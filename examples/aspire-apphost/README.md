@@ -42,6 +42,8 @@ Open the `web` endpoint and inspect the dashboard's logs, traces, and metrics ta
 
 The paired [`aspire-apphost.Tests`](../aspire-apphost.Tests/TypedProfileIntegrationTests.cs) project selects `QaProfile` by type, builds and starts the graph, waits for the `web` resource to become healthy, performs an HTTP request, and disposes the application before the testing builder. See the canonical [`ForgeTrust.AppSurface.Aspire.Testing` guide](../../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) for lifecycle and compatibility constraints.
 
+The [EvidenceHost integration theory](../aspire-apphost.Tests/EvidenceReadinessIntegrationTests.cs) also starts a real AppHost and verifies HTTP readiness, producer execution, and disposal of its single application lease with both default and custom probe clients. Both integration classes share an [xUnit collection](../aspire-apphost.Tests/AspireAppHostIntegrationCollection.cs), so their DCP startup and application disposal run sequentially within this test assembly. These tests verify one application's lifecycle; concurrent AppHost startup would add a separate orchestration scenario. Keep new live AppHost cases in this collection. The two-minute evidence run deadline, one-minute HTTP readiness deadline, and typed-profile startup and repeated-lifecycle deadlines still apply to each case; other test assemblies retain their own scheduling.
+
 ## Project Reference Shape
 
 Aspire AppHost projects generate the `Projects` namespace from project references. Keep library references out of the Aspire resource graph:

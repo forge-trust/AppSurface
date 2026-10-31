@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\Evidence\ForgeTrust.AppSurface.Evidence.Coverage\ForgeTrust.AppSurface.Evidence.Coverage.csproj" />
     <ProjectReference Include="..\..\Evidence\ForgeTrust.AppSurface.Evidence.Cli\ForgeTrust.AppSurface.Evidence.Cli.csproj" />
     <ProjectReference Include="..\..\ForgeTrust.AppSurface.Core\ForgeTrust.AppSurface.Core.csproj" />
+    <ProjectReference Include="..\..\Deployment\ForgeTrust.AppSurface.Deployment.GcpCloudRun\ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj" />
     <ProjectReference Include="..\..\tools\ForgeTrust.AppSurface.ReleaseContracts\ForgeTrust.AppSurface.ReleaseContracts.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Web\ForgeTrust.AppSurface.Web.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />

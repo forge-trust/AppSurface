@@ -249,6 +249,66 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["deployment", "gcp-cloud-run", "observe-execution", "--help"],
+            "appsurface deployment gcp-cloud-run observe-execution --help",
+            "checking packaged Cloud Run execution observer command")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var executionHelp = commands[^1];
+        if (!executionHelp.StandardOutput.Contains("--bundle-dir", StringComparison.Ordinal)
+            || !executionHelp.StandardOutput.Contains("--execution", StringComparison.Ordinal)
+            || !executionHelp.StandardOutput.Contains("--poll-interval", StringComparison.Ordinal))
+        {
+            commands[^1] = executionHelp with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged Cloud Run execution observer help to describe bundle, execution, and polling options."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        await WriteCloudRunApiConsumerAsync(fixtureDirectory, request.PackageVersion, cancellationToken);
+        if (!await RunRequiredAsync(DotNetCommand(
+            context,
+            ["restore", "CloudRunExecutionConsumer/CloudRunExecutionConsumer.csproj", "--configfile", toolNuGetConfigPath],
+            "dotnet restore Cloud Run API consumer",
+            "restoring the packed Cloud Run execution API consumer")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(DotNetCommand(
+            context,
+            ["build", "CloudRunExecutionConsumer/CloudRunExecutionConsumer.csproj", "--no-restore", "--configuration", "Release"],
+            "dotnet build Cloud Run API consumer",
+            "building the packed Cloud Run execution API consumer")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(DotNetCommand(
+            context,
+            ["run", "--project", "CloudRunExecutionConsumer/CloudRunExecutionConsumer.csproj", "--no-build", "--configuration", "Release"],
+            "dotnet run Cloud Run API consumer",
+            "executing the packed Cloud Run execution API consumer")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!string.Equals(commands[^1].StandardOutput.Trim(), "GcpCloudRunExecutionObserver:ConsumerReader", StringComparison.Ordinal))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected the packed Cloud Run API consumer to instantiate the public observer and bounded-reader contracts without cloud access."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
         await WriteReleaseNoteFixtureAsync(fixtureDirectory, cancellationToken);
         var releaseOutputPath = Path.Join(fixtureDirectory, "releases", "v1.4.0.md");
         if (!await RunRequiredAsync(ToolCommand(
@@ -896,6 +956,49 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                 {
                     Assert.Equal(expected, Calculator.Sign(value));
                 }
+            }
+            """,
+            cancellationToken);
+    }
+
+    private static async Task WriteCloudRunApiConsumerAsync(
+        string fixtureDirectory,
+        string packageVersion,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.Join(fixtureDirectory, "CloudRunExecutionConsumer");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(
+            Path.Join(directory, "CloudRunExecutionConsumer.csproj"),
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <TargetFramework>net10.0</TargetFramework>
+                <ImplicitUsings>enable</ImplicitUsings>
+                <Nullable>enable</Nullable>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="ForgeTrust.AppSurface.Deployment.GcpCloudRun" Version="{{packageVersion}}" />
+              </ItemGroup>
+            </Project>
+            """,
+            cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Join(directory, "Program.cs"),
+            """
+            using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
+
+            // protects=packed observer API and dependency closure; fails_when=the published GCP package cannot compile
+            // from a clean package consumer; no_claim=provider compatibility or cloud execution is proven.
+            IBoundedGcloudExecutionReader reader = new ConsumerReader();
+            IGcpCloudRunExecutionObserver observer = new GcpCloudRunExecutionObserver(reader, TimeProvider.System);
+            Console.WriteLine($"{observer.GetType().Name}:{reader.GetType().Name}");
+
+            sealed class ConsumerReader : IBoundedGcloudExecutionReader
+            {
+                public Task<BoundedGcloudExecutionReadResult> ReadAsync(string executionResourceName, TimeSpan timeout, CancellationToken cancellationToken = default)
+                    => Task.FromResult(new BoundedGcloudExecutionReadResult(BoundedGcloudExecutionReadOutcome.ToolUnavailable, null));
             }
             """,
             cancellationToken);

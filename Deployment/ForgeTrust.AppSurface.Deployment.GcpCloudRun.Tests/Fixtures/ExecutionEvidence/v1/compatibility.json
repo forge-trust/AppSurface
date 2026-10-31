@@ -1,0 +1,134 @@
+{
+  "schemaVersion": "cloud-run-execution-compatibility/1",
+  "status": "candidate-not-certified",
+  "tool": {
+    "name": "gcloud",
+    "version": "576.0.0",
+    "os": "Darwin 25.6.0 arm64",
+    "launcher": "/opt/homebrew/bin/gcloud",
+    "argvTemplate": [
+      "gcloud",
+      "run",
+      "jobs",
+      "executions",
+      "describe",
+      "projects/<project-id>/locations/<region>/jobs/<job-id>/executions/<execution-id>",
+      "--project",
+      "<project-id>",
+      "--region",
+      "<region>",
+      "--format=json",
+      "--quiet"
+    ],
+    "commandSourceSha256": {
+      "describe.py": "0db5a2ed09465e1f5bdfa980c2ffc6665f9c0001cfadbafc40b4f9130495477a",
+      "run_v1_messages.py": "be8c87ce5b75d88512fbe8202baf5df4c179c1b63c76e1a272d22f6eff817ddf",
+      "execution.py": "d5497ce2d172445b195aedacab40a9d7c1c642c7ac0c8c52fd609cf046d7d91f",
+      "job_printer.py": "e6bef9753a672c9c240324d6deaef5caf61108e26ff9f62cfee1606f3b6d8fdd",
+      "resource_printer.py": "bd9c31aa8e626b68918cec22d9a03f74178c3ea78f53148eaf7a8451989af89b"
+    },
+    "providerReadRan": false,
+    "replay": "offline fixture inspection only",
+    "formatterReplay": {
+      "command": "offline sdk-replay.py using apitools encoding.JsonToMessage + run v1 Execution wrapper + resource_printer.Print(json)",
+      "exitCode": 0,
+      "credentialsUsed": false,
+      "networkRead": false,
+      "replayOutputs": [
+        {
+          "input": "schema-preparation/execution.json",
+          "inputSha256": "5740440b8e551d96ce3473ba7185fcc99707337338441834019fe60ea2409707",
+          "outputSha256": "d5a699fb285f62b22051e6b114531bb88c413505bb9df5a3c0b728fab6573aa5",
+          "semanticEquality": true,
+          "representationDifferences": [
+            "/metadata/generation int vs string",
+            "/status/observedGeneration int vs string",
+            "/spec/template/spec/timeoutSeconds string vs int"
+          ]
+        },
+        {
+          "input": "catalog-refresh/execution.json",
+          "inputSha256": "791deef5e6cd0fd87e52fb762ffb00008a4efc320024aa6b2610bb918bb08069",
+          "outputSha256": "a6df187283b4893c19c9659c45019ef24661f0acc2e9cc828c43507242c2e8c7",
+          "semanticEquality": true,
+          "representationDifferences": [
+            "/metadata/generation int vs string",
+            "/status/observedGeneration int vs string",
+            "/spec/template/spec/timeoutSeconds string vs int"
+          ]
+        }
+      ],
+      "note": "Semantic equality after SDK formatter normalization; not byte or JSON-type equality.",
+      "counterDefaultReplay": {
+        "omitted": "0 tasks currently running; 0 tasks completed successfully",
+        "explicitZero": "0 tasks currently running; 0 tasks completed successfully",
+        "equal": true,
+        "scope": [
+          "runningCount",
+          "succeededCount",
+          "failedCount",
+          "cancelledCount"
+        ],
+        "retriedCount": "covered by generated Go v1 int64 omitempty source contract; not human-rendered",
+        "noNetwork": true
+      }
+    },
+    "sdkSchemaPaths": {
+      "v1Execution": "lib/googlecloudsdk/generated_clients/apis/run/v1/run_v1_messages.py:682",
+      "v1ExecutionStatus": "...:774",
+      "v1ExecutionTemplateSpec": "...:818",
+      "v1TaskSpec": "...:6310"
+    },
+    "replayScript": {
+      "path": "offline-sdk-replay.py",
+      "sha256": "f513df986c85069177bd3c55d83ca66d973d5a39059c0f70dc0bf6abdd160047"
+    }
+  },
+  "worksheets": [
+    {
+      "path": "schema-preparation/worksheet.json",
+      "sha256": "f9b932323e0c3d7c291e85797b8189ee7c6a412a28f8d5b9909cb51d07eec2b7"
+    },
+    {
+      "path": "catalog-refresh/worksheet.json",
+      "sha256": "3b23112d19ccbe069342ec590780035756c01dc79ece801b1ff9f16786669708"
+    }
+  ],
+  "fixtures": [
+    {
+      "path": "schema-preparation/execution.json",
+      "sha256": "5740440b8e551d96ce3473ba7185fcc99707337338441834019fe60ea2409707",
+      "kind": "synthetic-positive"
+    },
+    {
+      "path": "catalog-refresh/execution.json",
+      "sha256": "791deef5e6cd0fd87e52fb762ffb00008a4efc320024aa6b2610bb918bb08069",
+      "kind": "synthetic-positive"
+    },
+    {
+      "path": "negative/schema-preparation-swapped-execution.json",
+      "sha256": "a828cfc28ca2fb5ddd20afce15887448ffb65681ac23ac6f14f17b9db6260210",
+      "kind": "synthetic-negative"
+    },
+    {
+      "path": "negative/catalog-refresh-swapped-execution.json",
+      "sha256": "4ae5b8af5d02937401c090bb4108d7fb1f3a811715163c2da968377dece57a78",
+      "kind": "synthetic-negative"
+    }
+  ],
+  "limitations": [
+    "No live cloud read, credentials, mutation or provider attestation.",
+    "The local gcloud version and installed source hashes are candidate compatibility evidence only.",
+    "Fixtures are independently authored neutral data; recovered Skoolit shape is recorded as provenance, not copied payload.",
+    "v1 implicit Cloud SQL socket projection is documentation-derived and does not prove mount presence or connectivity.",
+    "SDK replay normalizes generation and observedGeneration to integers and timeoutSeconds to a string; equality is semantic, not byte/JSON-type equality.",
+    "For this fixed v1 adapter, omitted all-five nonnullable counters are admitted as zero under the generated Go client omitempty contract and installed gcloud integer handling. Null, negative, overflow, duplicate or unknown counter shapes remain rejected/Unknown."
+  ],
+  "review": {
+    "owner": "Codex",
+    "acceptingMaintainer": "Andrew (repository owner)",
+    "status": "owner-authorized-technical-evidence-provider-certification-pending",
+    "acceptanceSource": "Owner-authorized technical acceptance recorded in the approved 2026-10-24 execution amendment; provider certification remains pending."
+  },
+  "technicalAcceptance": "owner-authorized reviewed mapping plus executable fixture/hash/replay checks; this is not provider certification"
+}

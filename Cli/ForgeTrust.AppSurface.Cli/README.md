@@ -97,10 +97,12 @@ is a nonzero result with no success output. A one-slot runtime pool must not cau
 
 Client disposal does not acknowledge PostgreSQL backend exit; the [termination protocol](https://www.postgresql.org/docs/16/protocol-flow.html#PROTOCOL-FLOW-TERMINATION)
 closes the client without waiting for backend acknowledgement. The [preflight integration tests](../ForgeTrust.AppSurface.Cli.Tests/DurablePreflightIntegrationTests.cs)
-therefore observe the exact application-name session exiting after success and expected connection rejection, using the existing ten-second polling
-window within the same 30-second deadline as the preflight call. They retain the expected SQLSTATE and final zero-session
-assertions and immediate fence-release checks. A held real backend must still fail observation; the barrier neither retries
-the preflight, makes a rejected caller succeed, nor extends its deadline.
+therefore observe the exact application-name session exiting after success, expected connection rejection, and caller cancellation,
+using the existing ten-second polling window within the same 30-second deadline as the preflight call. Cancellation remains configured
+for 400 ms in the writer-fence regression; its preceding writer stays locked until backend exit is observed, so releasing the
+writer cannot hide a reader cleanup failure. The tests retain the expected SQLSTATE or timeout category, final zero-session
+assertions, and immediate fence-release checks. A held real backend must still fail observation; the barrier neither retries
+the preflight, makes a rejected caller succeed, nor renews its deadline.
 
 The manifest authorizes the expected set; database policies and ACLs are evidence only. Checks require every expected
 role to resolve exactly once and be a restricted LOGIN leaf with no forbidden attributes, membership edges, or
@@ -1467,6 +1469,119 @@ Migration map for repo-owned AppSurface Docs export:
 | `--output <dir>` | `--output <dir>` |
 | `AppSurfaceDocs__Routing__PublicOrigin=https://docs.example.com` | `--public-origin https://docs.example.com` |
 | `--project`, `--dll`, `--url`, `--app-args`, `--no-build`, `--framework` | use `appsurface export` for arbitrary app export |
+
+### `appsurface deployment gcp-cloud-run observe-execution`
+
+Use this command to inspect one caller-selected Cloud Run Job execution against a published AppSurface bundle. It is read-only and never submits, cancels, retries, or mutates a Job. The bundle directory contains exactly `deployment-intent.v1.json`, `gcp-cloud-run-migration.tf.json`, and `gcp-cloud-run-migration.plan.json`, plus the optional ownership marker. Each artifact is bounded to 4 MiB and validated before `gcloud` starts. The CLI opens the artifacts and optional marker through no-follow regular-file admission; a non-regular entry such as a FIFO is rejected locally with `ASDEPLOY171` before provider observation.
+
+```sh
+appsurface deployment gcp-cloud-run observe-execution \
+  --bundle-dir ./artifacts/schema-preparation \
+  --job schema-preparation \
+  --execution projects/my-project/locations/us-central1/jobs/schema-preparation/executions/exec-20261024 \
+  --timeout 60s --poll-interval 2s --json
+```
+
+`--bundle-dir`, `--job`, and `--execution` are required. The execution must be the complete canonical resource `projects/{project-or-number}/locations/{region}/jobs/{physical-job}/executions/{execution}`. The project is matched against the configured project ID or explicitly configured project number; no ID/number inference or alias lookup occurs. `--timeout` defaults to `60s`; `--poll-interval` defaults to `2s`. The API contract itself has no duration defaults.
+
+Value options accept both `--name value` and `--name=value`; embedded equals signs remain part of the value. Prefix a relative bundle directory beginning with `-` with `./` so its value cannot be mistaken for an option. The valueless `--json` switch must appear alone. Unknown, duplicate, missing, or malformed options return the safe `ASDEPLOY170` diagnostic before framework parsing.
+
+The library path receives an existing `DeploymentRenderResult` from the target's `RenderAsync` call. It does not expose a public bundle loader. A trusted published directory can be reconstructed into that same immutable shape with the bounded three-file read below; the exact filenames and `DeploymentArtifact.Create` admission are part of the contract. This example assumes a caller-controlled directory and ancestors containing stable regular files, with no concurrent replacement while the files are read:
+
+```csharp
+using ForgeTrust.AppSurface.Deployment;
+using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
+
+static async Task<CloudRunExecutionObservation> ObserveAsync(
+    DeploymentRenderResult rendered,
+    string logicalJobId,
+    string executionResourceName,
+    CancellationToken cancellationToken)
+{
+    var observer = GcpCloudRunExecutionObserver.Create();
+    return await observer.ObserveAsync(
+        new CloudRunExecutionObservationRequest(
+            rendered, logicalJobId, executionResourceName,
+            TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(2)),
+        cancellationToken);
+}
+
+static async Task<DeploymentRenderResult> ReadPublishedBundleAsync(
+    string directory,
+    CancellationToken cancellationToken)
+{
+    string[] names =
+    [
+        "deployment-intent.v1.json",
+        "gcp-cloud-run-migration.tf.json",
+        "gcp-cloud-run-migration.plan.json",
+    ];
+    var artifacts = new List<DeploymentArtifact>(names.Length);
+    foreach (var name in names)
+    {
+        var path = Path.Combine(directory, name);
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var bytes = new MemoryStream(capacity: 4 * 1024 * 1024);
+        var buffer = new byte[64 * 1024];
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = await stream.ReadAsync(buffer, cancellationToken);
+            if (count == 0) break;
+            if (bytes.Length + count > 4 * 1024 * 1024) throw new InvalidDataException();
+            bytes.Write(buffer, 0, count);
+        }
+        artifacts.Add(DeploymentArtifact.Create(name, bytes.ToArray()));
+    }
+    return new DeploymentRenderResult("gcp-cloud-run", artifacts.AsReadOnly());
+}
+```
+
+The production construction is `GcpCloudRunExecutionObserver.Create()`. Tests inject `new GcpCloudRunExecutionObserver(reader, timeProvider)` with `IBoundedGcloudExecutionReader`; there is no arbitrary executable or unbounded-runner API. The published directory must already be trusted and complete; callers must also apply the CLI's strict reparse-free path admission and ownership checks rather than treating this compact reconstruction as a replacement for the full CLI loader. The direct `FileStream` opens shown above do not provide the CLI's handle-based, no-follow, nonblocking regular-file admission; byte limits and asynchronous reads do not bound a FIFO open. For bundle directories that cannot meet the stable regular-file precondition, pass the existing rendered result to the library or use the CLI's bundle loader.
+
+With `--json`, stdout receives exactly one versioned object containing only `schemaVersion: "1.0"`, `logicalJobId`, `executionResourceName`, `state`, `configurationMatched`, RFC 3339 UTC `observedAt`, and `diagnosticCode`. It has no raw provider JSON, stderr, command arguments, secret/environment values, credentials, provider messages, or exception text. On caller cancellation the command attempts one safe `Unknown`/false envelope only before any output failure; after the first stdout write/flush failure it suppresses further writes and returns 130 even when the envelope cannot be delivered. Ordinary output failure is `ASDEPLOY188` and returns 2; unexpected internal failure is `ASDEPLOY189` and returns safe `Unknown`. Text-mode failures write only fixed safe problem/cause/fix/recovery guidance and the canonical reference link to stderr.
+
+Captured CLI output from a synthetic response (the timestamp is the local receipt time of this offline probe; no live provider read or certification is claimed):
+
+```json
+{"schemaVersion":"1.0","logicalJobId":"schema-preparation","executionResourceName":"projects/demo-project/locations/us-central1/jobs/schema-preparation/executions/schema-preparation-run","state":"Succeeded","configurationMatched":true,"observedAt":"2026-10-25T01:25:10.9564400+00:00","diagnosticCode":"ASDEPLOY183"}
+```
+
+| Exit | Meaning | Caller action |
+| ---: | --- | --- |
+| 0 | Matching configuration and terminal success. | Continue caller-owned acceptance. |
+| 1 | Matching configuration with workload failure or remote cancellation. | Apply caller-owned recovery; no automatic retry. |
+| 2 | Invalid input, unknown evidence, mismatch, provider/read/output/cleanup failure. | Correct or investigate; no stale-state promotion. |
+| 3 | Last matching `Running` evidence at a clean deadline. | Decide whether to issue a new observation. |
+| 130 | Caller cancellation. | Resume only under caller control. |
+
+For an offline quickstart, use the neutral `schema-preparation` and `catalog-refresh` fixtures to exercise identity, configuration, state, and swapped-execution rejection. The repository's local evidence was produced with .NET 10 and `gcloud` 576.0.0 on Darwin arm64; that is a reproducibility note, not a live-read or compatibility claim. A separately authorized provider read, if performed, uses the caller's existing `gcloud`, credentials, and inherited `PATH`; values must not be placed in the bundle or output. The v1 shape proves gen2 configuration and implicit Cloud SQL socket annotation; v2 proves typed Cloud SQL volume attachment and the `/cloudsql` mount. Neither proves filesystem permissions, IAM effectiveness, database reachability, or application acceptance. See the [Cloud Run package reference](../../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md#exact-cloud-run-execution-observation) and [adoption recipe](../../Deployment/adoption.md#observe-an-existing-execution).
+
+See the [two neutral execution consumers example](../../examples/cloud-run-execution-consumers/README.md) for an offline contract walkthrough.
+
+The JSON envelope above was captured from the built CLI with an owned synthetic read response. The [neutral consumer sample](../../examples/cloud-run-execution-consumers/README.md) uses the library directly and prints its PascalCase record fields; it exercises the same observer but has its own sample output format:
+
+```sh
+dotnet run --project examples/cloud-run-execution-consumers/CloudRunExecutionConsumers.csproj -- schema-preparation
+```
+
+POSIX CI can capture and branch on all five exits without automatic retry, submission, or cancellation:
+
+```sh
+set +e
+appsurface deployment gcp-cloud-run observe-execution --bundle-dir "$BUNDLE_DIR" --job "$JOB_ID" --execution "$EXECUTION_RESOURCE" --timeout 60s --poll-interval 2s --json
+status=$?
+set -e
+case "$status" in
+  0) echo "execution matched and succeeded" ;;
+  1) echo "execution matched but failed or was remotely cancelled"; exit 1 ;;
+  2) echo "observation was unknown or invalid"; exit 2 ;;
+  3) echo "execution is still running at the observation deadline"; exit 3 ;;
+  130) echo "observation was cancelled by the caller"; exit 130 ;;
+  *) echo "unexpected observation exit"; exit 2 ;;
+esac
+```
 
 ## Development
 

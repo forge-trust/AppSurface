@@ -579,6 +579,13 @@ public class MemoTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_NullClock_Throws()
+    {
+        var cache = A.Fake<IMemoryCache>();
+        Assert.Throws<ArgumentNullException>(() => new Memo(cache, TimeSpan.FromMilliseconds(100), null!));
+    }
+
+    [Fact]
     public void Constructor_ZeroFailureDuration_Throws()
     {
         var cache = A.Fake<IMemoryCache>();

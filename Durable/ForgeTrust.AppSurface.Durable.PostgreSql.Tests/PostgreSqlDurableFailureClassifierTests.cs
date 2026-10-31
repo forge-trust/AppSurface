@@ -257,7 +257,8 @@ public sealed class PostgreSqlDurableFailureClassifierTests
     {
         var exception = new OperationCanceledException();
         using var start = new Barrier(8);
-        var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        // Blocking barrier participants use dedicated threads so async database probes keep their workers.
+        var tasks = Enumerable.Range(0, 8).Select(_ => Task.Factory.StartNew(() =>
         {
             start.SignalAndWait();
             for (var iteration = 0; iteration < 10_000; iteration++)
@@ -266,7 +267,7 @@ public sealed class PostgreSqlDurableFailureClassifierTests
                     exception,
                     PostgreSqlDurableTimeoutEvidence.ProviderDeadlineElapsed);
             }
-        })).ToArray();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
 
         await Task.WhenAll(tasks);
 
@@ -486,14 +487,15 @@ public sealed class PostgreSqlDurableFailureClassifierTests
     {
         var indeterminate = new NpgsqlException("concurrent acknowledgement lost");
         using var start = new Barrier(8);
-        var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        // Blocking barrier participants use dedicated threads so async database probes keep their workers.
+        var tasks = Enumerable.Range(0, 8).Select(_ => Task.Factory.StartNew(() =>
         {
             start.SignalAndWait();
             for (var iteration = 0; iteration < 10_000; iteration++)
             {
                 PostgreSqlDurableAdmissionFailureContext.MarkIndeterminate(indeterminate);
             }
-        })).ToArray();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
 
         await Task.WhenAll(tasks);
 

@@ -16,6 +16,7 @@
 
     <ItemGroup>
       <InternalsVisibleTo Include="ForgeTrust.AppSurface.Caching.Tests" />
+      <InternalsVisibleTo Include="ForgeTrust.AppSurface.Docs.Tests" />
     </ItemGroup>
 
 </Project>

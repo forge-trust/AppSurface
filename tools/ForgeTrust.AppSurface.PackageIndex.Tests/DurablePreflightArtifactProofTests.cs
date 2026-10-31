@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Xml.Linq;
 using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
@@ -286,6 +287,20 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             "--source-commit", SourceCommit, "--run-id", RunId, "--artifact-id", ArtifactId
         ];
 
+    private static IEnumerable<string> EnumerateAuthoredFiles(string root)
+    {
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.TopDirectoryOnly))
+        {
+            yield return file;
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly))
+        {
+            if (Path.GetFileName(directory) is "bin" or "obj") continue;
+            foreach (var file in EnumerateAuthoredFiles(directory)) yield return file;
+        }
+    }
+
     [Fact]
     public async Task ConsumerMaterializer_StagesExactAuthoredInputsAndRefusesAnOccupiedDestination()
     {
@@ -294,8 +309,16 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
         var source = TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer");
         var template = Path.Combine(source, "PostgreSqlPreflightConsumer.csproj.template");
         var destination = Path.Combine(_root, "consumer with spaces");
-        var expected = Directory.GetFiles(source, "*.cs").ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes);
-        expected["PostgreSqlPreflightConsumer.csproj"] = File.ReadAllBytes(template);
+        var sourceBefore = EnumerateAuthoredFiles(source)
+            .ToDictionary(path => Path.GetRelativePath(source, path), File.ReadAllBytes, StringComparer.Ordinal);
+        var expected = new Dictionary<string, byte[]>(sourceBefore, StringComparer.Ordinal);
+        var templateBytes = expected["PostgreSqlPreflightConsumer.csproj.template"];
+        expected.Remove("PostgreSqlPreflightConsumer.csproj.template");
+        expected.Remove("PostgreSqlPreflightConsumer.csproj");
+        foreach (var generatedPath in expected.Keys.Where(path =>
+                     path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")).ToArray())
+            expected.Remove(generatedPath);
+        expected["PostgreSqlPreflightConsumer.csproj"] = templateBytes;
         expected["Directory.Build.props"] = File.ReadAllBytes(Path.Combine(repository, "Directory.Build.props"));
         expected["Directory.Build.targets"] = File.ReadAllBytes(Path.Combine(repository, "Directory.Build.targets"));
         var request = new ExternalCommandRequest(
@@ -307,35 +330,137 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(Path.Combine(destination, "PostgreSqlPreflightConsumer.csproj"), result.StandardOutput.Trim());
-        Assert.Equal(expected.Count, Directory.GetFiles(destination).Length);
-        foreach (var (name, bytes) in expected) Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(destination, name)));
-        Assert.Equal(expected["PostgreSqlPreflightConsumer.csproj"], File.ReadAllBytes(template));
+        var stagedFiles = Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.GetRelativePath(destination, path), File.ReadAllBytes, StringComparer.Ordinal);
+        Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), stagedFiles.Keys.Order(StringComparer.Ordinal));
+        foreach (var (path, bytes) in expected) Assert.Equal(bytes, stagedFiles[path]);
+        Assert.Equal(templateBytes, File.ReadAllBytes(template));
+        Assert.Equal(Path.Combine(destination, "PostgreSqlPreflightConsumer.csproj"),
+            Assert.Single(Directory.EnumerateFiles(destination, "*.csproj", SearchOption.TopDirectoryOnly)));
+        Assert.Equal(sourceBefore.Keys.Order(StringComparer.Ordinal),
+            EnumerateAuthoredFiles(source)
+                .Select(path => Path.GetRelativePath(source, path))
+                .Order(StringComparer.Ordinal));
+        foreach (var (path, bytes) in sourceBefore) Assert.Equal(bytes, File.ReadAllBytes(TestPathUtils.PathUnder(source, path)));
+        Assert.DoesNotContain(stagedFiles.Keys, path => path.Split(Path.DirectorySeparatorChar)
+            .Any(segment => segment is "bin" or "obj"));
 
         var occupied = await runner.RunAsync(request, CancellationToken.None);
 
         Assert.NotEqual(0, occupied.ExitCode);
         Assert.Contains("consumer-destination-exists", occupied.StandardError, StringComparison.Ordinal);
-        Assert.Equal(expected.Count, Directory.GetFiles(destination).Length);
-        foreach (var (name, bytes) in expected) Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(destination, name)));
+        var destinationAfterCollision = Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.GetRelativePath(destination, path), File.ReadAllBytes, StringComparer.Ordinal);
+        Assert.Equal(stagedFiles.Keys.Order(StringComparer.Ordinal), destinationAfterCollision.Keys.Order(StringComparer.Ordinal));
+        foreach (var (path, bytes) in stagedFiles) Assert.Equal(bytes, destinationAfterCollision[path]);
+    }
+
+    [Theory]
+    [InlineData("legacy-project-reference")]
+    [InlineData("legacy-package-reference-missing")]
+    [InlineData("legacy-package-compatible")]
+    [InlineData("legacy-project-noncanonical-name")]
+    [InlineData("both-project-options")]
+    public async Task VerifierRejectsLegacyProjectReferenceAndAmbiguousProjectInputsBeforeProof(string mode)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var artifactDirectory = TestPathUtils.PathUnder(_root, mode, "bundle");
+        Directory.CreateDirectory(artifactDirectory);
+        var manifest = TestPathUtils.PathUnder(artifactDirectory, "manifest.json");
+        var receipt = TestPathUtils.PathUnder(_root, mode, "receipt.json");
+        await File.WriteAllTextAsync(manifest, "{}\n");
+        var consumerDirectory = TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer");
+        var developmentProject = Path.Combine(consumerDirectory, "PostgreSqlPreflightConsumer.csproj");
+        var template = Path.Combine(consumerDirectory, "PostgreSqlPreflightConsumer.csproj.template");
+        var arguments = new List<string>
+        {
+            Path.Combine(repository, "Durable/verify-preflight-artifacts.sh"),
+            "--artifact-dir", artifactDirectory,
+            "--artifact-manifest", manifest,
+            "--source-commit", SourceCommit,
+            "--run-id", RunId,
+            "--artifact-id", ArtifactId
+        };
+        if (mode == "legacy-project-reference")
+        {
+            arguments.AddRange(["--consumer-project", developmentProject]);
+        }
+        else if (mode == "legacy-package-reference-missing")
+        {
+            var legacyDirectory = TestPathUtils.PathUnder(_root, "legacy-without-package");
+            Directory.CreateDirectory(legacyDirectory);
+            var legacyProjectWithoutPackage = Path.Combine(legacyDirectory, "PostgreSqlPreflightConsumer.csproj");
+            await File.WriteAllTextAsync(legacyProjectWithoutPackage, "<Project />\n");
+            arguments.AddRange(["--consumer-project", legacyProjectWithoutPackage]);
+        }
+        else if (mode == "legacy-package-compatible")
+        {
+            var legacyDirectory = TestPathUtils.PathUnder(_root, "legacy-package-compatible");
+            Directory.CreateDirectory(legacyDirectory);
+            var legacyPackageProject = Path.Combine(legacyDirectory, "PostgreSqlPreflightConsumer.csproj");
+            await File.WriteAllBytesAsync(legacyPackageProject, await File.ReadAllBytesAsync(template));
+            arguments.AddRange(["--consumer-project", legacyPackageProject]);
+        }
+        else if (mode == "legacy-project-noncanonical-name")
+        {
+            var legacyDirectory = TestPathUtils.PathUnder(_root, "legacy-noncanonical");
+            Directory.CreateDirectory(legacyDirectory);
+            var legacyProjectWithPackage = Path.Combine(legacyDirectory, "OtherConsumer.csproj");
+            await File.WriteAllTextAsync(legacyProjectWithPackage,
+                "<Project><ItemGroup><PackageReference Include=\"ForgeTrust.AppSurface.Durable.PostgreSql\" Version=\"$(AppSurfacePackageVersion)\" /></ItemGroup></Project>\n");
+            arguments.AddRange(["--consumer-project", legacyProjectWithPackage]);
+        }
+        else
+        {
+            arguments.AddRange(["--consumer-project-template", template, "--consumer-project", developmentProject]);
+        }
+        arguments.AddRange(["--receipt", receipt]);
+
+        var result = await new CliWrapCommandRunner().RunAsync(new ExternalCommandRequest(
+            "bash", arguments, repository, "reject unsupported preflight project input", "validate verifier arguments", 15_000),
+            CancellationToken.None);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(mode switch
+        {
+            "legacy-project-reference" => "consumer-project-project-reference-not-supported",
+            "legacy-package-reference-missing" => "consumer-project-package-reference-required",
+            "legacy-package-compatible" => "artifact-manifest-identity-invalid",
+            "legacy-project-noncanonical-name" => "consumer-project-name-invalid",
+            "both-project-options" => "consumer-project-input-exclusive",
+            _ => throw new InvalidOperationException($"Unknown verifier rejection case '{mode}'.")
+        }, result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(receipt));
     }
 
     [Fact]
-    public void CheckedInPreflightConsumerIsOnlyATemplateForDynamicRestoreDiscovery()
+    public void CheckedInConsumerSeparatesDevelopmentProjectFromPackageOnlyProofTemplate()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var consumerDirectory = TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer");
         var projectTemplate = TestPathUtils.PathUnder(consumerDirectory, "PostgreSqlPreflightConsumer.csproj.template");
+        var developmentProject = TestPathUtils.PathUnder(consumerDirectory, "PostgreSqlPreflightConsumer.csproj");
         var script = File.ReadAllText(TestPathUtils.PathUnder(repository, "Durable/verify-preflight-artifacts.sh"));
         var materializer = File.ReadAllText(TestPathUtils.PathUnder(repository, "Durable/materialize-preflight-consumer.sh"));
-        var template = File.ReadAllText(projectTemplate);
+        var developmentProjectDocument = XDocument.Load(developmentProject);
+        var templateDocument = XDocument.Load(projectTemplate);
+        var packageReference = Assert.Single(templateDocument.Descendants("PackageReference"), reference =>
+            string.Equals((string?)reference.Attribute("Include"), "ForgeTrust.AppSurface.Durable.PostgreSql", StringComparison.Ordinal));
 
-        Assert.Empty(Directory.EnumerateFiles(consumerDirectory, "*.csproj", SearchOption.TopDirectoryOnly));
-        Assert.Contains("Version=\"$(AppSurfacePackageVersion)\"", template, StringComparison.Ordinal);
+        Assert.Equal(developmentProject, Assert.Single(Directory.EnumerateFiles(consumerDirectory, "*.csproj", SearchOption.TopDirectoryOnly)));
+        Assert.Equal(projectTemplate, Assert.Single(Directory.EnumerateFiles(consumerDirectory, "*.csproj.template", SearchOption.TopDirectoryOnly)));
+        Assert.Single(developmentProjectDocument.Descendants("ProjectReference"));
+        Assert.Empty(templateDocument.Descendants("ProjectReference"));
+        Assert.Equal("ForgeTrust.AppSurface.Durable.PostgreSql", (string?)packageReference.Attribute("Include"));
+        Assert.Equal("$(AppSurfacePackageVersion)", (string?)packageReference.Attribute("Version"));
+        Assert.DoesNotContain(developmentProjectDocument.Descendants("PackageReference"), reference =>
+            string.Equals((string?)reference.Attribute("Include"), "ForgeTrust.AppSurface.Durable.PostgreSql", StringComparison.Ordinal));
         Assert.Contains("--consumer-project-template", script, StringComparison.Ordinal);
+        Assert.Contains("--consumer-project", script, StringComparison.Ordinal);
         Assert.Contains("materialize-preflight-consumer.sh", script, StringComparison.Ordinal);
-        Assert.Contains("cp -- \"$consumer_template\" \"$consumer_project\"", materializer, StringComparison.Ordinal);
-        Assert.Contains("cp -- \"$repo_root/Directory.Build.props\" \"$destination_root/Directory.Build.props\"", materializer, StringComparison.Ordinal);
-        Assert.Contains("cp -- \"$repo_root/Directory.Build.targets\" \"$destination_root/Directory.Build.targets\"", materializer, StringComparison.Ordinal);
+        Assert.Contains("Directory.Build.props", materializer, StringComparison.Ordinal);
+        Assert.Contains("Directory.Build.targets", materializer, StringComparison.Ordinal);
         Assert.Contains("-p:AppSurfacePackageVersion=\"$package_version\"", script, StringComparison.Ordinal);
     }
 
@@ -368,6 +493,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
 
         Assert.Equal(1, runner.Calls);
         Assert.Contains("--consumer-project-template", runner.LastRequest!.Arguments);
+        Assert.DoesNotContain("--consumer-project", runner.LastRequest.Arguments);
         Assert.Equal(DurablePreflightArtifactProof.CandidateProofTimeoutMilliseconds, runner.LastRequest.TimeoutMilliseconds);
         Assert.Equal(TestPathUtils.PathUnder(fixture.Request.RepositoryRoot, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template"),
             runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--consumer-project-template") + 1]);

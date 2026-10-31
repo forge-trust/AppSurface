@@ -1,0 +1,209 @@
+{
+  "schemaVersion": "cloud-run-execution-worksheet/1",
+  "logicalJobId": "schema-preparation",
+  "expectedBundle": {
+    "projectId": "demo-project",
+    "projectNumber": "123456789012",
+    "region": "us-central1",
+    "physicalJobId": "schema-preparation",
+    "executionId": "schema-preparation-run",
+    "image": "us-docker.pkg.dev/demo-project/migrations/schema-preparation@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "command": [
+      "dotnet"
+    ],
+    "args": [
+      "migrate"
+    ],
+    "env": [
+      {
+        "name": "MODE",
+        "value": "safe"
+      },
+      {
+        "name": "CONNECTIONSTRINGS_DATABASE",
+        "secret": "db-connection/latest"
+      }
+    ],
+    "serviceAccount": "migration@demo-project.iam.gserviceaccount.com",
+    "network": "projects/demo-project/global/networks/private",
+    "subnetwork": "projects/demo-project/regions/us-central1/subnetworks/private",
+    "egress": "all-traffic",
+    "cloudSql": "demo-project:us-central1:database",
+    "executionEnvironment": "gen2",
+    "taskCount": 1,
+    "parallelism": 1,
+    "maxRetries": 0,
+    "timeoutSeconds": 60,
+    "artifactHashes": {
+      "deployment-intent.v1.json": "c995faba6fe44695d2cdd22e7e0cf1ac5ec9a62abec22af3af0288ed315dc5f7",
+      "gcp-cloud-run-migration.plan.json": "0ad9850d87c3cf426ed0127f8ae4969b2816a33cd8acc27aaacfda18ad7a5a52",
+      "gcp-cloud-run-migration.tf.json": "fce3b1013ad83c35dbea7fba7b75671cf9afc4549f14d01fbbfea1330df75801"
+    }
+  },
+  "tool": {
+    "name": "gcloud",
+    "version": "576.0.0",
+    "os": "Darwin",
+    "launcher": "/opt/homebrew/bin/gcloud",
+    "argv": [
+      "gcloud",
+      "run",
+      "jobs",
+      "executions",
+      "describe",
+      "projects/demo-project/locations/us-central1/jobs/schema-preparation/executions/schema-preparation-run",
+      "--project",
+      "demo-project",
+      "--region",
+      "us-central1",
+      "--format=json",
+      "--quiet"
+    ],
+    "outputShape": "v1 Execution JSON; offline fixture replay; no provider read"
+  },
+  "provenance": {
+    "documentSources": [
+      "https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.executions",
+      "https://docs.cloud.google.com/sql/docs/postgres/connect-run#connect_with_unix_sockets"
+    ],
+    "fixtureKind": "independently-authored-neutral-synthetic",
+    "sanitization": "All identifiers, hashes, timestamps and UUIDs are synthetic; values are documentation-derived or transformed neutral expectations.",
+    "providerReadRan": false,
+    "recoveredShape": "Preserves the locally recovered v1 representation: numeric namespace, location/job labels, gen2 and Cloud SQL/network annotations, single container, no explicit volumes or mounts, explicit retry/timeout/service-account fields.",
+    "docsDerived": [
+      "v1 Cloud SQL annotation supplies the documented single-container /cloudsql projection; no explicit v1 CloudSQL volume is claimed.",
+      "For this fixed v1 adapter, all five nonnullable ExecutionStatus counters admit omitted-as-zero: the official generated Go v1 client declares each as int64 with omitempty, and the gcloud SDK treats absent integer status values as zero. This is adapter-scoped and does not apply to null, negative, overflow, or unknown shapes."
+    ]
+  },
+  "positiveFixture": {
+    "path": "execution.json",
+    "sha256": "5740440b8e551d96ce3473ba7185fcc99707337338441834019fe60ea2409707",
+    "expectedClassification": "configuration-match-succeeded"
+  },
+  "negativeFixture": {
+    "path": "../negative/schema-preparation-swapped-execution.json",
+    "sha256": "a828cfc28ca2fb5ddd20afce15887448ffb65681ac23ac6f14f17b9db6260210",
+    "expectedClassification": "Unknown"
+  },
+  "fields": [
+    {
+      "pointer": "/metadata/namespace",
+      "fact": "123456789012",
+      "rule": "R",
+      "citation": "v1 ObjectMeta namespace; declared project number"
+    },
+    {
+      "pointer": "/metadata/labels/cloud.googleapis.com~1location",
+      "fact": "us-central1",
+      "rule": "R",
+      "citation": "design amendment identity rule"
+    },
+    {
+      "pointer": "/metadata/labels/run.googleapis.com~1job",
+      "fact": "schema-preparation",
+      "rule": "R",
+      "citation": "design amendment identity rule"
+    },
+    {
+      "pointer": "/metadata/uid",
+      "fact": "present; synthetic",
+      "rule": "R",
+      "citation": "v1 Execution metadata"
+    },
+    {
+      "pointer": "/metadata/generation and /status/observedGeneration",
+      "fact": "7 == 7",
+      "rule": "R",
+      "citation": "current-generation requirement"
+    },
+    {
+      "pointer": "/metadata/annotations/run.googleapis.com~1cloudsql-instances",
+      "fact": "demo-project:us-central1:database",
+      "rule": "R",
+      "citation": "Cloud SQL socket configuration"
+    },
+    {
+      "pointer": "/metadata/annotations/run.googleapis.com~1network-interfaces",
+      "fact": "private network and us-central1 subnet",
+      "rule": "R",
+      "citation": "v1 execution annotation mapping"
+    },
+    {
+      "pointer": "/metadata/annotations/run.googleapis.com~1execution-environment",
+      "fact": "gen2",
+      "rule": "R",
+      "citation": "Cloud SQL gen2 requirement"
+    },
+    {
+      "pointer": "/spec/template/spec/containers/0",
+      "fact": "one container; no volumes or mounts",
+      "rule": "R",
+      "citation": "implicit v1 Cloud SQL representation"
+    },
+    {
+      "pointer": "/spec/template/spec/containers/0/image",
+      "fact": "immutable synthetic digest",
+      "rule": "R",
+      "citation": "full image identity"
+    },
+    {
+      "pointer": "/spec/template/spec/containers/0/env",
+      "fact": "MODE plus db-connection/latest secret",
+      "rule": "R",
+      "citation": "complete environment inventory"
+    },
+    {
+      "pointer": "/spec/taskCount and /spec/parallelism",
+      "fact": "1 and 1",
+      "rule": "R",
+      "citation": "v1 Execution spec"
+    },
+    {
+      "pointer": "/spec/template/spec/maxRetries",
+      "fact": "0",
+      "rule": "R",
+      "citation": "explicit retry setting"
+    },
+    {
+      "pointer": "/spec/template/spec/timeoutSeconds",
+      "fact": "60",
+      "rule": "R",
+      "citation": "explicit timeout setting"
+    },
+    {
+      "pointer": "/status/conditions",
+      "fact": "Completed=True",
+      "rule": "R",
+      "citation": "v1 Execution status"
+    },
+    {
+      "pointer": "/status/completionTime",
+      "fact": "present; synthetic",
+      "rule": "R",
+      "citation": "terminal completion marker"
+    },
+    {
+      "pointer": "/status/succeededCount",
+      "fact": "1",
+      "rule": "R",
+      "citation": "v1 ExecutionStatus succeededCount"
+    },
+    {
+      "pointer": "/status/failedCount, /status/runningCount, /status/cancelledCount, /status/retriedCount",
+      "fact": "all five counters omitted; SDK/provider default interpretation is zero for this fixed v1 adapter",
+      "rule": "D",
+      "citation": "Google generated Go v1 ExecutionStatus int64 fields with omitempty; installed gcloud counter handling; exact v1 adapter contract"
+    }
+  ],
+  "review": {
+    "implementingOwner": "Codex",
+    "acceptingMaintainer": "Andrew (repository owner)",
+    "date": "2026-10-24",
+    "disposition": "owner-authorized-technical-evidence-provider-certification-pending",
+    "unresolvedFacts": [
+      "No provider read; gcloud version is local candidate only.",
+      "v1 implicit socket projection is docs-derived, not a socket-connectivity claim."
+    ],
+    "acceptanceSource": "Owner instruction on 2026-10-24: update the plan using Skoolit evidence, reconcile both assumptions without weakening configuration proof, and continue make-it-so; scope is the reviewed offline technical mapping, not live provider certification."
+  }
+}

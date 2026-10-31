@@ -5,6 +5,7 @@ using ForgeTrust.AppSurface.Evidence.Readiness;
 
 namespace AspireAppHostExample.Tests;
 
+[Collection(AspireAppHostIntegrationCollection.Name)]
 public sealed class TypedProfileIntegrationTests
 {
     private const int MaximumHttpRequestAttempts = 3;

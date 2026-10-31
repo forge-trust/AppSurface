@@ -18,17 +18,64 @@ destination_root="$3"
   || { echo "consumer-build-policy-missing" >&2; exit 1; }
 [[ ! -e "$destination_root" && ! -L "$destination_root" ]] || { echo "consumer-destination-exists" >&2; exit 1; }
 
-mkdir "$destination_root"
-consumer_name="$(basename "$consumer_template" .csproj.template)"
-consumer_project="$destination_root/$consumer_name.csproj"
-cp -- "$consumer_template" "$consumer_project"
-source_count=0
-for source_file in "$(dirname "$consumer_template")"/*.cs; do
-  [[ -f "$source_file" && ! -L "$source_file" ]] || { echo "consumer-source-invalid" >&2; exit 1; }
-  cp -- "$source_file" "$destination_root/"
-  source_count=$((source_count + 1))
-done
-[[ "$source_count" -gt 0 ]] || { echo "consumer-sources-missing" >&2; exit 1; }
-cp -- "$repo_root/Directory.Build.props" "$destination_root/Directory.Build.props"
-cp -- "$repo_root/Directory.Build.targets" "$destination_root/Directory.Build.targets"
-printf '%s\n' "$consumer_project"
+python3 - "$consumer_template" "$repo_root" "$destination_root" <<'PY'
+import os
+import pathlib
+import shutil
+import sys
+
+source = pathlib.Path(sys.argv[1])
+repo = pathlib.Path(sys.argv[2])
+destination = pathlib.Path(sys.argv[3])
+
+try:
+    source_real = source.resolve(strict=True)
+    source_dir = source_real.parent
+    repo_real = repo.resolve(strict=True)
+    destination_real = destination.resolve(strict=False)
+except OSError:
+    raise SystemExit("consumer-template-invalid")
+
+if (destination_real == source_dir or source_dir in destination_real.parents
+        or destination_real in source_dir.parents):
+    raise SystemExit("consumer-template-destination-overlaps-source")
+
+# Reject symlinks anywhere in authored input before copytree can follow them.
+for directory, names, files in os.walk(source_dir, followlinks=False):
+    for name in names + files:
+        if name in {"bin", "obj"}:
+            continue
+        path = pathlib.Path(directory) / name
+        if path.is_symlink():
+            raise SystemExit("consumer-source-invalid")
+    names[:] = [name for name in names if name not in {"bin", "obj"}]
+
+flat_sources = list(source_dir.glob("*.cs"))
+if not flat_sources or any(not path.is_file() or path.is_symlink() for path in flat_sources):
+    raise SystemExit("consumer-sources-missing-or-invalid")
+
+project_name = "PostgreSqlPreflightConsumer.csproj"
+if not source.is_file() or source.name != project_name + ".template":
+    raise SystemExit("consumer-template-invalid")
+if not (repo_real / "Directory.Build.props").is_file() or not (repo_real / "Directory.Build.targets").is_file():
+    raise SystemExit("consumer-build-policy-missing")
+if destination.exists() or destination.is_symlink():
+    raise SystemExit("consumer-destination-exists")
+
+def ignore(directory, names):
+    current = pathlib.Path(directory)
+    ignored = {"bin", "obj"}
+    if current == source_dir:
+        ignored.add(project_name)  # Keep the local development project out of proof.
+    return [name for name in names if name in ignored]
+
+shutil.copytree(source_dir, destination, ignore=ignore, symlinks=False)
+staged_template = destination / source.name
+if not staged_template.is_file() or staged_template.is_symlink():
+    raise SystemExit("consumer-template-invalid")
+staged_project = destination / project_name
+staged_template.rename(staged_project)
+shutil.copyfile(repo_real / "Directory.Build.props", destination / "Directory.Build.props")
+shutil.copyfile(repo_real / "Directory.Build.targets", destination / "Directory.Build.targets")
+print(staged_project)
+PY
