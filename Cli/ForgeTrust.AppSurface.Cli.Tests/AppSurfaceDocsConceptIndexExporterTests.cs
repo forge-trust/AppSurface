@@ -123,6 +123,91 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
         Assert.Contains("every finalized", Assert.Single(incomplete.Diagnostics).Message);
     }
 
+    [Fact]
+    public async Task WriteAsync_RejectsMissingOrInvalidFinalizedRouteManifest()
+    {
+        using var missingOutput = new TemporaryDirectory();
+        var missing = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(missingOutput.Path, [], 4194304, CancellationToken.None));
+        Assert.Contains("route manifest could not be read", Assert.Single(missing.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
+
+        using var invalidOutput = new TemporaryDirectory();
+        await File.WriteAllTextAsync(Path.Join(invalidOutput.Path, ".appsurface-docs-route-manifest.json"), "{}");
+        var invalid = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(invalidOutput.Path, [], 4194304, CancellationToken.None));
+        Assert.Contains("invalid for concept-index generation", Assert.Single(invalid.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(Path.Join(invalidOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Fact]
+    public async Task WriteAsync_RejectsNullAndDuplicateSourceProjections()
+    {
+        using var nullOutput = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(nullOutput.Path, ("guide.md", "guide", "guide.html"));
+        var missingProjection = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(nullOutput.Path, [null!], 4194304, CancellationToken.None));
+        Assert.Contains("missing canonical page projection", Assert.Single(missingProjection.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
+
+        using var duplicateOutput = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(duplicateOutput.Path, ("guide.md", "guide", "guide.html"));
+        AppSurfaceDocsConceptExportPage projection = new("guide", null, null, "Guide", false, false);
+        var duplicate = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(duplicateOutput.Path, [projection, projection], 4194304, CancellationToken.None));
+        Assert.Contains("repeats a canonical page route", Assert.Single(duplicate.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(Path.Join(duplicateOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Theory]
+    [InlineData(null, "  ", "no resolved title")]
+    [InlineData("en ", "Guide", "unnormalized locale")]
+    public async Task WriteAsync_RejectsInvalidResolvedTitleOrLocale(string? locale, string title, string expectedMessage)
+    {
+        using var output = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(output.Path, ("guide.md", "guide", "guide.html"));
+        await File.WriteAllTextAsync(Path.Join(output.Path, "guide.html"), "<h1>Guide</h1>");
+        AppSurfaceDocsConceptExportPage page = new("guide", locale, "guide", title, false, false);
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [page], 4194304, CancellationToken.None));
+
+        Assert.Contains(expectedMessage, Assert.Single(exception.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Fact]
+    public async Task WriteAsync_RejectsMissingMappedHtmlAndDuplicateEmittedAnchors()
+    {
+        using var missingOutput = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(missingOutput.Path, ("guide.md", "guide", "rendered/guide.html"));
+        AppSurfaceDocsConceptExportPage page = new("guide", null, null, "Guide", false, false);
+        var missing = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(missingOutput.Path, [page], 4194304, CancellationToken.None));
+        Assert.Contains("could not be read", Assert.Single(missing.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
+
+        using var duplicateOutput = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(duplicateOutput.Path, ("guide.md", "guide", "rendered/guide.html"));
+        Directory.CreateDirectory(Path.Join(duplicateOutput.Path, "rendered"));
+        await File.WriteAllTextAsync(Path.Join(duplicateOutput.Path, "rendered", "guide.html"), "<h1 id=\"same\">Guide</h1><a id=\"same\"></a>");
+        var duplicate = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(duplicateOutput.Path, [page], 4194304, CancellationToken.None));
+        Assert.Contains("invalid or duplicate emitted anchor", Assert.Single(duplicate.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(Path.Join(duplicateOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Fact]
+    public async Task WriteAsync_RejectsUnsafePhysicalHtmlMapping()
+    {
+        using var output = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(output.Path, ("guide.md", "guide", "../outside.html"));
+        AppSurfaceDocsConceptExportPage page = new("guide", null, null, "Guide", false, false);
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [page], 4194304, CancellationToken.None));
+
+        Assert.Contains("invalid for concept-index generation", Assert.Single(exception.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
     private static async Task WriteFrozenRoutesAsync(string outputPath, params (string Source, string Route, string Artifact)[] routes)
     {
         var entries = routes.Select(route => new
