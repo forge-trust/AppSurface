@@ -100,6 +100,79 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
     }
 
     [Fact]
+    public async Task StaticSwitch_PartialDomLifecycleClaimsOnlyTheCurrentVerifiedDocument()
+    {
+        var pagesRoot = await _versions.EnsureStaticPublicationAsync();
+        await using var host = await AppSurfaceDocsVersionSwitchStaticHost.StartAsync(pagesRoot);
+        await using var context = await _browser.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var sourceRoute = _versions.GetCanonicalRoutePath("1.0.0", "guides.setup", "en");
+        var targetRoute = _versions.GetCanonicalRoutePath("2.0.0", "guides.setup", "en");
+        var sourceUrl = _versions.BuildVersionPageUrl(host.BaseUrl, "1.0.0", sourceRoute);
+        var targetUrl = _versions.BuildVersionPageUrl(host.BaseUrl, "2.0.0", targetRoute);
+
+        var sourceResponse = await page.GotoAsync(sourceUrl);
+        Assert.NotNull(sourceResponse);
+        Assert.Equal(200, sourceResponse.Status);
+        var sourceKey = await page.EvaluateAsync<string>(
+            "() => JSON.parse(document.querySelector('script[data-docs-version-data]').textContent).sourceKey");
+        Assert.Matches("^[0-9a-f]{64}$", sourceKey);
+
+        // Fetch the independently published counterpart outside the sandboxed browser, then
+        // model the markup replacement performed by a partial-page navigation framework.
+        using var client = new HttpClient();
+        var targetHtml = await client.GetStringAsync(targetUrl);
+        Assert.Contains("Getting started with configuration", targetHtml, StringComparison.Ordinal);
+        var transitionUrl = targetUrl + "?docsFrom=" + Uri.EscapeDataString(sourceKey) + "#configure";
+
+        await page.EvaluateAsync("""
+            ({ html, transitionUrl }) => {
+                const parsed = new DOMParser().parseFromString(html, 'text/html');
+                parsed.querySelectorAll('script[data-docs-switch-runtime]').forEach(script => script.remove());
+                document.body.replaceChildren(...Array.from(parsed.body.childNodes, node => document.importNode(node, true)));
+                history.pushState({}, '', transitionUrl);
+
+                const lifecycleEvents = [
+                    'turbo:render',
+                    'turbo:load',
+                    'turbo:frame-load',
+                    'razorwire:page-nav:active-change'
+                ];
+                for (let pass = 0; pass < 2; pass++) {
+                    lifecycleEvents.forEach(name => document.dispatchEvent(new Event(name)));
+                }
+            }
+            """, new { html = targetHtml, transitionUrl });
+
+        Assert.Contains("Getting started with configuration", await page.Locator("main h1").First.TextContentAsync(), StringComparison.Ordinal);
+        Assert.Equal(1, await page.Locator("[data-docs-version-notice]").CountAsync());
+        var targetPolicy = await page.Locator("meta[http-equiv='Content-Security-Policy']").GetAttributeAsync("content");
+        Assert.Contains("connect-src 'none'", targetPolicy ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("This guide has a different location in 2.0.0.",
+            await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
+        Assert.Equal("configure", await page.EvaluateAsync<string>("() => document.activeElement?.id || ''"));
+        var describedBy = await page.Locator("#configure").GetAttributeAsync("aria-describedby");
+        Assert.Equal(1, (describedBy ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Count(value => value == "docs-version-explanation"));
+
+        await page.EvaluateAsync("""
+            sourceUrl => {
+                history.pushState({}, '', sourceUrl);
+                for (let pass = 0; pass < 2; pass++) {
+                    document.dispatchEvent(new Event('turbo:render'));
+                    document.dispatchEvent(new Event('turbo:load'));
+                    document.dispatchEvent(new Event('turbo:frame-load'));
+                    document.dispatchEvent(new Event('razorwire:page-nav:active-change'));
+                }
+            }
+            """, sourceUrl);
+
+        Assert.Equal(0, await page.Locator("[data-docs-version-notice]").CountAsync());
+        Assert.Equal(0, await page.Locator("#configure[aria-describedby~='docs-version-explanation']").CountAsync());
+        _versions.AssertOriginalArchiveHashesUnchanged();
+    }
+
+    [Fact]
     public async Task StaticChoicePage_NoJavaScriptOffersDirectTargetForMovedConcept()
     {
         var pagesRoot = await _versions.EnsureStaticPublicationAsync();
@@ -505,6 +578,7 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         Assert.Equal(sourceRoute, targetRoute);
 
         await page.GotoAsync(_versions.BuildVersionPageUrl(host.BaseUrl, "1.0.0", sourceRoute));
+        await page.Locator("[data-docs-version-toggle]").ClickAsync();
         var targetLink = page.Locator("[data-docs-version-options] a[href*='/docs/v/2.0.0/']").First;
         await targetLink.ClickAsync();
         await page.WaitForSelectorAsync("[data-docs-version-notice]", new PageWaitForSelectorOptions
