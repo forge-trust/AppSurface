@@ -5,15 +5,62 @@ using System.Text.Json.Nodes;
 using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.Release;
 using ForgeTrust.AppSurface.ReleaseContracts;
+using Xunit.Abstractions;
 
 namespace ForgeTrust.AppSurface.Release.Tests;
 
-public sealed class ReleaseDocsConceptCoverageTests : IDisposable
+public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : IDisposable
 {
     private const string ReleaseManifestName = ".appsurface-docs-release-manifest.json";
     private const string RouteManifestName = ".appsurface-docs-route-manifest.json";
     private const string ConceptIndexName = ".appsurface-docs-concepts.json";
     private readonly string _root = TestPathUtils.PathUnder(Path.GetTempPath(), "release-docs-concept-coverage-" + Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public async Task GenerateAsync_PreservesEveryConceptInFiniteMultiReleaseCorpus()
+    {
+        const int releaseCount = 3;
+        const int conceptsPerRelease = 12;
+        var releases = Enumerable.Range(1, releaseCount).Select(release => new ReleaseInput($"{release}.0.0",
+            Enumerable.Range(1, conceptsPerRelease).Select(concept => new PageInput(
+                $"guides/release-{release}/topic-{concept}", $"export/release-{release}/topic-{concept}.html", "en",
+                $"topic.{concept}", $"Topic {concept} in release {release}")).ToArray())).ToArray();
+        var fixture = await CreateFixtureAsync(releases);
+        var original = SnapshotFiles(fixture.Root);
+        var serving = TestPathUtils.PathUnder(_root, "finite-corpus");
+
+        var result = await GenerateAsync(fixture, serving);
+
+        using var inventory = JsonDocument.Parse(await File.ReadAllBytesAsync(result.InventoryPath));
+        var files = inventory.RootElement.GetProperty("files").EnumerateArray().ToArray();
+        Assert.Equal(releaseCount, inventory.RootElement.GetProperty("sourceReleases").GetArrayLength());
+        Assert.Equal(releaseCount * conceptsPerRelease, files.Count(file => file.GetProperty("kind").GetString() == "guide"));
+        Assert.Equal(releaseCount * conceptsPerRelease, files.Count(file => file.GetProperty("kind").GetString() == "choice-page"));
+        foreach (var release in Enumerable.Range(1, releaseCount))
+            foreach (var concept in Enumerable.Range(1, conceptsPerRelease))
+            {
+                var choice = await ReadChoiceAsync(fixture, serving, $"{release}.0.0", $"guides/release-{release}/topic-{concept}");
+                var targets = choice.QuerySelectorAll("main section");
+                Assert.Equal(releaseCount - 1, targets.Length);
+                foreach (var target in Enumerable.Range(1, releaseCount).Where(version => version != release))
+                {
+                    var section = Assert.Single(targets, item => item.TextContent.Contains($"{target}.0.0", StringComparison.Ordinal));
+                    Assert.Contains("This guide moved", section.TextContent, StringComparison.Ordinal);
+                    Assert.Contains(section.QuerySelectorAll("a"), link => link.TextContent == "Open this guide"
+                        && link.GetAttribute("href")!.StartsWith($"/docs/v/{target}.0.0/export/release-{target}/topic-{concept}.html?docsFrom=", StringComparison.Ordinal));
+                }
+            }
+        long generatedBytes = 0;
+        foreach (var file in files)
+        {
+            var bytes = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(serving, file.GetProperty("path").GetString()!.Split('/')));
+            Assert.Equal(file.GetProperty("length").GetInt64(), bytes.LongLength);
+            Assert.Equal(file.GetProperty("sha256").GetString(), Sha256(bytes));
+            generatedBytes += bytes.LongLength;
+        }
+        Assert.Equal(original, SnapshotFiles(fixture.Root));
+        output.WriteLine($"Finite correctness fixture: releases={releaseCount}; conceptsPerRelease={conceptsPerRelease}; pages={releaseCount * conceptsPerRelease}; artifacts={files.Length}; generatedBytes={generatedBytes}.");
+    }
 
     [Fact]
     public async Task GenerateAsync_RejectsMalformedCatalogWithoutReplacingPriorOutput()
