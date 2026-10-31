@@ -19,7 +19,7 @@ internal static class ControlProbe
         switch (control)
         {
             case "baseline":
-                Require(Environment.GetEnvironmentVariables().Count == 4, "environment-count");
+                LauncherEnvironment.Require(Environment.GetEnvironmentVariables());
                 Require(Directory.Exists(OwnerPaths.Source) && Directory.Exists(OwnerPaths.Native), "source-visible");
                 Require(File.ReadAllText(OwnerPaths.Input + "/immutable-canary") == "immutable\n", "input-visible");
                 Require(File.ReadAllText(OwnerPaths.Stage + "/archive-canary") == "archive\n", "archive-visible");
@@ -33,8 +33,8 @@ internal static class ControlProbe
                 }
                 var sdkProbe = new ProcessStartInfo(OwnerPaths.Dotnet, "--version")
                 { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-                // The SDK's own first-use state belongs in private scratch. The phase/worker
-                // itself still has exactly the four credential-free environment entries.
+                // The SDK's own first-use state belongs in private scratch. The managed
+                // launcher has five fixed entries; the Python replay worker retains four.
                 sdkProbe.Environment["DOTNET_CLI_HOME"] = "/tmp/sdk-control-home";
                 using (var process = Process.Start(sdkProbe)!)
                 {

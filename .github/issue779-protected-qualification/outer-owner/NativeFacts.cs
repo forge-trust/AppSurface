@@ -14,22 +14,7 @@ internal static class NativeFacts
     private const int MaximumStatusBytes = 64 * 1024;
     private const int MaximumEnvironmentBytes = 16 * 1024;
 
-    internal static void RequireSelfEnvironment(IReadOnlyCollection<string> allowed)
-    {
-        var expected = new HashSet<string>(allowed, StringComparer.Ordinal);
-        var actual = Environment.GetEnvironmentVariables();
-        if (actual.Count != expected.Count) throw new IsolationException("launcher-environment");
-        foreach (System.Collections.DictionaryEntry entry in actual)
-        {
-            if (entry.Key is not string key || !expected.Contains(key) || entry.Value is not string value
-                || value.Any(char.IsControl)) throw new IsolationException("launcher-environment");
-        }
-        RequireEnv("PATH", "/usr/bin:/bin");
-        RequireEnv("HOME", "/nonexistent");
-        RequireEnv("LANG", "C.UTF-8");
-        RequireEnv("LC_ALL", "C");
-        RequireEnv("DOTNET_EnableDiagnostics", "0");
-    }
+    internal static void RequireSelfEnvironment() => LauncherEnvironment.Require(Environment.GetEnvironmentVariables());
 
     internal static void RequireSelfIdentity()
     {
@@ -674,10 +659,6 @@ internal static class NativeFacts
     private static bool AllEqual(string[] values, uint expected) => values.Length == 4 && values.All(value =>
         uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed == expected);
     private static bool ParseUInt(string value, out uint result) => uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out result);
-    private static void RequireEnv(string key, string expected)
-    {
-        if (Environment.GetEnvironmentVariable(key) != expected) throw new IsolationException("launcher-environment");
-    }
     private static string PhaseName(OwnerPhase phase) => phase switch
     {
         OwnerPhase.Prepare => "prepare",

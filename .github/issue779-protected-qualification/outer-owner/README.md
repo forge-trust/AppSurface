@@ -54,6 +54,15 @@ FIFOs; `filesystem-special-node` is only an allowlisted, path-free failure categ
 The setting is a mitigation candidate supported by a Linux forced-termination
 mechanism probe; only fresh source-bound Linux CI can confirm the control outcome.
 
+The baseline executes in that same managed launcher, so it uses the shared
+[`LauncherEnvironment.Require`](LauncherEnvironment.cs) check for all five exact
+keys and values. It must not use the Python worker's four-entry count. The portable
+policy controls exercise the shared rule with missing, additional, wrongly cased,
+wrongly valued and control-character entries; replay's separate four-entry command
+check remains in place. A launcher READY line alone does not exercise baseline:
+the control regression must send a valid baseline release frame and let its
+filesystem and SDK checks complete.
+
 ## Phase ordering and lifetime
 
 1. Verify all source captures and fixed tool bytes, reserve the identity, and

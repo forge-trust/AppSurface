@@ -112,6 +112,7 @@ internal static class PolicyControls
             || replayEnvironment.Any(pair => !replayStart.Environment.TryGetValue(pair.Key, out var value) || value != pair.Value))
             throw new IsolationException("replay-environment-control");
         count++;
+        count += LauncherEnvironmentControls();
         if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
             || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
             || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure"
@@ -669,6 +670,47 @@ internal static class PolicyControls
         catch (IsolationException) { rejectedStage = true; }
         if (!rejectedStage) throw new IsolationException("sdk-stage-closed-control");
         return 4;
+    }
+
+    private static int LauncherEnvironmentControls()
+    {
+        var exact = new System.Collections.Hashtable(StringComparer.Ordinal)
+        {
+            ["PATH"] = "/usr/bin:/bin",
+            ["HOME"] = "/nonexistent",
+            ["LANG"] = "C.UTF-8",
+            ["LC_ALL"] = "C",
+            ["DOTNET_EnableDiagnostics"] = "0",
+        };
+        LauncherEnvironment.Require(exact);
+        var count = 1;
+        foreach (string key in exact.Keys)
+        {
+            var missing = (System.Collections.Hashtable)exact.Clone();
+            missing.Remove(key);
+            Reject(() => LauncherEnvironment.Require(missing));
+            var wrong = (System.Collections.Hashtable)exact.Clone();
+            wrong[key] = "wrong";
+            Reject(() => LauncherEnvironment.Require(wrong));
+            var control = (System.Collections.Hashtable)exact.Clone();
+            control[key] = (string)exact[key]! + "\n";
+            Reject(() => LauncherEnvironment.Require(control));
+            var cased = (System.Collections.Hashtable)exact.Clone();
+            cased.Remove(key);
+            cased[key.ToLowerInvariant()] = exact[key];
+            Reject(() => LauncherEnvironment.Require(cased));
+            count += 4;
+        }
+        var extra = (System.Collections.Hashtable)exact.Clone();
+        extra["GH_TOKEN"] = "synthetic-canary";
+        Reject(() => LauncherEnvironment.Require(extra));
+        var insensitive = new System.Collections.Hashtable(StringComparer.OrdinalIgnoreCase);
+        foreach (string key in exact.Keys) insensitive[key.ToLowerInvariant()] = exact[key];
+        Reject(() => LauncherEnvironment.Require(insensitive));
+        var nonString = (System.Collections.Hashtable)exact.Clone();
+        nonString["DOTNET_EnableDiagnostics"] = 0;
+        Reject(() => LauncherEnvironment.Require(nonString));
+        return count + 3;
     }
 
     private static void Reject(Action action)

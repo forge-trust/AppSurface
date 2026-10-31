@@ -20,11 +20,6 @@ internal static class PhaseLauncher
     private const int MaximumTokenBytes = 8192;
     private const string Python = "/usr/bin/python3";
 
-    private static readonly string[] EnvironmentKeys =
-    [
-        "PATH", "HOME", "LANG", "LC_ALL", "DOTNET_EnableDiagnostics"
-    ];
-
     private static readonly string[] ContextKeys =
     [
         "GITHUB_ACTIONS", "GITHUB_EVENT_NAME", "GITHUB_REPOSITORY", "GITHUB_REF",
@@ -48,7 +43,7 @@ internal static class PhaseLauncher
         try
         {
             RequirePhase(phase);
-            NativeFacts.RequireSelfEnvironment(EnvironmentKeys);
+            NativeFacts.RequireSelfEnvironment();
             NativeFacts.RequireSelfIdentity();
             NativeFacts.RequireSelfCapabilitiesAndDescriptors();
 
