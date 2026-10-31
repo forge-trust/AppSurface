@@ -171,6 +171,17 @@ an allowlisted category. The setup checkpoint can describe an earlier successful
 SDK validation and must not be interpreted as the failing operation by itself.
 These diagnostics expose no paths, child-authored text, or credential material.
 
+The `credential-denial` control keeps its original environment, host-canary,
+manager, home-directory and private-proc checks in the same order. A failed check
+may expose only its existing fixed category (`token-environment`,
+`host-credential-hidden`, `host-credential-readable`, `manager-hidden`,
+`root-home-hidden`, `runner-home-hidden`, `private-proc`, `private-init`, or
+`token-process`) through [`Program.SafeFailureCode`](Program.cs). Unknown or
+decorated strings remain redacted. A category identifies the failed assertion;
+it does not by itself establish that credential bytes were accessible. A minimal
+Linux container passing this body also does not establish that the full systemd
+and root-directory setup passes it on the CI host.
+
 A successful controls report proves only its named host controls at the captured
 source. It does not establish a genuine protected predecessor, successful full
 completed-run replay, original gate success, support registration, native
