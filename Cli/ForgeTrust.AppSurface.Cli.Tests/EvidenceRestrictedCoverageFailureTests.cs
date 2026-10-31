@@ -290,6 +290,36 @@ public sealed class EvidenceRestrictedCoverageFailureTests
         AssertNoArtifacts(result);
     }
 
+    [Fact]
+    public async Task RunAsync_ShouldNotWriteAnEarlierOptionalArtifactWhenALaterRequiredArtifactExceedsItsQuota()
+    {
+        using var directory = TestDirectory.Create();
+        var transport = new FakeRestrictedRun([Report(PassingCobertura)]);
+        var declaration = CreateDeclaration(
+        [
+            new EvidenceArtifactSlot("coverage-report", "coverage", "application/xml", Required: false, MaximumBytes: 1024 * 1024),
+            new EvidenceArtifactSlot("coverage-gate", "coverage", "application/json", Required: true, MaximumBytes: 1),
+        ]);
+        var writer = CreateWriter(directory.Path, declaration);
+        var reportGenerator = new RecordingReportGenerator();
+
+        var result = await CreateProducer(transport, reportGenerator).RunAsync(
+            declaration,
+            TestPathUtils.PathUnder(directory.Path, "subject.slnx"),
+            null,
+            writer,
+            CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.Contains("Required artifact slot 'coverage-gate' exceeds its declared byte limit", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        AssertNoArtifacts(result);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Equal(1, transport.RunCount);
+        Assert.Equal(1, transport.CollectCount);
+        Assert.Equal(1, reportGenerator.MergeCount);
+    }
+
 
     [Theory]
     [InlineData("measurable", true)]
