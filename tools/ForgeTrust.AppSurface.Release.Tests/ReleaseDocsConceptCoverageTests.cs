@@ -275,7 +275,7 @@ public sealed class ReleaseDocsConceptCoverageTests : IDisposable
             + "<meta http-equiv=\"refresh\" content=\"0; URL=/docs/contact\">"
             + "<link rel=\"canonical\" href=\"/docs/guides/start\"></head>"
             + "<body><h1>Guide</h1><img src=\"//cdn.example/logo.svg\"><a href=\"relative.html\">relative</a>"
-            + "<form action=\"/docs/contact\"></form></body></html>";
+            + "<form action=\"/docs/contact\"></form><img src=\"/global.svg\"></body></html>";
         const string statusHtml = "<html><head><link rel=\"canonical\" href=\"https://manual.example/status\">"
             + "<meta http-equiv=\"refresh\" content=\"5\"></head><body><h1>Status</h1></body></html>";
         var fixture = await CreateFixtureAsync(
@@ -305,6 +305,7 @@ public sealed class ReleaseDocsConceptCoverageTests : IDisposable
         var rebased = await File.ReadAllTextAsync(inferredIndexFile);
         Assert.Contains("href=\"/docs/v/1.0.0/theme.css\"", rebased, StringComparison.Ordinal);
         Assert.Contains("action=\"/docs/v/1.0.0/contact\"", rebased, StringComparison.Ordinal);
+        Assert.Contains("src=\"/docs/v/1.0.0/global.svg\"", rebased, StringComparison.Ordinal);
         Assert.Contains("url=/docs/v/1.0.0/contact", rebased, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("src=\"//cdn.example/logo.svg\"", rebased, StringComparison.Ordinal);
         Assert.Contains("href=\"relative.html\"", rebased, StringComparison.Ordinal);
@@ -507,24 +508,129 @@ public sealed class ReleaseDocsConceptCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateAsync_SkipsPriorManagedMountAndSwitchFilesWhenInventoryMarksTheirOwnership()
+    public async Task GenerateAsync_ReplacesPriorManagedFilesOnlyWithMatchingGeneratedInventory()
     {
         var fixture = await CreateFixtureAsync([SingleRelease()]);
-        var oldMount = TestPathUtils.PathUnder(fixture.Root, "docs", "v", "stale.html");
-        var oldSwitch = TestPathUtils.PathUnder(fixture.Root, "docs", "versions", "switch", "stale.html");
-        Directory.CreateDirectory(Path.GetDirectoryName(oldMount)!);
-        Directory.CreateDirectory(Path.GetDirectoryName(oldSwitch)!);
-        await File.WriteAllTextAsync(oldMount, "previously generated mount content");
-        await File.WriteAllTextAsync(oldSwitch, "previously generated switch content");
-        await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture.Root, ReleaseDocsStaticConceptPublication.InventoryFileName), "{}");
+        var firstRoot = TestPathUtils.PathUnder(_root, "prior-generated-serving");
+        await GenerateAsync(fixture, firstRoot);
+        foreach (var file in Directory.EnumerateFiles(firstRoot, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(firstRoot, file).Replace(Path.DirectorySeparatorChar, '/');
+            if (relative != ReleaseDocsStaticConceptPublication.InventoryFileName
+                && !relative.StartsWith("docs/v/", StringComparison.Ordinal)
+                && !relative.StartsWith("docs/versions/switch/", StringComparison.Ordinal)) continue;
+            var destination = TestPathUtils.PathUnder(fixture.Root, relative.Split('/'));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination);
+        }
+        var sourceSnapshot = SnapshotFiles(fixture.Root);
         var outputRoot = TestPathUtils.PathUnder(_root, "owned-reserved-output");
 
         var result = await GenerateAsync(fixture, outputRoot);
 
-        Assert.True(File.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "1.0.0", "export", "start.html")));
-        Assert.False(File.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "stale.html")));
-        Assert.False(File.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "versions", "switch", "stale.html")));
+        Assert.Equal(SnapshotFiles(firstRoot), SnapshotFiles(outputRoot));
+        Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.Root));
         Assert.True(File.Exists(result.InventoryPath));
+    }
+
+    [Theory]
+    [InlineData("wrong-schema")]
+    [InlineData("wrong-transform")]
+    [InlineData("missing-files")]
+    [InlineData("wrong-files")]
+    [InlineData("null-record")]
+    [InlineData("unlisted")]
+    [InlineData("unsafe-path")]
+    [InlineData("duplicate-path")]
+    [InlineData("missing-length")]
+    [InlineData("wrong-length-type")]
+    [InlineData("negative-length")]
+    [InlineData("length-mismatch")]
+    [InlineData("digest-mismatch")]
+    [InlineData("short-digest")]
+    [InlineData("invalid-digest")]
+    public async Task GenerateAsync_RejectsInvalidPriorOwnershipWithoutChangingInputsOrPublishedOutput(string invalid)
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        const string relative = "docs/versions/switch/prior.html";
+        var member = TestPathUtils.PathUnder(fixture.Root, relative.Split('/'));
+        Directory.CreateDirectory(Path.GetDirectoryName(member)!);
+        var bytes = Encoding.UTF8.GetBytes("a complete prior generated file");
+        await File.WriteAllBytesAsync(member, bytes);
+        var record = new JsonObject { ["path"] = relative, ["length"] = bytes.Length, ["sha256"] = Sha256(bytes) };
+        var files = new JsonArray(record);
+        var inventory = new JsonObject
+        {
+            ["schema"] = ReleaseDocsStaticConceptPublication.InventorySchema,
+            ["transformVersion"] = ReleaseDocsStaticConceptPublication.TransformVersion,
+            ["files"] = files
+        };
+        switch (invalid)
+        {
+            case "wrong-schema": inventory["schema"] = "unknown"; break;
+            case "wrong-transform": inventory["transformVersion"] = "unknown"; break;
+            case "missing-files": inventory.Remove("files"); break;
+            case "wrong-files": inventory["files"] = "invalid"; break;
+            case "null-record": files[0] = null; break;
+            case "unlisted": files.Clear(); break;
+            case "unsafe-path": record["path"] = "../escaped"; break;
+            case "duplicate-path": files.Add(record.DeepClone()); break;
+            case "missing-length": record.Remove("length"); break;
+            case "wrong-length-type": record["length"] = "invalid"; break;
+            case "negative-length": record["length"] = -1; break;
+            case "length-mismatch": record["length"] = bytes.Length + 1; break;
+            case "digest-mismatch": record["sha256"] = new string('0', 64); break;
+            case "short-digest": record["sha256"] = "bad"; break;
+            case "invalid-digest": record["sha256"] = new string('z', 64); break;
+        }
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture.Root, ReleaseDocsStaticConceptPublication.InventoryFileName), inventory.ToJsonString());
+        var before = SnapshotFiles(fixture.Root);
+        var output = ExistingOutput("invalid-prior-ownership-" + invalid);
+        var published = SnapshotFiles(output);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, output));
+
+        Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
+        Assert.Equal(before, SnapshotFiles(fixture.Root));
+        Assert.Equal(published, SnapshotFiles(output));
+    }
+
+    [Theory]
+    [InlineData("Start", "This guide is available", "The documented guide is available at the same location.")]
+    [InlineData("Configure", "This guide has a different title", "This guide has a different title in 2.0.0.")]
+    public async Task GenerateAsync_ExplainsSameRouteIdentityAndTitleChanges(string targetTitle, string heading, string explanation)
+    {
+        var fixture = await CreateFixtureAsync([
+            new ReleaseInput("1.0.0", [new PageInput("guides/start", "export/start.html", "en", "setup", "Start")]),
+            new ReleaseInput("2.0.0", [new PageInput("guides/start", "export/start.html", "en", "setup", targetTitle)])
+        ]);
+        var output = TestPathUtils.PathUnder(_root, "same-route-" + targetTitle);
+        await GenerateAsync(fixture, output);
+        var choice = await ReadChoiceAsync(fixture, output, "1.0.0", "guides/start");
+        var target = Assert.Single(choice.QuerySelectorAll("main section"), section => section.TextContent.Contains("2.0.0", StringComparison.Ordinal));
+        Assert.Contains(heading, target.TextContent, StringComparison.Ordinal);
+        Assert.Contains(explanation, target.TextContent, StringComparison.Ordinal);
+        Assert.Contains(target.QuerySelectorAll("a"), link => link.TextContent == "Open this guide"
+            && link.GetAttribute("href")!.StartsWith("/docs/v/2.0.0/export/start.html?docsFrom=", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_RejectsReservedPathsWhenInventoryMarkerIsMalformedWithoutReplacingPriorOutput()
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var authoredPath = TestPathUtils.PathUnder(fixture.Root, "docs", "v", "stale.html");
+        Directory.CreateDirectory(Path.GetDirectoryName(authoredPath)!);
+        await File.WriteAllTextAsync(authoredPath, "authored content must not be claimed by an inventory marker");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture.Root, ReleaseDocsStaticConceptPublication.InventoryFileName), "{}");
+        var sourceSnapshot = SnapshotFiles(fixture.Root);
+        var outputRoot = ExistingOutput("malformed-serving-inventory");
+        var previousSnapshot = SnapshotFiles(outputRoot);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, outputRoot));
+
+        Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
+        Assert.Equal(previousSnapshot, SnapshotFiles(outputRoot));
+        Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.Root));
     }
 
     [Fact]
@@ -602,14 +708,21 @@ public sealed class ReleaseDocsConceptCoverageTests : IDisposable
         Assert.Equal(previousSnapshot, SnapshotFiles(outputRoot));
     }
 
-    [Fact]
-    public async Task GenerateAsync_RejectsInvalidRouteRootBeforeWritingOutput()
+    [Theory]
+    [InlineData("/docs/../outside")]
+    [InlineData("docs")]
+    [InlineData("//outside")]
+    [InlineData("/docs?query")]
+    [InlineData("/docs#fragment")]
+    [InlineData("/docs\\outside")]
+    [InlineData("/docs\ncontrol")]
+    public async Task GenerateAsync_RejectsInvalidRouteRootBeforeWritingOutput(string routeRoot)
     {
         var fixture = await CreateFixtureAsync([SingleRelease()]);
         var outputRoot = ExistingOutput("invalid-route-root");
         var previousSnapshot = SnapshotFiles(outputRoot);
 
-        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, outputRoot, routeRoot: "/docs/../outside"));
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, outputRoot, routeRoot: routeRoot));
 
         Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
         Assert.Equal(previousSnapshot, SnapshotFiles(outputRoot));

@@ -114,6 +114,7 @@ internal static class ReleaseDocsStaticConceptPublication
             ResetDirectory(stagingRoot);
             try
             {
+                Dictionary<string, (long Length, string Sha256)>? priorFiles = null;
                 foreach (var file in EnumerateFiles(verificationRoot, cancellationToken))
                 {
                     var relative = Path.GetRelativePath(verificationRoot, file).Replace(Path.DirectorySeparatorChar, '/');
@@ -123,17 +124,18 @@ internal static class ReleaseDocsStaticConceptPublication
                     if (releases.Any(release => !release.IsPublic && (relative == release.ExactTreePath
                             || relative.StartsWith(release.ExactTreePath + "/", StringComparison.Ordinal)))) continue;
                     var oldMount = ServingMember(root, "v/");
-                    if (relative.StartsWith(oldMount, StringComparison.OrdinalIgnoreCase))
+                    var managed = ServingMember(root, "versions/switch/");
+                    if (relative.StartsWith(oldMount, StringComparison.OrdinalIgnoreCase)
+                        || relative.StartsWith(managed, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!File.Exists(Path.Combine(verificationRoot, InventoryFileName)))
-                            throw Invalid("An authored output collides with the reserved exact-version mount.");
-                        continue;
-                    }
-                    var managed = root.TrimStart('/') + "/versions/switch/";
-                    if (relative.StartsWith(managed, StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (!File.Exists(Path.Combine(verificationRoot, InventoryFileName)))
-                            throw Invalid("An authored output collides with the reserved switch namespace.");
+                        priorFiles ??= await ReadPriorServingFilesAsync(verificationRoot, cancellationToken);
+                        if (!priorFiles.TryGetValue(relative, out var prior))
+                            throw Invalid("An unlisted output collides with a reserved Docs namespace.");
+                        await using var stream = File.OpenRead(file);
+                        if (stream.Length != prior.Length
+                            || !Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken))
+                                .Equals(prior.Sha256, StringComparison.OrdinalIgnoreCase))
+                            throw Invalid("A reserved Docs file does not match its prior serving inventory.");
                         continue;
                     }
                     var destination = Path.Combine(stagingRoot, relative);
@@ -713,6 +715,31 @@ internal static class ReleaseDocsStaticConceptPublication
             throw Invalid("A serving staging directory is a reparse point.");
         if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
         Directory.CreateDirectory(path);
+    }
+
+    /// <summary>Reads prior generated-file claims; callers verify each reserved member's bytes before replacing it.</summary>
+    /// <remarks>These claims authorize replacement only. Original archive trust still requires its catalog-pinned manifest.</remarks>
+    private static async Task<Dictionary<string, (long Length, string Sha256)>> ReadPriorServingFilesAsync(string root, CancellationToken token)
+    {
+        var path = SafeCombine(root, InventoryFileName);
+        if (!File.Exists(path)) throw Invalid("An authored output collides with a reserved Docs namespace.");
+        await using var stream = File.OpenRead(path);
+        var inventory = await JsonNode.ParseAsync(stream, cancellationToken: token) as JsonObject;
+        if (inventory is null || String(inventory, "schema") != InventorySchema
+            || String(inventory, "transformVersion") != TransformVersion || inventory["files"] is not JsonArray files)
+            throw Invalid("The prior serving inventory has an unsupported schema, transform, or file list.");
+        var result = new Dictionary<string, (long Length, string Sha256)>(StringComparer.Ordinal);
+        foreach (var node in files)
+        {
+            if (node is not JsonObject file) throw Invalid("A prior serving inventory file record is malformed.");
+            var relative = String(file, "path")!;
+            _ = SafeCombine(root, relative);
+            var digest = String(file, "sha256")!;
+            if (file["length"] is not JsonValue length || !length.TryGetValue<long>(out var count) || count < 0
+                || digest.Length != 64 || !digest.All(Uri.IsHexDigit) || !result.TryAdd(relative, (count, digest)))
+                throw Invalid("A prior serving inventory file length, digest, or unique path is invalid.");
+        }
+        return result;
     }
 
     private static string ResolveCatalogTree(string root, string relative) => SafeCombine(root, relative);
