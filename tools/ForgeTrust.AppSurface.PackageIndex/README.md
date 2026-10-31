@@ -107,7 +107,7 @@ local provider project. The separate `PostgreSqlPreflightConsumer.csproj.templat
 by the release carrier; its provider reference requires the exact manifest-derived `AppSurfacePackageVersion`, has
 no default published-version fallback, and must not be replaced by the source-backed project.
 
-The shared [`materialize-preflight-consumer.sh`](../../Durable/materialize-preflight-consumer.sh) stages the package
+The shared [`materialize-preflight-consumer.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/materialize-preflight-consumer.sh) stages the package
 project in the verifier's private scratch directory. It preserves authored sources and nested resources, omits generated
 `bin`/`obj` directories and exactly the same-directory development `.csproj`, and copies the repository's authored
 [`Directory.Build.props`](../../Directory.Build.props) and [`Directory.Build.targets`](../../Directory.Build.targets).
