@@ -43,7 +43,9 @@ internal static class DurableTemplateCommand
     /// use the system temporary directory. The short Unix paths keep PostgreSQL's socket path within its fixed limit.</summary>
     /// <remarks>The smoke still enforces the 103-byte Unix-domain socket path limit in
     /// <see cref="DurableTemplateNativePostgreSql"/>. Linux and macOS ignore user-selected temporary-directory
-    /// environment paths for this owned cluster because they can exceed that limit.</remarks>
+    /// environment paths for this owned cluster because they can exceed that limit. The remaining setup budget is
+    /// sampled once and shared by the child environment and command timeout, so the timeout cannot drift below the
+    /// budget advertised to the child.</remarks>
     /// <param name="bin">Absolute PostgreSQL tool directory selected for the smoke runner.</param>
     /// <param name="root">Generated test project to run.</param>
     /// <param name="environment">Environment shared with the generated proof, copied before adding cluster credentials.</param>
@@ -79,12 +81,14 @@ internal static class DurableTemplateCommand
             var childEnvironment = environment.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_ADMIN_CONNECTION"] = cluster.ConnectionString;
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PG_BIN"] = bin;
-            childEnvironment["APPSURFACE_TEMPLATE_NATIVE_SETUP_REMAINING_MS"] = cluster.SetupBudgetRemainingMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PORT_MIN"] = "50000";
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PORT_MAX"] = "60000";
+            var setupBudgetRemainingMilliseconds = cluster.SetupBudgetRemainingMilliseconds;
+            childEnvironment["APPSURFACE_TEMPLATE_NATIVE_SETUP_REMAINING_MS"] =
+                setupBudgetRemainingMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             result = await runner.RunAsync(new ExternalCommandRequest("dotnet",
                 ["test", root, "--no-build", "--no-restore", "--filter", "FullyQualifiedName~NativePostgreSqlSmoke", "--logger", "console;verbosity=detailed"],
-                root, "native-smoke", "verifying ordinary generated host startup", cluster.SetupBudgetRemainingMilliseconds + 35_000, childEnvironment,
+                root, "native-smoke", "verifying ordinary generated host startup", setupBudgetRemainingMilliseconds + 35_000, childEnvironment,
                 ExternalCapturePolicy.ReleaseProof), cancellationToken);
             // A completed child result cannot renew cleanup when its observation fails validation.
             // Preserve the initial allowance only for runner failures before a result exists.
