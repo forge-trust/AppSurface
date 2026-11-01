@@ -132,6 +132,52 @@ public sealed class CoverageArtifactDirectoryTests
         finally { Directory.Delete(parent); }
     }
 
+    [CoverageUnixFact]
+    public void UnixEnumeration_ShouldRejectSymlinkEntryWithoutReadingItsTarget()
+    {
+
+        using var temp = TempDirectory.Create("appsurface-linux-artifact-enumeration-");
+        using var root = CoverageRunOutputLease.AcquireArtifactDirectory(
+            Path.Join(temp.Path, "private"), createMissing: true, requirePrivate: true)!;
+        var outside = Path.Join(temp.Path, "outside.txt");
+        var linked = Path.Join(root.ArtifactDirectoryPath, "linked.txt");
+        File.WriteAllText(outside, "outside sentinel");
+        File.CreateSymbolicLink(linked, outside);
+
+        Assert.Throws<IOException>(() => root.EnumerateArtifactEntries(8));
+
+        root.VerifyArtifactBinding();
+        Assert.True(File.Exists(linked));
+        Assert.Equal("outside sentinel", File.ReadAllText(outside));
+    }
+
+    [CoverageUnixFact]
+    public void UnixRetainedFileHandle_ShouldKeepIdentityAcrossNameReplacementAndRejectReopen()
+    {
+
+        using var temp = TempDirectory.Create("appsurface-linux-artifact-file-");
+        using var root = CoverageRunOutputLease.AcquireArtifactDirectory(
+            Path.Join(temp.Path, "private"), createMissing: true, requirePrivate: true)!;
+        var originalPath = Path.Join(root.ArtifactDirectoryPath, "payload.txt");
+        var retainedPath = Path.Join(root.ArtifactDirectoryPath, "retained.txt");
+        var outside = Path.Join(temp.Path, "outside.txt");
+        using (var created = root.OpenArtifactFile("payload.txt", createNew: true))
+            created.Write("retained bytes"u8);
+        File.WriteAllText(outside, "outside sentinel");
+
+        using var retained = root.OpenArtifactFile("payload.txt", createNew: false);
+        var identity = CoverageRunOutputLease.GetArtifactObjectIdentity(retained.SafeFileHandle);
+        File.Move(originalPath, retainedPath);
+        File.CreateSymbolicLink(originalPath, outside);
+
+        using var reader = new StreamReader(retained);
+        Assert.Equal("retained bytes", reader.ReadToEnd());
+        Assert.Equal(identity, CoverageRunOutputLease.GetArtifactObjectIdentity(retained.SafeFileHandle));
+        Assert.Throws<IOException>(() => root.OpenArtifactFile("payload.txt", createNew: false));
+        root.VerifyArtifactBinding();
+        Assert.Equal("outside sentinel", File.ReadAllText(outside));
+    }
+
     [Fact]
     public void Publish_ShouldRejectChangedSourceIdentity()
     {

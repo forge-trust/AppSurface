@@ -112,7 +112,10 @@ coverage thresholds remain independently required.
 The [C3 workflow](../../.github/workflows/issue779-checkpoint3-application.yml) runs a
 separate standard collector pass for `LinuxOwnerGuardNativeTests` (19 cases),
 `LinuxCustodySupplementNativeTests` (12 cases), and `LinuxProducerFileTreeNativeTests`
-(13 cases). These actual Linux x64 root tests
+(13 cases), [`LinuxWorkspaceSupplementNativeTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkspaceSupplementNativeTests.cs)
+(8 cases), [`LinuxExecutionOutputNativeTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxExecutionOutputNativeTests.cs)
+(1 case), and [`LinuxWorkerHandshakeNativeTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerHandshakeNativeTests.cs)
+(8 cases). These actual Linux x64 root tests
 exercise atomic marker consumption, replay, cancellation and object mutation, and
 retained nested report names, selected root pins, unknown reads and cancellation.
 They establish file/marker behavior only; they create no application admission,
@@ -122,10 +125,16 @@ The supplementary [producer file-copy controls](../ForgeTrust.AppSurface.Evidenc
 
 The three additional [retained-report boundary controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCustodySupplementNativeTests.cs) reject a nested directory symlink without altering its outside file, read a genuine report at the existing 1 MiB limit before rejecting one extra byte, and reject replacement of the selected root's parent through two independent retained sets. Every failed operation stays closed; the original file bytes remain unchanged. Their fixed names are required alongside the larger count. Local compilation cannot establish that these Linux-only controls passed; fresh current-source root execution is required.
 
+The [additional actual-root supplement controls](../../.github/issue779-checkpoint3/README.md#additional-actual-root-supplement-controls)
+exercise retained bundle mutations, shared pipe drainage after a quota failure, and deliberately rejected
+handshake frames over a genuine root UNIX peer. The handshake controls need Contracts instrumentation
+alongside Supervision; both restored dependency images are checked against their original DLL/PDB hashes.
+These negative frames issue no supervisor, owner, READY descriptor or admission capability.
+
 The supplemental `root-supplement.trx` and `root_supplement_tests` binding are
 separate from the original 43-case `root-files.trx` consumed by the account lineage.
-The binding requires exact SHA-256, 44 executed/passed rows with no skips or failures,
-and exactly the three fixed classes. The same already verified C3 dependency image
+The binding requires exact SHA-256, 61 executed/passed rows with no skips or failures,
+and exactly the six fixed classes. The same already verified C3 dependency image
 is measured, its DLL/PDB bytes are rechecked after collector restoration, and its
 genuine report is merged through Coverlet's standard `--merge-with` before the
 coverage hash is updated. No counts are rewritten. The
@@ -144,7 +153,7 @@ The runtime workflow downloads the current application-lane artifact and copies 
 | `native-sdk-failure.json` | Independently finalized standard report for the genuine failed-test SDK control. |
 | `sdk-test-failure.json` | Finalized failed-SDK receipt, restoration and pre-exit worker-cache provenance. |
 | `root-files.trx` | Hash-bound current-run passing root filesystem/kernel controls for all four expected classes; zero skips or failures. |
-| `root-supplement.trx` | Separate hash-bound 44-case marker/subtree/copy supplement; no replacement of the original root TRX or account lineage. |
+| `root-supplement.trx` | Separate hash-bound 61-case marker/subtree/copy/workspace/pipe/handshake supplement; no replacement of the original root TRX or account lineage. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
 | `native-receipt.json` | Receipt for the seven native C3 controls, including source, per-case outcomes, and `trusted_eligibility: false`. |
 
@@ -360,12 +369,12 @@ and twelve [selected results-root controls](../ForgeTrust.AppSurface.Evidence.Su
 twenty-nine executed and passed rows, all twenty-nine fixed test names once (including exact theory parameters), zero failed/skipped/error counters, and
 `native_acceptance: false`. The TRX is bounded to 1 MiB and prohibits DTDs.
 The same single collector pass covers all three classes; the original six audit rows remain in the same TRX and the
-43-row root report and 44-row supplement stay separate. The [detached parser controls](ApplicationBundleMeasurementTests.cs)
+43-row root report and 61-row supplement stay separate. The [detached parser controls](ApplicationBundleMeasurementTests.cs)
 reject the old six-row-only shape, a missing discovery row, a changed theory parameter, duplicates, malformed
 and mismatched counters, and provide no native or acceptance credit. The twelve selected-root cases require fresh native execution on this source;
 the earlier seventeen-case result cannot establish those new cases.
 
-The original 43-row root TRX and 44-row supplement remain separate. The pinned standard collector alone
+The original 43-row root TRX and 61-row supplement remain separate. The pinned standard collector alone
 merges the new actual report into the existing measured report; no hit values or denominators are
 rewritten by this validator. [`NativeMeasurementTests`](NativeMeasurementTests.cs) reads the new fixed
 subdirectory only after staging from the same run's source-bound application artifact.

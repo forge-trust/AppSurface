@@ -349,7 +349,9 @@ class OwnerReferenceGuardEventTests(unittest.TestCase):
 
     def event(self):
         return {"schema": "evidence-native-owner-reference-guards-v1", "generation": "a" * 32,
-                "rejected": list(runner.OWNER_REFERENCE_GUARDS), "native_acceptance": False}
+                "rejected": list(runner.OWNER_REFERENCE_GUARDS),
+                "read_only_controls": list(runner.OWNER_REFERENCE_READ_ONLY_CONTROLS),
+                "native_acceptance": False}
 
     def inspect(self, rows, generation="a" * 32):
         with tempfile.TemporaryDirectory() as directory:
@@ -360,6 +362,7 @@ class OwnerReferenceGuardEventTests(unittest.TestCase):
     def test_exact_event_requires_all_fixed_denials_without_claiming_native_acceptance(self):
         event = self.event()
         self.assertEqual(26, len(set(runner.OWNER_REFERENCE_GUARDS)))
+        self.assertEqual(2, len(set(runner.OWNER_REFERENCE_READ_ONLY_CONTROLS)))
         self.assertEqual(event, self.inspect([event]))
 
     def test_missing_duplicate_or_nonclosed_event_cannot_substitute_for_actual_denials(self):
@@ -368,6 +371,8 @@ class OwnerReferenceGuardEventTests(unittest.TestCase):
                      [dict(event, generation="b" * 32)], [dict(event, native_acceptance=True)],
                      [dict(event, native_acceptance=0)], [dict(event, rejected=event["rejected"][:-1])],
                      [dict(event, rejected=[*event["rejected"][:-1], event["rejected"][0]])],
+                     [dict(event, read_only_controls=event["read_only_controls"][:-1])],
+                     [dict(event, read_only_controls=[*event["read_only_controls"], "extra-control"])],
                      [dict(event, rejected=list(reversed(event["rejected"])))],
                      [dict(event, rejected="raw-canary")]):
             with self.subTest(rows=rows), self.assertRaises(RuntimeError):

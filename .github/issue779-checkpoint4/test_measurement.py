@@ -62,6 +62,23 @@ class ArgumentControls(unittest.TestCase):
         expression = ast.parse(row).body[0].value.args[0]
         self.assertEqual(arguments.MODULES, ast.literal_eval(expression.generators[0].iter))
 
+    def test_separate_root_supplement_collects_real_handshake_dependency_and_keeps_exact_counts(self):
+        workflow = (Path(__file__).resolve().parents[1] / 'workflows/issue779-checkpoint3-application.yml').read_text()
+        supplement = workflow.split('      - name: Measure supplementary actual root marker', 1)[1].split(
+            '      - name: Measure four actual peer-credential', 1)[0]
+        for name in ('LinuxOwnerGuardNativeTests', 'LinuxCustodySupplementNativeTests',
+                     'LinuxProducerFileTreeNativeTests', 'LinuxWorkspaceSupplementNativeTests',
+                     'LinuxExecutionOutputNativeTests', 'LinuxWorkerHandshakeNativeTests'):
+            self.assertIn('FullyQualifiedName~' + name, supplement)
+        self.assertIn("--include '[ForgeTrust.AppSurface.Evidence.Supervision]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*'", supplement)
+        self.assertIn("counters[key]) == 61", supplement)
+        self.assertIn("'LinuxWorkspaceSupplementNativeTests': 8", supplement)
+        self.assertIn("'LinuxWorkerHandshakeNativeTests': 8", supplement)
+        self.assertIn("'LinuxExecutionOutputNativeTests': 1", supplement)
+        self.assertIn("'executed': 61, 'passed': 61, 'native_acceptance': False", supplement)
+        self.assertIn("('ForgeTrust.AppSurface.Evidence.Supervision', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Evidence.Planner')", supplement)
+        self.assertIn("original['files'][name]", supplement)
+
     def test_unclosed_inputs_reject_before_a_command_can_be_constructed(self):
         for index, value in ((0, 'relative'), (1, '/tool\ncanary'), (2, '/sdk"canary'),
                              (3, '/runtime\\canary'), (6, 'g' * 40), (6, 'a' * 39)):

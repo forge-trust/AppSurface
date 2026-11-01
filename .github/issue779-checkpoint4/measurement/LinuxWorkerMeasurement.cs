@@ -329,6 +329,7 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
         ArgumentNullException.ThrowIfNull(applicationWorkspace);
         owner.RequireActive(token);
         var rejected = new List<string>(26);
+        var readOnlyControls = new List<string>(2);
         Admission("workspace-accounts", "ASEVD402", () => workspace.RequireAccountOwner(null!, owner));
         Admission("workspace-owner", "ASEVD402", () => workspace.RequireAccountOwner(accounts, null!));
         Admission("producer-workspace-accounts", "ASEVD402", () => producerWorkspace.RequireAccountOwner(null!, owner));
@@ -355,10 +356,20 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
         Account("accounts-control-owner", () => { _ = accounts.RequireControlOwnedBy(null!, token); });
         Admission("owner-active-input", "ASEVD402", () => owner.RequireLaunchInput(null!, token));
         Admission("owner-control-input", "ASEVD402", () => owner.RequireCleanupLaunchInput(null!, token));
+        // This workspace boundary checks cancellation before any native inspection. The next live
+        // call must recheck the same retained workspace without changing its cleanup lifecycle.
+        var cancelledControlToken = new CancellationToken(canceled: true);
+        var cancelledWorkspaceControlRejected = false;
+        try { workspace.RequireControlOwnedBy(owner, accounts, cancelledControlToken); }
+        catch (OperationCanceledException error) when (error.CancellationToken == cancelledControlToken)
+        { cancelledWorkspaceControlRejected = true; }
+        if (!cancelledWorkspaceControlRejected) throw LinuxSystemdBackend.InvalidControl();
+        readOnlyControls.Add("workspace-control-cancelled-before-inspection");
+        workspace.RequireControlOwnedBy(owner, accounts, token);
+        readOnlyControls.Add("workspace-control-live-retained-recheck");
         // The cancelled check must return before any native recheck. It cannot poison the authentic
         // workspace: the adjacent live check still traverses its retained names, bundle and tmpfs.
         // This is a guard invocation, not a cleanup transition or a replacement deadline.
-        var cancelledControlToken = new CancellationToken(canceled: true);
         var cancelledControlRejected = false;
         try { applicationWorkspace.RequireControlOwnedBy(owner, accounts, cancelledControlToken); }
         catch (OperationCanceledException error) when (error.CancellationToken == cancelledControlToken)
@@ -371,7 +382,7 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
         Console.Error.WriteLine(JsonSerializer.Serialize(new
         {
             schema = "evidence-native-owner-reference-guards-v1", generation = owner.RunId.ToString("N"),
-            rejected = rejected.ToArray(), native_acceptance = false
+            rejected = rejected.ToArray(), read_only_controls = readOnlyControls.ToArray(), native_acceptance = false
         }));
 
         void Admission(string name, string code, Action operation)

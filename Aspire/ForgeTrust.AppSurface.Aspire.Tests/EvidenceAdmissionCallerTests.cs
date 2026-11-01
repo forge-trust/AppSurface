@@ -6,6 +6,41 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class EvidenceAdmissionCallerTests
 {
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(60_001)]
+    public void Create_RejectsProducerCleanupTimeoutOutsideItsDocumentedRange(int milliseconds)
+    {
+        var configured = false;
+        var options = new EvidenceHostOptions
+        {
+            ProducerCleanupTimeout = TimeSpan.FromMilliseconds(milliseconds),
+        };
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            EvidenceHostBootstrap.Create(CreatePlan(), _ => configured = true, options));
+
+        Assert.Equal("options", exception.ParamName);
+        Assert.False(configured);
+    }
+
+    [Theory]
+    [InlineData(1L)]
+    [InlineData(TimeSpan.TicksPerMinute)]
+    public async Task Create_AcceptsProducerCleanupTimeoutAtPositiveRangeBoundaries(long ticks)
+    {
+        await using var host = EvidenceHostBootstrap.Create(
+            CreatePlan(),
+            _ => { },
+            new EvidenceHostOptions
+            {
+                ProducerCleanupTimeout = TimeSpan.FromTicks(ticks),
+            });
+
+        Assert.Equal(EvidenceHostState.Created, host.State);
+    }
+
     [Fact]
     public async Task Create_DefersConfigurationAndLegacyRunFailsBeforeCallback()
     {

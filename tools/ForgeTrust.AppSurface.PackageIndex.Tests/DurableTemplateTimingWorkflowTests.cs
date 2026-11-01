@@ -434,11 +434,13 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
     [Theory]
     [InlineData("empty-daemon")]
     [InlineData("wrong-image-digest")]
+    [InlineData("truncated-image")]
     public async Task InvalidDockerIdentityFailsTheSampleAndStillCleansUp(string fault)
     {
         var runner = new TimingRunner(this,
             emptyDaemonOrdinal: fault == "empty-daemon" ? 1 : null,
-            wrongImageOrdinal: fault == "wrong-image-digest" ? 1 : null);
+            wrongImageOrdinal: fault == "wrong-image-digest" ? 1 : null,
+            truncatedImageOrdinal: fault == "truncated-image" ? 1 : null);
 
         var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
             .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
@@ -448,6 +450,25 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         Assert.Equal("sample-failed", failed.FailureCode);
         Assert.False(failed.Succeeded);
         Assert.True(failed.CleanupComplete);
+        Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
+    }
+
+    [Fact]
+    public async Task ColdImageInspectionAcceptsDockerNoSuchObjectDiagnostic()
+    {
+        var runner = new TimingRunner(this, coldImageMissingDiagnostic: "Error: No such object: postgres candidate");
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Cold, ColdDockerHosts, CancellationToken.None);
+
+        Assert.True(receipt.Succeeded, receipt.FailureCode);
+        Assert.All(receipt.Samples, result =>
+        {
+            var sample = Assert.IsType<DurableTemplateTimingSample>(result.Sample);
+            Assert.True(sample.Succeeded);
+            Assert.False(sample.DockerImagePresentAtStart);
+            Assert.Empty(sample.ImageDigestAtStart);
+        });
         Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
     }
 
@@ -663,6 +684,9 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
             new DurableTemplateTimingWorkflow(runner, () => true).RunAsync(_input, (DurableTemplateTimingMode)42, [], CancellationToken.None));
         await Assert.ThrowsAsync<PackageIndexException>(() =>
             new DurableTemplateTimingWorkflow(runner, () => true).RunAsync(_input, DurableTemplateTimingMode.Cold, ColdDockerHosts[..4], CancellationToken.None));
+        await Assert.ThrowsAsync<PackageIndexException>(() =>
+            new DurableTemplateTimingWorkflow(runner, () => true).RunAsync(_input, DurableTemplateTimingMode.Cold,
+                ColdDockerHosts.Append("tcp://172.16.0.6:2375").ToArray(), CancellationToken.None));
         await Assert.ThrowsAsync<PackageIndexException>(() =>
             new DurableTemplateTimingWorkflow(runner, () => true).RunAsync(_input, DurableTemplateTimingMode.Primed, [ColdDockerHosts[0]], CancellationToken.None));
         Assert.Empty(runner.Requests);
@@ -933,12 +957,14 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         int? truncatedFirstWorkErrorOrdinal = null,
         string? cleanupElapsedMilliseconds = null,
         int? wrongImageOrdinal = null,
+        int? truncatedImageOrdinal = null,
         int? emptyDaemonOrdinal = null,
         int? templateRemainsInstalledOrdinal = null,
         Action<ExternalCommandRequest>? afterRequest = null,
         string outputIndentation = "",
         bool uppercaseDatabaseIdentity = false,
-        string sdkVersion = "10.0.100") : IExternalCommandRunner
+        string sdkVersion = "10.0.100",
+        string? coldImageMissingDiagnostic = null) : IExternalCommandRunner
     {
         private readonly Dictionary<string, int> _imageObservations = new(StringComparer.Ordinal);
         private readonly HashSet<string> _privateRoots = new(StringComparer.Ordinal);
@@ -1015,8 +1041,10 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
                 var endpoint = request.Environment?.GetValueOrDefault("DOCKER_HOST") ?? "primed-daemon";
                 var observations = _imageObservations.GetValueOrDefault(endpoint) + 1;
                 _imageObservations[endpoint] = observations;
+                if (truncatedImageOrdinal == ParseSampleOrdinal(request.WorkingDirectory) && observations == 1)
+                    return new(0, "[]", string.Empty, StandardOutputTruncated: true);
                 if (request.Environment?.ContainsKey("DOCKER_HOST") == true && observations == 1)
-                    return new(1, string.Empty, "Error: No such image: postgres candidate");
+                    return new(1, string.Empty, coldImageMissingDiagnostic ?? "Error: No such image: postgres candidate");
                 var digest = DurableTemplateConsumerProof.PostgreSqlImage.Split('@', 2)[1];
                 var ordinal = ParseSampleOrdinal(request.WorkingDirectory);
                 if (wrongImageOrdinal == ordinal && observations == ordinal * 2) digest = new string('0', digest.Length);

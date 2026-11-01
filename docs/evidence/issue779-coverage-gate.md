@@ -104,3 +104,18 @@ This diagnostic used an existing Release evaluator assembly, which was not rebui
 the analysis. It does not repair the original failed tests, supply the absent original
 gate output, prove successful original execution, or establish coverage for later commits.
 Fresh complete-source collection and the unchanged gate remain required before publication.
+
+
+### Native supplement expansion after source 152
+
+The source-152 [normal CI coverage job](https://github.com/forge-trust/AppSurface/actions/runs/41230714195/job/124664551360)
+completed all 59 test projects without failures, then failed `ASCOV020`: overall line/branch coverage
+was 95.9463% / 88.1193%, patch branch coverage was 86.0216%, and patch line coverage was 90.1036%.
+The unchanged 95/85/95/85 thresholds, 0.5-point tolerance, Codecov patch-line semantics, and comparison
+base `1991280e8af049db592ebcb705cbf66f4b4c6e8b` still apply. At that measured denominator, 1,273
+additional fully covered patch-line targets are needed. This is a failing result, not a waiver.
+
+The next [actual-root supplement](../../.github/issue779-checkpoint3/README.md#additional-actual-root-supplement-controls)
+adds descriptor/mutation, pipe-drain, and rejected-handshake cases while preserving the original lineage.
+Only the current source's genuine native collector and final unchanged gate can establish the numerical
+result. Added test source, detached receipt fixtures, or successful local emulation do not establish a gate pass.

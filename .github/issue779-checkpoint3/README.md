@@ -179,3 +179,26 @@ This separate negative control requires the actual six-test failure summary, ori
 Its [standard collector partition and binding](../issue779-checkpoint4/measurement/README.md#separate-sdk-failed-test-partition) has its own finite allowance. It leaves the original matrix's clocks, runtime limits and retention ceilings unchanged. The negative report is completed and all fourteen SDK originals are restored before the original matrix can consume that report through standard merging. This new case remains unverified until a fresh genuine Linux run; portable reader/model tests grant no native or Trusted authority.
 
 The separate [post-stop SDK control](post-stop-guards-source-preparation.md) checks real closed work/write admission after joined cleanup. It uses a private compile-only selector and remains uncredited until fresh Linux execution; ordinary producer limits and the original seven-case matrix are unchanged.
+
+
+## Additional actual-root supplement controls
+
+The separate [`root-supplement.trx` measurement](../workflows/issue779-checkpoint3-application.yml)
+now requires 61 passing results from six fixed classes. The original 43-row `root-files.trx`
+and account lineage stay separate. The additional 17 cases cover:
+
+- Eight [`LinuxWorkspaceSupplementNativeTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkspaceSupplementNativeTests.cs)
+  using actual root-owned nodes, retained descriptors, bundle mutations, and directory/descriptor policy.
+- One [`LinuxExecutionOutputNativeTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxExecutionOutputNativeTests.cs)
+  using real anonymous pipes and the shared output ledger; a quota failure still requires both original EOFs.
+- Eight [`LinuxWorkerHandshakeNativeTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerHandshakeNativeTests.cs)
+  using a real root UNIX peer and deliberately incomplete or invalid protocol frames. These reject before a
+  supervisor is returned; no READY descriptor, authentic owner, admission, or successful workload is fabricated.
+
+The pinned collector measures Supervision and Contracts from the same C3 dependency image. The existing
+pre-merge hash comparison checks both DLL and PDB originals before their actual hit reports are merged;
+all original byte bounds, source bindings, and the 180-second supplement deadline remain in force.
+[`RootSupplementMeasurement`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/RootSupplementMeasurement.cs)
+requires the exact class counts and retained TRX digest. A skipped native case or missing class fails that
+contract. Portable parser fixtures and emulated local Linux runs do not establish native acceptance.
+The runtime and coverage gates still require fresh matching reports from normal CI.

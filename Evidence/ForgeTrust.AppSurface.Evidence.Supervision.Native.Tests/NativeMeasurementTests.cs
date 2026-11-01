@@ -167,12 +167,14 @@ public sealed class NativeMeasurementTests
             Assert.True(row.GetProperty("groups_empty").GetBoolean());
             Assert.True(row.GetProperty("final_groups_empty").GetBoolean());
             var guards = row.GetProperty("owner_reference_guards");
-            Assert.Equal(new[] { "generation", "native_acceptance", "rejected", "schema" },
+            Assert.Equal(new[] { "generation", "native_acceptance", "read_only_controls", "rejected", "schema" },
                 guards.EnumerateObject().Select(static property => property.Name).Order(StringComparer.Ordinal));
             Assert.Equal("evidence-native-owner-reference-guards-v1", guards.GetProperty("schema").GetString());
             Assert.Equal(row.GetProperty("generation").GetString(), guards.GetProperty("generation").GetString());
             Assert.Equal(OwnerReferenceGuards, guards.GetProperty("rejected").EnumerateArray()
                 .Select(static value => value.GetString()));
+            Assert.Equal(new[] { "workspace-control-cancelled-before-inspection", "workspace-control-live-retained-recheck" },
+                guards.GetProperty("read_only_controls").EnumerateArray().Select(static value => value.GetString()));
             Assert.False(guards.GetProperty("native_acceptance").GetBoolean());
             var settled = Assert.Single(row.GetProperty("application_observations").EnumerateArray(),
                 static value => value.GetProperty("phase").GetString() == "settled");

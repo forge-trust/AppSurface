@@ -198,16 +198,20 @@ no owner, admission, lease, token, process identity or custody is fabricated. On
 reference checks are called. Listener claims, failure-latching listener checks, stop and custody
 transitions are excluded. A successful reference-denial call or unexpected exception fails the native procedure.
 
-The same pre-dispatch window also checks the actual application workspace's
+The same pre-dispatch window also checks the actual run workspace's
+[`RequireControlOwnedBy`](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs)
+cancellation and live path, plus the application workspace's
 [`RequireControlOwnedBy`](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxApplicationWorkspace.cs)
 cancellation and live paths. An already cancelled token must reject with that exact token before native
 I/O; the original live job token must then pass the retained owner/account, named-node, copied-bundle
-and mounted-scratch rechecks. Either failure aborts the original procedure. These two calls add no case
+and mounted-scratch rechecks. The run workspace gets the same cancelled-before-inspection and live
+retained-workspace pair. Either failure aborts the original procedure. These calls add no case
 or receipt row, close no admission, start no cleanup, and create no timer or alternative owner. They
 remain under the existing job deadline and do not replace the later physical stop/join and release checks.
 
 The root emits one closed `evidence-native-owner-reference-guards-v1` event with `generation`, the
-ordered 26 `rejected` labels and `native_acceptance: false`. The original [C3 runner](../../issue779-checkpoint3/run-native.py)
+ordered 26 `rejected` labels, the two fixed `read_only_controls` labels and `native_acceptance: false`.
+The original [C3 runner](../../issue779-checkpoint3/run-native.py)
 requires exactly one event for the current generation. The [native measurement gate](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/NativeMeasurementTests.cs)
 requires the same labels for every original application case, alongside all original process,
 settlement, report and cleanup checks. Missing, duplicate or altered events fail verification. Portable

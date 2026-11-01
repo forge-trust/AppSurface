@@ -22,7 +22,9 @@ def fixture():
     source = 'a' * 40
     generation = '1' * 32
     guard_event = {'schema': 'evidence-native-owner-reference-guards-v1', 'generation': generation,
-                   'rejected': list(runner.OWNER_REFERENCE_GUARDS), 'native_acceptance': False}
+                   'rejected': list(runner.OWNER_REFERENCE_GUARDS),
+                   'read_only_controls': list(runner.OWNER_REFERENCE_READ_ONLY_CONTROLS),
+                   'native_acceptance': False}
     output = {'schema': 'evidence-coverage-output-v1', 'registered_pairs': 2,
               'received_bytes': 1, 'received_byte_limit': 16 * 1024 * 1024,
               'failure': 'None', 'quota_exceeded': False, 'stop_signal_failed': False,

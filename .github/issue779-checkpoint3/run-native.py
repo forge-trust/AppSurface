@@ -38,6 +38,10 @@ OWNER_REFERENCE_GUARDS=(
  'owner-active-input',
  'owner-control-input',
 )
+OWNER_REFERENCE_READ_ONLY_CONTROLS=(
+ 'workspace-control-cancelled-before-inspection',
+ 'workspace-control-live-retained-recheck',
+)
 
 def events(path,schema):
  if isinstance(path,bytes):
@@ -58,11 +62,14 @@ def owner_reference_guards(path,generation):
  values=events(path,'evidence-native-owner-reference-guards-v1')
  require(len(values)==1,'owner-reference-guard-event-count')
  value=values[0]
- require(set(value)=={'schema','generation','rejected','native_acceptance'},'owner-reference-guard-event-shape')
+ require(set(value)=={'schema','generation','rejected','read_only_controls','native_acceptance'},'owner-reference-guard-event-shape')
  require(type(generation) is str and len(generation)==32 and all(c in '0123456789abcdef' for c in generation)
          and value['generation']==generation,'owner-reference-guard-generation')
  require(type(value['rejected']) is list and value['rejected']==list(OWNER_REFERENCE_GUARDS)
          and value['native_acceptance'] is False,'owner-reference-guard-denials')
+ require(type(value['read_only_controls']) is list
+         and value['read_only_controls']==list(OWNER_REFERENCE_READ_ONLY_CONTROLS),
+         'owner-reference-guard-read-only-controls')
  return value
 
 def lifecycle_stall_events(path,expected_case):

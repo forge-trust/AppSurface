@@ -384,7 +384,7 @@ jobs:
           test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
           target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/root-supplement-tests" <<'PY_ARGS'
           import subprocess, sys
-          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxOwnerGuardNativeTests|FullyQualifiedName~LinuxCustodySupplementNativeTests|FullyQualifiedName~LinuxProducerFileTreeNativeTests', '--logger:trx;LogFileName=root-supplement.trx', '--ResultsDirectory:' + sys.argv[2]]
+          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxOwnerGuardNativeTests|FullyQualifiedName~LinuxCustodySupplementNativeTests|FullyQualifiedName~LinuxProducerFileTreeNativeTests|FullyQualifiedName~LinuxWorkspaceSupplementNativeTests|FullyQualifiedName~LinuxExecutionOutputNativeTests|FullyQualifiedName~LinuxWorkerHandshakeNativeTests', '--logger:trx;LogFileName=root-supplement.trx', '--ResultsDirectory:' + sys.argv[2]]
           assert all(not any(c in value for c in '\n\r"\\') for value in values)
           print(subprocess.list2cmdline(values))
           PY_ARGS
@@ -392,7 +392,7 @@ jobs:
           timeout --signal=KILL 180 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$test_image" \
             --target "$CHECKPOINT3_SDK_ROOT/dotnet" --targetargs "$target_args" \
-            --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' \
+            --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' \
             --merge-with "$CHECKPOINT3_EVIDENCE/native-supervision.json" \
             --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision-supplement" > "$CHECKPOINT3_EVIDENCE/root-supplement-driver.log" 2>&1
           sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" "$GITHUB_WORKSPACE" <<'PY_BIND'
@@ -409,20 +409,26 @@ jobs:
           document = ET.parse(trx)
           ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
           counters = document.find('.//' + ns + 'Counters').attrib
-          assert all(int(counters[key]) == 44 for key in ('total', 'executed', 'passed'))
+          assert all(int(counters[key]) == 61 for key in ('total', 'executed', 'passed'))
           assert all(int(counters.get(key, '0')) == 0 for key in ('failed', 'error', 'notExecuted', 'warning'))
           rows = document.findall('.//' + ns + 'UnitTestResult')
-          expected = {'LinuxOwnerGuardNativeTests': 19, 'LinuxCustodySupplementNativeTests': 12, 'LinuxProducerFileTreeNativeTests': 13}
-          assert len(rows) == 44 and len({row.attrib['testName'] for row in rows}) == 44
+          expected = {'LinuxOwnerGuardNativeTests': 19, 'LinuxCustodySupplementNativeTests': 12, 'LinuxProducerFileTreeNativeTests': 13, 'LinuxWorkspaceSupplementNativeTests': 8, 'LinuxExecutionOutputNativeTests': 1, 'LinuxWorkerHandshakeNativeTests': 8}
+          assert len(rows) == 61 and len({row.attrib['testName'] for row in rows}) == 61
           assert all(row.attrib['outcome'] == 'Passed' for row in rows)
           for name, count in expected.items():
               assert sum(row.attrib['testName'].startswith('ForgeTrust.AppSurface.Evidence.Supervision.Tests.' + name + '.') for row in rows) == count
           names = {row.attrib['testName'] for row in rows}
           for name in ('NestedDirectorySymlinkCannotSelectAnOutsideReport', 'ActualReportAtTheByteLimitReadsExactEofAndTheNextByteRejectsBeforeRetention', 'ReplacedParentOfTheSelectedRootPoisonsTheRetainedSet'):
               assert 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxCustodySupplementNativeTests.' + name in names
+          for test_class, method in (
+              ('LinuxWorkspaceSupplementNativeTests', 'ApplicationWorkspaceInventoryAcceptsTheActualRetainedReadOnlyBundleTree'),
+              ('LinuxWorkspaceSupplementNativeTests', 'RetainedBundleDescriptorDetectsSamePathReplacementAfterInventory'),
+              ('LinuxExecutionOutputNativeTests', 'ActualRootPipesDrainBothStreamsAfterSharedQuotaStopsExecution'),
+          ):
+              assert 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.' + test_class + '.' + method in names
           binding_path = root / 'measurement-binding.json'
           binding = json.loads(binding_path.read_bytes())
-          binding['root_supplement_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': 44, 'passed': 44, 'native_acceptance': False}
+          binding['root_supplement_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': 61, 'passed': 61, 'native_acceptance': False}
           for suffix in ('json', 'cobertura.xml'):
               combined = root / ('native-supervision-supplement.' + suffix)
               assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024
