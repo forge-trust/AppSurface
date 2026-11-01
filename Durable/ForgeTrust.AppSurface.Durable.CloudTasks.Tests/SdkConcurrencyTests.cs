@@ -143,52 +143,54 @@ public sealed class SdkConcurrencyTests
             RemoteCertificateValidationCallback = (_, peer, _, _) => peer is not null && peer.GetRawCertData().AsSpan().SequenceEqual(certificate.RawData)
         };
         var sdkInvocations = 0;
-        var transport = new CloudTasksSdkTransport(new Uri(address), handler, () => Interlocked.Increment(ref sdkInvocations));
-        using var fixtureCaller = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var tokens = new SequenceSource();
-        var client = new CloudTasksActivationClient(tokens, new(TimeSpan.FromSeconds(30)), transport, TimeProvider.System);
-        var target = new CloudTasksActivationTarget("project", "us-central1", "queue", new Uri("https://worker.example/activate"), "worker@example.com", "worker", TimeSpan.FromSeconds(15));
-        var first = new CloudTasksActivationRequest(target, "first-stream-limit");
-        var second = new CloudTasksActivationRequest(target, "second-stream-limit");
-        Task<CloudTasksDispatchReceipt>? firstDispatch = null;
-        Task<CloudTasksDispatchReceipt>? secondDispatch = null;
         try
         {
-            firstDispatch = client.DispatchAsync(first, fixtureCaller.Token);
-            await firstAccepted.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            secondDispatch = client.DispatchAsync(second, fixtureCaller.Token);
-            await secondAccepted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            using var transport = new CloudTasksSdkTransport(new Uri(address), handler, () => Interlocked.Increment(ref sdkInvocations));
+            using var fixtureCaller = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var tokens = new SequenceSource();
+            var client = new CloudTasksActivationClient(tokens, new(TimeSpan.FromSeconds(30)), transport, TimeProvider.System);
+            var target = new CloudTasksActivationTarget("project", "us-central1", "queue", new Uri("https://worker.example/activate"), "worker@example.com", "worker", TimeSpan.FromSeconds(15));
+            var first = new CloudTasksActivationRequest(target, "first-stream-limit");
+            var second = new CloudTasksActivationRequest(target, "second-stream-limit");
+            Task<CloudTasksDispatchReceipt>? firstDispatch = null;
+            Task<CloudTasksDispatchReceipt>? secondDispatch = null;
+            try
+            {
+                firstDispatch = client.DispatchAsync(first, fixtureCaller.Token);
+                await firstAccepted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                secondDispatch = client.DispatchAsync(second, fixtureCaller.Token);
+                await secondAccepted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-            Assert.Equal(first.TaskName, observed.Single(pair => pair.Key == first.TaskName).Key);
-            Assert.Equal(second.TaskName, observed.Single(pair => pair.Key == second.TaskName).Key);
-            Assert.NotEqual(observed[first.TaskName], observed[second.TaskName]);
-            Assert.Equal(2, Volatile.Read(ref acceptedCount));
-            Assert.Equal(2, Volatile.Read(ref sdkInvocations));
+                Assert.Equal(first.TaskName, observed.Single(pair => pair.Key == first.TaskName).Key);
+                Assert.Equal(second.TaskName, observed.Single(pair => pair.Key == second.TaskName).Key);
+                Assert.NotEqual(observed[first.TaskName], observed[second.TaskName]);
+                Assert.Equal(2, Volatile.Read(ref acceptedCount));
+                Assert.Equal(2, Volatile.Read(ref sdkInvocations));
 
-            releaseFirst.TrySetResult();
-            var receipts = await Task.WhenAll(firstDispatch, secondDispatch).WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.Equal([first.TaskName, second.TaskName], receipts.Select(static receipt => receipt.TaskName));
-            Assert.All(receipts, receipt => Assert.Equal("ASCT001", receipt.DiagnosticCode));
-            Assert.Equal(2, tokens.Calls);
+                releaseFirst.TrySetResult();
+                var receipts = await Task.WhenAll(firstDispatch, secondDispatch).WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.Equal([first.TaskName, second.TaskName], receipts.Select(static receipt => receipt.TaskName));
+                Assert.All(receipts, receipt => Assert.Equal("ASCT001", receipt.DiagnosticCode));
+                Assert.Equal(2, tokens.Calls);
+            }
+            finally
+            {
+                releaseFirst.TrySetResult();
+                fixtureCaller.Cancel();
+                try
+                {
+                    var started = new List<Task<CloudTasksDispatchReceipt>>(2);
+                    if (firstDispatch is not null) started.Add(firstDispatch);
+                    if (secondDispatch is not null) started.Add(secondDispatch);
+                    if (started.Count != 0) await Task.WhenAll(started).WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (OperationCanceledException) { }
+                catch (TimeoutException) { }
+            }
         }
         finally
         {
-            releaseFirst.TrySetResult();
-            fixtureCaller.Cancel();
-            try
-            {
-                var started = new List<Task<CloudTasksDispatchReceipt>>(2);
-                if (firstDispatch is not null) started.Add(firstDispatch);
-                if (secondDispatch is not null) started.Add(secondDispatch);
-                if (started.Count != 0) await Task.WhenAll(started).WaitAsync(TimeSpan.FromSeconds(5));
-            }
-            catch (OperationCanceledException) { }
-            catch (TimeoutException) { }
-            finally
-            {
-                transport.Dispose();
-                await server.StopAsync();
-            }
+            await server.StopAsync();
         }
     }
 
