@@ -37,6 +37,28 @@ jobs:
           persist-credentials: false
           fetch-depth: 0 # Packed Cloud Tasks isolation proof archives the pinned baseline commit.
 
+      - name: Verify package runner preparation guards
+        run: python3 .github/tests/package_runner_capacity_tests.py
+
+      - name: Prepare package runner disk capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This job packs .NET/Node consumers and does not use the image's Android SDK.
+          # Reclaim only that preinstalled toolkit, before any proof work or restore starts.
+          if [[ "${RUNNER_ENVIRONMENT:-}" != github-hosted || "${RUNNER_OS:-}" != Linux ]]; then
+            echo "::error::Package runner preparation requires a disposable GitHub-hosted Linux runner."
+            exit 1
+          fi
+          df -h . "$RUNNER_TEMP"
+          df -i . "$RUNNER_TEMP"
+          if [[ -d /usr/local/lib/android ]]; then
+            du -sh /usr/local/lib/android
+          fi
+          sudo rm -rf -- /usr/local/lib/android
+          df -h . "$RUNNER_TEMP"
+          df -i . "$RUNNER_TEMP"
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:

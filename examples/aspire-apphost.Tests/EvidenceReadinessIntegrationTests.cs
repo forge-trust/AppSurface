@@ -5,6 +5,7 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace AspireAppHostExample.Tests;
 
+[Collection(AspireAppHostIntegrationCollection.Name)]
 public sealed class EvidenceReadinessIntegrationTests
 {
     [Theory]

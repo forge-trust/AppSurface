@@ -461,6 +461,15 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.deployment": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.deployment.gcpcloudrun": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Deployment": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.docs": {
         "type": "Project",
         "dependencies": {

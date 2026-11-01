@@ -140,15 +140,26 @@ defines the candidate, published and deployment gates for complete runtime-set p
 [disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
-Its [project template](https://github.com/forge-trust/AppSurface/blob/3e2f8d2833afaf894f5e653530c25f899a8c0326/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
-is materialized with its C# sources and repository build policy only in the proof's private workspace by
-[`materialize-preflight-consumer.sh`](https://github.com/forge-trust/AppSurface/blob/cc9b4bb910436dd4369fe7ce42f3f1cb547cb93d/Durable/materialize-preflight-consumer.sh).
-This keeps the artifact-only consumer out of automatic `.csproj` restore discovery. The carrier's
-`--consumer-project-template` accepts the authored `PostgreSqlPreflightConsumer.csproj.template` and supplies
-`AppSurfacePackageVersion` from the verified bundle on every restore and run; there is no default feed version.
-Restored first-party archive bytes must still match the artifact manifest.
-Run the carrier rather than restoring the template directly. The owned workspace and generated project are
-removed on success or failure; source files and the template stay in the checkout.
+The ordinary [PostgreSqlPreflightConsumer.csproj](https://github.com/forge-trust/AppSurface/blob/03e9ab1759a288141624027e9cc1fb633336dad5/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj) is a source-backed, non-packable development project for editing,
+compilation and generic dependency discovery, including GitHub automatic dependency submission. It references the
+local provider project. The separate [package project template](https://github.com/forge-trust/AppSurface/blob/03e9ab1759a288141624027e9cc1fb633336dad5/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template) is the artifact-only project selected
+by the release carrier; its provider reference requires the exact manifest-derived `AppSurfacePackageVersion`, has
+no default published-version fallback, and must not be replaced by the source-backed project.
+
+The shared [`materialize-preflight-consumer.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/materialize-preflight-consumer.sh) stages the package
+project in the verifier's private scratch directory. It preserves authored sources and nested resources, omits generated
+`bin`/`obj` directories and exactly the same-directory development `.csproj`, and copies the repository's authored
+[`Directory.Build.props`](../../Directory.Build.props) and [`Directory.Build.targets`](../../Directory.Build.targets).
+The staged `.csproj` bytes match the package template and contain no project reference. Occupied destinations,
+source/destination overlap, missing build policy and unsupported links are rejected before staging. Nested resources
+sharing the project basename remain intact. The verifier uses `--consumer-project-template` for release proof;
+explicit legacy `--consumer-project` callers retain an already-materialized package-project path with the canonical
+`PostgreSqlPreflightConsumer.csproj` basename. Source `ProjectReference` inputs are rejected, and the provider
+package reference must use `$(AppSurfacePackageVersion)`.
+Both modes are described by the script's help and must not be combined. Artifact receipts still require the exact
+verified version, frozen first-party feed, complete archive equality checks and checked cleanup. A source build or
+empty-version restore cannot replace candidate or published artifact proof.
+
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
 and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
 runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule
