@@ -344,6 +344,8 @@ def c2(raws, source_raw, head, identity, producer, measured, capture):
         # Apply the original producer's report validator as well.
         producer.report(body)
         need(value['reports'][name] == {'sha256': sha(body), 'bytes': len(body)}, 'c2-report-hash')
+    producer.require_quota_contribution(
+        None, modules['native-producer-roots-c2.json'], modules['native-producer-roots.json'], capture)
     witnesses = {'C2': producer.witness(modules['native-producer-roots-c2.json'], capture, True),
                  'None': producer.witness(modules['native-producer-roots.json'], capture, False)}
     need(value['current_witness'] == witnesses

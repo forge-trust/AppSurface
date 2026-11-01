@@ -13,7 +13,8 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 /// authority or acceptance. Source mappings are reviewed immutable hashes/spans, not filesystem observations.
 /// Changing either mapped source requires an explicit mapping review. Ancillary digest claims whose original
 /// bytes are not API inputs remain claims validated by the producing fixture and the artifact verifier.
-/// Rollback must declare no C2 mutation method and no positive quota-arm contribution; missing quota data stays absent.
+/// Rollback must declare no C2 mutation method. If it contains the mapped quota point, inner C2 must preserve or
+/// exceed that count, and combined outer None must contain a strictly larger positive count. Missing points stay absent.
 /// </remarks>
 internal static class ProducerRootsMeasurement
 {
@@ -93,7 +94,7 @@ internal static class ProducerRootsMeasurement
         Report(combinedJson.RootElement);
         Report(innerJson.RootElement);
         Report(rollbackReportJson.RootElement);
-        PriorContribution(rollbackReportJson.RootElement);
+        PriorContribution(rollbackReportJson.RootElement, innerJson.RootElement, combinedJson.RootElement);
         var witnesses = root.GetProperty("current_witness");
         Properties(witnesses, ["C2", "None"]);
         Witness(witnesses.GetProperty("C2"), files, innerJson.RootElement, mutation: true);
@@ -255,30 +256,48 @@ internal static class ProducerRootsMeasurement
                     }
     }
 
-    private static void PriorContribution(JsonElement rollbackReport)
+    private static void PriorContribution(JsonElement rollbackReport, JsonElement innerReport, JsonElement combinedReport)
     {
         var supervision = rollbackReport.EnumerateObject().Single(static row => Leaf(row.Name) == Supervision + ".dll").Value;
         var mutationType = Supervision + ".LinuxRetainedReportSet";
         var mutationMethod = "System.Byte[] " + mutationType + "::MutateRetainedReportForC2(System.Threading.CancellationToken)";
-        var quotaType = Supervision + ".SupervisionRunOutputBudget";
-        var quotaMethod = "System.Boolean " + quotaType + "::Charge(System.Int32)";
-        var quotaCandidates = new List<JsonElement>();
         foreach (var document in supervision.EnumerateObject())
         {
             // A declaration is disallowed even at zero hits or under an unrelated document path.
             Require(!document.Value.TryGetProperty(mutationType, out var mutation)
                 || !mutation.TryGetProperty(mutationMethod, out _));
-            var name = document.Name.Replace('\\', '/');
-            if ((name == QuotaDocument || name.EndsWith("/" + QuotaDocument, StringComparison.Ordinal))
-                && document.Value.TryGetProperty(quotaType, out var quota) && quota.TryGetProperty(quotaMethod, out var method))
-                quotaCandidates.Add(method);
         }
-        Require(quotaCandidates.Count <= 1);
-        if (quotaCandidates.Count == 0) return;
-        // Report already checked integer line keys/hits. Numeric aliases still name the same point and may not duplicate it.
-        var points = quotaCandidates[0].GetProperty("Lines").EnumerateObject().Where(static line =>
-            long.Parse(line.Name, NumberStyles.None, CultureInfo.InvariantCulture) == 173).ToArray();
-        Require(points.Length <= 1 && points.All(static line => Integer(line.Value) == 0));
+
+        var prior = QuotaPoint(rollbackReport);
+        var inner = QuotaPoint(innerReport);
+        var combined = QuotaPoint(combinedReport);
+        if (prior.HasValue) Require(inner.HasValue && inner.Value >= prior.Value);
+        var finalCount = combined ?? throw new InvalidDataException("Producer-root measurement data does not match its contract.");
+        Require(finalCount > 0);
+        if (inner.HasValue) Require(finalCount > inner.Value);
+    }
+
+    private static long? QuotaPoint(JsonElement report)
+    {
+        var supervision = report.EnumerateObject().Single(static row => Leaf(row.Name) == Supervision + ".dll").Value;
+        var documents = supervision.EnumerateObject().Where(static document =>
+        {
+            var name = document.Name.Replace('\\', '/');
+            return name == QuotaDocument || name.EndsWith("/" + QuotaDocument, StringComparison.Ordinal);
+        }).ToArray();
+        Require(documents.Length <= 1);
+        if (documents.Length == 0
+            || !documents[0].Value.TryGetProperty(Supervision + ".SupervisionRunOutputBudget", out var quota)
+            || !quota.TryGetProperty("System.Boolean " + Supervision + ".SupervisionRunOutputBudget::Charge(System.Int32)", out var method))
+            return null;
+
+        // Only canonical line 173 is the reviewed quota point; a numeric spelling alias is ambiguous evidence.
+        var points = method.GetProperty("Lines").EnumerateObject().Where(static line =>
+            long.TryParse(line.Name, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number == 173).ToArray();
+        Require(points.Length <= 1);
+        if (points.Length == 0) return null;
+        Require(points[0].Name == "173");
+        return Integer(points[0].Value);
     }
 
     private static void Witness(JsonElement witness, JsonElement files, JsonElement report, bool mutation)

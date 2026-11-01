@@ -11,12 +11,17 @@ import stat
 import tempfile
 import time
 import unittest
+import sys
 from contextlib import contextmanager
 from unittest.mock import patch
 
 import binding
+import measurement as measured
 import measurement_chain as subject
 from test_binding import HEAD, build_model
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'issue779-checkpoint4'))
+import producer_roots as producer
+import test_producer_roots
 
 IDENTITY = 'github-actions-12345-2'
 
@@ -130,6 +135,78 @@ def refresh_segment_map(segment):
 
 
 class MeasurementChainDataTests(unittest.TestCase):
+    def test_c2_endpoint_rejects_inner_only_quota_hit_and_missing_final_point(self):
+        fixture = test_producer_roots.ProducerRootsPredecessorTests('runTest')
+        fixture.setUp()
+        try:
+            prior_quota, quota_line = fixture.quota(None)
+            prior_quota['Lines'][str(quota_line)] = 2
+            fixture.publish_prior()
+            with patch.object(producer, 'source', return_value=(fixture.source_body, fixture.capture)):
+                fixture.prepare_completed()
+                producer.finalize(fixture.args)
+
+            evidence = fixture.args.evidence
+            files = {
+                'source.json': fixture.source_body,
+                'producer-roots-binding.json': (evidence / producer.FILES[6]).read_bytes(),
+                'producer-roots-original.json': (evidence / producer.FILES[0]).read_bytes(),
+                'producer-roots-instrumented.json': (evidence / producer.FILES[1]).read_bytes(),
+                'producer-roots-inner-exit.json': (evidence / producer.FILES[2]).read_bytes(),
+                'producer-roots-target.json': (evidence / producer.FILES[3]).read_bytes(),
+                'native-producer-roots-c2.json': (evidence / producer.FILES[4]).read_bytes(),
+                'native-producer-roots.json': (evidence / producer.FILES[5]).read_bytes(),
+                'package-smoke.json': (evidence / 'package-smoke.json').read_bytes(),
+            }
+            files.update({path.relative_to(evidence).as_posix(): path.read_bytes()
+                          for path in (evidence / 'native').rglob('*') if path.is_file()})
+            identity = 'github-actions-39200000000-1'
+            original = dict(files)
+
+            def validate():
+                return subject.c2(files, fixture.source_body, fixture.args.source,
+                                  identity, producer, measured, fixture.capture)
+
+            self.assertEqual('producer-roots', validate()['kind'])
+            self.assertEqual(original, files)
+
+            inner = producer.decode(files['native-producer-roots-c2.json'])
+            combined = producer.decode(files['native-producer-roots.json'])
+            quota_type = producer.SUP + '.SupervisionRunOutputBudget'
+            quota_method = 'System.Boolean ' + quota_type + '::Charge(System.Int32)'
+            line = next(n for n, text in enumerate(
+                (producer.ROOT / producer.QUOTA_DOC).read_text().splitlines(), 1)
+                if text.strip() == 'Fail(SupervisionRunOutputFailure.QuotaExceeded);')
+            inner_count = inner[producer.SUP + '.dll']['/src/' + producer.QUOTA_DOC][quota_type][quota_method]['Lines'][str(line)]
+
+            def republish_combined(counter):
+                rows = copy.deepcopy(combined)
+                lines = rows[producer.SUP + '.dll']['/src/' + producer.QUOTA_DOC][quota_type][quota_method]['Lines']
+                if counter is None:
+                    lines.clear()
+                else:
+                    lines[str(line)] = counter
+                report_raw = producer.canonical(rows)
+                files['native-producer-roots.json'] = report_raw
+                binding_value = producer.decode(files['producer-roots-binding.json'])
+                binding_value['reports']['native-producer-roots.json'] = {
+                    'sha256': producer.digest(report_raw), 'bytes': len(report_raw)}
+                files['producer-roots-binding.json'] = producer.canonical(binding_value)
+
+            for counter in (inner_count, None):
+                republish_combined(counter)
+                mutated = dict(files)
+                with self.subTest(combined_counter=counter), self.assertRaisesRegex(
+                        ValueError, 'quota-current-contribution'):
+                    validate()
+                self.assertEqual(mutated, files)  # Validation reads but never repairs reports or metadata.
+            republish_combined(inner_count + 1)
+            before_valid = dict(files)
+            self.assertEqual('producer-roots', validate()['kind'])
+            self.assertEqual(before_valid, files)
+        finally:
+            fixture.doCleanups()
+
     def test_valid_initial_and_all_fourteen_prefixes_keep_authority_false(self):
         raw, files, predecessor = seed()
         links = []

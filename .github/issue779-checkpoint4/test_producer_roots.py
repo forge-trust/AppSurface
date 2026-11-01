@@ -173,6 +173,72 @@ class ProducerRootsDataTests(unittest.TestCase):
                 subject.report(subject.canonical(report))
 
 
+class QuotaContributionDataTests(unittest.TestCase):
+    """Detached counter comparisons only; no owner, collector execution or native authority."""
+
+    def setUp(self):
+        self.body = (subject.ROOT / subject.QUOTA_DOC).read_bytes()
+        self.capture = {'files': {subject.QUOTA_DOC: {'sha256': subject.digest(self.body)}}}
+        self.line = next(n for n, text in enumerate(self.body.decode().splitlines(), 1)
+                         if text.strip() == 'Fail(SupervisionRunOutputFailure.QuotaExceeded);')
+
+    def counter(self, hits):
+        report = ProducerRootsDataTests().standard_report()
+        if hits is not None:
+            typ = subject.SUP + '.SupervisionRunOutputBudget'
+            method = 'System.Boolean ' + typ + '::Charge(System.Int32)'
+            report[subject.SUP + '.dll']['/src/' + subject.QUOTA_DOC] = {
+                typ: {method: {'Lines': {str(self.line): hits}, 'Branches': []}}}
+        return report
+
+    def test_inherited_positive_requires_outer_growth_and_inner_preservation(self):
+        for before, inside, after, valid in (
+            (None, None, 1, True), (None, 0, 1, True), (0, 0, 1, True),
+            (2, 2, 3, True), (2, 3, 4, True), (None, 4, 5, True),
+            (2, 2, 2, False), (2, 3, 3, False), (2, 2, 1, False),
+            (2, 1, 3, False), (2, None, 3, False), (0, None, 1, False),
+            (None, None, None, False), (None, None, 0, False), (None, 1, None, False),
+            (None, 0, 0, False),
+        ):
+            values = [self.counter(value) for value in (before, inside, after)]
+            original = copy.deepcopy(values)
+            with self.subTest(before=before, inside=inside, after=after):
+                if valid:
+                    subject.require_quota_contribution(*values, self.capture)
+                else:
+                    with self.assertRaises(ValueError):
+                        subject.require_quota_contribution(*values, self.capture)
+                self.assertEqual(original, values)
+
+    def test_invalid_counter_alias_and_ambiguous_mapping_reject_at_every_stage(self):
+        typ = subject.SUP + '.SupervisionRunOutputBudget'
+        method = 'System.Boolean ' + typ + '::Charge(System.Int32)'
+        for index in range(3):
+            for mutation in ('bool', 'negative', 'overflow', 'alias', 'single-alias', 'duplicate-document', 'empty-duplicate-document'):
+                values = [self.counter(value) for value in (2, 2, 3)]
+                docs = values[index][subject.SUP + '.dll']
+                data = docs['/src/' + subject.QUOTA_DOC][typ][method]
+                if mutation == 'bool': data['Lines'][str(self.line)] = True
+                if mutation == 'negative': data['Lines'][str(self.line)] = -1
+                if mutation == 'overflow': data['Lines'][str(self.line)] = 2**63
+                if mutation == 'alias': data['Lines']['0' + str(self.line)] = 0
+                if mutation == 'single-alias': data['Lines']['0' + str(self.line)] = data['Lines'].pop(str(self.line))
+                if mutation == 'duplicate-document': docs[subject.QUOTA_DOC] = copy.deepcopy(docs['/src/' + subject.QUOTA_DOC])
+                if mutation == 'empty-duplicate-document': docs[subject.QUOTA_DOC] = {}
+                with self.subTest(stage=index, mutation=mutation), self.assertRaises(ValueError):
+                    subject.require_quota_contribution(*values, self.capture)
+
+    def test_v1_has_no_predecessor_but_still_requires_fresh_outer_counter(self):
+        subject.require_quota_contribution(None, self.counter(1), self.counter(2), self.capture)
+        with self.assertRaises(ValueError):
+            subject.require_quota_contribution(None, self.counter(1), self.counter(1), self.capture)
+
+    def test_changed_source_cannot_select_another_quota_point(self):
+        self.capture['files'][subject.QUOTA_DOC]['sha256'] = '0' * 64
+        with self.assertRaises(ValueError):
+            subject.require_quota_contribution(self.counter(2), self.counter(2), self.counter(3), self.capture)
+
+
 class ProducerRootsSmallFileTests(unittest.TestCase):
     def test_real_regular_empty_neighbor_and_bound(self):
         with tempfile.TemporaryDirectory() as root:
@@ -256,7 +322,12 @@ class ProducerRootsSmallFileTests(unittest.TestCase):
                      'Fail(SupervisionRunOutputFailure.QuotaExceeded);')):
                     line = next(n for n, text in enumerate((subject.ROOT / doc).read_text().splitlines(), 1) if text.strip() == marker)
                     docs['/src/' + doc] = {typ: {method: {'Lines': {str(line): 1}, 'Branches': []}}}
-                subject.write(evidence / subject.FILES[4], report); subject.write(evidence / subject.FILES[5], report)
+                inside = copy.deepcopy(report)
+                quota_type = subject.SUP + '.SupervisionRunOutputBudget'
+                quota_method = 'System.Boolean ' + quota_type + '::Charge(System.Int32)'
+                inside[subject.SUP + '.dll']['/src/' + subject.QUOTA_DOC][quota_type][quota_method]['Lines'] = {}
+                subject.write(evidence / subject.FILES[4], inside)
+                subject.write(evidence / subject.FILES[5], report)
                 for path in (args.tool, args.mutation_tool):
                     for name in subject.NAMES: (path / name).write_bytes((str(path) + name).encode())
                 # A nonempty original/restored mismatch cannot publish a final binding.
@@ -474,9 +545,11 @@ class ProducerRootsPredecessorTests(unittest.TestCase):
         data, line = self.quota(None); self.publish_prior(); self.check()  # Method, no exact point.
         self.assertNotIn(str(line), data['Lines'])
         data['Lines'][str(line)] = 0; self.publish_prior(); self.check()
-        data['Lines'][str(line)] = 1; self.publish_prior(); self.reject()
+        data['Lines'][str(line)] = 1; self.publish_prior(); self.check()
         data['Lines'].pop(str(line)); data['Lines']['0' + str(line)] = 1
         self.publish_prior(); self.reject()
+        data['Lines'][str(line)] = 0
+        self.publish_prior(); self.reject()  # Two aliases are ambiguous even when one is zero.
 
     def test_external_inputs_must_be_distinct_absolute_and_outside_outgoing_inventory(self):
         for name, bad in (('prior_report', Path('relative.json')),
@@ -537,10 +610,41 @@ class ProducerRootsPredecessorTests(unittest.TestCase):
              'Fail(SupervisionRunOutputFailure.QuotaExceeded);')):
             line = next(n for n, text in enumerate((subject.ROOT / doc).read_text().splitlines(), 1) if text.strip() == marker)
             combined[subject.SUP + '.dll']['/src/' + doc] = {typ: {method: {'Lines': {str(line): 1}, 'Branches': []}}}
-        for name in subject.FILES[4:6]: subject.write(args.evidence / name, combined)
+        inside = copy.deepcopy(combined)
+        quota_type = subject.SUP + '.SupervisionRunOutputBudget'
+        quota_method = 'System.Boolean ' + quota_type + '::Charge(System.Int32)'
+        prior_hits = subject.quota_counter(self.modules, self.capture)
+        point = str(next(n for n, text in enumerate((subject.ROOT / subject.QUOTA_DOC).read_text().splitlines(), 1)
+                         if text.strip() == 'Fail(SupervisionRunOutputFailure.QuotaExceeded);'))
+        inside[subject.SUP + '.dll']['/src/' + subject.QUOTA_DOC][quota_type][quota_method]['Lines'] = (
+            {} if prior_hits is None else {point: prior_hits})
+        combined[subject.SUP + '.dll']['/src/' + subject.QUOTA_DOC][quota_type][quota_method]['Lines'] = {
+            point: 1 if prior_hits is None else prior_hits + 1}
+        subject.write(args.evidence / subject.FILES[4], inside)
+        subject.write(args.evidence / subject.FILES[5], combined)
         for path in (args.tool, args.mutation_tool):
             for name in subject.NAMES: (path / name).write_bytes((str(path) + name).encode())
         return original
+
+    def test_positive_predecessor_requires_fresh_none_counter_before_ready_publication(self):
+        data, line = self.quota(None)
+        data['Lines'][str(line)] = 2
+        self.publish_prior()
+        with patch.object(subject, 'source', return_value=(self.source_body, self.capture)):
+            self.prepare_completed()
+            path = self.args.evidence / subject.FILES[5]
+            raw = path.read_bytes()
+            combined = subject.decode(raw)
+            typ = subject.SUP + '.SupervisionRunOutputBudget'
+            method = 'System.Boolean ' + typ + '::Charge(System.Int32)'
+            combined[subject.SUP + '.dll']['/src/' + subject.QUOTA_DOC][typ][method]['Lines'][str(line)] = 2
+            path.write_bytes(subject.canonical(combined))
+            with self.assertRaisesRegex(ValueError, 'quota-current-contribution'):
+                subject.finalize(self.args)
+            self.assertFalse((self.args.evidence / subject.FILES[6]).exists())
+            path.write_bytes(raw)
+            subject.finalize(self.args)
+            self.assertTrue(subject.decode(subject.read(self.args.evidence / subject.FILES[6]))['ready_for_gate'])
 
     def test_self_consistent_changed_prior_cannot_replay_after_bind(self):
         with patch.object(subject, 'source', return_value=(self.source_body, self.capture)):

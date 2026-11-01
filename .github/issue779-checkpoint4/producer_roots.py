@@ -166,36 +166,69 @@ def account_data():
 
 
 def prior_contribution(modules, capture):
-    """Reject inherited C2 declarations or quota hits, without manufacturing missing zeros.
+    """Reject inherited private C2 declarations and validate the shared quota point.
 
-    A missing quota method/point is accepted as absent, not recorded as a zero hit.
-    A declared point must be exactly zero. Finalization still requires actual current
-    positive witnesses. These comparisons do not subtract, edit or merge counters.
+    Prior C3 controls may already exercise the shared quota statement. Its optional
+    counter remains unchanged; finalization separately requires fresh outer None
+    growth beyond the inner collector. Absence never becomes a synthetic zero.
     """
-    for mutation in (True, False):
-        doc = MUTATION_DOC if mutation else QUOTA_DOC
-        body = read(ROOT / doc)
-        require(digest(body) == capture['files'][doc]['sha256'], 'prior-witness-source')
-        typ = SUP + ('.LinuxRetainedReportSet' if mutation else '.SupervisionRunOutputBudget')
-        method = ('System.Byte[] ' + typ + '::MutateRetainedReportForC2(System.Threading.CancellationToken)' if mutation
-                  else 'System.Boolean ' + typ + '::Charge(System.Int32)')
-        candidates = []
-        for module, docs in modules.items():
-            if Path(module).name == SUP + '.dll':
-                for name, types in docs.items():
-                    if mutation or name.replace('\\', '/') == doc or name.replace('\\', '/').endswith('/' + doc):
-                        if typ in types and method in types[typ]:
-                            candidates.append(types[typ][method])
-        if mutation:
-            require(not candidates, 'prior-c2-method-present')
-        else:
-            anchors = [n for n, line in enumerate(body.decode().splitlines(), 1)
-                       if line.strip() == 'Fail(SupervisionRunOutputFailure.QuotaExceeded);']
-            require(len(anchors) == 1 and len(candidates) <= 1, 'prior-quota-mapping')
-            if candidates:
-                points = [hits for line, hits in candidates[0]['Lines'].items() if int(line) == anchors[0]]
-                require(len(points) <= 1 and all(type(hits) is int and hits == 0 for hits in points),
-                        'prior-quota-positive')
+    body = read(ROOT / MUTATION_DOC)
+    require(digest(body) == capture['files'][MUTATION_DOC]['sha256'], 'prior-witness-source')
+    typ = SUP + '.LinuxRetainedReportSet'
+    method = 'System.Byte[] ' + typ + '::MutateRetainedReportForC2(System.Threading.CancellationToken)'
+    for module, docs in modules.items():
+        if Path(module).name == SUP + '.dll':
+            for types in docs.values():
+                require(typ not in types or method not in types[typ], 'prior-c2-method-present')
+    quota_counter(modules, capture)
+
+
+def quota_counter(modules, capture):
+    """Read one optional exact quota counter without changing any report bytes.
+
+    The source-bound, unconditional Charge statement has the same meaning across
+    C3, account, C2 and None images. Numeric aliases and duplicate mapped documents
+    reject rather than choosing one observation. A missing method or point is None.
+    """
+    body = read(ROOT / QUOTA_DOC)
+    require(digest(body) == capture['files'][QUOTA_DOC]['sha256'], 'quota-witness-source')
+    anchors = [n for n, line in enumerate(body.decode().splitlines(), 1)
+               if line.strip() == 'Fail(SupervisionRunOutputFailure.QuotaExceeded);']
+    require(len(anchors) == 1, 'quota-source-anchor')
+    typ = SUP + '.SupervisionRunOutputBudget'
+    method = 'System.Boolean ' + typ + '::Charge(System.Int32)'
+    documents = []
+    for module, docs in modules.items():
+        if Path(module).name != SUP + '.dll':
+            continue
+        for name, types in docs.items():
+            normalized = name.replace('\\', '/')
+            if normalized == QUOTA_DOC or normalized.endswith('/' + QUOTA_DOC):
+                documents.append(types)
+    require(len(documents) <= 1, 'quota-mapping')
+    if not documents or typ not in documents[0] or method not in documents[0][typ]:
+        return None
+    points = [(line, hits) for line, hits in documents[0][typ][method]['Lines'].items() if int(line) == anchors[0]]
+    require(len(points) <= 1 and all(line == str(anchors[0]) and type(hits) is int and 0 <= hits < 2**63
+                                   for line, hits in points),
+            'quota-point')
+    return points[0][1] if points else None
+
+
+def require_quota_contribution(prior, inner, combined, capture):
+    """Require actual None quota execution beyond the unchanged inner C2 report.
+
+    Standard Coverlet merges add matching line counters. The inner collector has
+    already inherited the validated predecessor; its quota count may not regress.
+    The outer None count must then strictly grow, so inherited or inner-only hits
+    cannot satisfy the current None witness. This compares, never edits, counters.
+    """
+    before = quota_counter(prior, capture) if prior is not None else None
+    inside = quota_counter(inner, capture)
+    after = quota_counter(combined, capture)
+    require(before is None or inside is not None and inside >= before, 'quota-prior-retained')
+    require(after is not None and after > 0 and (inside is None or after > inside),
+            'quota-current-contribution')
 
 
 def predecessor(args, current_source, capture):
@@ -480,7 +513,10 @@ def finalize(args):
     _, capture = source(args)
     raw, combined = [read(args.evidence / name, REPORT) for name in FILES[4:6]]
     combined_report = report(combined)
-    witnesses = {'C2': witness(report(raw), capture, True), 'None': witness(combined_report, capture, False)}
+    inner_report = report(raw)
+    prior_report = (report(read(args.prior_report, REPORT)) if prior_enabled(args) else None)
+    require_quota_contribution(prior_report, inner_report, combined_report, capture)
+    witnesses = {'C2': witness(inner_report, capture, True), 'None': witness(combined_report, capture, False)}
     require(witness(combined_report, capture, True) == witnesses['C2'], 'merged-current-witness')
     prior = original['context'].get('external_predecessor')
     if prior is not None:

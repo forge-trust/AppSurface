@@ -326,8 +326,13 @@ rollback bytes and the same workflow run/attempt. Both original/instrumented/res
 seven-module DLL/PDB maps, zero collector/driver exits, seven ordered native controls,
 physical settlement/account outcomes and exact current-source witnesses are required.
 The C2 mutation method and the packaged None quota arm have separate source mappings;
-an earlier positive method cannot stand in for either current witness. Metadata never
-creates an owner, imports worker hits or admits a proof.
+the predecessor must lack the private C2 mutation declaration. Earlier C3 controls
+may legitimately hit the shared quota statement. Its counter must survive in the
+inner report without regression, and the final combined counter must be positive
+and strictly greater than the inner counter. Comparing only with the predecessor
+would allow an inner-stage hit to stand in for current outer None execution. Missing
+points stay absent, ambiguous mappings reject, and no report counters are edited or
+subtracted. Metadata never creates an owner, imports worker hits or admits a proof.
 
 The standalone v1 packet from [run 39203788097](https://github.com/forge-trust/AppSurface/actions/runs/39203788097)
 passed all seven actual Linux producer controls on source

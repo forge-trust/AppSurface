@@ -206,12 +206,18 @@ only rollback inputs and cannot independently authenticate every earlier ancesto
 V1 retains its original schema, null external predecessor and false readiness.
 
 The predecessor must contain **no C2 mutation method declaration**, even at zero hits.
-The exact current quota statement must have zero prior hits **if its sequence point
-exists**. A missing method or point stays absent; it is never converted into a synthetic
-zero. Both exact current positive witnesses remain mandatory after collection. These
-checks establish bounded contribution controls, not a numerical coverage gain or
-per-case attribution. All incoming leaves stay outside the outgoing artifact, whose
-seven filenames and total/count bounds remain unchanged.
+The shared quota statement may already have nonnegative prior hits from C3 controls.
+Its exact source-bound counter must be retained without regression in the inner C2
+report. The final combined report must then have a positive counter strictly greater
+than the inner report, proving fresh execution by the outer None collector. Growth
+only over the rollback report is insufficient: the inner C2 stage could supply it.
+A missing method or point stays absent; it is never converted into a synthetic zero.
+Duplicate mapped methods or numeric line aliases reject. Both exact current positive
+witnesses remain mandatory after collection. These comparisons use Coverlet's standard
+additive merge; they never edit, subtract or rewrite report counters. They establish
+bounded contribution controls, not a numerical coverage gain or per-case attribution.
+All incoming leaves stay outside the outgoing artifact, whose seven filenames and
+total/count bounds remain unchanged.
 
 ## Retained file whitelist and interpretation
 
@@ -255,7 +261,7 @@ The raw C2 report must hit the exact
 `LinuxRetainedReportSet.MutateRetainedReportForC2(CancellationToken)` source span
 (declaration line148 at this baseline), bound to its current physical source SHA.
 This private method is absent from the prior C3 image. The combined report must preserve
-that witness and positively hit the exact `Fail(QuotaExceeded)` statement in
+that witness and add fresh hits beyond the inner C2 report at the exact `Fail(QuotaExceeded)` statement in
 `SupervisionRunOutputBudget.Charge(Int32)` (line173 at this baseline). Anchors are resolved
 from exact current source text; another positive method or nearby line is insufficient.
 
@@ -276,13 +282,19 @@ separately reviewed; portable packets cannot supply them.
 
 ## Validation status
 
-The private v2 preparation's single bounded Python suite passed all **30** data and
+The original private v2 preparation's bounded Python suite passed all **30** data and
 small-file tests (15 existing methods with unchanged ASTs plus 15 new predecessor
 controls). It exercises exact source bytes, stage/order/hash bindings, rollback error
-and NSS data, unique current witnesses, inherited positive rejection, changed-prior
+and NSS data, unique current witnesses, the original inherited-positive rule, changed-prior
 replay, incoming node safety and readiness publication. No driver, collector or native
 process ran in this suite. The v2 console chain still requires independent review and
 fresh actual Linux proof; this status does not claim integration or gate consumption.
+
+The [quota contribution regressions](../test_producer_roots.py) now cover legitimate
+inherited positive counters, strict fresh outer growth, missing and regressed counters,
+malformed or ambiguous mappings, unchanged report data and rejected readiness
+publication before a current witness exists. They replace the invalid zero-prior
+assumption; detached fixtures provide no native execution or coverage-gate result.
 
 The initial v1 preparation passed fifteen focused data controls and independent
 source review. Subsequently, [run 39203788097](https://github.com/forge-trust/AppSurface/actions/runs/39203788097)

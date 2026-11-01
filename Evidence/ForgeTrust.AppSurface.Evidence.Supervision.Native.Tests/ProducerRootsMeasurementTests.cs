@@ -574,22 +574,42 @@ public sealed class ProducerRootsMeasurementTests
         Assert.ThrowsAny<Exception>(() => packet.Validate());
     }
 
-    /// <summary>Rebound prior reports cannot supply either current witness; missing data stays absent and unchanged.</summary>
+    /// <summary>Prior quota hits require retained inner counts and a strictly larger current outer contribution.</summary>
     [Theory]
-    [InlineData("quota-method-absent", true)]
-    [InlineData("quota-point-absent", true)]
-    [InlineData("quota-zero", true)]
-    [InlineData("quota-alias-zero", true)]
-    [InlineData("quota-positive", false)]
-    [InlineData("quota-alias-positive", false)]
-    [InlineData("quota-alias-two-zero", false)]
-    [InlineData("quota-ambiguous-documents", false)]
-    [InlineData("quota-wrong-document-positive", true)]
+    [InlineData("no-prior", true)]
+    [InlineData("prior-method-without-point", true)]
+    [InlineData("inner-two-no-prior-final-two", false)]
+    [InlineData("inner-two-no-prior-final-one", false)]
+    [InlineData("prior-zero-without-inner", false)]
+    [InlineData("prior-zero-inner-zero-final-one", true)]
+    [InlineData("prior-one-inner-one-final-two", true)]
+    [InlineData("prior-one-inner-two-final-three", true)]
+    [InlineData("prior-one-inner-two-final-two", false)]
+    [InlineData("prior-one-inner-missing", false)]
+    [InlineData("prior-one-inner-zero", false)]
+    [InlineData("positive-inner-final-missing", false)]
+    [InlineData("positive-inner-final-zero", false)]
+    [InlineData("prior-line-alias", false)]
+    [InlineData("inner-line-alias", false)]
+    [InlineData("final-line-alias", false)]
+    [InlineData("prior-ambiguous-documents", false)]
+    [InlineData("prior-duplicate-empty-document", false)]
+    [InlineData("prior-negative", false)]
+    [InlineData("prior-boolean", false)]
+    [InlineData("prior-overflow", false)]
+    [InlineData("inner-negative", false)]
+    [InlineData("inner-boolean", false)]
+    [InlineData("inner-overflow", false)]
+    [InlineData("final-negative", false)]
+    [InlineData("final-boolean", false)]
+    [InlineData("final-overflow", false)]
+    [InlineData("final-fractional", false)]
+    [InlineData("wrong-document-prior-positive", true)]
     [InlineData("c2-zero", false)]
     [InlineData("c2-positive", false)]
     [InlineData("c2-wrong-document-zero", false)]
     [InlineData("c2-wrong-document-positive", false)]
-    public void PriorContributionCannotStandInForCurrentExecution(string mutation, bool valid)
+    public void QuotaContributionMustGrowAcrossBoundReports(string mutation, bool valid)
     {
         var fixture = new Fixture();
         var baseline = fixture.Packets();
@@ -598,32 +618,136 @@ public sealed class ProducerRootsMeasurementTests
         Assert.Equal(baselineReport, baseline.Inputs[6]);
         var documents = fixture.Rollback.Supervision;
         var isC2 = mutation.StartsWith("c2-", StringComparison.Ordinal);
-        var type = Supervision + (isC2 ? ".LinuxRetainedReportSet" : ".SupervisionRunOutputBudget");
-        var methodName = isC2 ? "System.Byte[] " + type + "::MutateRetainedReportForC2(System.Threading.CancellationToken)"
-            : "System.Boolean " + type + "::Charge(System.Int32)";
-        var wrongDocument = mutation.Contains("wrong-document", StringComparison.Ordinal);
-        var path = wrongDocument ? "/unrelated/Other.cs" : "/prior/" + (isC2 ? MutationDocument : QuotaDocument);
-        var method = Fixture.Method(isC2 ? 148 : 172);
-        var lines = method["Lines"]!.AsObject();
-        if (isC2) lines["148"] = mutation.EndsWith("-zero", StringComparison.Ordinal) ? 0 : 1;
+        if (isC2)
+        {
+            var type = Supervision + ".LinuxRetainedReportSet";
+            var methodName = "System.Byte[] " + type + "::MutateRetainedReportForC2(System.Threading.CancellationToken)";
+            var wrongDocument = mutation.Contains("wrong-document", StringComparison.Ordinal);
+            var path = wrongDocument ? "/unrelated/Other.cs" : "/prior/" + MutationDocument;
+            var method = Fixture.Method(148);
+            method["Lines"]!["148"] = mutation.EndsWith("-zero", StringComparison.Ordinal) ? 0 : 1;
+            var methods = new JsonObject { [methodName] = method };
+            documents[path] = new JsonObject { [type] = methods };
+        }
         else
         {
-            if (mutation is "quota-zero" or "quota-ambiguous-documents") lines["173"] = 0;
-            if (mutation is "quota-positive" or "quota-wrong-document-positive") lines["173"] = 1;
-            if (mutation == "quota-alias-zero") lines["0173"] = 0;
-            if (mutation == "quota-alias-positive") lines["0173"] = 1;
-            if (mutation == "quota-alias-two-zero") { lines["173"] = 0; lines["0173"] = 0; }
+            switch (mutation)
+            {
+                case "prior-method-without-point":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument);
+                    break;
+                case "no-prior":
+                    break;
+                case "inner-two-no-prior-final-two":
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", 2));
+                    Fixture.SetQuotaPoint(fixture.Combined, "/source/" + QuotaDocument, ("173", 2));
+                    break;
+                case "inner-two-no-prior-final-one":
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", 2));
+                    Fixture.SetQuotaPoint(fixture.Combined, "/source/" + QuotaDocument, ("173", 1));
+                    break;
+                case "prior-zero-without-inner":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", 0));
+                    break;
+                case "prior-zero-inner-zero-final-one":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", 0));
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", 0));
+                    Fixture.SetQuotaPoint(fixture.Combined, "/source/" + QuotaDocument, ("173", 1));
+                    break;
+                case "prior-one-inner-one-final-two":
+                    SetQuotaReports(fixture, 1, 1, 2);
+                    break;
+                case "prior-one-inner-two-final-three":
+                    SetQuotaReports(fixture, 1, 2, 3);
+                    break;
+                case "prior-one-inner-two-final-two":
+                    SetQuotaReports(fixture, 1, 2, 2);
+                    break;
+                case "prior-one-inner-missing":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", 1));
+                    break;
+                case "prior-one-inner-zero":
+                    SetQuotaReports(fixture, 1, 0, 1);
+                    break;
+                case "positive-inner-final-missing":
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", 1));
+                    fixture.Combined[Supervision + ".dll"]!.AsObject().Remove("/source/" + QuotaDocument);
+                    break;
+                case "positive-inner-final-zero":
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", 1));
+                    Fixture.SetQuotaPoint(fixture.Combined, "/source/" + QuotaDocument, ("173", 0));
+                    break;
+                case "prior-line-alias":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("0173", 1));
+                    break;
+                case "inner-line-alias":
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("0173", 1));
+                    break;
+                case "final-line-alias":
+                    Fixture.SetQuotaPoint(fixture.Combined, "/source/" + QuotaDocument, ("0173", 1));
+                    break;
+                case "prior-ambiguous-documents":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", 0));
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, QuotaDocument, ("173", 0));
+                    break;
+                case "prior-duplicate-empty-document":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", 0));
+                    documents[QuotaDocument] = new JsonObject();
+                    break;
+                case "prior-negative":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", -1));
+                    break;
+                case "prior-boolean":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", 1));
+                    Fixture.QuotaLines(fixture.Rollback.Report, "/prior/" + QuotaDocument)["173"] = true;
+                    break;
+                case "prior-overflow":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", 1));
+                    Fixture.QuotaLines(fixture.Rollback.Report, "/prior/" + QuotaDocument)["173"] = JsonNode.Parse("9223372036854775808");
+                    break;
+                case "inner-negative":
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", -1));
+                    break;
+                case "inner-boolean":
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", 1));
+                    Fixture.QuotaLines(fixture.Inner, "/inner/" + QuotaDocument)["173"] = true;
+                    break;
+                case "inner-overflow":
+                    Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", 1));
+                    Fixture.QuotaLines(fixture.Inner, "/inner/" + QuotaDocument)["173"] = JsonNode.Parse("9223372036854775808");
+                    break;
+                case "final-negative":
+                    Fixture.SetQuotaPoint(fixture.Combined, "/source/" + QuotaDocument, ("173", -1));
+                    break;
+                case "final-boolean":
+                    Fixture.QuotaLines(fixture.Combined, "/source/" + QuotaDocument)["173"] = true;
+                    break;
+                case "final-overflow":
+                    Fixture.QuotaLines(fixture.Combined, "/source/" + QuotaDocument)["173"] = JsonNode.Parse("9223372036854775808");
+                    break;
+                case "final-fractional":
+                    Fixture.QuotaLines(fixture.Combined, "/source/" + QuotaDocument)["173"] = JsonNode.Parse("1.5");
+                    break;
+                case "wrong-document-prior-positive":
+                    Fixture.SetQuotaPoint(fixture.Rollback.Report, "/unrelated/Other.cs", ("173", 5));
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(mutation));
+            }
         }
-        var methods = new JsonObject();
-        if (mutation != "quota-method-absent") methods[methodName] = method;
-        documents[path] = new JsonObject { [type] = methods };
-        if (mutation == "quota-ambiguous-documents") documents[QuotaDocument] = documents[path]!.DeepClone();
         // Rebuild rollback's own hashes and both predecessor copies, preserving the genuine current-witness controls.
         var packet = fixture.Packets();
         var originalReport = packet.Inputs[6].ToArray();
         if (valid) packet.Validate();
         else Assert.ThrowsAny<Exception>(() => packet.Validate());
         Assert.Equal(originalReport, packet.Inputs[6]);
+    }
+
+    private static void SetQuotaReports(Fixture fixture, long prior, long inner, long combined)
+    {
+        Fixture.SetQuotaPoint(fixture.Rollback.Report, "/prior/" + QuotaDocument, ("173", prior));
+        Fixture.SetQuotaPoint(fixture.Inner, "/inner/" + QuotaDocument, ("173", inner));
+        Fixture.SetQuotaPoint(fixture.Combined, "/source/" + QuotaDocument, ("173", combined));
     }
 
     private sealed record Packet(byte[][] Inputs)
@@ -669,22 +793,39 @@ public sealed class ProducerRootsMeasurementTests
             Binding["schema"] = "issue779-producer-roots-measurement-v2";
             Binding["root_only"] = true; Binding["worker_imported"] = false;
             Binding["native_acceptance"] = false; Binding["ready_for_gate"] = true;
-            Binding["context"] = new JsonObject { ["source"] = Head, ["base"] = Base,
-                ["package_smoke_sha256"] = new string('c', 64), ["paths"] = new JsonObject
-                { ["tool"] = "/fixture/tool", ["mutation_tool"] = "/fixture/mutation", ["runtime"] = "/fixture/runtime",
-                    ["subject"] = "/fixture/subject", ["evidence"] = "/fixture/evidence" } };
+            Binding["context"] = new JsonObject
+            {
+                ["source"] = Head,
+                ["base"] = Base,
+                ["package_smoke_sha256"] = new string('c', 64),
+                ["paths"] = new JsonObject
+                {
+                    ["tool"] = "/fixture/tool",
+                    ["mutation_tool"] = "/fixture/mutation",
+                    ["runtime"] = "/fixture/runtime",
+                    ["subject"] = "/fixture/subject",
+                    ["evidence"] = "/fixture/evidence"
+                }
+            };
             foreach (var kind in new[] { "original", "instrumented", "restored" })
-                Binding[kind] = new JsonObject { ["None"] = Rollback.Binding[kind == "restored" ? "original" : kind]!.DeepClone(),
-                    ["C2"] = Rollback.Binding[kind == "restored" ? "original" : kind]!.DeepClone() };
+                Binding[kind] = new JsonObject
+                {
+                    ["None"] = Rollback.Binding[kind == "restored" ? "original" : kind]!.DeepClone(),
+                    ["C2"] = Rollback.Binding[kind == "restored" ? "original" : kind]!.DeepClone()
+                };
             foreach (var key in new[] { "original_binding_sha256", "instrumented_binding_sha256", "inner_exit_sha256",
                 "driver_exit_sha256", "input_inventory_sha256" }) Binding[key] = new string('c', 64);
             foreach (var key in new[] { "outer_collector_exit", "inner_collector_exit", "driver_exit" }) Binding[key] = 0;
             var caseHashes = new JsonObject();
             foreach (var name in Cases) caseHashes[name] = new string('c', 64);
             Binding["case_receipt_sha256"] = caseHashes;
-            Binding["external_predecessor"] = new JsonObject { ["kind"] = "accounts-rollback", ["variant"] = "C4AccountRollback",
+            Binding["external_predecessor"] = new JsonObject
+            {
+                ["kind"] = "accounts-rollback",
+                ["variant"] = "C4AccountRollback",
                 ["artifact_name"] = "issue779-c4-accounts-C4AccountRollback-99-1",
-                ["merge_order"] = JsonSerializer.SerializeToNode(new[] { "C3", "C4Accounts", "C4AccountRollback", "C2", "None" }) };
+                ["merge_order"] = JsonSerializer.SerializeToNode(new[] { "C3", "C4Accounts", "C4AccountRollback", "C2", "None" })
+            };
             Binding["current_witness"] = new JsonObject { ["C2"] = Witness(mutation: true), ["None"] = Witness(mutation: false) };
             AddWitness(Inner, mutation: true);
             AddWitness(Combined, mutation: true);
@@ -696,17 +837,30 @@ public sealed class ProducerRootsMeasurementTests
             {
                 var name = Cases[index];
                 var cleanup = name == "cleanup-failure";
-                var row = new JsonObject { ["case"] = name, ["generation"] = index.ToString("x32", System.Globalization.CultureInfo.InvariantCulture),
-                    ["passed"] = true, ["groups_empty"] = true, ["final_groups_empty"] = true,
-                    ["native_acceptance"] = false, ["accounts_absent"] = !cleanup, ["accounts_quarantined"] = cleanup,
+                var row = new JsonObject
+                {
+                    ["case"] = name,
+                    ["generation"] = index.ToString("x32", System.Globalization.CultureInfo.InvariantCulture),
+                    ["passed"] = true,
+                    ["groups_empty"] = true,
+                    ["final_groups_empty"] = true,
+                    ["native_acceptance"] = false,
+                    ["accounts_absent"] = !cleanup,
+                    ["accounts_quarantined"] = cleanup,
                     ["owner_terminal"] = new JsonObject { ["wrapper_exit"] = index == 0 ? 0 : 1 },
-                    ["input_inventory_sha256"] = new string('c', 64), ["stdout_sha256"] = new string('c', 64),
-                    ["stderr_sha256"] = new string('c', 64) };
+                    ["input_inventory_sha256"] = new string('c', 64),
+                    ["stdout_sha256"] = new string('c', 64),
+                    ["stderr_sha256"] = new string('c', 64)
+                };
                 if (cleanup) row["quarantined"] = true;
                 if (name is "cancel" or "ignored-cancel") row["cancel_sent"] = true;
                 if (name == "ignored-cancel") row["descendant_term_observed"] = true;
-                if (name == "quota") row["output_observation"] = new JsonObject { ["quota_exceeded"] = true,
-                    ["received_byte_limit"] = 16 * 1024 * 1024, ["received_bytes"] = 16 * 1024 * 1024 + 1 };
+                if (name == "quota") row["output_observation"] = new JsonObject
+                {
+                    ["quota_exceeded"] = true,
+                    ["received_byte_limit"] = 16 * 1024 * 1024,
+                    ["received_bytes"] = 16 * 1024 * 1024 + 1
+                };
                 if (name == "artifact-mutation") row["artifact_mutation"] = new JsonArray
                 {
                     new JsonObject { ["schema"] = "evidence-c2-artifact-mutation-v1", ["phase"] = "mutated",
@@ -729,8 +883,11 @@ public sealed class ProducerRootsMeasurementTests
             Binding["context"]!["source_capture_sha256"] = Digest(source);
             Binding["native_receipt_sha256"] = Digest(native);
             Binding["native_receipt_bytes"] = native.Length;
-            Binding["reports"] = new JsonObject { ["native-producer-roots-c2.json"] = ReportBinding(inner),
-                ["native-producer-roots.json"] = ReportBinding(combined) };
+            Binding["reports"] = new JsonObject
+            {
+                ["native-producer-roots-c2.json"] = ReportBinding(inner),
+                ["native-producer-roots.json"] = ReportBinding(combined)
+            };
             foreach (var row in new[] { ("source_capture_sha256", source), ("input_binding_sha256", rollback.Binding),
                 ("coverage_sha256", rollback.Coverage), ("native_receipt_sha256", rollback.Native) })
                 Binding["external_predecessor"]![row.Item1] = Digest(row.Item2);
@@ -742,10 +899,16 @@ public sealed class ProducerRootsMeasurementTests
         private static JsonObject Witness(bool mutation)
         {
             var type = Supervision + (mutation ? ".LinuxRetainedReportSet" : ".SupervisionRunOutputBudget");
-            return new JsonObject { ["document"] = mutation ? MutationDocument : QuotaDocument, ["type"] = type,
+            return new JsonObject
+            {
+                ["document"] = mutation ? MutationDocument : QuotaDocument,
+                ["type"] = type,
                 ["method"] = mutation ? "System.Byte[] " + type + "::MutateRetainedReportForC2(System.Threading.CancellationToken)"
-                    : "System.Boolean " + type + "::Charge(System.Int32)", ["start"] = mutation ? 148 : 173,
-                ["end"] = mutation ? 199 : 173, ["source_sha256"] = mutation ? MutationHash : QuotaHash };
+                    : "System.Boolean " + type + "::Charge(System.Int32)",
+                ["start"] = mutation ? 148 : 173,
+                ["end"] = mutation ? 199 : 173,
+                ["source_sha256"] = mutation ? MutationHash : QuotaHash
+            };
         }
         private static void AddWitness(JsonObject report, bool mutation)
         {
@@ -753,7 +916,7 @@ public sealed class ProducerRootsMeasurementTests
             report[Supervision + ".dll"]!["/source/" + witness["document"]!.GetValue<string>()] = new JsonObject
             {
                 [witness["type"]!.GetValue<string>()] = new JsonObject
-                    { [witness["method"]!.GetValue<string>()] = Method(mutation ? 148 : 173) }
+                { [witness["method"]!.GetValue<string>()] = Method(mutation ? 148 : 173) }
             };
         }
         internal static JsonObject WitnessMethod(JsonObject report, bool mutation)
@@ -769,6 +932,23 @@ public sealed class ProducerRootsMeasurementTests
             ["Branches"] = new JsonArray { new JsonObject { ["Line"] = line, ["Offset"] = 0, ["EndOffset"] = 1,
                 ["Path"] = 0, ["Ordinal"] = 0, ["Hits"] = 1 } }
         };
+        internal static void SetQuotaPoint(JsonObject report, string document, params (string Line, long Hits)[] points)
+        {
+            var lines = new JsonObject();
+            foreach (var point in points) lines[point.Line] = point.Hits;
+            var type = Supervision + ".SupervisionRunOutputBudget";
+            var method = "System.Boolean " + type + "::Charge(System.Int32)";
+            report[Supervision + ".dll"]![document] = new JsonObject
+            {
+                [type] = new JsonObject { [method] = new JsonObject { ["Lines"] = lines, ["Branches"] = new JsonArray() } }
+            };
+        }
+        internal static JsonObject QuotaLines(JsonObject report, string document)
+        {
+            var type = Supervision + ".SupervisionRunOutputBudget";
+            var method = "System.Boolean " + type + "::Charge(System.Int32)";
+            return report[Supervision + ".dll"]![document]![type]![method]!["Lines"]!.AsObject();
+        }
         private static byte[] Serialize(JsonNode value) => JsonSerializer.SerializeToUtf8Bytes(value);
         private static string Digest(byte[] value) => Convert.ToHexStringLower(SHA256.HashData(value));
     }

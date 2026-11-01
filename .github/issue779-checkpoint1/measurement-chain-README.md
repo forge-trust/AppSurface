@@ -143,6 +143,13 @@ The initial predecessor's `report_sha256` always identifies C2, not the immediat
 previous selector. Independent C3 → Accounts → Rollback → C2 gate verification
 still owns its complete predecessor semantics.
 
+The C2 seed independently rechecks the [producer quota contribution](../issue779-checkpoint4/measurement/producer-roots-README.md#source-bound-witnesses-and-known-limits)
+against its retained inner and combined standard reports: the exact final quota
+counter must be positive and strictly greater than the inner counter. An inherited
+positive count alone cannot satisfy current outer execution. The rollback report
+is outside this seed packet; preservation from rollback into the inner report stays
+with the separate producer and account-lineage validators. No counters are changed.
+
 ## Custody and bounds
 
 Fixed producer-root native/report/witness validators load only after checking
