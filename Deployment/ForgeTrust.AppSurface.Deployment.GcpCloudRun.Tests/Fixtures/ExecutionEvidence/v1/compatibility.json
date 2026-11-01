@@ -1,5 +1,6 @@
 {
   "schemaVersion": "cloud-run-execution-compatibility/1",
+  "normalizerContractVersion": "cloud-run-execution-evidence/1",
   "status": "candidate-not-certified",
   "tool": {
     "name": "gcloud",

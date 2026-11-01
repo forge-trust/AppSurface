@@ -277,18 +277,20 @@ public sealed class BoundedGcloudExecutionReader : IBoundedGcloudExecutionReader
             {
                 await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(cleanupCts.Token).ConfigureAwait(false);
             }
-            catch (Exception) { }
+            // A faulted reader can race the deadline or overflow path. Keep nonfatal teardown faults
+            // inside this containment boundary; completion below still decides whether cleanup is confirmed.
+            catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException) { }
             if (!stdoutTask.IsCompleted || !stderrTask.IsCompleted)
             {
                 // Pipe closure is the final bounded escape for a descendant-held inherited pipe.
                 try { process.StandardOutput.Close(); } catch (ObjectDisposedException) { }
                 try { process.StandardError.Close(); } catch (ObjectDisposedException) { }
                 try { await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(cleanupCts.Token).ConfigureAwait(false); }
-                catch (Exception) { }
+                catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException) { }
             }
             cleanup = process.HasExited && stdoutTask.IsCompleted && stderrTask.IsCompleted;
         }
-        catch (Exception) { cleanup = false; }
+        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException) { cleanup = false; }
         callerToken.ThrowIfCancellationRequested();
         return new(cleanup ? outcome : BoundedGcloudExecutionReadOutcome.CleanupUnconfirmed, cleanup ? exitCode : null);
     }

@@ -11,6 +11,8 @@ public sealed class ExecutionCompatibilityManifestTests
         // manifest; no_claim=hashes authenticate a publisher or attest to a live provider read.
         var root = FindFixtureRoot();
         using var manifest = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(root, "compatibility.json")));
+        Assert.Equal("cloud-run-execution-compatibility/1", manifest.RootElement.GetProperty("schemaVersion").GetString());
+        Assert.Equal("cloud-run-execution-evidence/1", manifest.RootElement.GetProperty("normalizerContractVersion").GetString());
 
         foreach (var item in manifest.RootElement.GetProperty("worksheets").EnumerateArray())
         {
@@ -22,9 +24,8 @@ public sealed class ExecutionCompatibilityManifestTests
             Assert.Equal("Andrew (repository owner)", review.GetProperty("acceptingMaintainer").GetString());
             Assert.Equal("owner-authorized-technical-evidence-provider-certification-pending", review.GetProperty("disposition").GetString());
             Assert.Contains("not live provider certification", review.GetProperty("acceptanceSource").GetString());
-            foreach (var fixtureName in new[] { "positiveFixture", "negativeFixture" })
+            foreach (var fixture in new[] { "positiveFixture", "negativeFixture" }.Select(worksheet.RootElement.GetProperty))
             {
-                var fixture = worksheet.RootElement.GetProperty(fixtureName);
                 var fixturePath = Path.GetFullPath(fixture.GetProperty("path").GetString()!, Path.GetDirectoryName(TestPathUtils.PathUnder(root, worksheetPath))!);
                 AssertHash(root, Path.GetRelativePath(root, fixturePath), fixture.GetProperty("sha256").GetString()!);
             }

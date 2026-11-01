@@ -51,6 +51,14 @@ public sealed class PreflightConsumerTemplateTests : IDisposable
         Assert.Equal("10.0.8", explicitPackageReferences["Microsoft.Extensions.DependencyInjection"]);
         Assert.Equal("2026.0.0", explicitPackageReferences["SSH.NET"]);
         Assert.Equal(4, explicitPackageReferences.Count);
+        var templatePins = packageReferences
+            .Where(reference => (string?)reference.Attribute("Include") != "ForgeTrust.AppSurface.Durable.PostgreSql")
+            .ToDictionary(
+                reference => (string)reference.Attribute("Include")!,
+                reference => (string)reference.Attribute("Version")!,
+                StringComparer.Ordinal);
+        Assert.Equal(explicitPackageReferences.OrderBy(pair => pair.Key, StringComparer.Ordinal),
+            templatePins.OrderBy(pair => pair.Key, StringComparer.Ordinal));
     }
 
     [Fact]

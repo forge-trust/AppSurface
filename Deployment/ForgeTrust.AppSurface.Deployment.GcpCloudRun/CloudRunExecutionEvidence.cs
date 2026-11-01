@@ -183,9 +183,8 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
                 {
                     var entries = aliases.GetString()!.Split(',');
                     var map = new Dictionary<string, string>(StringComparer.Ordinal);
-                    foreach (var entry in entries)
+                    foreach (var pair in entries.Select(entry => entry.Split(':', 2)))
                     {
-                        var pair = entry.Split(':', 2);
                         if (pair.Length != 2 || !map.TryAdd(pair[0], pair[1])) throw Bad("ASDEPLOY174");
                     }
                     if (map.Count != 1 || !map.TryGetValue(reference, out reference!)) throw Bad("ASDEPLOY175");
@@ -268,9 +267,9 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
         var hasCompletion = status.TryGetProperty("completionTime", out var completion);
         string? reason = null;
         string? reasonField = null;
-        foreach (var field in v1 ? new[] { "reason" } : new[] { "reason", "executionReason", "revisionReason", "instanceReason" })
+        foreach (var field in (v1 ? new[] { "reason" } : new[] { "reason", "executionReason", "revisionReason", "instanceReason" })
+                     .Where(field => overall.TryGetProperty(field, out _)))
         {
-            if (!overall.TryGetProperty(field, out _)) continue;
             if (reasonField is not null) throw Bad("ASDEPLOY174");
             reasonField = field;
             reason = Text(overall, field);

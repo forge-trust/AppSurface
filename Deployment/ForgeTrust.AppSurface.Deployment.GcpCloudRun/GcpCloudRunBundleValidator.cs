@@ -349,17 +349,17 @@ internal static class GcpCloudRunBundleValidator
             if (!allowed.Contains(property.Name)) throw Failure("ASDEPLOY171", "Deployment observation schema is unsupported.", $"Artifact '{fileName}' contains unknown property '{property.Name}'.", "Regenerate the bundle with the supported schema.");
             if (property.Value.ValueKind == JsonValueKind.Object && property.Name is "resourceAddresses" or "labels" or "environment" or "for_each")
             {
-                foreach (var value in property.Value.EnumerateObject())
+                foreach (var value in property.Value.EnumerateObject().Where(value => value.Value.ValueKind == JsonValueKind.Object))
                 {
-                    if (value.Value.ValueKind == JsonValueKind.Object) RejectUnknown(value.Value, allowed, fileName);
+                    RejectUnknown(value.Value, allowed, fileName);
                 }
             }
             else if (property.Value.ValueKind == JsonValueKind.Object) RejectUnknown(property.Value, allowed, fileName);
             else if (property.Value.ValueKind == JsonValueKind.Array)
             {
-                foreach (var item in property.Value.EnumerateArray())
+                foreach (var item in property.Value.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.Object))
                 {
-                    if (item.ValueKind == JsonValueKind.Object) RejectUnknown(item, allowed, fileName);
+                    RejectUnknown(item, allowed, fileName);
                 }
             }
         }

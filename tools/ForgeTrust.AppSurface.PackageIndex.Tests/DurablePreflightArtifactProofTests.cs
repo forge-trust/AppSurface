@@ -294,9 +294,9 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             yield return file;
         }
 
-        foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly))
+        foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly)
+                     .Where(directory => Path.GetFileName(directory) is not ("bin" or "obj")))
         {
-            if (Path.GetFileName(directory) is "bin" or "obj") continue;
             foreach (var file in EnumerateAuthoredFiles(directory)) yield return file;
         }
     }

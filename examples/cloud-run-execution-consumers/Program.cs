@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Deployment;
 using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 
@@ -86,7 +87,10 @@ try
     var reader = new FixtureReader(await File.ReadAllBytesAsync(fixturePath));
     var observation = await new GcpCloudRunExecutionObserver(reader, TimeProvider.System).ObserveAsync(
         new CloudRunExecutionObservationRequest(rendered, logicalJobId, executionResource, TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(10)));
-    Console.WriteLine(JsonSerializer.Serialize(observation));
+    Console.WriteLine(JsonSerializer.Serialize(observation, new JsonSerializerOptions
+    {
+        Converters = { new JsonStringEnumConverter<CloudRunExecutionState>() }
+    }));
     Console.Error.WriteLine($"bundleOutput={bundleOutput}");
     return observation.State == CloudRunExecutionState.Succeeded && observation.ConfigurationMatched ? 0 : 2;
 }
