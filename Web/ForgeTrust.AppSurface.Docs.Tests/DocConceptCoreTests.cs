@@ -436,6 +436,42 @@ public sealed class DocConceptCoreTests
         Assert.Null(unknownOutcome.HomeRoutePath);
     }
 
+    // Value: protects=selected-language recovery when a counterpart exists only in another language;
+    // fails_when=foreign concept membership suppresses verified selected-locale fallback, search, or home;
+    // why_new=the existing locale test has no target pages in the selected language; seam=none;
+    // no_claim=browser rendering or translation quality.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OtherLocaleCounterpartDoesNotHideSelectedLocaleRecovery(bool complete)
+    {
+        var sourcePin = Pin('3');
+        var targetPin = Pin('4');
+        var source = Release("1", sourcePin,
+            [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var targetPages = Release("2", targetPin,
+        [
+            new Page("guide", "en", complete ? "section" : null, "Guides", [], Landing: true),
+            new Page("guide/topic", "fr", "topic", "Sujet", [])
+        ], complete);
+        var target = new DocConceptReleaseInput("2", targetPin, true, true, true, true, "guide",
+            targetPages.CanonicalRoutes, targetPages.ConceptIndexBytes);
+        var index = Build([source, target]).Index;
+        var identity = new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true);
+
+        var result = index.Resolve(identity, "2", targetPin);
+
+        Assert.Equal(complete ? DocConceptResolutionReason.KnownAbsent : DocConceptResolutionReason.Unknown, result.Reason);
+        Assert.Null(result.TargetPage);
+        Assert.NotNull(result.TargetRelease);
+        Assert.Equal("2", result.TargetRelease.Version);
+        Assert.NotNull(result.FallbackSection);
+        Assert.Equal("guide", result.FallbackSection.RoutePath);
+        Assert.Equal("en", result.FallbackSection.Locale);
+        Assert.True(result.SearchAvailable);
+        Assert.Equal("guide", result.HomeRoutePath);
+    }
+
     [Fact]
     public void UnknownTargetLocaleDoesNotBecomeKnownAbsenceOrEnableLocalRecovery()
     {

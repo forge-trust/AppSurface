@@ -40,6 +40,7 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         var sourceResponse = await page.GotoAsync(sourceUrl);
         Assert.NotNull(sourceResponse);
         Assert.Equal(200, sourceResponse.Status);
+        Assert.Equal("CSS1Compat", await page.EvaluateAsync<string>("() => document.compatMode"));
         Assert.Null(await sourceResponse.HeaderValueAsync("Content-Security-Policy"));
 
         var policy = Assert.IsType<string>(await page.Locator("meta[http-equiv='Content-Security-Policy']").GetAttributeAsync("content"));
@@ -86,6 +87,7 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
         Assert.Contains("Getting started with configuration", await page.Locator("main h1").First.TextContentAsync(), StringComparison.Ordinal);
+        Assert.Equal("CSS1Compat", await page.EvaluateAsync<string>("() => document.compatMode"));
         Assert.Contains("This guide has a different location in 2.0.0.", await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
         Assert.Equal("configure", await page.EvaluateAsync<string>("() => document.activeElement?.id || ''"));
         var describedBy = await page.Locator("#configure").GetAttributeAsync("aria-describedby");
@@ -212,6 +214,10 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         Assert.Contains("2.0.0", bodyText, StringComparison.Ordinal);
         Assert.Contains("Return to original guide", bodyText, StringComparison.Ordinal);
         Assert.Equal(0, await page.Locator("script[data-docs-switch-runtime]").CountAsync());
+        await AssertChoicePageFocusAndTargetsAsync(page, "main.docs-version-choice h1");
+        await page.ReloadAsync();
+        await AssertChoicePageFocusAndTargetsAsync(page, "main.docs-version-choice h1");
+        await AssertChoicePageResponsiveLayoutAsync(page);
 
         var targetLink = page.Locator("main.docs-version-choice a").Filter(new LocatorFilterOptions { HasText = "Open this guide" }).First;
         var targetHref = Assert.IsType<string>(await targetLink.GetAttributeAsync("href"));
@@ -228,8 +234,14 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         _versions.AssertOriginalArchiveHashesUnchanged();
     }
 
-    [Fact]
-    public async Task StaticChoicePage_NoJavaScriptOffersTargetLocalSearchForKnownAbsence()
+    // Value: protects=static plain-link recovery reaches target-version search without a foreign-language counterpart;
+    // fails_when=a foreign-only concept hides valid selected-language search or becomes the selected counterpart;
+    // why_new=the previous static absence case did not include a counterpart in another language; seam=none;
+    // no_claim=partial-page network navigation or translation quality.
+    [Theory]
+    [InlineData("guides.removed")]
+    [InlineData("guides.locale-example")]
+    public async Task StaticChoicePage_NoJavaScriptOffersTargetLocalSearchForKnownAbsence(string conceptId)
     {
         var pagesRoot = await _versions.EnsureStaticPublicationAsync();
         await using var host = await AppSurfaceDocsVersionSwitchStaticHost.StartAsync(pagesRoot);
@@ -239,18 +251,30 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
             ViewportSize = new ViewportSize { Width = 1280, Height = 900 }
         });
         var page = await context.NewPageAsync();
-        var sourceRoute = _versions.GetCanonicalRoutePath("1.0.0", "guides.removed", "en");
+        var sourceRoute = _versions.GetCanonicalRoutePath("1.0.0", conceptId, "en");
         await page.GotoAsync(_versions.BuildVersionPageUrl(host.BaseUrl, "1.0.0", sourceRoute));
+        var fallbackHref = Assert.IsType<string>(await page.Locator("a[data-docs-version-fallback]").GetAttributeAsync("href"));
+        var selectedReasonHref = Assert.IsType<string>(await page.Locator("[data-docs-version-options] a[href*='docs-switch-version-']").First.GetAttributeAsync("href"));
 
-        await page.Locator("a[data-docs-version-fallback]").ClickAsync();
+        await page.GotoAsync(new Uri(new Uri(host.BaseUrl), fallbackHref).AbsoluteUri);
         await page.WaitForSelectorAsync("main.docs-version-choice", new PageWaitForSelectorOptions
         {
             Timeout = 15_000,
             State = WaitForSelectorState.Visible
         });
+        await AssertChoicePageFocusAndTargetsAsync(page, "main.docs-version-choice h1");
+        await page.ReloadAsync();
+        await AssertChoicePageFocusAndTargetsAsync(page, "main.docs-version-choice h1");
+        await AssertChoicePageResponsiveLayoutAsync(page);
+
+        await page.GotoAsync(new Uri(new Uri(host.BaseUrl), selectedReasonHref).AbsoluteUri);
+        var selectedReasonId = new Uri(new Uri(host.BaseUrl), selectedReasonHref).Fragment.TrimStart('#');
+        await AssertChoicePageFocusAndTargetsAsync(page, $"main.docs-version-choice h2#{selectedReasonId}");
+        await AssertChoicePageResponsiveLayoutAsync(page);
 
         var bodyText = await page.Locator("main.docs-version-choice").InnerTextAsync();
         Assert.Contains("No documented counterpart", bodyText, StringComparison.Ordinal);
+        Assert.Equal(0, await page.Locator("main.docs-version-choice a[href*='/docs/v/2.0.0/fr/']").CountAsync());
         var searchLink = page.Locator("main.docs-version-choice a").Filter(new LocatorFilterOptions { HasText = "Search this version" }).First;
         var searchHref = Assert.IsType<string>(await searchLink.GetAttributeAsync("href"));
         Assert.Contains("/docs/v/2.0.0/", searchHref, StringComparison.Ordinal);
@@ -258,7 +282,36 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         var searchResponse = await client.GetAsync(new Uri(new Uri(host.BaseUrl), searchHref));
         Assert.Equal(HttpStatusCode.OK, searchResponse.StatusCode);
         Assert.Contains("Search", await searchResponse.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        await page.GotoAsync(new Uri(new Uri(host.BaseUrl), searchHref).AbsoluteUri);
+        Assert.Equal("CSS1Compat", await page.EvaluateAsync<string>("() => document.compatMode"));
         _versions.AssertOriginalArchiveHashesUnchanged();
+    }
+
+    [Fact]
+    public async Task HostedChoicePage_NoJavaScriptFocusesGenericAndSelectedReasons()
+    {
+        await using var host = await StartHostedHostAsync();
+        await using var context = await _browser.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            JavaScriptEnabled = false,
+            ViewportSize = new ViewportSize { Width = 1280, Height = 900 }
+        });
+        var page = await context.NewPageAsync();
+        var sourceRoute = _versions.GetCanonicalRoutePath("1.0.0", "guides.removed", "en");
+        await page.GotoAsync(_versions.BuildVersionPageUrl(host.BaseUrl, "1.0.0", sourceRoute));
+        var fallbackHref = Assert.IsType<string>(await page.Locator("a[data-docs-version-fallback]").GetAttributeAsync("href"));
+        var selectedReasonHref = Assert.IsType<string>(await page.Locator("[data-docs-version-options] a[href*='docs-switch-version-']").First.GetAttributeAsync("href"));
+
+        await page.GotoAsync(new Uri(new Uri(host.BaseUrl), fallbackHref).AbsoluteUri);
+        await AssertChoicePageFocusAndTargetsAsync(page, "main.docs-version-choice h1");
+        await page.ReloadAsync();
+        await AssertChoicePageFocusAndTargetsAsync(page, "main.docs-version-choice h1");
+        await AssertChoicePageResponsiveLayoutAsync(page);
+
+        await page.GotoAsync(new Uri(new Uri(host.BaseUrl), selectedReasonHref).AbsoluteUri);
+        var selectedReasonId = new Uri(new Uri(host.BaseUrl), selectedReasonHref).Fragment.TrimStart('#');
+        await AssertChoicePageFocusAndTargetsAsync(page, $"main.docs-version-choice h2#{selectedReasonId}");
+        await AssertChoicePageResponsiveLayoutAsync(page);
     }
 
     [Fact]
@@ -352,6 +405,7 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         var sourceResponse = await page.GotoAsync(sourceUrl);
         Assert.NotNull(sourceResponse);
         Assert.Equal(200, sourceResponse.Status);
+        Assert.Equal("CSS1Compat", await page.EvaluateAsync<string>("() => document.compatMode"));
         Assert.Contains("Initial setup", await page.Locator("main h1").First.TextContentAsync(), StringComparison.Ordinal);
 
         var runtimeScript = page.Locator("script[data-docs-switch-runtime]");
@@ -411,6 +465,7 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         });
 
         Assert.Contains("Getting started with configuration", await page.Locator("main h1").First.TextContentAsync(), StringComparison.Ordinal);
+        Assert.Equal("CSS1Compat", await page.EvaluateAsync<string>("() => document.compatMode"));
         Assert.Contains("This guide moved in 2.0.0", await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
         Assert.Equal(1, await page.Locator("[data-docs-version-notice]").CountAsync());
         Assert.Equal("configure", await page.EvaluateAsync<string>("() => document.activeElement?.id || ''"));
@@ -436,6 +491,54 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
+        _versions.AssertOriginalArchiveHashesUnchanged();
+    }
+
+    [Fact]
+    public async Task HostedSwitch_CaseInsensitiveMountWithExactPhysicalPathKeepsEnhancementAndNotice()
+    {
+        await using var host = await StartHostedHostAsync();
+        await using var context = await _browser.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1280, Height = 900 }
+        });
+        var page = await context.NewPageAsync();
+        var sourceRoute = _versions.GetCanonicalRoutePath("1.0.0", "guides.setup", "en");
+        var targetRoute = _versions.GetCanonicalRoutePath("2.0.0", "guides.setup", "en");
+
+        await page.GotoAsync(_versions.BuildVersionPageUrl(host.BaseUrl, "1.0.0", sourceRoute));
+        var sourceKey = await page.EvaluateAsync<string>(
+            "() => JSON.parse(document.querySelector('[data-docs-version-data]').textContent).sourceKey");
+        var sourceToggle = page.Locator("button[data-docs-version-toggle]");
+        await sourceToggle.ClickAsync();
+        var normalDestination = page.Locator("[data-docs-version-options] a[href*='/docs/v/2.0.0/']").First;
+        var normalDestinationHref = Assert.IsType<string>(await normalDestination.GetAttributeAsync("href"));
+        var canonicalTargetPath = new Uri(_versions.BuildVersionPageUrl(host.BaseUrl, "2.0.0", targetRoute)).AbsolutePath;
+        Assert.Equal(canonicalTargetPath, new Uri(new Uri(host.BaseUrl), normalDestinationHref).AbsolutePath);
+        Assert.Contains("docsFrom=" + sourceKey, normalDestinationHref, StringComparison.Ordinal);
+
+        var uppercasePath = canonicalTargetPath.Replace("/docs/v/", "/DOCS/V/", StringComparison.Ordinal);
+        var uppercaseUrl = new Uri(new Uri(host.BaseUrl), uppercasePath + "?docsFrom=" + Uri.EscapeDataString(sourceKey) + "#configure").AbsoluteUri;
+        var response = await page.GotoAsync(uppercaseUrl);
+
+        Assert.NotNull(response);
+        Assert.Equal(200, response.Status);
+        Assert.Null(response.Request.RedirectedFrom);
+        Assert.Equal(uppercasePath, new Uri(response.Url).AbsolutePath);
+        Assert.Contains("Getting started with configuration", await page.Locator("main h1").First.TextContentAsync(), StringComparison.Ordinal);
+        await page.Locator("button[data-docs-version-toggle]").WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Visible,
+            Timeout = 15_000
+        });
+        Assert.Contains("This guide moved in 2.0.0", await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
+        Assert.Contains("same documented concept", await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
+        Assert.Equal("configure", await page.EvaluateAsync<string>("() => document.activeElement?.id || ''"));
+        Assert.Contains("connect-src 'none'", await response.HeaderValueAsync("Content-Security-Policy") ?? string.Empty, StringComparison.Ordinal);
+
+        var returnHref = await page.Locator("[data-docs-version-notice] a").GetAttributeAsync("href");
+        Assert.Equal(new Uri(_versions.BuildVersionPageUrl(host.BaseUrl, "1.0.0", sourceRoute)).AbsolutePath,
+            new Uri(new Uri(host.BaseUrl), Assert.IsType<string>(returnHref)).AbsolutePath);
         _versions.AssertOriginalArchiveHashesUnchanged();
     }
 
@@ -474,10 +577,14 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         Assert.Equal(0, await page.Locator("[data-docs-version-notice]").CountAsync());
     }
 
+    // Value: protects=hosted plain-link choices distinguish evidence and retain verified target-language recovery;
+    // fails_when=known absence or uncertainty hides local search or switches to a foreign-language counterpart;
+    // why_new=the locale row previously expected the wrong missing-language outcome; seam=none;
+    // no_claim=partial-page network navigation or translation quality.
     [Theory]
     [InlineData("known-absent", "guides.removed", "", "No documented counterpart")]
     [InlineData("unknown", "", "Legacy guide with unknown identity", "No verified counterpart")]
-    [InlineData("locale", "guides.locale-example", "", "No documentation in this language")]
+    [InlineData("locale", "guides.locale-example", "", "No documented counterpart")]
     public async Task HostedChoicePage_ExplainsEvidenceAndKeepsNoScriptRecoveryLocal(
         string scenario,
         string conceptId,
@@ -513,15 +620,13 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         Assert.Contains("Return to original guide", bodyText, StringComparison.Ordinal);
         Assert.Equal(0, await page.Locator("script[data-docs-switch-runtime]").CountAsync());
 
-        if (scenario == "known-absent" || scenario == "unknown")
-        {
-            var targetLocalSearch = page.Locator("main.docs-version-choice a[href='/docs/v/2.0.0/search']");
-            Assert.True(await targetLocalSearch.CountAsync() > 0);
-            var originalReturn = page.Locator("main.docs-version-choice a").Filter(new LocatorFilterOptions { HasText = "Return to original guide" }).Last;
-            var href = Assert.IsType<string>(await originalReturn.GetAttributeAsync("href"));
-            Assert.Contains("/docs/v/1.0.0/", href, StringComparison.Ordinal);
-        }
-        else
+        var targetLocalSearch = page.Locator("main.docs-version-choice a[href='/docs/v/2.0.0/search']");
+        Assert.True(await targetLocalSearch.CountAsync() > 0);
+        var originalReturn = page.Locator("main.docs-version-choice a").Filter(new LocatorFilterOptions { HasText = "Return to original guide" }).Last;
+        var href = Assert.IsType<string>(await originalReturn.GetAttributeAsync("href"));
+        Assert.Contains("/docs/v/1.0.0/", href, StringComparison.Ordinal);
+
+        if (scenario == "locale")
         {
             Assert.DoesNotContain("/docs/v/2.0.0/fr/", bodyText, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(0, await page.Locator("main.docs-version-choice a[href*='/docs/v/2.0.0/fr/']").CountAsync());
@@ -706,5 +811,56 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         script.SetAttribute("crossorigin", "anonymous");
         document.Head?.AppendChild(script);
         return document.DocumentElement.OuterHtml;
+    }
+
+    private static async Task AssertChoicePageFocusAndTargetsAsync(IPage page, string expectedHeadingSelector)
+    {
+        Assert.Equal(0, await page.Locator("script").CountAsync());
+        var hasExpectedFocus = await page.EvaluateAsync<bool>(
+            "selector => document.activeElement === document.querySelector(selector)", expectedHeadingSelector);
+        var focusedElement = await page.EvaluateAsync<string>("() => document.activeElement?.outerHTML ?? ''");
+        Assert.True(hasExpectedFocus, $"Expected focus on {expectedHeadingSelector}; active element: {focusedElement}");
+        Assert.True(await page.EvaluateAsync<bool>("""
+            () => {
+                const links = Array.from(document.querySelectorAll('main.docs-version-choice a'));
+                return links.length > 0 && links.every(link => {
+                    const bounds = link.getBoundingClientRect();
+                    return bounds.width >= 44 && bounds.height >= 44;
+                });
+            }
+            """));
+        Assert.True(await page.EvaluateAsync<bool>("""
+            () => {
+                const luminance = color => {
+                    const channels = color.match(/[0-9.]+/g).slice(0, 3).map(Number).map(value => {
+                        const channel = value / 255;
+                        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+                    });
+                    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+                };
+                const background = luminance(getComputedStyle(document.body).backgroundColor);
+                const contrast = color => {
+                    const foreground = luminance(color);
+                    return (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
+                };
+                const text = [
+                    document.querySelector('main.docs-version-choice'),
+                    document.querySelector('main.docs-version-choice h1'),
+                    ...document.querySelectorAll('main.docs-version-choice h2'),
+                    ...document.querySelectorAll('main.docs-version-choice a')
+                ];
+                return text.length > 0 && text.every(element => contrast(getComputedStyle(element).color) >= 4.5);
+            }
+            """));
+    }
+
+    private static async Task AssertChoicePageResponsiveLayoutAsync(IPage page)
+    {
+        await page.SetViewportSizeAsync(320, 900);
+        await page.EvaluateAsync("() => { document.documentElement.style.zoom = '2'; }");
+        Assert.False(await page.EvaluateAsync<bool>("""
+            () => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)
+                > document.documentElement.clientWidth
+            """));
     }
 }

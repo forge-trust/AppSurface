@@ -74,14 +74,14 @@ internal static class DocConceptPresentation
         writer.Add($"<section class=\"docs-version-switch\" data-docs-version-switch aria-label=\"Documentation version\"><div class=\"docs-version-identity\"><span>{Text(view.Target.Version)}</span><span>{Text(Locale(view.Target.Locale))}</span></div>");
         if (view.Choices.Count > 0)
         {
-            writer.Add($"<a href=\"{Url(view.ChoicePageUrl)}\" data-docs-version-fallback>Change version</a>");
+            writer.Add($"<a href=\"{Url(view.ChoicePageUrl)}#docs-switch-choices\" data-docs-version-fallback>Change version</a>");
             writer.Add($"<button type=\"button\" hidden data-docs-version-toggle aria-expanded=\"false\" aria-controls=\"{id}\">Change version</button><div id=\"{id}\" data-docs-version-options hidden><ul>");
             foreach (var choice in view.Choices)
             {
                 var anchors = choice.AnchorIds is null ? string.Empty : $" data-docs-version-anchor-ids=\"{Text(Json(choice.AnchorIds))}\"";
                 writer.Add($"<li><a href=\"{Url(choice.Href)}\"{anchors}>{Text(choice.Label)}</a></li>");
             }
-            writer.Add($"<li><a href=\"{Url(view.ChoicePageUrl)}\">All version choices</a></li></ul></div>");
+            writer.Add($"<li><a href=\"{Url(view.ChoicePageUrl)}#docs-switch-choices\">All version choices</a></li></ul></div>");
         }
         else
         {
@@ -114,6 +114,7 @@ internal static class DocConceptPresentation
     }
 
     /// <summary>Encodes a complete no-JavaScript choice page, including the caller's already-validated policy markup.</summary>
+    /// <remarks>Entry links target the focusable heading fragment because a hosted sandbox blocks automatic focus.</remarks>
     internal static string Choices(
         string sourceTitle, string sourceVersion, string sourceUrl, string archiveUrl, string styleUrl,
         IEnumerable<DocConceptChoiceView> choices, int maximumBytes, string headPolicy = "")
@@ -121,7 +122,7 @@ internal static class DocConceptPresentation
         var writer = new BudgetWriter(maximumBytes);
         writer.Add("<!DOCTYPE html><html lang=\"en\"><head>" + headPolicy +
                    "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-                   $"<title>Version choices: {Text(sourceTitle)}</title><link rel=\"stylesheet\" href=\"{Url(styleUrl)}\"></head><body><main class=\"docs-version-choice\"><p>{Text(sourceVersion)}</p><h1 tabindex=\"-1\">Choose a version of {Text(sourceTitle)}</h1>");
+                   $"<title>Version choices: {Text(sourceTitle)}</title><link rel=\"stylesheet\" href=\"{Url(styleUrl)}\"></head><body><main class=\"docs-version-choice\"><p>{Text(sourceVersion)}</p><h1 id=\"docs-switch-choices\" tabindex=\"-1\" autofocus>Choose a version of {Text(sourceTitle)}</h1>");
         foreach (var choice in choices)
         {
             writer.Add($"<section><p>{Text(choice.Version)} · {Text(choice.LocaleLabel)}</p><h2 id=\"{ChoiceAnchor(choice.Version)}\" tabindex=\"-1\">{Text(choice.Heading)}</h2><p>{Text(choice.Explanation)}</p><ul>");

@@ -18,6 +18,10 @@ public sealed class DocConceptPresentationTests
         var document = new HtmlParser().ParseDocument("<html><head>" + markup.Head + "</head><body>" + markup.Body + "</body></html>");
         Assert.Equal("Moved <script>alert('x')</script>", document.QuerySelector("#docs-version-explanation")!.TextContent);
         Assert.Equal(2, document.QuerySelectorAll("script").Length);
+        Assert.Equal("/docs/versions/switch/" + Key + ".html#docs-switch-choices",
+            document.QuerySelector("a[data-docs-version-fallback]")!.GetAttribute("href"));
+        Assert.Equal("/docs/versions/switch/" + Key + ".html#docs-switch-choices",
+            document.QuerySelector("[data-docs-version-options] li:last-child a")!.GetAttribute("href"));
         using var data = JsonDocument.Parse(document.QuerySelector("script[type='application/json']")!.TextContent);
         Assert.Equal(incoming.Notice, data.RootElement.GetProperty("incoming")[0].GetProperty("notice").GetString());
         Assert.Contains("&lt;title&gt;", markup.Body);
@@ -107,6 +111,12 @@ public sealed class DocConceptPresentationTests
         Assert.Contains("&lt;Setup&gt;", page);
         Assert.Contains("Open &lt;guide&gt;", page);
         Assert.Contains(DocConceptPresentation.ChoiceAnchor(choice.Version), page);
+        var document = new HtmlParser().ParseDocument(page);
+        Assert.Equal("docs-switch-choices", document.QuerySelector("main.docs-version-choice h1")!.Id);
+        Assert.Equal("-1", document.QuerySelector("main.docs-version-choice h1")!.GetAttribute("tabindex"));
+        Assert.True(document.QuerySelector("main.docs-version-choice h1")!.HasAttribute("autofocus"));
+        Assert.Equal(DocConceptPresentation.ChoiceAnchor(choice.Version), document.QuerySelector("main.docs-version-choice h2")!.Id);
+        Assert.Equal("-1", document.QuerySelector("main.docs-version-choice h2")!.GetAttribute("tabindex"));
         var bytes = Encoding.UTF8.GetByteCount(page);
         Assert.Equal(page, DocConceptPresentation.Choices("<Setup>", "1", "/docs/v/1/old", "/docs/versions", "/style.css", [choice], bytes));
         Assert.Throws<DocConceptArtifactOverflowException>(() => DocConceptPresentation.Choices("<Setup>", "1", "/docs/v/1/old", "/docs/versions", "/style.css", [choice], bytes - 1));

@@ -338,13 +338,15 @@ internal sealed partial class DocsVerifyArchiveCommand : ICommand
     public string? TrustedReleaseRootPath { get; set; }
 
     /// <summary>
-    /// Gets the maximum byte size accepted for a rewritten HTML or root search index file in the published tree.
+    /// Gets the maximum UTF-8 byte size accepted per rewritten HTML/search input, concept index, pinned bridge,
+    /// or complete added version-switch artifact.
     /// </summary>
     /// <remarks>
     /// Omit this option to use the 4 MiB runtime default. Set it to the same value configured on a host that
-    /// mounts a larger archive; supported values are 1 through 33,554,432 bytes (32 MiB).
+    /// mounts a larger archive; supported values are 1 through 33,554,432 bytes (32 MiB). This is the shared,
+    /// coupled input and switch-artifact limit; raising it increases both budgets.
     /// </remarks>
-    [CommandOption("max-rewritten-file-size-bytes", Description = "Maximum rewritten HTML or search-index.json size in bytes (default: 4194304; maximum: 33554432).")]
+    [CommandOption("max-rewritten-file-size-bytes", Description = "Per-artifact UTF-8 limit for rewritten HTML/search input, concept metadata, and complete added switch output (default: 4194304; range: 1..33554432).")]
     public long? MaxRewrittenFileSizeBytes { get; set; }
 
     /// <summary>

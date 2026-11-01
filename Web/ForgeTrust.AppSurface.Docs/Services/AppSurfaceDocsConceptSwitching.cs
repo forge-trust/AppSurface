@@ -1,4 +1,5 @@
 using System.Text;
+using AngleSharp;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.ReleaseContracts;
@@ -10,6 +11,8 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// The adapter does not modify archived bytes. It projects one page at a time, verifies source files before exposing
 /// standalone choices, and bounds the complete added UI including incoming transition records. Request context is a
 /// lookup key only: all notice text and return links come from validated, page-local rows in this host snapshot.
+/// The self-page binding retains the accepted request mount's spelling; destination links still use configured roots
+/// and verified physical mappings.
 /// </remarks>
 internal sealed class AppSurfaceDocsConceptSwitching
 {
@@ -108,13 +111,17 @@ internal sealed class AppSurfaceDocsConceptSwitching
         {
             if (document.QuerySelector("[data-docs-version-switch], [data-docs-version-data], [data-docs-switch-runtime]") is not null)
                 throw new InvalidDataException("The original shell collides with package-owned switch markup.");
-            var view = GuideView(context, release, page, mount.MountRootPath);
+            var requestedMount = context.Request.Path.StartsWithSegments(mount.MountRootPath,
+                StringComparison.OrdinalIgnoreCase, out var matchedMount, out _)
+                ? matchedMount.Value!
+                : mount.MountRootPath;
+            var view = GuideView(context, release, page, requestedMount);
             var incomingKey = context.Request.Query.TryGetValue("docsFrom", out var keys) && keys.Count == 1 ? keys[0] : null;
             var markup = DocConceptPresentation.Guide(view, DocConceptSwitchRuntime.RuntimeSubresourceIntegrity, _limit, incomingKey);
             Insert(parser, document.Head, markup.Head, null);
             Insert(parser, title.ParentElement, markup.Body, title);
             context.Items[RuntimeAuthorizationKey] = true;
-            return document.DocumentElement.OuterHtml;
+            return document.ToHtml();
         }
         catch (DocConceptArtifactOverflowException overflow)
         {
@@ -132,7 +139,7 @@ internal sealed class AppSurfaceDocsConceptSwitching
         var recovery = Recovery(context, release, page, standalone: false);
         if (recovery is null) return html;
         Insert(parser, title.ParentElement, recovery, title);
-        return document.DocumentElement.OuterHtml;
+        return document.ToHtml();
     }
 
     /// <summary>Checks a request-local authorization marker set only after trusted projection completed.</summary>

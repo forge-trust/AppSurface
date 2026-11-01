@@ -133,6 +133,59 @@
     text-underline-offset: 0.15em;
 }
 
+.docs-version-choice,
+.docs-version-choice * {
+    box-sizing: border-box;
+}
+
+body:has(main.docs-version-choice) {
+    min-height: 100vh;
+    margin: 0;
+    background: var(--docs-color-surface-canvas, #050b17);
+    color: var(--docs-color-text-default, #e5e7eb);
+}
+
+.docs-version-choice {
+    width: 100%;
+    max-width: 75ch;
+    min-width: 0;
+    margin-inline: auto;
+    padding: 1rem;
+    color: var(--docs-color-text-default, #e5e7eb);
+    font-family: var(--font-inter, Inter, ui-sans-serif, system-ui, sans-serif);
+    font-size: 1rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.docs-version-choice h1,
+.docs-version-choice h2 {
+    color: var(--docs-color-text-strong, #f8fafc);
+    line-height: 1.25;
+    scroll-margin-block: 1rem;
+}
+
+.docs-version-choice a {
+    display: inline-flex;
+    align-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    max-width: 100%;
+    padding: 0.5rem 0.75rem;
+    color: var(--docs-color-link, #8dbdff);
+    overflow-wrap: anywhere;
+    text-underline-offset: 0.15em;
+}
+
+.docs-version-choice a:visited {
+    color: var(--docs-color-link-visited, #c0a5ff);
+}
+
+.docs-version-choice :focus-visible {
+    outline: var(--docs-focus-outline, 2px solid #81b4ff);
+    outline-offset: 4px;
+}
+
 @media (max-width: 47.999rem) {
     /* Archived shells cannot run their inline navigation handlers under the exact-runtime policy.
        Keep their existing navigation in ordinary document flow so it cannot obscure the guide. */
@@ -178,6 +231,11 @@
 
     .docs-version-switch [data-docs-version-options] {
         grid-column: 1;
+    }
+
+    .docs-version-choice {
+        max-width: none;
+        padding-inline: 0.75rem;
     }
 }
 

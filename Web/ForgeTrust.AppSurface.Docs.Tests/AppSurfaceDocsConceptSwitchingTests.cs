@@ -138,6 +138,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         context.Request.QueryString = new QueryString("?docsFrom=" + key);
         var html = fixture.Adapter.RewriteGuide(context, mount, "export/new.html", Html, NullLogger.Instance);
         var document = new HtmlParser().ParseDocument(html);
+        Assert.NotNull(document.Doctype);
         Assert.NotNull(document.QuerySelector("[data-docs-version-notice]"));
         Assert.Contains("same documented concept", document.QuerySelector("[data-docs-version-notice]")!.TextContent);
         Assert.Contains("/base/docs/v/1/export/old.html", html);
@@ -151,6 +152,32 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         }
         Assert.Equal(Html, fixture.Adapter.RewriteGuide(context, mount, "not-indexed.html", Html, NullLogger.Instance));
         Assert.Equal("<p>No shell</p>", fixture.Adapter.RewriteGuide(context, mount, "export/new.html", "<p>No shell</p>", NullLogger.Instance));
+        var legacyHtml = Html.Replace("<!doctype html>", string.Empty, StringComparison.Ordinal);
+        var legacyOutput = fixture.Adapter.RewriteGuide(context, mount, "export/new.html", legacyHtml, NullLogger.Instance);
+        Assert.Null(new HtmlParser().ParseDocument(legacyOutput).Doctype);
+    }
+
+    [Theory]
+    [InlineData("/DOCS/v/2", "")]
+    [InlineData("/DOCS/V/2", "/base")]
+    public void Guide_BindsSelfUrlToAcceptedMountCasingWithoutChangingDestinations(string requestedMount, string pathBase)
+    {
+        var fixture = Create();
+        var key = DocConceptIdentityIndex.CreateSourceKey("Default", Source());
+        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
+        var context = Context(requestedMount + "/export/new.html", pathBase);
+        context.Request.QueryString = new QueryString("?docsFrom=" + key);
+
+        var html = fixture.Adapter.RewriteGuide(context, mount, "export/new.html", Html, NullLogger.Instance);
+        var document = new HtmlParser().ParseDocument(html);
+        using var data = JsonDocument.Parse(document.QuerySelector("script[data-docs-version-data]")!.TextContent);
+
+        Assert.Equal(pathBase + requestedMount + "/export/new.html", data.RootElement.GetProperty("pageUrl").GetString());
+        Assert.NotNull(document.QuerySelector("[data-docs-version-notice]"));
+        Assert.Contains(pathBase + "/docs/v/1/export/old.html", html);
+        Assert.Contains(pathBase + "/docs/versions/switch/runtime.js", html);
+        Assert.True(AppSurfaceDocsConceptSwitching.IsRuntimeAuthorized(context));
     }
 
     [Theory]
@@ -162,6 +189,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         using var provider = new PhysicalFileProvider(Path.Combine(_root, "1"));
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/1", provider);
         var html = fixture.Adapter.RewriteGuide(Context("/docs/v/1/export/old.html"), mount, "export/old.html", Html, NullLogger.Instance);
+        Assert.NotNull(new HtmlParser().ParseDocument(html).Doctype);
         Assert.Contains("Readable guide content.", html);
         Assert.DoesNotContain("data-docs-switch-runtime", html);
         Assert.Equal(recoveryFits, html.Contains("data-docs-version-unavailable", StringComparison.Ordinal));
@@ -241,6 +269,34 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         Assert.Contains("connect-src 'none'", csp);
         Assert.DoesNotContain("unsafe-inline", csp);
         Assert.Contains("Readable guide content.", Body(context));
+    }
+
+    [Fact]
+    public async Task PublishedHandler_CaseInsensitiveMountKeepsReceivedSelfPathAndPathBase()
+    {
+        var fixture = Create();
+        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        var version = fixture.Versions[1];
+        var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider, version.ExactTreePath,
+            archiveVerificationState: AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+            verifiedReleaseArchive: version.VerifiedReleaseArchive);
+        var handler = new AppSurfaceDocsPublishedTreeHandler([mount], "/docs/next", conceptSwitching: fixture.Adapter);
+        var key = DocConceptIdentityIndex.CreateSourceKey("Default", Source());
+        var context = Context("/DOCS/V/2/export/new.html", "/base");
+        context.Request.QueryString = new QueryString("?docsFrom=" + key);
+
+        Assert.True(await handler.TryHandleAsync(context));
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.False(context.Response.Headers.ContainsKey("Location"));
+        var html = Body(context);
+        var document = new HtmlParser().ParseDocument(html);
+        using var data = JsonDocument.Parse(document.QuerySelector("[data-docs-version-data]")!.TextContent);
+        Assert.Equal("/base/DOCS/V/2/export/new.html", data.RootElement.GetProperty("pageUrl").GetString());
+        Assert.Contains("This guide moved in 2.", document.QuerySelector("[data-docs-version-notice]")!.TextContent);
+        Assert.Contains("same documented concept", document.QuerySelector("[data-docs-version-notice]")!.TextContent);
+        Assert.Equal("/base/docs/v/1/export/old.html", document.QuerySelector("[data-docs-version-notice] a")!.GetAttribute("href"));
+        Assert.True(AppSurfaceDocsConceptSwitching.IsRuntimeAuthorized(context));
     }
 
     [Fact]

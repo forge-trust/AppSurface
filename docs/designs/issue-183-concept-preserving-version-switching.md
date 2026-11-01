@@ -2690,3 +2690,11 @@ Historical dashboard note: Eng remains ISSUES OPEN because the skill counts mapp
 **OUTSIDE COVERAGE:** Native CEO3,Design4,DX5,Eng round1=3 and round2=3 findings completed; external Claude Code unavailable each phase. Consensus N/A. No feature runtime results.
 **VERDICT:** Owner decisions accepted and engineering refresh complete as a plan review. All remedies are mapped; implementation and acceptance proof remain future. Historical dashboard keeps ISSUES OPEN because resolved findings are counted by the skill.
 NO UNRESOLVED DECISIONS
+
+## Owner-approved implementation verification amendment — 2026-11-01
+
+The owner approved all three requested execution decisions: one additional documentation audit after the two incomplete attempts, the CSP-preserving CP6 verification approach, and one bounded repair/review cycle for the confirmed choice-page accessibility gap. This authorizes finishing the required reviews, validation and draft PR under the existing Make It So scope.
+
+CP6 retains real hosted/static full-page navigation, history, keyboard, fragment, focus and no-JavaScript browser proof. Partial-navigation compatibility is verified by replacing real generated document content and exercising the runtime's lifecycle events. This is lifecycle compatibility proof; it does not claim actual Turbo HTTP navigation. The exact packaged-runtime hash and matching integrity attribute, hosted sandbox contract, static meta policy and `connect-src 'none'` remain binding. No additional script or connection permission is authorized.
+
+The additional repair must restore the existing Dsg4 choice-page target and focus requirements with browser regression proof. The extra documentation audit and repair/review cycle do not reset prior attempt counts or waive any required review, package, formatting, coverage or CI gate. Publication remains a draft PR.

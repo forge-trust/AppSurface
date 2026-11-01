@@ -498,13 +498,6 @@ internal sealed class DocConceptIdentityIndex
                 return CreateRecovery(DocConceptResolutionReason.Unknown, sourceIdentity, sourcePage, targetRelease, foundMembership, allowLocalActions: true);
             }
 
-            var conceptExistsInOtherLocale = targetRelease.Pages.Any(page => page.LocaleIsKnown && !LocaleEquals(page.Locale, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown)
-                && string.Equals(page.ConceptId, sourceConceptId, StringComparison.Ordinal));
-            if (conceptExistsInOtherLocale)
-            {
-                return CreateResolution(DocConceptResolutionReason.NoSelectedLocaleDocs, sourceIdentity, sourcePage, targetRelease, null, null, false, null);
-            }
-
             if (targetRelease.IdentityState == DocConceptIdentityState.ValidComplete)
             {
                 return CreateRecovery(DocConceptResolutionReason.KnownAbsent, sourceIdentity, sourcePage, targetRelease, null, allowLocalActions: true);
