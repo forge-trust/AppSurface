@@ -146,11 +146,10 @@ class ReleaseProjectGraphTests(unittest.TestCase):
             repository.mkdir()
             release = repository / "Release.csproj"
             release.write_text("<Project />", encoding="utf-8")
-            external = Path(directory).parent / "external.csproj"
+            external = Path(directory) / "external.csproj"
             external.write_text("<Project />", encoding="utf-8")
             with self.assertRaisesRegex(VERIFIER.VerificationError, "outside the repository"):
                 VERIFIER.inspect_release_project_graph(release, lambda _: [external], repository_root=repository)
-            external.unlink()
 
 
 class BclOnlyCoreTests(unittest.TestCase):
