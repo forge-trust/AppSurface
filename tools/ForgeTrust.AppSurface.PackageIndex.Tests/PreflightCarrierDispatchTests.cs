@@ -296,6 +296,7 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
         Assert.Contains("--consumer-project-template", request.Arguments);
         Assert.Equal(Path.Combine(fixture.Request.RepositoryRoot, "Durable", "consumers", "PostgreSqlPreflightConsumer", "PostgreSqlPreflightConsumer.csproj.template"),
             request.Arguments[Array.IndexOf(request.Arguments.ToArray(), "--consumer-project-template") + 1]);
+        Assert.DoesNotContain("--consumer-project", request.Arguments);
         Assert.Contains("--receipt", request.Arguments);
     }
 

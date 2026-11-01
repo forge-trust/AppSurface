@@ -111,6 +111,27 @@ dependency-submission discovery from attempting an unconfigured restore while pr
 package-hash, closure, identity, schema, guard, timeout and receipt gate. The carrier's internal
 `--consumer-project-template` input names the source template; the shared script cleans up its
 materialized project with the rest of the proof's owned directory before promoting a receipt.
+
+The ordinary `PostgreSqlPreflightConsumer.csproj` is a source-backed, non-packable development project for editing,
+compilation and generic dependency discovery, including GitHub automatic dependency submission. It references the
+local provider project. The separate `PostgreSqlPreflightConsumer.csproj.template` is the artifact-only project selected
+by the release carrier; its provider reference requires the exact manifest-derived `AppSurfacePackageVersion`, has
+no default published-version fallback, and must not be replaced by the source-backed project.
+
+The shared [`materialize-preflight-consumer.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/materialize-preflight-consumer.sh) stages the package
+project in the verifier's private scratch directory. It preserves authored sources and nested resources, omits generated
+`bin`/`obj` directories and exactly the same-directory development `.csproj`, and copies the repository's authored
+[`Directory.Build.props`](../../Directory.Build.props) and [`Directory.Build.targets`](../../Directory.Build.targets).
+The staged `.csproj` bytes match the package template and contain no project reference. Occupied destinations,
+source/destination overlap, missing build policy and unsupported links are rejected before staging. Nested resources
+sharing the project basename remain intact. The verifier uses `--consumer-project-template` for release proof;
+explicit legacy `--consumer-project` callers retain an already-materialized package-project path with the canonical
+`PostgreSqlPreflightConsumer.csproj` basename. Source `ProjectReference` inputs are rejected, and the provider
+package reference must use `$(AppSurfacePackageVersion)`.
+Both modes are described by the script's help and must not be combined. Artifact receipts still require the exact
+verified version, frozen first-party feed, complete archive equality checks and checked cleanup. A source build or
+empty-version restore cannot replace candidate or published artifact proof.
+
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
 and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
 runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule

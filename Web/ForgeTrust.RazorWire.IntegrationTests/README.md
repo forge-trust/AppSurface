@@ -45,16 +45,23 @@ completion and the DOM assertions, with the existing deadlines.
 ## Functional runtime readiness
 
 The functional form-interactions and concurrent user-list revalidation tests in
-[`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs) use a browser context that serves the
-sample's Google Fonts stylesheet with a local empty CSS response. The sample uses its system-font fallback;
-these tests verify conditional fields, collection form data, validation redisplay, and preservation of concurrent stream updates. Use the [visual-baseline
+[`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs) and the functional nested-collection tests in
+[`RazorWireNestedCollectionsPlaywrightTests`](./RazorWireNestedCollectionsPlaywrightTests.cs) share
+`RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync`, which installs a local empty CSS response
+for the sample's Google Fonts stylesheet before navigation. The sample uses its system-font fallback;
+these tests verify conditional fields, nested collection form data, focus, validation redisplay, and preservation
+of concurrent stream updates. Use the [visual-baseline
 suites](#release-page-visual-baselines) when verifying appearance.
 
 The [sample layout](../../examples/razorwire-mvc/Views/Shared/_Layout.cshtml) requests this decorative stylesheet
 before parser-blocking runtime scripts. A stalled font response can therefore prevent parsing and runtime initialization,
 even when every local asset has loaded. The context intercepts only `https://fonts.googleapis.com/**`;
 application scripts, styles, requests, and the form-readiness and validation assertions still run normally.
-Keep this interception scoped to these functional runtime tests so browser tests that exercise rendering retain their own font policy.
+Keep this interception scoped to functional runtime tests so browser tests that exercise rendering retain their own font policy.
+The nested-collection responsive test explicitly opts out, and the no-JavaScript test retains its ordinary context.
+The functional navigation helper keeps its default 30-second `load` deadline and 15-second runtime-readiness wait.
+Regression cases hold an upstream decorative-font request to verify local fallback and hold a required application script
+to verify that navigation still fails at its original deadline. Held requests are released before context disposal.
 
 ## AppSurface Docs standalone fixture
 

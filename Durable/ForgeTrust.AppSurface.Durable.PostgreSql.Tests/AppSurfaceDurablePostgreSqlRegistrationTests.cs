@@ -698,7 +698,8 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         PostgreSqlDurablePumpFailureContext.Mark(exception, PostgreSqlDurablePumpPhase.Executing);
 
         using var start = new Barrier(8);
-        var tasks = Enumerable.Range(0, 8).Select(index => Task.Run(() =>
+        // Blocking barrier participants use dedicated threads so async database probes keep their workers.
+        var tasks = Enumerable.Range(0, 8).Select(index => Task.Factory.StartNew(() =>
         {
             start.SignalAndWait();
             for (var iteration = 0; iteration < 100_000; iteration++)
@@ -709,7 +710,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
                         ? PostgreSqlDurablePumpPhase.Executing
                         : PostgreSqlDurablePumpPhase.Finalizing);
             }
-        })).ToArray();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
 
         await Task.WhenAll(tasks);
 
