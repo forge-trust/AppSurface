@@ -23,13 +23,25 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
     }
 
     [Fact]
-    public void ExactArtifactConsumer_IsNotDiscoveredAsAStandaloneRestoreProject()
+    public void ExactArtifactConsumer_RemainsTemplateWhileDevelopmentProjectRestoresFromSource()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var consumerDirectory = TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer");
+        var developmentProjectPath = Assert.Single(Directory.EnumerateFiles(consumerDirectory, "*.csproj", SearchOption.TopDirectoryOnly));
+        Assert.Equal("PostgreSqlPreflightConsumer.csproj", Path.GetFileName(developmentProjectPath));
+        var developmentProject = XDocument.Load(developmentProjectPath);
+        var developmentReference = Assert.Single(developmentProject.Descendants("ProjectReference"));
+        Assert.Equal("../../ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj", (string?)developmentReference.Attribute("Include"));
+        Assert.DoesNotContain(developmentProject.Descendants("PackageReference"), reference =>
+            (string?)reference.Attribute("Include") == "ForgeTrust.AppSurface.Durable.PostgreSql");
+        Assert.DoesNotContain("$(AppSurfacePackageVersion)", File.ReadAllText(developmentProjectPath), StringComparison.Ordinal);
 
-        Assert.Empty(Directory.EnumerateFiles(consumerDirectory, "*.csproj", SearchOption.TopDirectoryOnly));
-        Assert.True(File.Exists(Path.Combine(consumerDirectory, "PostgreSqlPreflightConsumer.csproj.template")));
+        // protects=dependency discovery sees source references while the artifact-only template retains exact-version restore; fails_when=the template becomes a discoverable project or loses its package binding; no_claim=artifact receipt validation.
+        var template = XDocument.Load(Path.Combine(consumerDirectory, "PostgreSqlPreflightConsumer.csproj.template"));
+        Assert.Empty(template.Descendants("ProjectReference"));
+        var providerPackage = Assert.Single(template.Descendants("PackageReference"), reference =>
+            (string?)reference.Attribute("Include") == "ForgeTrust.AppSurface.Durable.PostgreSql");
+        Assert.Equal("$(AppSurfacePackageVersion)", (string?)providerPackage.Attribute("Version"));
     }
 
     [Theory]
