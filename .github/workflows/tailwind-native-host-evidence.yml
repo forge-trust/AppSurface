@@ -132,7 +132,7 @@ jobs:
 
       - name: Download exact producer artifact
         id: producer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ env.PRODUCER_ARTIFACT_ID }}
           path: ${{ runner.temp }}/tailwind-producer
@@ -205,7 +205,7 @@ jobs:
 
       - name: Upload host evidence (including failure diagnostics)
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tailwind-native-host-${{ github.run_id }}-${{ env.NATIVE_INVOCATION_ID }}-${{ matrix.rid }}
           path: ${{ runner.temp }}/tailwind-host-report
@@ -261,27 +261,27 @@ jobs:
           cp "$GITHUB_OUTPUT.json" "$HOST_MAP"
           echo "native_invocation_id=$NATIVE_INVOCATION_ID" >> "$GITHUB_OUTPUT"
       - name: Download linux-x64 evidence by immutable ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.resolve.outputs.artifact_linux_x64_id }}
           path: ${{ runner.temp }}/tailwind-hosts/linux-x64
       - name: Download linux-arm64 evidence by immutable ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.resolve.outputs.artifact_linux_arm64_id }}
           path: ${{ runner.temp }}/tailwind-hosts/linux-arm64
       - name: Download osx-x64 evidence by immutable ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.resolve.outputs.artifact_osx_x64_id }}
           path: ${{ runner.temp }}/tailwind-hosts/osx-x64
       - name: Download osx-arm64 evidence by immutable ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.resolve.outputs.artifact_osx_arm64_id }}
           path: ${{ runner.temp }}/tailwind-hosts/osx-arm64
       - name: Download win-x64 evidence by immutable ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.resolve.outputs.artifact_win_x64_id }}
           path: ${{ runner.temp }}/tailwind-hosts/win-x64
@@ -292,7 +292,7 @@ jobs:
       - name: Restore verifier from locked dependencies
         run: dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode
       - name: Download exact producer artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ inputs.producer_artifact_id }}
           path: ${{ runner.temp }}/tailwind-producer
@@ -322,7 +322,7 @@ jobs:
       - name: Upload aggregate and bound host evidence
         id: upload-aggregate
         if: ${{ success() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tailwind-native-aggregate-${{ github.run_id }}-${{ env.NATIVE_INVOCATION_ID }}
           path: ${{ runner.temp }}/tailwind-aggregate
