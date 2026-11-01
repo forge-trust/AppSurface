@@ -120,6 +120,98 @@ public sealed class EvidenceProtectedSupportRecordTests
     }
 
     [Fact]
+    public void ParserRequiresRuntimeAndEntryPathsAndDigestsToNameManifestRows()
+    {
+        var baseline = DataShapeOnly();
+        _ = Parse(EvidenceCanonicalJson.Serialize(baseline));
+
+        RejectData(baseline with { RuntimeHostPath = "different-dotnet" });
+        RejectData(baseline with { RuntimeHostSha256 = Hex('9') });
+        RejectData(baseline with { EntryAssemblyPath = "different-worker.dll" });
+        RejectData(baseline with { EntryAssemblySha256 = Hex('9') });
+    }
+
+    [Fact]
+    public void ParserRejectsMalformedApplicationIdentityAndDigests()
+    {
+        var baseline = DataShapeOnly();
+        var application = baseline.Applications[0];
+        _ = Parse(EvidenceCanonicalJson.Serialize(baseline));
+
+        RejectData(baseline with { Applications = Array.AsReadOnly([application with { Id = "invalid id" }]) });
+        RejectData(baseline with { Applications = Array.AsReadOnly([application with { CatalogueSha256 = Hex('A') }]) });
+        RejectData(baseline with { Applications = Array.AsReadOnly([application with { EntrySha256 = "not-a-sha256" }]) });
+    }
+
+    [Fact]
+    public void ParserRejectsMalformedQualificationCommitSourceAndArtifactFields()
+    {
+        var baseline = DataShapeOnly();
+        var qualification = baseline.Qualification;
+        _ = Parse(EvidenceCanonicalJson.Serialize(baseline));
+
+        RejectData(baseline with { Qualification = qualification with { WorkflowCommit = "not-a-commit" } });
+        RejectData(baseline with { Qualification = qualification with { SubjectRevision = "not-a-commit" } });
+        RejectData(baseline with { Qualification = qualification with { SourceCaptureSha256 = "not-a-sha256" } });
+        RejectData(baseline with { Qualification = qualification with { SourceTree = Hex40('A') } });
+        RejectData(baseline with { Qualification = qualification with { ArtifactId = "../artifact" } });
+        RejectData(baseline with { Qualification = qualification with { ArtifactSha256 = "not-a-sha256" } });
+    }
+
+    [Fact]
+    public void ParserRejectsUnsupportedPlatformAndRepositoryIdentity()
+    {
+        var baseline = DataShapeOnly();
+        _ = Parse(EvidenceCanonicalJson.Serialize(baseline));
+
+        RejectData(baseline with { Platform = "linux-arm64" });
+        RejectData(baseline with { RepositoryName = "forge-trust/other" });
+    }
+
+    [Fact]
+    public void ParserRequiresSortedUniqueWellFormedIdentifierAndReceiptIds()
+    {
+        var baseline = DataShapeOnly() with
+        {
+            ProfileIds = ["profile-a", "profile-b"],
+            ProducerIds = ["producer-a", "producer-b"],
+            CapabilityIds = ["capability-a", "capability-b"],
+            Qualification = DataShapeOnly().Qualification with
+            {
+                ProofReceipts = Array.AsReadOnly(new[]
+                {
+                    new EvidenceSupportReceipt("receipt-a", Hex('f')),
+                    new EvidenceSupportReceipt("receipt-b", Hex('f')),
+                }),
+            },
+        };
+        _ = Parse(EvidenceCanonicalJson.Serialize(baseline));
+
+        IReadOnlyList<string>[] invalidIds =
+        [
+            ["second", "first"],
+            ["same", "same"],
+            ["invalid id"],
+        ];
+        foreach (var ids in invalidIds)
+        {
+            RejectData(baseline with { ProfileIds = ids });
+            RejectData(baseline with { ProducerIds = ids });
+            RejectData(baseline with { CapabilityIds = ids });
+        }
+
+        EvidenceSupportReceipt[][] invalidReceipts =
+        [
+            [new("receipt-b", Hex('f')), new("receipt-a", Hex('f'))],
+            [new("same", Hex('f')), new("same", Hex('f'))],
+            [new("invalid id", Hex('f'))],
+        ];
+        foreach (var receipts in invalidReceipts)
+            RejectData(baseline with
+            { Qualification = baseline.Qualification with { ProofReceipts = Array.AsReadOnly(receipts) } });
+    }
+
+    [Fact]
     public void ParserRejectsUnknownDuplicateAliasNoncanonicalAndNestedDigestDrift()
     {
         var raw = Encoding.UTF8.GetString(EvidenceCanonicalJson.Serialize(DataShapeOnly()));
@@ -155,6 +247,10 @@ public sealed class EvidenceProtectedSupportRecordTests
     [InlineData("CurrentRunAttempt")]
     [InlineData("CurrentSubjectRevision")]
     [InlineData("CurrentRefProtected")]
+    [InlineData("Platform")]
+    [InlineData("RepositoryName")]
+    [InlineData("ApplicationCatalogueSha256")]
+    [InlineData("ApplicationEntrySha256")]
     public void MatcherRejectsMismatchedCurrentProtectedFacts(string field)
     {
         var (record, facts) = DataShapeOnlyAndFacts();
@@ -179,6 +275,12 @@ public sealed class EvidenceProtectedSupportRecordTests
             "CurrentRunId" => facts with { CurrentRunId = 0 },
             "CurrentRunAttempt" => facts with { CurrentRunAttempt = 0 },
             "CurrentSubjectRevision" => facts with { CurrentSubjectRevision = "not-a-commit" },
+            "Platform" => facts with { Platform = "linux-arm64" },
+            "RepositoryName" => facts with { RepositoryName = "forge-trust/other" },
+            "ApplicationCatalogueSha256" => facts with
+            { Application = facts.Application with { CatalogueSha256 = Hex('9') } },
+            "ApplicationEntrySha256" => facts with
+            { Application = facts.Application with { EntrySha256 = Hex('9') } },
             _ => facts with { RefProtected = false },
         };
         Assert.False(EvidenceProtectedSupportMatcher.Matches(record, wrong));
@@ -199,6 +301,18 @@ public sealed class EvidenceProtectedSupportRecordTests
         var laterCurrentCommit = facts with { CurrentWorkflowCommit = Hex40('c') };
 
         Assert.True(EvidenceProtectedSupportMatcher.Matches(record, laterCurrentCommit));
+    }
+
+    [Fact]
+    public void MatcherDispatchEventCanReachLateMismatchWithoutClaimingQualification()
+    {
+        var (record, facts) = DataShapeOnlyAndFacts();
+        var dispatched = facts with { Event = "workflow_dispatch" };
+
+        Assert.True(EvidenceProtectedSupportMatcher.Matches(record, dispatched));
+        Assert.False(EvidenceProtectedSupportMatcher.Matches(record,
+            dispatched with { CapabilityIds = ["different-capability"] }));
+        // These synthetic facts exercise matcher equality only; they do not prove a provider run or qualify a build.
     }
 
     [Fact]
@@ -430,7 +544,13 @@ public sealed class EvidenceProtectedSupportRecordTests
         Assert.False(EvidenceProtectedSupportMatcher.Matches(record, reverseOrder with { CapabilityIds = null! }));
     }
 
-    private static void Reject(byte[] bytes) => Assert.Throws<FormatException>(() => Parse(bytes));
+    private static void Reject(byte[] bytes)
+    {
+        var error = Assert.Throws<FormatException>(() => Parse(bytes));
+        Assert.Equal("Protected support record is invalid.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+    private static void RejectData(EvidenceProtectedSupportRecordData data) => Reject(EvidenceCanonicalJson.Serialize(data));
     private static EvidenceProtectedSupportRecord Parse(byte[] bytes) =>
         EvidenceProtectedSupportRecord.Parse(bytes, EvidenceDigest.Sha256(bytes));
     private static byte[] CanonicalDataBytes() => EvidenceCanonicalJson.Serialize(DataShapeOnly());
