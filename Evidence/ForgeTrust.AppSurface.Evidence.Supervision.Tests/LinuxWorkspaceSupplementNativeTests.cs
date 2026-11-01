@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Testing;
+using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 
@@ -129,8 +130,10 @@ public sealed class LinuxWorkspaceSupplementNativeTests
             Directory.CreateDirectory(path, PrivateDirectory);
             Assert.Equal(0, Chown(path, policy.Uid, policy.Gid));
             File.SetUnixFileMode(path, (UnixFileMode)policy.Permissions);
-            using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
+            // File.OpenHandle rejects directories even for root; retain a real native directory descriptor.
+            var descriptor = OpenDirectory(path, 0x10000 | 0x80000 | 0x20000); // O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW.
+            Assert.True(descriptor >= 0);
+            using var handle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
             var actual = LinuxProtectedMetadata.From(EvidenceLinuxFileSystem.StatFd(handle));
             LinuxWorkspaceLayout.RequireDirectory(actual, policy);
             if (policy.Name == "output")
@@ -396,6 +399,9 @@ public sealed class LinuxWorkspaceSupplementNativeTests
         internal uint Gid;
         internal IntPtr Members;
     }
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 
     [DllImport("libc", EntryPoint = "geteuid")]
     private static extern uint GetEffectiveUid();
