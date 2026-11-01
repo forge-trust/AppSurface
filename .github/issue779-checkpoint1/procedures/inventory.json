@@ -670,7 +670,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n10/port-manifest.json",
-      "ported_sha256": "44ff947ada932d4772ed18a9051c1291ed7956d8144f55f87baccbc47cd3228b",
+      "ported_sha256": "ccbb8e95b9cede18bdf1651ee73c4a495484dbdbb220ec82d17bd460dbb2c423",
       "sha256": "44ff947ada932d4772ed18a9051c1291ed7956d8144f55f87baccbc47cd3228b"
     },
     {
@@ -679,7 +679,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n10/portable-validation.json",
-      "ported_sha256": "ce78489a4db23ada217eb779bce145afb1cbb75692c179384c2c0e1619f8ba6d",
+      "ported_sha256": "8a539c6dba036985a96abd54a1f3febcd0471b2c8dc5f664031984609b004f04",
       "sha256": "ce78489a4db23ada217eb779bce145afb1cbb75692c179384c2c0e1619f8ba6d"
     },
     {
