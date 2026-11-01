@@ -96,7 +96,9 @@ internal static class ContextMaterialization
                 };
                 var result = await ArchiveTransformer.TransformAsync(transformed, token).ConfigureAwait(false);
                 verified = checked(verified + new FileInfo(transformed.OutputPath).Length);
+                var sourceMode = FileModeOf(source);
                 File.Move(transformed.OutputPath, source, true);
+                SetMode(source, sourceMode);
                 repaired = result.OutputSha256;
                 Require(input.ExpectedRepairedCliSha256 is null || repaired == input.ExpectedRepairedCliSha256, "Repaired archive differs from its declared output digest.");
             }

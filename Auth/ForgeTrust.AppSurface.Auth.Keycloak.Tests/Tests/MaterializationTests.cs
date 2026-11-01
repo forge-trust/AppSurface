@@ -135,6 +135,40 @@ public sealed class MaterializationTests
         Assert.False(Directory.Exists(destination));
     }
 
+    [Theory]
+    [InlineData(292)]
+    [InlineData(416)]
+    [InlineData(493)]
+    public async Task MaterializationPreservesRepairedArchiveSourceMode(int declaredMode)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var fixture = TinyImageFixture.Create();
+        var root = Path.Combine(fixture.Root, "archive-mode-input");
+        var input = CreateRichInput(fixture, root);
+        var sourceJar = Path.Combine(root, "source", "lib", "server.jar");
+        var replacementJar = Path.Combine(root, "replacement.jar");
+        WriteTinyJar(sourceJar, "1", "old");
+        WriteTinyJar(replacementJar, "2", "new");
+        var sourceMode = (UnixFileMode)declaredMode;
+        File.SetUnixFileMode(sourceJar, sourceMode);
+        var sourceFiles = input.Source.Files.SetItem(0, new ContextSourceFile("lib/server.jar", HexFile(sourceJar), new FileInfo(sourceJar).Length, sourceMode));
+        var archive = new ArchiveTransformSpec(sourceJar, Path.Combine(root, "repaired.jar"), HexFile(sourceJar),
+            [new ArchiveModuleSpec("com.example", "jackson-core", "1", "2", "com/example/", "example", HexFile(replacementJar), ReplacementPath: replacementJar)], new());
+        input = input with { Source = input.Source with { Files = sourceFiles }, Replacements = [], Archive = archive, ArchiveDestination = "/opt/keycloak/lib/server.jar" };
+
+        var result = await ContextMaterialization.MaterializeAsync(input, Path.Combine(fixture.Root, "archive-mode-context"));
+
+        const string relative = "rootfs/opt/keycloak/lib/server.jar";
+        var repairedPath = TestPathUtils.PathUnder(result.ContextPath, relative);
+        Assert.Equal(sourceMode, File.GetUnixFileMode(repairedPath));
+        Assert.Equal(result.RepairedCliSha256, HexFile(repairedPath));
+        Assert.Equal(result.RepairedCliSha256, result.ExpectedFinalFiles[relative]);
+        using var manifest = System.Text.Json.JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(result.ContextPath, "context-manifest.json")));
+        var entry = manifest.RootElement.GetProperty("files").EnumerateArray().Single(x => x.GetProperty("path").GetString() == relative);
+        Assert.Equal(declaredMode, entry.GetProperty("mode").GetInt32());
+        Assert.Equal(result.ManifestDigest, ContextMaterialization.Revalidate(result.ContextPath, result.ManifestDigest));
+    }
+
     [Fact]
     public async Task MaterializationCopiesBoundedSourceReplacementThemeEntrypointDebAndRealOciGraphs()
     {

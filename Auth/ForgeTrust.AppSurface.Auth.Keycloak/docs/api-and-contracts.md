@@ -8,6 +8,8 @@
 
 `KeycloakSecurity.MaterializeAsync` accepts an accepted plan and an absent context directory. `KeycloakBuildContext.Digest`, `DirectoryPath`, and `RepairedCliSha256` identify the result. `Verify` revalidates the context. `CreateDockerBuildArguments` returns fixed Docker 29-compatible arguments and validates the local tag; it never invokes Docker or publishes.
 
+Archive repair preserves the captured source file's Unix mode when installing the transformed bytes. The context manifest records that restored mode, and `Verify` checks it along with the repaired digest. The host's file-creation umask does not define the repaired archive's permissions; see the [engine decision guide](engine.md) for the transformation boundary.
+
 `KeycloakSecurity.ResolveLocalImageAsync` accepts a host image reference and returns the immutable `KeycloakInspectionImage` resolved by the Docker 29 containerd adapter. The adapter is the safe handoff from a mutable local tag to the actual manifest, config, platform, ordered diff IDs, and full export hash checks. It does not trust image labels. Classic Docker image stores that expose only config metadata fail as unsupported because they cannot prove the selected manifest graph. `KeycloakSecurity.InspectAsync` accepts that resolved identity and the plan, returning `VerifiedKeycloakImageEvidence` only after every declared check, each actual theme file hash, and, in security mode, the read-only probe pass. Theme-only inspection instead preserves the source configuration and filesystem outside the declared application tree, and explicitly reports that security customization was not evaluated. A config digest of all zeroes, an unrelated image, reordered layers, or a changed theme file must fail.
 
 ## Complete input files

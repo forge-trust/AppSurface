@@ -1,5 +1,8 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Formats.Tar;
+using System.Security.Cryptography;
 using ForgeTrust.AppSurface.Auth.Keycloak;
 using ForgeTrust.AppSurface.Auth.Keycloak.Tests.Tests;
 
@@ -260,6 +263,91 @@ public sealed class DockerInspectionTests
         Assert.Equal(KeycloakStageOutcome.Succeeded, own[1].Outcome);
         Assert.Equal(own[0].CorrelationId, own[1].CorrelationId);
         Assert.Equal(fixture.InspectionImage.DiffIds.Length, own[1].CheckCount);
+    }
+
+    [Theory]
+    [InlineData("classic-config")]
+    [InlineData("nonobject-root")]
+    [InlineData("nonobject-config")]
+    [InlineData("missing-media-type")]
+    [InlineData("wrong-media-type")]
+    [InlineData("wrong-media-type-kind")]
+    [InlineData("missing-config")]
+    [InlineData("missing-config-media-type")]
+    [InlineData("wrong-config-media-type")]
+    [InlineData("wrong-config-media-type-kind")]
+    [InlineData("missing-digest")]
+    [InlineData("wrong-digest-type")]
+    [InlineData("null-digest")]
+    public async Task Resolve_local_core_classifies_unsupported_manifest_shapes(string shape)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var manifest = JsonNode.Parse(ReadBlob(fixture.ArchivePath, fixture.InspectionImage.ManifestDigest))!.AsObject();
+        var config = manifest["config"]!.AsObject();
+        switch (shape)
+        {
+            case "nonobject-config": manifest["config"] = new JsonArray(); break;
+            case "missing-media-type": manifest.Remove("mediaType"); break;
+            case "wrong-media-type": manifest["mediaType"] = "application/vnd.oci.image.index.v1+json"; break;
+            case "wrong-media-type-kind": manifest["mediaType"] = 7; break;
+            case "missing-config": manifest.Remove("config"); break;
+            case "missing-config-media-type": config.Remove("mediaType"); break;
+            case "wrong-config-media-type": config["mediaType"] = "application/vnd.oci.image.index.v1+json"; break;
+            case "wrong-config-media-type-kind": config["mediaType"] = 7; break;
+            case "missing-digest": config.Remove("digest"); break;
+            case "wrong-digest-type": config["digest"] = 7; break;
+            case "null-digest": config["digest"] = null; break;
+        }
+        var bytes = shape switch
+        {
+            "classic-config" => ReadBlob(fixture.ArchivePath, fixture.InspectionImage.ConfigDigest),
+            "nonobject-root" => "[]"u8.ToArray(),
+            _ => JsonSerializer.SerializeToUtf8Bytes(manifest)
+        };
+        var digest = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
+        var archive = Path.Combine(fixture.Root, "resolver-" + shape + ".tar");
+        if (shape != "classic-config") AddBlob(fixture.ArchivePath, archive, digest, bytes);
+        var image = fixture.InspectionImage with { ManifestDigest = digest };
+        Task<ProcessObservation> Command(IReadOnlyList<string> args, CancellationToken token)
+        {
+            if (args[0] == "image" && args[1] == "save") File.Copy(shape == "classic-config" ? fixture.ArchivePath : archive, args[3]);
+            return Task.FromResult(args[0] == "version" ? Observation("29.7.2") : Reply(args, image, digest));
+        }
+
+        var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() =>
+            KeycloakSecurity.ResolveLocalImageCoreAsync("local:shape", default, Command));
+
+        Assert.Equal(KeycloakFailureCode.Unsupported, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Inspection, failure.Phase);
+        Assert.Equal(KeycloakEffectState.None, failure.Effect);
+    }
+
+    private static byte[] ReadBlob(string archive, string digest)
+    {
+        using var input = File.OpenRead(archive);
+        using var tar = new TarReader(input);
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            if (entry.Name == "blobs/sha256/" + digest[7..])
+            {
+                using var content = new MemoryStream();
+                entry.DataStream!.CopyTo(content);
+                return content.ToArray();
+            }
+        throw new InvalidDataException("Fixture blob not found.");
+    }
+
+    private static void AddBlob(string source, string destination, string digest, byte[] bytes)
+    {
+        using var input = File.OpenRead(source);
+        using var reader = new TarReader(input);
+        using var output = File.Create(destination);
+        using var writer = new TarWriter(output, TarEntryFormat.Pax);
+        TarEntry? entry;
+        while ((entry = reader.GetNextEntry()) is not null)
+            writer.WriteEntry(entry);
+        using var content = new MemoryStream(bytes);
+        writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "blobs/sha256/" + digest[7..]) { DataStream = content });
     }
 
     [Fact]

@@ -128,9 +128,16 @@ internal static class DockerInspection
             KeycloakSecurity.Require(manifest is not null && "sha256:" + KeycloakSecurity.Hash(manifest) == selected.EngineId, "Platform manifest is unavailable from this Docker store.");
             preflight.Finish();
             using var json = OciLayout.StrictJson(manifest!);
-            if (!json.RootElement.TryGetProperty("config", out _))
-                throw new NotSupportedException("The local reference must resolve to a platform manifest. Build with the fixed context arguments, including disabled provenance, or select an immutable platform manifest.");
-            var config = json.RootElement.GetProperty("config").GetProperty("digest").GetString()!;
+            var root = json.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("mediaType", out var mediaType) || mediaType.ValueKind != JsonValueKind.String ||
+                mediaType.GetString() != "application/vnd.oci.image.manifest.v1+json" ||
+                !root.TryGetProperty("config", out var configDescriptor) || configDescriptor.ValueKind != JsonValueKind.Object ||
+                !configDescriptor.TryGetProperty("mediaType", out var configMediaType) || configMediaType.ValueKind != JsonValueKind.String ||
+                configMediaType.GetString() != "application/vnd.oci.image.config.v1+json" ||
+                !configDescriptor.TryGetProperty("digest", out var configDigest) || configDigest.ValueKind != JsonValueKind.String)
+                throw new NotSupportedException("The local reference must resolve to a supported OCI platform manifest. Build with the fixed context arguments, including disabled provenance, or select an immutable platform manifest.");
+            var config = configDigest.GetString()!;
             var result = new KeycloakInspectionImage(selected.EngineId, config, selected.Platform, selected.DiffIds);
             _ = new OciReader().Read(archive, new(null, result.ManifestDigest, result.Platform, result.ConfigDigest, result.DiffIds), token);
             Verify(await ImageIdentity(selected.EngineId, token, run).ConfigureAwait(false), result);
