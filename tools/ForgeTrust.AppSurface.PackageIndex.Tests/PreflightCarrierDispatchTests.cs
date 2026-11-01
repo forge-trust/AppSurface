@@ -294,6 +294,7 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
         Assert.Equal("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", request.Environment["PREFLIGHT_STORE_ID"]);
         Assert.Equal("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450", request.Environment["PREFLIGHT_ACTIVE_EPOCH"]);
         Assert.Contains("--consumer-project-template", request.Arguments);
+        Assert.DoesNotContain("--consumer-project", request.Arguments);
         Assert.Contains("--receipt", request.Arguments);
     }
 

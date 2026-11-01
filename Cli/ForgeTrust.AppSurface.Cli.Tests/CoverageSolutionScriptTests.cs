@@ -68,7 +68,13 @@ public sealed class CoverageSolutionScriptTests
     {
         var workflow = ReadWorkflow();
 
-        Assert.Contains("timeout-minutes: 45", workflow, StringComparison.Ordinal);
+        var yaml = new YamlStream();
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var build = (YamlMappingNode)jobs.Children[new YamlScalarNode("build")];
+        Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
         Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
@@ -101,7 +107,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Equal(
             new[] { "coverage-security-platform", "packed-durable-consumers" },
             dependencies.Children.Cast<YamlScalarNode>().Select(node => node.Value));
-        Assert.Equal("45", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
+        Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
         Assert.False(build.Children.ContainsKey(new YamlScalarNode("if")));
 
         var packed = (YamlMappingNode)jobs.Children[new YamlScalarNode("packed-durable-consumers")];

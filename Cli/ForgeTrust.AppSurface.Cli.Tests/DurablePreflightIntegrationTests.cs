@@ -400,6 +400,65 @@ public sealed class DurableSchemaPreflightIntegrationTests
     public async Task Cancellation_while_waiting_for_writer_fence_fails_and_releases_reader_session()
     {
         await using var fixture = await Fixture.CreateAsync();
+        await AssertCancellationWhileWriterFenceAsync(fixture);
+    }
+
+    // Value: protects=cancelled readers exit while the preceding writer remains fenced;
+    // fails_when=server-exit observation is skipped or accepts a retained real backend;
+    // why_new=ordinary cancellation cannot force the client-close/backend-exit ordering;
+    // seam=server observation only; no_claim=the retained session models visibility, not a verifier leak.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Cancelled_preflight_observes_backend_exit_while_writer_fence_remains_held(bool backendExits)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        const string readerName = "issue845-cancelled-reader";
+        var settings = new NpgsqlConnectionStringBuilder(fixture.OwnerConnection)
+        {
+            Pooling = false,
+            ApplicationName = readerName,
+        };
+        await using var retainedSession = new NpgsqlConnection(settings.ConnectionString);
+        await retainedSession.OpenAsync();
+        var observedBackend = false;
+        var error = await Record.ExceptionAsync(async () =>
+            await AssertCancellationWhileWriterFenceAsync(fixture, sessionObserved: async () =>
+            {
+                observedBackend = true;
+                if (backendExits)
+                {
+                    // Release only after a real nonzero observation; no timer determines success.
+                    await retainedSession.CloseAsync();
+                }
+            }));
+
+        _output.WriteLine($"cancelled-session backend_exits={backendExits} observed={observedBackend} failure={error?.GetType().Name ?? "none"}");
+        Assert.True(observedBackend);
+        if (backendExits)
+        {
+            Assert.Null(error);
+            Assert.Equal(0, await fixture.CountSessionsAsync(readerName));
+        }
+        else
+        {
+            Assert.IsType<TimeoutException>(error);
+            Assert.Equal(1, await fixture.CountSessionsAsync(readerName));
+        }
+        await fixture.AssertNoFenceLocksAsync();
+    }
+
+    /// <summary>Checks cancellation and server exit before releasing the test's preceding writer.</summary>
+    /// <remarks>
+    /// Keeps the 400 ms work cancellation and observes server exit in the existing ten-second window,
+    /// within the same 30-second deadline started before the call. The writer is never released to make exit pass.
+    /// </remarks>
+    /// <param name="fixture">Owns the real database and independent session observer.</param>
+    /// <param name="sessionObserved">Regression barrier after a nonzero session count; cannot certify exit.</param>
+    private static async Task AssertCancellationWhileWriterFenceAsync(
+        Fixture fixture,
+        Func<Task>? sessionObserved = null)
+    {
         await using var writer = await fixture.OpenOwnerConnectionAsync();
         await using var transaction = await writer.BeginTransactionAsync();
         await using (var command = new NpgsqlCommand("SELECT pg_catalog.pg_advisory_xact_lock(@key)", writer, transaction))
@@ -409,6 +468,7 @@ public sealed class DurableSchemaPreflightIntegrationTests
         }
 
         const string readerName = "issue845-cancelled-reader";
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
         var read = fixture.RunAsync(RuntimeA, applicationName: readerName, cancellationToken: cancellation.Token);
         await fixture.WaitForWaitEventAsync(readerName, "advisory");
@@ -418,6 +478,8 @@ public sealed class DurableSchemaPreflightIntegrationTests
         {
             Assert.Equal("timeout", preflightError.Category);
         }
+        // Client close is one-way; observe server exit before releasing the preceding writer.
+        await fixture.WaitForSessionExitAsync(readerName, completionDeadline.Token, sessionObserved);
         Assert.Equal(0, await fixture.CountSessionsAsync(readerName));
         await transaction.CommitAsync();
         await fixture.AssertNoFenceLocksAsync();

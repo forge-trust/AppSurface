@@ -1531,12 +1531,7 @@ public sealed class RazorWireMvcPlaywrightTests
         var context = await _fixture.Browser.NewContextAsync();
         try
         {
-            await context.RouteAsync("https://fonts.googleapis.com/**", route => route.FulfillAsync(new RouteFulfillOptions
-            {
-                Status = StatusCodes.Status200OK,
-                ContentType = "text/css",
-                Body = "/* Functional form tests use the sample's system-font fallback. */"
-            }));
+            await RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync(context);
             return context;
         }
         catch
@@ -1624,6 +1619,22 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
     public string BaseUrl { get; private set; } = string.Empty;
     public string ReactivityUrl { get; private set; } = string.Empty;
     public string FormFailuresUrl { get; private set; } = string.Empty;
+
+    /// <summary>Installs the local decorative-font fallback used by functional form tests.</summary>
+    /// <param name="context">The caller-owned context to configure before navigating to the sample.</param>
+    /// <returns>A task that completes when the font stylesheet route has been installed.</returns>
+    /// <remarks>
+    /// Only the Google Fonts stylesheet is fulfilled locally; application requests and readiness deadlines
+    /// remain unchanged. Rendering and responsive tests keep their own font policy and must not use this helper.
+    /// The caller remains responsible for disposing the context.
+    /// </remarks>
+    internal static Task ConfigureFunctionalFormContextAsync(IBrowserContext context) =>
+        context.RouteAsync("https://fonts.googleapis.com/**", route => route.FulfillAsync(new RouteFulfillOptions
+        {
+            Status = StatusCodes.Status200OK,
+            ContentType = "text/css",
+            Body = "/* Functional form tests use the sample's system-font fallback. */"
+        }));
 
     public async Task InitializeAsync()
     {

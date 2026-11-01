@@ -29,9 +29,11 @@ It also includes an AppSurface Docs browser regression test that runs against `W
 ## Form-interactions readiness
 
 The functional form-interactions tests in
-[`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs) use a browser context that serves the
-sample's Google Fonts stylesheet with a local empty CSS response. The sample uses its system-font fallback;
-these tests verify conditional fields, collection form data, and validation redisplay. Use the [visual-baseline
+[`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs) and
+[`RazorWireNestedCollectionsPlaywrightTests`](./RazorWireNestedCollectionsPlaywrightTests.cs) share
+`RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync`, which installs a local empty CSS response
+for the sample's Google Fonts stylesheet before navigation. The sample uses its system-font fallback;
+these tests verify conditional fields, nested collection form data, focus, and validation redisplay. Use the [visual-baseline
 suites](#release-page-visual-baselines) when verifying appearance.
 
 The [sample layout](../../examples/razorwire-mvc/Views/Shared/_Layout.cshtml) requests this decorative stylesheet
@@ -39,6 +41,10 @@ before parser-blocking runtime scripts. A stalled font response can therefore pr
 even when every local asset has loaded. The context intercepts only `https://fonts.googleapis.com/**`;
 application scripts, styles, requests, and the form-readiness and validation assertions still run normally.
 Keep this interception scoped to functional form tests so browser tests that exercise rendering retain their own font policy.
+The nested-collection responsive test explicitly opts out, and the no-JavaScript test retains its ordinary context.
+The functional navigation helper keeps its default 30-second `load` deadline and 15-second runtime-readiness wait.
+Regression cases hold an upstream decorative-font request to verify local fallback and hold a required application script
+to verify that navigation still fails at its original deadline. Held requests are released before context disposal.
 
 ## AppSurface Docs standalone fixture
 
