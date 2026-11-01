@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AngleSharp;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.ReleaseContracts;
@@ -119,10 +120,11 @@ internal static class ReleaseDocsStaticConceptPublication
                 {
                     var relative = Path.GetRelativePath(verificationRoot, file).Replace(Path.DirectorySeparatorChar, '/');
                     if (IsPrivateMap(file, relative)) continue;
-                    if (relative.StartsWith("releases/", StringComparison.Ordinal)
-                        && !releases.Any(release => release.IsPublic && relative.StartsWith(release.ExactTreePath + "/", StringComparison.Ordinal))) continue;
-                    if (releases.Any(release => !release.IsPublic && (relative == release.ExactTreePath
-                            || relative.StartsWith(release.ExactTreePath + "/", StringComparison.Ordinal)))) continue;
+                    if (relative.StartsWith("releases/", StringComparison.OrdinalIgnoreCase)
+                        && !servedReleases.Any(release => relative.StartsWith(release.ExactTreePath + "/", StringComparison.Ordinal))) continue;
+                    if (releases.Any(release => (!release.IsPublic || !release.IsAvailable)
+                            && (relative.Equals(release.ExactTreePath, StringComparison.OrdinalIgnoreCase)
+                                || relative.StartsWith(release.ExactTreePath + "/", StringComparison.OrdinalIgnoreCase)))) continue;
                     var oldMount = ServingMember(root, "v/");
                     var managed = ServingMember(root, "versions/switch/");
                     if (relative.StartsWith(oldMount, StringComparison.OrdinalIgnoreCase)
@@ -169,7 +171,7 @@ internal static class ReleaseDocsStaticConceptPublication
                             var bytes = await ReadBoundedAsync(file, limit, cancellationToken);
                             var document = new HtmlParser().ParseDocument(new UTF8Encoding(false, true).GetString(bytes));
                             RebaseDocument(document, mount, release.UsesExportRoot);
-                            var rendered = document.DocumentElement.OuterHtml;
+                            var rendered = document.ToHtml();
                             await File.WriteAllTextAsync(file, rendered, cancellationToken);
                             var relative = Path.GetRelativePath(stagingRoot, file).Replace(Path.DirectorySeparatorChar, '/');
                             outputRecords.Add(new DocsServingOutputFile(relative, "mounted-html", release.Version, release.ManifestSha256,
@@ -541,7 +543,7 @@ internal static class ReleaseDocsStaticConceptPublication
         InsertFragment(document, document.Head, markup.Head, before: null);
         document.Head.InsertBefore(policyElement, document.Head.FirstChild);
         InsertFragment(document, h1.ParentElement, markup.Body, h1);
-        return document.DocumentElement?.OuterHtml ?? throw Invalid("The canonical guide shell could not be serialized.");
+        return document.ToHtml();
     }
 
     private static void InsertFragment(IDocument document, IElement parent, string html, IElement? before)

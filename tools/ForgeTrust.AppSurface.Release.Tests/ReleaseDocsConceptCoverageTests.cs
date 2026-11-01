@@ -236,6 +236,7 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
     [Theory]
     [InlineData("missing-tree")]
     [InlineData("tampered-archive")]
+    [InlineData("tampered-case-variant-tree")]
     public async Task GenerateAsync_RepresentsUnavailableUnselectedReleaseWithoutMountingIt(string availabilityFailure)
     {
         var fixture = await CreateFixtureAsync(
@@ -253,6 +254,14 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
         {
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture.Root, "releases", "2.0.0", "export", "start.html"),
                 "tampered bytes no longer match the pinned archive manifest");
+            if (availabilityFailure == "tampered-case-variant-tree")
+            {
+                var originalRoot = TestPathUtils.PathUnder(fixture.Root, "releases");
+                var temporaryRoot = TestPathUtils.PathUnder(fixture.Root, "release-case-staging");
+                Directory.Move(originalRoot, temporaryRoot);
+                Directory.Move(temporaryRoot, TestPathUtils.PathUnder(fixture.Root, "Releases"));
+                await SetCatalogFieldAsync(fixture, "1.0.0", "exactTreePath", JsonValue.Create("Releases/1.0.0"));
+            }
         }
         var outputRoot = TestPathUtils.PathUnder(_root, "unavailable-unselected-release");
 
@@ -260,12 +269,52 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
 
         Assert.Equal(new[] { "1.0.0" }, result.VerifiedVersions);
         Assert.False(Directory.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "2.0.0")));
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(outputRoot, "releases", "2.0.0")));
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(outputRoot, "Releases", "2.0.0")));
         var choice = await ReadChoiceAsync(fixture, outputRoot, "1.0.0", "guides/start");
         var targetChoice = Assert.Single(choice.QuerySelectorAll("main section"), section =>
             section.TextContent.Contains("2.0.0", StringComparison.Ordinal));
         Assert.Contains("This version is unavailable", targetChoice.TextContent, StringComparison.Ordinal);
         Assert.DoesNotContain(targetChoice.QuerySelectorAll("a[href]"), link =>
             link.GetAttribute("href")!.StartsWith("/docs/v/2.0.0/", StringComparison.Ordinal));
+    }
+
+    // Value: protects=raw release copies require the exact verified catalog path spelling;
+    // fails_when=a case-folded allowlist admits a distinct unverified sibling on a case-sensitive filesystem;
+    // why_new=unavailable-release cases do not exercise an available release with an unlisted case alias; seam=none;
+    // no_claim=the current filesystem supports distinct case-only names; both layouts are exercised where available.
+    [Fact]
+    public async Task GenerateAsync_OmitsRawCaseAliasesWhileKeepingTheVerifiedMount()
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var originalRoot = TestPathUtils.PathUnder(fixture.Root, "releases");
+        var aliasRoot = TestPathUtils.PathUnder(fixture.Root, "Releases");
+        var temporaryRoot = TestPathUtils.PathUnder(fixture.Root, "release-case-staging");
+        var verifiedFiles = Directory.EnumerateFiles(originalRoot, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.GetRelativePath(originalRoot, path), File.ReadAllBytes, StringComparer.Ordinal);
+        Directory.Move(originalRoot, temporaryRoot);
+        Directory.Move(temporaryRoot, aliasRoot);
+        if (!Directory.Exists(originalRoot))
+        {
+            // Recreate the pinned tree and leave a separate unverified alias on case-sensitive filesystems.
+            foreach (var (relative, bytes) in verifiedFiles)
+            {
+                var destination = TestPathUtils.PathUnder(originalRoot, relative.Split(Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                await File.WriteAllBytesAsync(destination, bytes);
+            }
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(aliasRoot, "1.0.0", "export", "start.html"),
+                "unverified case-variant sibling must not be served");
+        }
+        var originalSnapshot = SnapshotFiles(fixture.Root);
+        var outputRoot = TestPathUtils.PathUnder(_root, "raw-release-case-alias");
+
+        var result = await GenerateAsync(fixture, outputRoot);
+
+        Assert.Equal(new[] { "1.0.0" }, result.VerifiedVersions);
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(outputRoot, "Releases")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "1.0.0", "export", "start.html")));
+        Assert.Equal(originalSnapshot, SnapshotFiles(fixture.Root));
     }
 
     [Theory]
