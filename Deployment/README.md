@@ -31,5 +31,9 @@ Read next:
 - [Shadow adoption and single-writer cutover](adoption.md)
 - [Diagnostics and troubleshooting](diagnostics.md)
 
+For exact Cloud Run execution evidence, start with the [execution observation reference](reference.md#exact-cloud-run-execution-observation), then follow the [existing-execution adoption guide](adoption.md#observe-an-existing-execution). That contract proves the caller-selected execution's captured configuration and terminal state with bounded read-only evidence; it does not own submission, cancellation, recovery, or application acceptance.
+
+The [CLI quickstart](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-deployment-gcp-cloud-run-observe-execution) shows the trusted-bundle workflow, library construction seam, and captured offline evidence.
+
 ---
 [Back to root](../README.md)

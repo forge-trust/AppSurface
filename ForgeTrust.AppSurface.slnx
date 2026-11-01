@@ -110,6 +110,7 @@
     <Project Path="examples/local-secrets/LocalSecretsExample.csproj" />
     <Project Path="examples/flow-generated-authoring/FlowGeneratedAuthoringExample.csproj" />
     <Project Path="examples/flow-approval-local/FlowApprovalLocalExample.csproj" />
+    <Project Path="examples/cloud-run-execution-consumers/CloudRunExecutionConsumers.csproj" />
     <Project Path="examples/named-canary-lab.Tests/NamedCanaryLab.Tests.csproj" />
     <Project Path="examples/named-canary-lab/NamedCanaryLab.csproj" />
     <Project Path="examples/product-readiness-lab/ProductReadinessLab.csproj" />

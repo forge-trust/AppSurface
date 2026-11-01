@@ -7,6 +7,7 @@ set -euo pipefail
 
 usage() {
   echo "Usage: $0 --artifact-dir DIR --artifact-manifest FILE --source-commit SHA --run-id ID --artifact-id ID --consumer-project-template FILE --receipt FILE [--prepare-only]" >&2
+  echo "       $0 --artifact-dir DIR --artifact-manifest FILE --source-commit SHA --run-id ID --artifact-id ID --consumer-project FILE.csproj --receipt FILE [--prepare-only]" >&2
 }
 
 fail() {
@@ -20,6 +21,7 @@ source_commit=""
 run_id=""
 artifact_id=""
 consumer_project_template=""
+consumer_project_input=""
 receipt_path=""
 prepare_only=false
 
@@ -31,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --run-id) [[ $# -ge 2 ]] || { usage; exit 2; }; run_id="$2"; shift 2 ;;
     --artifact-id) [[ $# -ge 2 ]] || { usage; exit 2; }; artifact_id="$2"; shift 2 ;;
     --consumer-project-template) [[ $# -ge 2 ]] || { usage; exit 2; }; consumer_project_template="$2"; shift 2 ;;
+    --consumer-project) [[ $# -ge 2 ]] || { usage; exit 2; }; consumer_project_input="$2"; shift 2 ;;
     --receipt) [[ $# -ge 2 ]] || { usage; exit 2; }; receipt_path="$2"; shift 2 ;;
     --prepare-only) prepare_only=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -39,10 +42,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$artifact_dir" && -n "$artifact_manifest" && -n "$source_commit" \
-  && -n "$run_id" && -n "$artifact_id" && -n "$consumer_project_template" && -n "$receipt_path" ]] \
+  && -n "$run_id" && -n "$artifact_id" && -n "$receipt_path" ]] \
   || { usage; fail "missing-input"; }
-[[ -d "$artifact_dir" && -f "$artifact_manifest" && -f "$consumer_project_template" ]] \
+[[ ( -n "$consumer_project_template" && -z "$consumer_project_input" ) \
+  || ( -z "$consumer_project_template" && -n "$consumer_project_input" ) ]] \
+  || { usage; fail "consumer-project-input-exclusive"; }
+[[ -d "$artifact_dir" && -f "$artifact_manifest" ]] \
   || fail "input-not-found"
+if [[ -n "$consumer_project_template" ]]; then
+  [[ -f "$consumer_project_template" ]] || fail "input-not-found"
+else
+  [[ -f "$consumer_project_input" && ! -L "$consumer_project_input" \
+    && "$consumer_project_input" == *.csproj && "$consumer_project_input" != *.csproj.template ]] \
+    || fail "input-not-found"
+  [[ "$(basename "$consumer_project_input")" == "PostgreSqlPreflightConsumer.csproj" ]] \
+    || fail "consumer-project-name-invalid"
+fi
 [[ ! -e "$receipt_path" && ! -L "$receipt_path" ]] || fail "receipt-already-exists"
 [[ "$source_commit" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]] || fail "invalid-source-commit"
 [[ "$run_id" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || fail "invalid-run-id"
@@ -51,7 +66,32 @@ done
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 artifact_dir="$(cd "$artifact_dir" && pwd -P)"
 artifact_manifest="$(cd "$(dirname "$artifact_manifest")" && pwd -P)/$(basename "$artifact_manifest")"
-consumer_project_template="$(cd "$(dirname "$consumer_project_template")" && pwd -P)/$(basename "$consumer_project_template")"
+if [[ -n "$consumer_project_template" ]]; then
+  consumer_project_template="$(cd "$(dirname "$consumer_project_template")" && pwd -P)/$(basename "$consumer_project_template")"
+else
+  consumer_project_input="$(cd "$(dirname "$consumer_project_input")" && pwd -P)/$(basename "$consumer_project_input")"
+  python3 - "$consumer_project_input" <<'PY'
+import pathlib
+import sys
+import xml.etree.ElementTree as ET
+
+project = pathlib.Path(sys.argv[1])
+try:
+    root = ET.parse(project).getroot()
+except (OSError, ET.ParseError):
+    raise SystemExit("consumer-project-invalid")
+if any(element.tag.rsplit("}", 1)[-1] == "ProjectReference" for element in root.iter()):
+    raise SystemExit("consumer-project-project-reference-not-supported")
+provider_reference = any(
+    element.tag.rsplit("}", 1)[-1] == "PackageReference"
+    and element.attrib.get("Include", "").casefold() == "forgetrust.appsurface.durable.postgresql"
+    and element.attrib.get("Version", "").strip() == "$(AppSurfacePackageVersion)"
+    for element in root.iter()
+)
+if not provider_reference:
+    raise SystemExit("consumer-project-package-reference-required")
+PY
+fi
 receipt_parent="$(cd "$(dirname "$receipt_path")" && pwd -P)"
 receipt_path="$receipt_parent/$(basename "$receipt_path")"
 tmp_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
@@ -252,15 +292,18 @@ if [[ "$prepare_only" != true ]]; then
   [[ -f "$role_pairs_file" ]] || fail "proof-manifest-not-found"
   # The consumer receives the installed tool path and all identity values via
   # environment/arguments only; it remains source-independent of product projects.
-  # Keep the checked-in exact-artifact project as a template: automatic
-  # dependency submission discovers .csproj files and restores them without
-  # AppSurfacePackageVersion. Materialize authored inputs in this owned
-  # workspace, then restore only with the verified manifest's version.
-  consumer_root="$work_dir/consumer"
-  materializer="$repo_root/Durable/materialize-preflight-consumer.sh"
-  [[ -f "$materializer" && ! -L "$materializer" ]] || fail "consumer-materializer-missing"
-  consumer_project="$(bash "$materializer" "$consumer_project_template" "$repo_root" "$consumer_root")" \
-    || fail "consumer-materialization"
+  if [[ -n "$consumer_project_template" ]]; then
+    # Materialize only when the proof will run, after the exact artifact bundle
+    # is validated. The helper preserves authored resources and build policy.
+    consumer_root="$work_dir/consumer"
+    materializer="$repo_root/Durable/materialize-preflight-consumer.sh"
+    [[ -f "$materializer" && ! -L "$materializer" ]] || fail "consumer-materializer-missing"
+    consumer_project="$(bash "$materializer" "$consumer_project_template" "$repo_root" "$consumer_root")" \
+      || fail "consumer-materialization"
+  else
+    # Compatibility for direct callers with an already-materialized project.
+    consumer_project="$consumer_project_input"
+  fi
   consumer_artifacts="$work_dir/consumer-artifacts"
   dotnet restore "$consumer_project" \
     --configfile "$work_dir/NuGet.config" --packages "$NUGET_PACKAGES" --artifacts-path "$consumer_artifacts" \

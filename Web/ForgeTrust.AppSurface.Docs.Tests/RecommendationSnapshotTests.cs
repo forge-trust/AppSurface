@@ -6,12 +6,20 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class RecommendationSnapshotTests
 {
+    private sealed class CacheClock : ISystemClock
+    {
+        private long _ticks = DateTimeOffset.UnixEpoch.Ticks;
+        public DateTimeOffset UtcNow => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+        public void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -266,8 +274,9 @@ public sealed class RecommendationSnapshotTests
     [Fact]
     public async Task FailedStaleRefreshAndExpiredFailure_ShouldPreserveTheExistingFiniteCacheContract()
     {
-        using var cache = new MemoryCache(new MemoryCacheOptions());
-        using var memo = new Memo(cache, TimeSpan.FromMilliseconds(100));
+        var clock = new CacheClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        using var memo = new Memo(cache, TimeSpan.FromMilliseconds(100), () => clock.UtcNow);
         var environment = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => environment.ContentRootPath).Returns(Path.GetTempPath());
         var harvester = A.Fake<IDocHarvester>();
@@ -294,9 +303,8 @@ public sealed class RecommendationSnapshotTests
         var aggregator = new DocAggregator([harvester], new AppSurfaceDocsOptions { CacheExpirationMinutes = 1d / 60 },
             environment, memo, sanitizer, NullLogger<DocAggregator>.Instance);
         var first = (await aggregator.GetDocDetailsAsync("source"))!;
-        var firstCompletedAt = DateTimeOffset.UtcNow;
-        // The actual Memo clock has no injectable clock; use its one-second minimum TTL and control the factory itself.
-        await Task.Delay(TimeSpan.FromMilliseconds(1100));
+        // Preserve the one-second fresh and stale windows while advancing both cache clocks together.
+        clock.Advance(TimeSpan.FromMilliseconds(1100));
         var stale = (await aggregator.GetDocDetailsAsync("source"))!;
         await refreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(first.RecommendedPages.Select(row => row.Page.Href), stale.RecommendedPages.Select(row => row.Page.Href));
@@ -304,8 +312,7 @@ public sealed class RecommendationSnapshotTests
         refreshRelease.SetResult([Page("Source", "source.md", "guide"), Page("New", "new.md", "example")]);
         await failingSanitize.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal("Example", Assert.Single((await aggregator.GetDocDetailsAsync("source"))!.RecommendedPages).Page.Title);
-        var untilExpired = firstCompletedAt.AddMilliseconds(2200) - DateTimeOffset.UtcNow;
-        if (untilExpired > TimeSpan.Zero) await Task.Delay(untilExpired);
+        clock.Advance(TimeSpan.FromMilliseconds(1100));
         await Assert.ThrowsAsync<InvalidOperationException>(() => aggregator.GetDocDetailsAsync("source"));
         // Invalidation starts a new generation, preserving no unlimited last-good fallback across explicit rebuilds.
         aggregator.InvalidateCache();
