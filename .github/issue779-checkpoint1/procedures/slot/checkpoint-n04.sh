@@ -1317,7 +1317,11 @@ while IFS= read -r python_file; do
  [[ $python_file == /usr/lib/python3.12/* && $python_file != *$'\t'* && $python_file != *$'\n'* ]] || fail negative-stdlib-name
  python_hash=$(negative_os_file_hash "$python_file") || fail negative-stdlib-file-unpinned
  verify_os_path "$python_file" "$python_hash"
- if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
+ # Read the same first four bytes with one bounded, joined trusted command.
+ # Bash removes only od's fixed whitespace; failed reads reject before classification.
+ python_magic=$(bounded od -An -tx1 -N4 -- "$python_file")
+ python_magic=${python_magic//[[:space:]]/}
+ if [[ $python_magic == 7f454c46 ]]; then
   python_resolved=$python_file
   if python_alias=$(negative_os_alias_index "$python_file"); then
    python_resolved=$(alias_walk "$python_alias")

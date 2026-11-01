@@ -97,6 +97,9 @@ bounded() {
   head)
    if [[ $HEAD_ELF == *"$3"* ]]; then printf '\177ELF'; else printf 'data'; fi
    ;;
+  od)
+   if [[ $HEAD_ELF == *"${@: -1}"* ]]; then printf ' 7f 45 4c 46\n'; else printf ' 64 61 74 61\n'; fi
+   ;;
   *) fail fixture-unexpected-tool ;;
  esac
  ((status==0)) || fail bounded-operation

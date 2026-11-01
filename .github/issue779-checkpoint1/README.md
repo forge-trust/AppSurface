@@ -151,6 +151,17 @@ N04 or N08 incident. The N08-specific
 malformed-cache rejection, physical verification and the unchanged original
 240-second root bound without executing the native procedure.
 
+N04's ELF classification reads exactly the first four bytes of every verified
+stdlib member with one bounded `od` command, then removes only the command's
+fixed whitespace in Bash. This replaces three subprocesses per file while
+preserving the same `7f454c46` comparison. A failed read rejects before a member
+can be classified as non-ELF. The [binary-prefix regressions](test_n04_stdlib_magic.py)
+exercise actual empty, short, ELF and non-ELF files, plus read-error and deadline
+rejection. Hash pinning, alias verification, ELF audit membership, both complete
+inventory checks and the original prelaunch fit guard remain required. This
+reduces classification overhead; it does not establish that a native procedure
+fits its original allowance or that the coverage gate passes.
+
 Required helper IDs are `peer` for None, N04–N08, N11 and N12, plus `n04` for N04 and
 `n07` for N07. Other selectors require an empty helper map. Projects and assembly
 entries are fixed in [`binding.py`](binding.py). Each helper phase is named

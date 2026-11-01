@@ -21,7 +21,8 @@
     "current copied source/tool/runtime nodes determine exact original stdout inventory expectations",
     "stdlib file digests now come from the already initialized immutable OS-audit lookup table; per-file physical verification, alias and ELF checks, and complete before/after membership checks remain",
     "repeat the unchanged >246 remaining and >245 deadline-fit check after the stdlib scan immediately before computing the original 240-second owner interval",
-    "detached test_n10_stdlib_declarations.py reuses the N04 declaration-loop harness against the N10 shell and checks cache, verifier, membership, ELF, and root-fit boundaries"
+    "detached test_n10_stdlib_declarations.py reuses the N04 declaration-loop harness against the N10 shell and checks cache, verifier, membership, ELF, and root-fit boundaries",
+    "shared N04 declaration harness pin refreshed after the bounded od fixture addition; the N10 shell and its original stdlib checks were unchanged"
   ],
   "coverage_credit": false,
   "dotnet_executed": false,
@@ -61,7 +62,7 @@
       "bytes": 3624,
       "mode": "0644",
       "path": "portable-validation.json",
-      "sha256": "ce78489a4db23ada217eb779bce145afb1cbb75692c179384c2c0e1619f8ba6d"
+      "sha256": "8a539c6dba036985a96abd54a1f3febcd0471b2c8dc5f664031984609b004f04"
     },
     "process.py": {
       "bytes": 18212,
@@ -127,7 +128,7 @@
   "ownership_prefix": ".github/issue779-checkpoint1/procedures/n10/",
   "portable_validation": {
     "coverage_credit": false,
-    "elapsed_seconds": 0.242,
+    "elapsed_seconds": 0.117,
     "exit": 0,
     "native_executed": false,
     "receipt": "portable-validation.json",
@@ -170,7 +171,7 @@
   "shared_harness": {
     "path": "test_n04_stdlib_declarations.py",
     "role": "reused detached N04 stdlib declaration-loop harness; no native facts",
-    "sha256": "26ea0e314cd4c02b97a96db4b10b038cc1a10283ee338d84743baf68fcda4b65"
+    "sha256": "ac59391254feab14f3f8aea57f245e6f64a154f2f6c832a18e800a3cca7c610e"
   },
   "source44_followup": {
     "fresh_linux_required": true,
