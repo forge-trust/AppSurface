@@ -6639,13 +6639,21 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task DocsPublicationPreservesPriorReleaseArchiveCatalogEntries()
     {
         await SeedRepositoryAsync();
+        var priorDocs = await SeedDocsArchiveAsync("0.0.9");
         var docs = await SeedDocsArchiveAsync("0.1.0");
         var existingPagesRoot = RepositoryPath("artifacts/existing-pages");
         Directory.CreateDirectory(Path.Join(existingPagesRoot, "docs"));
         await File.WriteAllTextAsync(Path.Join(existingPagesRoot, "docs", "index.html"), "current docs root");
         var existingReleaseRoot = Path.Join(existingPagesRoot, "releases", "0.0.9");
         Directory.CreateDirectory(existingReleaseRoot);
-        await File.WriteAllTextAsync(Path.Join(existingReleaseRoot, "index.html"), "older release");
+        var priorExactTree = TestPathUtils.PathUnder(priorDocs.TrustedReleaseRootPath, priorDocs.ExactTreePath);
+        foreach (var file in Directory.EnumerateFiles(priorExactTree))
+        {
+            File.Copy(file, TestPathUtils.PathUnder(existingReleaseRoot, Path.GetFileName(file)));
+        }
+        var unavailableReleaseRoot = Path.Join(existingPagesRoot, "releases", "0.0.8");
+        Directory.CreateDirectory(unavailableReleaseRoot);
+        await File.WriteAllTextAsync(Path.Join(unavailableReleaseRoot, "index.html"), "unverified older release");
         await File.WriteAllTextAsync(
             Path.Join(existingPagesRoot, "versions.json"),
             JsonSerializer.Serialize(
@@ -6662,7 +6670,7 @@ public sealed class ReleaseToolTests : IDisposable
                             visibility = "Public",
                             advisoryState = "None",
                             exactTreePath = "releases/0.0.9",
-                            releaseManifestSha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+                            releaseManifestSha256 = priorDocs.ReleaseManifestSha256
                         },
                         new
                         {
@@ -6757,6 +6765,10 @@ public sealed class ReleaseToolTests : IDisposable
         var staging = ExternalPath("pages");
         Assert.True(File.Exists(Path.Join(staging, "docs", "index.html")));
         Assert.True(File.Exists(Path.Join(staging, "releases", "0.0.9", "index.html")));
+        Assert.Equal(
+            await File.ReadAllBytesAsync(Path.Join(existingReleaseRoot, "index.html")),
+            await File.ReadAllBytesAsync(Path.Join(staging, "releases", "0.0.9", "index.html")));
+        Assert.False(Directory.Exists(Path.Join(staging, "releases", "0.0.8")));
         var catalog = await File.ReadAllTextAsync(Path.Join(staging, "versions.json"));
         Assert.Contains("\"version\": \"0.0.9\"", catalog, StringComparison.Ordinal);
         Assert.Contains("\"version\": \"0.0.8\"", catalog, StringComparison.Ordinal);
