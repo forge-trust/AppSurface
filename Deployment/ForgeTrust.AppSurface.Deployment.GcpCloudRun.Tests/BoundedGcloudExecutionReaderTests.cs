@@ -302,7 +302,8 @@ public sealed class BoundedGcloudExecutionReaderTests
     public async Task NativeReaderCancellationDuringReadPropagatesAfterBoundedCleanup()
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return; // protects Unix native fixture; no Windows/other OS process claim.
-        using var fixture = NativeFixture.Create("dd if=/dev/zero bs=8192 2>/dev/null");
+        // Keep a read pending without racing the valid output-limit result against cancellation.
+        using var fixture = NativeFixture.Create("printf x; exec sleep 5");
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new BoundedGcloudExecutionReader(fixture.Path, TimeProvider.System)
