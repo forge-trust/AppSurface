@@ -111,15 +111,21 @@ not a native-control retry or a change to a product process deadline. The
 [APT download and install switches](https://manpages.debian.org/trixie/apt/apt-get.8.en.html#OPTIONS)
 separate variable network transfer time from package installation. Exhausting
 either setup phase still fails before copying a runtime or launching controls.
-The workflow replaces the runner's Azure Ubuntu mirror entry with Ubuntu's
-[canonical HTTPS archive](https://archive.ubuntu.com/ubuntu/). It retains the
+The [worker](../workflows/issue779-checkpoint1-worker.yml) and
+[measurement](../workflows/issue779-checkpoint1-measurement.yml) workflows replace the runner's known Azure or
+`us-east-2.ec2.archive.ubuntu.com` HTTP Ubuntu mirror entry with Ubuntu's
+[canonical HTTPS archive](https://archive.ubuntu.com/ubuntu/). They retain the
 public mirror list before and after that replacement as
 `runtime-mirrors-before.txt` and `runtime-mirrors-after.txt`. Setup requires the
-expected Azure entry before replacement, then requires the canonical entry and
-absence of the old entry afterward. If that expected entry is missing or remains
-after rewriting, setup fails before any package is installed. Other entries in
-the runner mirror list are retained and remain visible in the saved lists. This avoids the observed stalled Azure runtime
-package transfer without changing Ubuntu package versions or signature checks.
+expected Azure or EC2 entry as a complete URL token before replacement, then
+requires the canonical entry and absence of every HTTP URL afterward. Empty,
+unknown, commented-only, or already-canonical-only inputs fail before rewriting;
+an unrelated HTTP entry still fails the postcondition. Other HTTPS entries and
+priority metadata remain visible in both saved lists. This handles both observed
+runner configurations while avoiding stalled HTTP transfers, without changing
+Ubuntu package versions or signature checks. The [real shell regression controls](test_runtime_mirrors.py)
+execute each workflow's actual preflight against temporary mirror files with
+GNU sed and Bash on Linux; they neither invoke APT nor supply native credit.
 The APT candidate/origin log records the actual selected archive. The complete
 OS audit stays in force; a mirror change or transport retry does not qualify a
 runtime image.
