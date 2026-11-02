@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
@@ -30,11 +29,6 @@ CONSUMER_FIXTURE = ROOT / "tests/fixtures/docs-concept-consumer"
 DOCS_PACKAGE = "ForgeTrust.AppSurface.Docs"
 CONTRACTS_PACKAGE = "ForgeTrust.AppSurface.ReleaseContracts"
 CONCEPT_TYPE_PREFIX = "DocConcept"
-VERSION_PATTERN = re.compile(
-    r"\A(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-    r"(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
-    r"(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?\Z"
-)
 
 
 class VerificationError(RuntimeError):
@@ -42,7 +36,36 @@ class VerificationError(RuntimeError):
 
 
 def validate_package_version(version: str) -> None:
-    if not VERSION_PATTERN.fullmatch(version):
+    """Accept stable or prerelease SemVer in linear time, without build metadata.
+
+    Core components and numeric prerelease identifiers cannot have leading
+    zeroes. Prerelease identifiers use only ASCII letters, digits and hyphens.
+    Splitting identifiers avoids backtracking on malformed command-line input.
+    """
+    core, separator, prerelease = version.partition("-")
+
+    def numeric_identifier(value: str) -> bool:
+        return bool(value) and all("0" <= character <= "9" for character in value)
+
+    components = core.split(".")
+    valid = len(components) == 3 and all(
+        numeric_identifier(component) and (len(component) == 1 or component[0] != "0")
+        for component in components
+    )
+    if separator:
+        valid = valid and all(
+            bool(identifier)
+            and all(
+                "0" <= character <= "9"
+                or "A" <= character <= "Z"
+                or "a" <= character <= "z"
+                or character == "-"
+                for character in identifier
+            )
+            and (not numeric_identifier(identifier) or len(identifier) == 1 or identifier[0] != "0")
+            for identifier in prerelease.split(".")
+        )
+    if not valid:
         raise VerificationError(
             "--package-version must be a stable or prerelease SemVer value without build metadata."
         )

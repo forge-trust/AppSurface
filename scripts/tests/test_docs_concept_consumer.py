@@ -3,6 +3,8 @@
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest.mock
 import unittest
@@ -15,6 +17,45 @@ SPEC = importlib.util.spec_from_file_location("docs_concept_consumer_verifier", 
 VERIFIER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(VERIFIER)
+
+
+class PackageVersionTests(unittest.TestCase):
+    def test_accepts_stable_and_prerelease_versions(self):
+        for version in (
+            "0.0.0", "12.34.56", "1.2.3-0", "1.2.3-preview.183.local",
+            "1.2.3-01a", "1.2.3--", "1.2.3-00-",
+        ):
+            with self.subTest(version=version):
+                VERIFIER.validate_package_version(version)
+
+    def test_rejects_malformed_or_noncanonical_versions(self):
+        for version in (
+            "", "1.2", "1..3", "a.2.3", "1.2.3.4", "01.2.3", "1.02.3", "1.2.03", "1.2.3-",
+            "1.2.3-01", "1.2.3-a.00", "1.2.3-a..b", "1.2.3-.a", "1.2.3-a.",
+            "1.2.3+build", "1.2.3-a+build", "1.2.3-a_b", "1.2.3-é", "１.2.3",
+            "1.2.3-١", "1.2.3\n", " 1.2.3",
+        ):
+            with self.subTest(version=version):
+                with self.assertRaises(VERIFIER.VerificationError):
+                    VERIFIER.validate_package_version(version)
+
+    def test_long_prerelease_with_invalid_suffix_is_rejected(self):
+        # Bound a regression to the previous backtracking regex in a child process.
+        program = """
+import importlib.util
+import sys
+spec = importlib.util.spec_from_file_location("verifier", sys.argv[1])
+verifier = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(verifier)
+try:
+    verifier.validate_package_version("0.0.0-0." + "--." * 20_000 + "!")
+except verifier.VerificationError:
+    pass
+else:
+    raise AssertionError("Malformed prerelease version was accepted")
+verifier.validate_package_version("0.0.0-0." + "--." * 20_000 + "valid")
+"""
+        subprocess.run([sys.executable, "-c", program, str(SCRIPT)], check=True, timeout=5)
 
 
 class DependencyPinTests(unittest.TestCase):
