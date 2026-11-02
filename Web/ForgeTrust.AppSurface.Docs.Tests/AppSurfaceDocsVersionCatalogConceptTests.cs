@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.ReleaseContracts;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -82,22 +85,68 @@ public sealed partial class AppSurfaceDocsVersionCatalogServiceTests
     }
 
     [Fact]
-    public void ConceptCatalog_VerifiesLegacyCanonicalCandidatesWithoutInferringAliases()
+    public async Task ConceptCatalog_VerifiesLegacyCanonicalCandidatesWithoutInferringAliases()
     {
         var root = CreateExactTree("concept-legacy");
         Directory.CreateDirectory(Path.Combine(root, "docs"));
         File.WriteAllText(Path.Combine(root, "docs/guide.html"), "<html><h1>Legacy guide</h1></html>");
+        File.WriteAllText(Path.Combine(root, "root-guide.html"), "<html><h1>Root guide</h1></html>");
         File.WriteAllText(Path.Combine(root, ".appsurface-docs-route-manifest.json"), JsonSerializer.Serialize(new
         {
             schema = "appsurface-docs-route-manifest-v1",
-            entries = new[] { new { sourcePath = "guide.md", canonicalRoutePath = "guide", recoveryAliases = Array.Empty<string>(), declaredAliases = new[] { "old-guide" } } }
+            entries = new[]
+            {
+                new { sourcePath = "guide.md", canonicalRoutePath = "guide", recoveryAliases = Array.Empty<string>(), declaredAliases = new[] { "old-guide" } },
+                new { sourcePath = "root-guide.md", canonicalRoutePath = "root-guide", recoveryAliases = Array.Empty<string>(), declaredAliases = Array.Empty<string>() },
+                new { sourcePath = "missing.md", canonicalRoutePath = "missing", recoveryAliases = Array.Empty<string>(), declaredAliases = Array.Empty<string>() }
+            }
         }));
         var pin = WriteReleaseManifest(root);
         var path = WriteRawCatalogJson(JsonSerializer.Serialize(new { versions = new[] { new { version = "1", exactTreePath = "concept-legacy", releaseManifestSha256 = pin } } }));
         var catalog = CreateCatalogService(path).GetCatalog();
         Assert.True(Assert.Single(catalog.Versions).IsAvailable, catalog.Versions[0].AvailabilityIssue);
         Assert.NotNull(catalog.ConceptSwitching);
-        Assert.Equal(["guide"], catalog.Versions[0].VerifiedReleaseArchive!.FrozenRouteManifest.CanonicalRoutePaths);
+        var switching = Assert.IsType<AppSurfaceDocsConceptSwitching>(catalog.ConceptSwitching);
+        Assert.Equal(["guide", "root-guide", "missing"], catalog.Versions[0].VerifiedReleaseArchive!.FrozenRouteManifest.CanonicalRoutePaths);
+
+        static async Task<int> RequestStatusAsync(AppSurfaceDocsConceptSwitching switching, string sourcePin, string route)
+        {
+            var source = new DocConceptPageIdentity("1", sourcePin, route, null, LocaleIsKnown: false);
+            var key = DocConceptIdentityIndex.CreateSourceKey("Default", source);
+            var context = new DefaultHttpContext();
+            context.Request.Path = "/docs/versions/switch/" + key + ".html";
+            context.Response.Body = new MemoryStream();
+            Assert.True(await switching.TryHandleAsync(context, NullLogger.Instance));
+            return context.Response.StatusCode;
+        }
+
+        Assert.Equal(StatusCodes.Status200OK, await RequestStatusAsync(switching, pin, "guide"));
+        Assert.Equal(StatusCodes.Status200OK, await RequestStatusAsync(switching, pin, "root-guide"));
+        Assert.Equal(StatusCodes.Status404NotFound, await RequestStatusAsync(switching, pin, "missing"));
+    }
+
+    [Fact]
+    public void ConceptCatalog_InvalidPinnedSidecarConceptIdIsDiagnosedWithoutDisablingArchive()
+    {
+        var root = CreateConceptTree("concept-invalid-id");
+        File.WriteAllText(Path.Combine(root, ".appsurface-docs-concepts.json"), JsonSerializer.Serialize(new
+        {
+            schema = "appsurface-docs-concepts-v1",
+            identityCoverage = "complete",
+            pages = new[] { new { canonicalRoutePath = "guide", locale = (string?)null, conceptId = "../bad", title = "Guide", anchorIds = Array.Empty<string>() } }
+        }));
+        var pin = WriteReleaseManifest(root);
+        var path = WriteRawCatalogJson(JsonSerializer.Serialize(new
+        {
+            versions = new[] { new { version = "1", exactTreePath = "concept-invalid-id", releaseManifestSha256 = pin } }
+        }));
+        var logger = new CapturingLogger<AppSurfaceDocsVersionCatalogService>();
+
+        var catalog = CreateCatalogService(path, logger: logger).GetCatalog();
+
+        Assert.True(Assert.Single(catalog.Versions).IsAvailable, catalog.Versions[0].AvailabilityIssue);
+        Assert.NotNull(catalog.ConceptSwitching);
+        Assert.Contains(logger.Messages, message => message.Contains("docs-concept-id-invalid", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -200,6 +200,75 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldPreferAuthoredMetadataTitleOverNodeTitle()
+    {
+        var node = new DocNode(
+            "Node title",
+            "guides/metadata-title.md",
+            "<p>Content</p>",
+            Metadata: new DocMetadata { Title = "  Authored metadata title  " });
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([node]);
+
+        var page = Assert.Single(await _aggregator.GetConceptExportPagesAsync());
+
+        Assert.Equal("Authored metadata title", page.Title);
+    }
+
+    [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldUseLocalizedTitleAndLocaleFromResolvedVariant()
+    {
+        var node = new DocNode(
+            "Node title",
+            "guides/localized-title.md",
+            "<p>Content</p>",
+            Metadata: new DocMetadata
+            {
+                Title = "Authored metadata title",
+                Localization = new DocLocalizationMetadata
+                {
+                    Locale = "fr",
+                    TranslationKey = "guides.localized-title",
+                    LocalizedTitle = "Titre localisé"
+                }
+            });
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([node]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Localization = AppSurfaceDocsLocalizationFixture.CreateOptions()
+        };
+        var aggregator = new DocAggregator(
+            [_harvesterFake],
+            options,
+            _envFake,
+            _memo,
+            _sanitizerFake,
+            _loggerFake);
+
+        var page = Assert.Single(await aggregator.GetConceptExportPagesAsync());
+
+        Assert.Equal("Titre localisé", page.Title);
+        Assert.Equal("fr", page.Locale);
+    }
+
+    [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldRejectCanonicalPageWithoutAnyResolvedTitle()
+    {
+        var node = new DocNode(
+            "  ",
+            "guides/untitled.md",
+            "<p>Content</p>");
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([node]);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _aggregator.GetConceptExportPagesAsync());
+
+        Assert.Contains("Public canonical route 'guides/untitled' has no resolved export title.", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetMarkdownDownloadSourceAsync_ShouldReturnOnlyExactCanonicalOptedInMarkdown()
     {
         var repositoryRoot = TestPathUtils.PathUnder(

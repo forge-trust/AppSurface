@@ -389,6 +389,132 @@ public sealed class DocConceptCoreTests
         Assert.Equal(DocConceptResolutionReason.Ambiguous, reverse.Resolve(reverseSecondIdentity!, "2", legacyPin).Reason);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IndependentlyPinnedBridgesCannotAssignOneLegacyPageToDifferentConcepts(bool reverse)
+    {
+        var firstPin = Pin('b');
+        var legacyPin = Pin('c');
+        var secondPin = Pin('d');
+        var first = Release("1", firstPin, [new Page("guide/first", "en", "first", "First", [])]);
+        var legacy = Legacy("2", legacyPin, "guide/shared");
+        var second = Release("3", secondPin, [new Page("guide/second", "en", "second", "Second", [])]);
+        var firstBytes = Bridge(
+            new Membership("1", firstPin, "en", "page", "guide/first") { ConceptId = "first" },
+            new Membership("2", legacyPin, "en", "page", "guide/shared") { ConceptId = "first" });
+        var secondBytes = Bridge(
+            new Membership("3", secondPin, "en", "page", "guide/second") { ConceptId = "second" },
+            new Membership("2", legacyPin, "en", "page", "guide/shared") { ConceptId = "second" });
+        var firstMap = new DocConceptMapReference("first.json", firstBytes.Sha256, firstBytes.Bytes);
+        var secondMap = new DocConceptMapReference("second.json", secondBytes.Sha256, secondBytes.Bytes);
+        Assert.True(DocConceptSchema.TryLoadMap(firstMap.Bytes.Span, Budget, out _, out _));
+        Assert.True(DocConceptSchema.TryLoadMap(secondMap.Bytes.Span, Budget, out _, out _));
+        DocConceptMapReference[] maps = reverse ? [secondMap, firstMap] : [firstMap, secondMap];
+
+        var strict = DocConceptIdentityIndex.BuildCombined([first, legacy, second], maps, DocConceptValidationMode.Strict, Budget);
+        var startup = DocConceptIdentityIndex.BuildCombined([first, legacy, second], maps, DocConceptValidationMode.Quarantine, Budget);
+
+        Assert.False(strict.IsValid);
+        Assert.Contains(strict.Issues, issue => issue.Failure == DocConceptValidationFailure.IdentityConflict
+            && issue.Detail == "A bridge conflicts with a published concept identifier.");
+        Assert.True(startup.Index.TryGetPageIdentity("1", firstPin, "guide/first", out var firstIdentity));
+        Assert.True(startup.Index.TryGetPageIdentity("3", secondPin, "guide/second", out var secondIdentity));
+        foreach (var source in new[] { firstIdentity!, secondIdentity! })
+        {
+            var recovery = startup.Index.Resolve(source, "2", legacyPin);
+            Assert.Equal(DocConceptResolutionReason.Ambiguous, recovery.Reason);
+            Assert.Null(recovery.TargetPage);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IneligibleSourceReleaseCannotClaimCounterpartOrRecovery(bool hidden)
+    {
+        var sourcePin = Pin('e');
+        var targetPin = Pin('f');
+        var source = new DocConceptReleaseInput("1", sourcePin, !hidden, hidden, true, true, "guide/topic",
+            [Route("guide/topic", "en")], Sidecar(new Page("guide/topic", "en", "topic", "Topic", [])));
+        var target = Release("2", targetPin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var index = Build([source, target]).Index;
+
+        var result = index.Resolve(new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true), "2", targetPin);
+
+        Assert.Equal(DocConceptResolutionReason.Unknown, result.Reason);
+        Assert.Null(result.TargetPage);
+        Assert.Null(result.FallbackSection);
+        Assert.Null(result.HomeRoutePath);
+        Assert.False(result.SearchAvailable);
+    }
+
+    [Theory]
+    [InlineData("guides", false)]
+    [InlineData("guides/topic/child", true)]
+    [InlineData("guides/topicish", true)]
+    public void AncestorFallbackRequiresAStrictPathSegmentAncestor(string sourceRoute, bool includeShorterDecoy)
+    {
+        var sourcePin = Pin('c');
+        var targetPin = Pin('d');
+        var source = Release("1", sourcePin, [new Page(sourceRoute, "en", "removed", "Removed", [])]);
+        var targets = new List<Page>
+        {
+            new("guides/topic", "en", "section", "Section", [], true),
+            new("guides/topic/child/grandchild", "en", "descendant", "Descendant", [], true)
+        };
+        if (includeShorterDecoy) targets.Add(new Page("guide", "en", "prefix", "Prefix", [], true));
+        var target = Release("2", targetPin, targets);
+
+        var result = Build([source, target]).Index.Resolve(
+            new DocConceptPageIdentity("1", sourcePin, sourceRoute, "en", true), "2", targetPin);
+
+        Assert.Equal(DocConceptResolutionReason.KnownAbsent, result.Reason);
+        Assert.Null(result.TargetPage);
+        Assert.Equal(sourceRoute == "guides/topic/child" ? "guides/topic" : null, result.FallbackSection?.RoutePath);
+    }
+
+    [Fact]
+    public void AnUnservableSourceCannotAuthorizeTargetRecovery()
+    {
+        var sourcePin = Pin('a');
+        var targetPin = Pin('b');
+        var source = new DocConceptReleaseInput("1", sourcePin, true, true, true, true, null,
+            [new DocConceptCanonicalRouteFact("guide/topic", "guide/topic.html", "en", true, IsServeable: false)], null);
+        var target = Release("2", targetPin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+
+        var result = Build([source, target]).Index.Resolve(
+            new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true), "2", targetPin);
+
+        Assert.Equal(DocConceptResolutionReason.Unknown, result.Reason);
+        Assert.Null(result.TargetPage);
+        Assert.Null(result.FallbackSection);
+        Assert.Null(result.HomeRoutePath);
+        Assert.False(result.SearchAvailable);
+    }
+
+    [Fact]
+    public void AnUnservableUnknownLocalePageDoesNotHideSelectedLocaleAbsence()
+    {
+        var sourcePin = Pin('a');
+        var targetPin = Pin('b');
+        var source = Release("1", sourcePin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var target = new DocConceptReleaseInput("2", targetPin, true, true, true, true, "bonjour",
+        [
+            Route("bonjour", "fr"),
+            new DocConceptCanonicalRouteFact("unservable", "unservable.html", null, false, IsServeable: false)
+        ], null);
+
+        var result = Build([source, target]).Index.Resolve(
+            new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true), "2", targetPin);
+
+        Assert.Equal(DocConceptResolutionReason.NoSelectedLocaleDocs, result.Reason);
+        Assert.Null(result.TargetPage);
+        Assert.Null(result.FallbackSection);
+        Assert.Null(result.HomeRoutePath);
+        Assert.False(result.SearchAvailable);
+    }
+
     [Fact]
     public void RouteCompatibilityAndRecoveryPreserveLogicalCaseAndCanonicalWinnerSpelling()
     {

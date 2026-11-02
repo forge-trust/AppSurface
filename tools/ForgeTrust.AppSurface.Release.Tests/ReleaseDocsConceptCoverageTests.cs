@@ -837,6 +837,59 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
     }
 
     [Fact]
+    public async Task GenerateAsync_RejectsPinnedConceptPageOutsideCanonicalInventoryWithoutReplacingOutput()
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var sidecarPath = TestPathUtils.PathUnder(fixture.Root, "releases", "1.0.0", ConceptIndexName);
+        var sidecar = JsonNode.Parse(await File.ReadAllBytesAsync(sidecarPath))!.AsObject();
+        sidecar["pages"]![0]!["canonicalRoutePath"] = "guides/missing";
+        await RewriteReleaseManifestAsync(fixture, "1.0.0", ConceptIndexName,
+            JsonSerializer.SerializeToUtf8Bytes(sidecar, WebJson));
+        var sourceSnapshot = SnapshotFiles(fixture.Root);
+        var outputRoot = ExistingOutput("noncanonical-concept-page");
+        var previousSnapshot = SnapshotFiles(outputRoot);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, outputRoot));
+
+        Assert.Equal("docs-concept-index-invalid", exception.Diagnostic.Code);
+        Assert.Equal("A concept sidecar references a non-canonical or unservable route.", exception.Diagnostic.Cause);
+        Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.Root));
+        Assert.Equal(previousSnapshot, SnapshotFiles(outputRoot));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_RejectsLinkedServingBoundaryWithoutTouchingItsTarget()
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var target = ExistingOutput("linked-serving-target");
+        var targetSnapshot = SnapshotFiles(target);
+        var sourceSnapshot = SnapshotFiles(fixture.Root);
+        var outputRoot = TestPathUtils.PathUnder(_root, "linked-serving-output");
+        try
+        {
+            Directory.CreateSymbolicLink(outputRoot, target);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException or NotSupportedException)
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("This host does not allow the directory symlink needed for the serving-boundary check.");
+        }
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, outputRoot));
+
+            Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
+            Assert.Equal("A serving input or output boundary is a reparse-point directory.", exception.Diagnostic.Cause);
+            Assert.Equal(targetSnapshot, SnapshotFiles(target));
+            Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.Root));
+            Assert.False(Directory.Exists(outputRoot + ".switch-staging"));
+        }
+        finally
+        {
+            Directory.Delete(outputRoot);
+        }
+    }
+
+    [Fact]
     public async Task GenerateAsync_PropagatesCancellationWithoutReplacingPriorOutput()
     {
         var fixture = await CreateFixtureAsync([SingleRelease()]);
