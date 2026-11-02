@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -816,11 +817,55 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
     private static async Task AssertChoicePageFocusAndTargetsAsync(IPage page, string expectedHeadingSelector)
     {
         Assert.Equal(0, await page.Locator("script").CountAsync());
+        // Poll from the test host because page timers can stop when JavaScript is disabled.
         // Fragment focus can settle after navigation completes; require the same exact target.
-        await page.WaitForFunctionAsync(
-            "selector => document.activeElement === document.querySelector(selector)",
-            expectedHeadingSelector,
-            new PageWaitForFunctionOptions { Timeout = 5_000 });
+        try
+        {
+            var timeout = TimeSpan.FromSeconds(5);
+            var started = Stopwatch.GetTimestamp();
+            while (true)
+            {
+                var remaining = timeout - Stopwatch.GetElapsedTime(started);
+                if (remaining <= TimeSpan.Zero)
+                {
+                    throw new TimeoutException("Timeout 5000ms exceeded while waiting for native focus.");
+                }
+
+                if (await page.EvaluateAsync<bool>(
+                    "selector => document.activeElement === document.querySelector(selector)",
+                    expectedHeadingSelector).WaitAsync(remaining))
+                {
+                    break;
+                }
+
+                remaining = timeout - Stopwatch.GetElapsedTime(started);
+                if (remaining > TimeSpan.Zero)
+                {
+                    await Task.Delay(remaining < TimeSpan.FromMilliseconds(50) ? remaining : TimeSpan.FromMilliseconds(50));
+                }
+            }
+        }
+        catch (TimeoutException exception)
+        {
+            string focusState;
+            try
+            {
+                focusState = await page.EvaluateAsync<string>("""
+                selector => JSON.stringify({
+                    url: location.href,
+                    visibility: document.visibilityState,
+                    documentFocused: document.hasFocus(),
+                    activeElement: document.activeElement?.outerHTML ?? null,
+                    expectedElement: document.querySelector(selector)?.outerHTML ?? null
+                })
+                """, expectedHeadingSelector);
+            }
+            catch (PlaywrightException snapshotException)
+            {
+                focusState = $"snapshot unavailable: {snapshotException.Message}";
+            }
+            throw new TimeoutException($"Expected focus on {expectedHeadingSelector}; focus state: {focusState}", exception);
+        }
         var unexpectedFocus = await page.EvaluateAsync<string>(
             "selector => document.activeElement === document.querySelector(selector) ? '' : (document.activeElement?.outerHTML ?? '<none>')",
             expectedHeadingSelector);
