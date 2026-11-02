@@ -816,10 +816,16 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
     private static async Task AssertChoicePageFocusAndTargetsAsync(IPage page, string expectedHeadingSelector)
     {
         Assert.Equal(0, await page.Locator("script").CountAsync());
-        var hasExpectedFocus = await page.EvaluateAsync<bool>(
-            "selector => document.activeElement === document.querySelector(selector)", expectedHeadingSelector);
-        var focusedElement = await page.EvaluateAsync<string>("() => document.activeElement?.outerHTML ?? ''");
-        Assert.True(hasExpectedFocus, $"Expected focus on {expectedHeadingSelector}; active element: {focusedElement}");
+        // Fragment focus can settle after navigation completes; require the same exact target.
+        await page.WaitForFunctionAsync(
+            "selector => document.activeElement === document.querySelector(selector)",
+            expectedHeadingSelector,
+            new PageWaitForFunctionOptions { Timeout = 5_000 });
+        var unexpectedFocus = await page.EvaluateAsync<string>(
+            "selector => document.activeElement === document.querySelector(selector) ? '' : (document.activeElement?.outerHTML ?? '<none>')",
+            expectedHeadingSelector);
+        Assert.True(unexpectedFocus.Length == 0,
+            $"Expected focus on {expectedHeadingSelector}; active element: {unexpectedFocus}");
         Assert.True(await page.EvaluateAsync<bool>("""
             () => {
                 const links = Array.from(document.querySelectorAll('main.docs-version-choice a'));
