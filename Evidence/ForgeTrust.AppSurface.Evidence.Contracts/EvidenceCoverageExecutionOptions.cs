@@ -26,4 +26,20 @@ public enum EvidenceCoverageTestResultFormat
 public sealed record EvidenceCoverageExecutionOptions(
     string Configuration = "Debug",
     EvidenceCoverageTestResultFormat TestResults = EvidenceCoverageTestResultFormat.None,
-    int Parallelism = 1);
+    int Parallelism = 1)
+{
+    /// <summary>Determines whether these values fit the fixed protected coverage command.</summary>
+    /// <param name="producer">The complete coverage declaration to evaluate.</param>
+    /// <returns><see langword="true"/> when restricted execution uses only its fixed Debug, serial, no-results command.</returns>
+    /// <remarks>Ordinary coverage producers may use the wider planner-validated envelope. Restricted execution may omit
+    /// this property or specify exactly Debug, serial execution, and no managed results; artifact retention must be managed.</remarks>
+    internal static bool SupportsRestrictedExecution(EvidenceProducerDeclaration producer)
+    {
+        ArgumentNullException.ThrowIfNull(producer);
+        return string.Equals(producer.CoverageArtifactRetention, "managed", StringComparison.Ordinal)
+            && (producer.CoverageExecution is null
+                || (string.Equals(producer.CoverageExecution.Configuration, "Debug", StringComparison.Ordinal)
+                    && producer.CoverageExecution.Parallelism == 1
+                    && producer.CoverageExecution.TestResults == EvidenceCoverageTestResultFormat.None));
+    }
+}

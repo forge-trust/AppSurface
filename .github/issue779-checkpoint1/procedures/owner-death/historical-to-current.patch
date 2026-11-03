@@ -1,0 +1,32 @@
+--- historical/N13/checkpoint-owner-death-common.sh
++++ current/checkpoint-owner-death-common.sh
+@@ -8,4 +8,2 @@
+-readonly ORIGINAL_JOB_SECONDS=240 FIXTURE_SECONDS=600 CLEANUP_RESERVE=30 FIXTURE_REVIEW_CLEAR=1 SOURCE_REVIEW_CLEAR=1 ROOT_REVIEW_CLEAR=1
+-readonly EXPECTED_HEAD=5b4ed381badb91de47d793715d05b6ae7737e39e EXPECTED_PARENT=914046e1e998ca89a5f0f5be39a90bbfb88a431d
+-readonly EXPECTED_COUNT=2872 EXPECTED_CAPTURE_SHA=4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540
+-mode=prepare-only; selected=0; capture= capture_sha= request= request_sha= host= host_sha= entry= entry_sha= build= build_sha= output= parser= parser_sha= generation=
++readonly ORIGINAL_JOB_SECONDS=240 FIXTURE_SECONDS=600 CLEANUP_RESERVE=30
++mode=prepare-only; selected=0; capture= capture_sha= request= request_sha= host= host_sha= entry= entry_sha= build= build_sha= output= parser= parser_sha= generation= source_revision= binding_validator= binding_validator_sha256= binding_deadline_monotonic=
+@@ -16,1 +14,1 @@
+-  --source-capture|--source-capture-sha256|--request|--request-sha256|--runtime-host|--runtime-host-sha256|--entry|--entry-sha256|--build-receipt|--build-receipt-sha256|--output-root|--parser|--parser-sha256|--generation)
++  --source-capture|--source-capture-sha256|--request|--request-sha256|--runtime-host|--runtime-host-sha256|--entry|--entry-sha256|--build-receipt|--build-receipt-sha256|--output-root|--parser|--parser-sha256|--generation|--source-revision|--binding-validator|--binding-validator-sha256|--binding-deadline-monotonic)
+@@ -25,0 +24,4 @@
++    --source-revision) key=source_revision ;;
++    --binding-validator) key=binding_validator ;;
++    --binding-validator-sha256) key=binding_validator_sha256 ;;
++    --binding-deadline-monotonic) key=binding_deadline_monotonic ;;
+@@ -33,2 +35,1 @@
+-for v in capture capture_sha request request_sha host host_sha entry entry_sha build build_sha output parser parser_sha generation; do [[ -n ${!v} ]] || fail "missing-$v"; done
+-[[ $capture_sha == "$EXPECTED_CAPTURE_SHA" ]] || fail capture-pin
++for v in capture capture_sha request request_sha host host_sha entry entry_sha build build_sha output parser parser_sha generation source_revision binding_validator binding_validator_sha256 binding_deadline_monotonic; do [[ -n ${!v} ]] || fail "missing-$v"; done
+@@ -37,2 +38,3 @@
+-jq -e --arg h "$EXPECTED_HEAD" --arg p "$EXPECTED_PARENT" --arg t "3bafd0fcd5321f1b29323f46df94b77eb48fa859" --argjson n "$EXPECTED_COUNT" ' . as $r | $r.schema=="issue779-csharp-common-source-capture-v4" and $r.validation_commit==$h and $r.previous_validation_commit==$p and $r.source_count==$n and $r.source_tree==$t and $r.clean==true and $r.index_checksum_verified==true and $r.index_tree_blob_modes_equal==true and $r.no_alternates==true and $r.native_credit==false and $r.all16_final_integrated_native_verified==false and ($r.source|type=="object" and keys==["modes","sha256"]) and ($r.source.sha256|type=="object" and length==$n) and ($r.source.modes|type=="object" and length==$n) and ($r.source.sha256|keys)==($r.source.modes|keys)' "$capture" >/dev/null || fail source-capture-metadata
+-jq -e --arg c "$OWNER_DEATH_CASE" --arg h "$EXPECTED_HEAD" --argjson n "$EXPECTED_COUNT" '.source_revision==$h and .source_count==$n and .private_qualification==$c' "$build" >/dev/null || fail build-variant-binding
++[[ $source_revision =~ ^[0-9a-f]{40}$ ]] || fail current-source-syntax
++pin "$binding_validator" "$binding_validator_sha256" 131072
++timeout --signal=KILL 120 /usr/bin/python3 -I -S -B "$binding_validator" root-verify --source-capture "$capture" --build-receipt "$build" --source "$source_revision" --selector "$OWNER_DEATH_CASE" --deadline-monotonic "$binding_deadline_monotonic" >/dev/null || fail current-source-build-binding
+@@ -42,1 +43,0 @@
+-((SOURCE_REVIEW_CLEAR==1 && FIXTURE_REVIEW_CLEAR==1 && ROOT_REVIEW_CLEAR==1)) || fail independent-review-pending
+@@ -445,1 +446,1 @@
+-fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
++fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp)

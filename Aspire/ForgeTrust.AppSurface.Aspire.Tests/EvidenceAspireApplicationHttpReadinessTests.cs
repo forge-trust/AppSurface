@@ -1,81 +1,89 @@
-using Aspire.Hosting;
+using System.Net;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
+using ForgeTrust.AppSurface.Evidence.Readiness;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class EvidenceAspireApplicationHttpReadinessTests
 {
     [Fact]
-    public async Task CreateHttpReadiness_ValidatesPublicArgumentsBeforeResolvingTheResource()
+    public void HttpReadinessCore_ValidatesArgumentsBeforeResolvingEndpoint()
     {
-        await using var application = await StartEmptyApplicationAsync();
+        var resolutions = 0;
+        IEvidenceResourceReadiness Create(string id, string path, TimeSpan timeout) =>
+            EvidenceAspireApplication.CreateHttpReadinessCore(id, path, timeout,
+                HttpReadinessSettings.Snapshot(new()), _ => Task.CompletedTask,
+                _ => { resolutions++; return Task.FromResult<string?>("http://localhost/"); },
+                _ => new HttpClient(), () => ValueTask.CompletedTask, TimeProvider.System);
 
-        Assert.Throws<ArgumentNullException>(() => application.CreateHttpReadiness(null!, "api", "http", "/health", TimeSpan.FromSeconds(1)));
-        Assert.Throws<ArgumentException>(() => application.CreateHttpReadiness(" ", "api", "http", "/health", TimeSpan.FromSeconds(1)));
-        Assert.Throws<ArgumentException>(() => application.CreateHttpReadiness("evidence", " ", "http", "/health", TimeSpan.FromSeconds(1)));
-        Assert.Throws<ArgumentException>(() => application.CreateHttpReadiness("evidence", "api", " ", "/health", TimeSpan.FromSeconds(1)));
-        Assert.Throws<ArgumentException>(() => application.CreateHttpReadiness("evidence", "api", "http", " ", TimeSpan.FromSeconds(1)));
-        Assert.Throws<ArgumentOutOfRangeException>(() => application.CreateHttpReadiness("evidence", "api", "http", "/health", TimeSpan.Zero));
-        Assert.Throws<ArgumentNullException>(() => application.CreateHttpReadiness("evidence", "api", "http", "/health", TimeSpan.FromSeconds(1),
-            new EvidenceAspireHttpReadinessOptions { Http = null! }));
+        Assert.Throws<ArgumentNullException>(() => Create(null!, "/health", TimeSpan.FromSeconds(1)));
+        Assert.Throws<ArgumentException>(() => Create(" ", "/health", TimeSpan.FromSeconds(1)));
+        Assert.Throws<ArgumentException>(() => Create("evidence", " ", TimeSpan.FromSeconds(1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Create("evidence", "/health", TimeSpan.Zero));
+        Assert.Throws<ArgumentNullException>(() => new EvidenceAspireHttpReadinessOptions { Http = null! }.Snapshot());
+        Assert.Equal(0, resolutions);
     }
 
     [Fact]
-    public async Task CreateHttpReadiness_RejectsDisposedApplicationBeforeValidatingArguments()
+    public async Task ApplicationLifetime_RejectsNewRegistrationsAfterDisposalStarts()
     {
-        var application = await StartEmptyApplicationAsync();
-        await application.DisposeAsync();
+        var lifetime = new EvidenceAspireApplicationLifetime(() => ValueTask.CompletedTask);
+        await lifetime.DisposeAsync();
 
-        Assert.Throws<ObjectDisposedException>(() => application.CreateHttpReadiness(null!, "api", "http", "/health", TimeSpan.FromSeconds(1)));
+        Assert.Throws<ObjectDisposedException>(lifetime.ThrowIfDisposed);
+        Assert.Throws<ObjectDisposedException>(() => lifetime.Acquire());
     }
 
-    // Value: protects=independent health/HTTP application registrations; fails_when=one adapter stops another's owner;
-    // why_new=the existing public tests cover guards only; seam=none; no_claim=active transport draining is tested separately.
     [Fact]
     public async Task HealthAndHttpAdapters_KeepTheApplicationUntilTheFinalRegistrationDisposes()
     {
-        await using var application = await StartEmptyApplicationAsync(builder =>
-            builder.AddExecutable("api", "unused", ".").WithHttpEndpoint(targetPort: 8080, name: "http"));
-        var health = application.CreateHealthReadiness("health", "api");
-        var http = application.CreateHttpReadiness("http", "api", "http", "/health", TimeSpan.FromSeconds(1));
+        var order = new List<string>();
+        var lifetime = new EvidenceAspireApplicationLifetime(() =>
+        {
+            order.Add("application");
+            return ValueTask.CompletedTask;
+        });
+        var health = new LeaseReadiness("health", lifetime.Acquire());
+        var httpRegistration = lifetime.Acquire();
+        var http = EvidenceAspireApplication.CreateHttpReadinessCore(
+            "http", "/health", TimeSpan.FromSeconds(1), HttpReadinessSettings.Snapshot(new()),
+            _ => Task.CompletedTask, _ => Task.FromResult<string?>("http://localhost/"),
+            _ => new HttpClient(new OkHandler(() => order.Add("client"))), async () =>
+            {
+                order.Add("http-registration");
+                await httpRegistration.DisposeAsync();
+            }, TimeProvider.System);
+        var final = new LeaseReadiness("final", lifetime.Acquire());
 
-        await Assert.IsAssignableFrom<IAsyncDisposable>(health).DisposeAsync();
-        IEvidenceResourceReadiness? final = null;
-        Assert.Null(Record.Exception(() => final = application.CreateHealthReadiness("final", "api")));
+        await http.WaitUntilReadyAsync(CancellationToken.None);
+        Assert.Equal(["client"], order);
+        await health.DisposeAsync();
+        Assert.Equal(["client"], order);
         await Assert.IsAssignableFrom<IAsyncDisposable>(http).DisposeAsync();
-        await Assert.IsAssignableFrom<IAsyncDisposable>(final).DisposeAsync();
+        Assert.Equal(["client", "http-registration"], order);
+        await final.DisposeAsync();
 
-        Assert.Throws<ObjectDisposedException>(() => application.CreateHealthReadiness("late", "api"));
-        await application.DisposeAsync();
+        Assert.Equal(["client", "http-registration", "application"], order);
+        Assert.Throws<ObjectDisposedException>(lifetime.ThrowIfDisposed);
     }
 
-    private static async Task<EvidenceAspireApplication> StartEmptyApplicationAsync(Action<IDistributedApplicationBuilder>? configure = null)
+    private sealed class LeaseReadiness(string id, IAsyncDisposable lease) : IEvidenceResourceReadiness, IAsyncDisposable
     {
-        var originalDcpPath = Environment.GetEnvironmentVariable("ASPIRE_DCP_PATH");
-        var originalDashboardPath = Environment.GetEnvironmentVariable("ASPIRE_DASHBOARD_PATH");
-        Environment.SetEnvironmentVariable("ASPIRE_DCP_PATH", "dummy");
-        Environment.SetEnvironmentVariable("ASPIRE_DASHBOARD_PATH", "dummy");
-        try
+        public string Id { get; } = id;
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => lease.DisposeAsync();
+    }
+
+    private sealed class OkHandler(Action disposed) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+
+        protected override void Dispose(bool disposing)
         {
-            var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
-            {
-                Args = [],
-                AssemblyName = typeof(EvidenceAspireApplicationHttpReadinessTests).Assembly.GetName().Name,
-                ProjectDirectory = Directory.GetCurrentDirectory(),
-                DisableDashboard = true,
-            });
-            configure?.Invoke(builder);
-            builder.Services.RemoveAll<IHostedService>();
-            return await EvidenceAspireApplication.StartAsync(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ASPIRE_DCP_PATH", originalDcpPath);
-            Environment.SetEnvironmentVariable("ASPIRE_DASHBOARD_PATH", originalDashboardPath);
+            if (disposing) disposed();
+            base.Dispose(disposing);
         }
     }
 }

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>ForgeTrust.AppSurface.Evidence.ExitBarrier.Support</AssemblyName>
+    <RootNamespace>ForgeTrust.AppSurface.Evidence.ExitBarrier.Support</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <PackageDescription>Private, independently built SDK worker exit measurement support.</PackageDescription>
+  </PropertyGroup>
+</Project>

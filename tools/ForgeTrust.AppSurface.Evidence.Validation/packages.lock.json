@@ -467,11 +467,20 @@
         "dependencies": {
           "Aspire.Hosting": "[13.4.4, 14.0.0)",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.contracts": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+        }
       },
       "forgetrust.appsurface.evidence.planner": {
         "type": "Project",
@@ -516,6 +525,12 @@
           "StreamJsonRpc": "2.22.23",
           "System.IO.Hashing": "10.0.8"
         }
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
       "KubernetesClient": {
         "type": "CentralTransitive",

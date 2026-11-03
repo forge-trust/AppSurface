@@ -233,6 +233,21 @@ public sealed partial class DurableTemplateArtifactContractTests
         Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
     }
 
+    [Fact]
+    public void TemplateArchiveRejectsAmbiguousNuspecMetadataWithoutEchoingItsContents()
+    {
+        var archive = NewArchivePath();
+        var nuspec = $"<package><metadata><id>{DurableTemplateArtifactContract.PackageId}</id><version>{Version}</version><packageTypes><packageType name=\"Template\" /></packageTypes></metadata>"
+            + "<metadata><id>duplicate-metadata-sentinel</id></metadata></package>";
+        WriteArchive(archive, nuspecContent: nuspec);
+
+        var error = Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+
+        Assert.Contains("archive is malformed", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("duplicate-metadata-sentinel", error.ToString(), StringComparison.Ordinal);
+    }
+
+
     [Theory]
     [InlineData("root-null")]
     [InlineData("root-array")]

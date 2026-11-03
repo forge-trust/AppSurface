@@ -1,0 +1,221 @@
+# Genuine private-worker measurement
+
+This fixture is linked into the [supervision project](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/ForgeTrust.AppSurface.Evidence.Supervision.csproj) only for private C3/C3Sdk images. The ordinary executable contains neither this type nor its calls, checked through actual PE metadata. It is measurement infrastructure, with no admission, process owner, accepted proof or production runtime role.
+
+The pinned Coverlet Console 10.0.1 instruments exactly seven modules: CLI, Contracts, Planner, Coverage, Aspire, Supervision and the shared [Evidence.Cli workflow assembly](../../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md). The public CLI delegates protected producer execution to Evidence.Cli, so its worker tracker is part of the closed measurement set. The workflow records all original and instrumented DLL/PDB hashes before the original OS owner starts. The entry module is explicitly selected with `--include-test-assembly`; the option does not make the application a test assembly.
+
+Before publishing the worker descriptor, the root holder rechecks its original `LinuxProcessIdentity`, retains a pidfd and the actual worker's `/proc/<pid>/root/tmp` directory, then rechecks the full PID/start-time/UID/GID/cgroup binding. It requires a different directory identity from host `/tmp`. It changes no worker environment, writable path, private namespace, capability, unit limit or artifact inventory.
+
+After the original monitor observes that exact worker's normal exit and the retained pidfd reports exit, the fixture reads the genuine worker tracker files through the retained namespace handle. Exact pinned constructor/field metadata binds the module, GUID, candidate count and `/tmp` name; bounded reads require the original nonroot UID/GID, regular single-link nodes, safe modes, stable metadata, exact header/count/length and nonnegative counters. It copies the original bytes unchanged into an exclusive root-owned host file. The root's own Coverlet tracker performs accumulation on root exit; the standard collector produces the report. No code here manufactures, translates or adds counters.
+
+Only the **first eligible natural worker for each independently instrumented image** contributes raw hit bytes. Normal CLI/SDK controls retain their status0/v1 witnesses. The separate failed-SDK partition requires natural status1/v3 through the same original monitor, captured PID, pidfd and byte guards; it does not clear the worker's failure latch or change its zero-status successful-completion condition. If an earlier root process has already published a validated host hit file for that tracker, it is left unchanged. A module the worker never executed may remain honestly absent; no synthetic zero file is created. The normal CLI requires CLI, Contracts, Coverage and Evidence.Cli handoffs. The SDK directly invokes the Aspire host and requires CLI, Contracts, Coverage and Aspire handoffs; it does not execute the protected CLI branch. Evidence.Cli must still be present in the complete SDK image and standard report, but an unused worker tracker may be absent. If that tracker does publish a handoff, every original image/hash/byte-equality check still applies.
+
+The separate C3Sdk image is now instrumented by a second invocation of the same pinned collector. The outer collector instruments C3; its target is the SDK collector, whose target is the existing seven-control driver. Both images are instrumented before the driver stages either image, so the matrix still executes once. [`measurement_arguments.py`](../measurement_arguments.py) constructs the closed nested argument vectors for .NET's argument grammar; no shell evaluates them. The SDK collector finishes `native-sdk.json` before the outer collector reads it through its supported `--merge-with` operation. Collector identities and candidate arrays stay separate, and no fixture combines or rewrites raw counters. The [pinned result implementation](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/coverlet.core/Coverage.cs#L295-L308) performs report merging after target execution.
+
+The source binding records separate original/instrumented maps for all fourteen DLL/PDB files in each image. The normal SDK control must still prove its own unchanged v1 worker handoffs for CLI, Contracts, Coverage and Aspire. The [worker entry branches](../../../Cli/ForgeTrust.AppSurface.Cli/EvidenceWorkerCommand.cs) deliberately route SDK execution directly through the host; only the CLI branch must demonstrate positive `EvidenceProtectedCliExecution.cs` hits. The standard SDK report must contain genuine `EvidenceHostBootstrap` and `EvidenceRestrictedAspireApplication` hits before the merged input reaches the gate. Once the negative report is merged, those report hits are aggregate SDK measurements, not independent attribution to the normal run. The normal run's original handoff witnesses remain separate. An absent required SDK counter file, a missing DLL/PDB image leaf or a missing report fails validation; CLI measurements cannot stand in for SDK measurements.
+
+The source-pinned dependency on the [Coverlet tracker and instrumenter](https://github.com/coverlet-coverage/coverlet/tree/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/coverlet.core) is intentional, not a public raw-hit import API. A separate Linux helper probe verified a child-only method and both branch outcomes using identical worker/host hit hashes before this integration. That helper supplied zero AppSurface coverage credit. This integration still requires its own genuine Linux run; local compilation and data tests do not establish it.
+
+Capture uses the original job token and one additional **five-second maximum**, never a renewed job allowance. It is part of the original retained exit-monitor task, so a failure cannot detach from cleanup. Every measurement handle is closed after that task joins. A private failure remains a failed validation attempt; it cannot upgrade a consumer or issue Trusted eligibility. The source-bound measurement validator checks all seven physical application controls, the actual root filesystem TRX, the seven modules, original/instrumented hashes and first-worker handoff hashes before the ordinary collector's supported JSON merge.
+
+The C3 artifact holds exactly seven selected modules per image, so its measurement-only retention allows each fixed `native-supervision.json`/`native-sdk.json` report up to 32 MiB, the combined XML up to 40 MiB, other files up to 8 MiB, and 96 MiB total/135 files. The seven supplementary slots above the original 128 retain three files for the [root marker/subtree supplement](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#supplementary-root-marker-and-subtree-controls), three for the [application bundle audit and report-discovery controls](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#application-bundle-audit-and-producer-report-discovery-measurement), and the separate [peer-credential TRX](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#separate-peer-credential-measurement). C2 retention and every product output/memory/task quota remain unchanged. The canonical [solution and patch gates](../../../scripts/coverage-solution.sh), comparison base, thresholds and exclusions remain unchanged.
+
+The seven module names and all fourteen DLL/PDB leaves are required in each original and instrumented image map. Report and predecessor checks reject a missing Evidence.Cli module, a duplicate basename or a bare assembly-name alias; older six-module packets cannot substitute under the current source. Per-module candidate counts still come from the actual pinned tracker metadata. The byte-length, EOF, ownership and unchanged-hit checks retain their existing bounds. This measurement change adds no private helper or call to ordinary `None` or mutation `C2` images.
+
+## Separate SDK failed-test partition
+
+Before the original matrix, a separate pinned collector instruments the SDK image for the fixed `test-failure` subject. [`sdk_failure.py`](../sdk_failure.py) stages only that normal SDK application and delegates launch/observation to the existing C3 controller. The C# server rechecks its original application readiness/liveness guard after the genuine test command returns1, before sending the response that permits SDK failure cleanup. This observation is not a new HTTP probe. The real six-test output must report one failed/five passed/no skipped, and its root-private failure state must report natural producer code1/status1 with joined startup, stop, output and empty groups. The manifest must be `Incomplete`, with one `Failed` producer, the existing code1 diagnostic, no artifacts/assertions, no claim/eligibility and completed cleanup. A natural worker code1/status1 with original pidfd and required unchanged tracker handoffs from its separately labelled pre-exit cache is independently required; arbitrary nonzero or signal termination cannot substitute.
+
+The controller's receipt is provisional and outside retained evidence. After the collector writes `native-sdk-failure.json` and restores **all fourteen** published originals, the finalizer hashes the completed report, verifies restoration, and publishes one finalized receipt. The following original SDK collector instruments afresh and consumes that report through supported `--merge-with`. No tracker bytes are added, deleted, translated or replaced manually. Original and failure instrumentation maps remain distinct and must share the same published originals. The solution's [measurement consistency check](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/SdkFailureMeasurement.cs) requires the separate report to hit the actual current nonzero-result arm, located from source whose bytes match the full capture.
+
+The SDK-negative partition has its own finite 900-second outer allowance. The original seven-case matrix retains its 1800-second clock and case deadlines. The six subsequent [workspace rejection controls](../../issue779-checkpoint3/README.md#native-workspace-rejection-controls) have a separate fixed 900-second orchestration clock, including their existing containment reserve. The combined collector wrapper is 2820 seconds and the enclosing CI job is 65 minutes. Accepted work still has to join under its original runtime deadlines. Exactly three extra files belong to this partition: the negative report, finalized receipt and one bounded combined collector/owner diagnostic log. The negative report and log each retain the existing generic **8 MiB** ceiling. Including the later root supplement, application bundle controls and separate peer-credential TRX, the existing artifact total is **135 files / 96 MiB**. Temporary staging and intermediate receipts are not promoted. Diagnostic output is not echoed, and collector/finalizer failures remain failures before the original matrix can consume the report.
+
+The [small-file/argument controls](../test_sdk_failure.py) and [receipt model tests](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/SdkFailureMeasurementTests.cs) verify data handling only. Their constructed observations do not establish native execution, admission, an accepted consumer proof, or measured coverage gain. This new partition requires a fresh complete Linux result.
+
+The producer's unchanged `--verbosity quiet` command does not emit the assertion message. Failure inspection instead requires exactly the reviewed operation-zero failed test row, the one-failed/five-passed summary, and the actual durable `checkpoint2-case-entered` marker containing `test-failure`. The marker is written, flushed, closed and atomically published immediately before that reviewed assertion. Inspection opens its fixed producer scratch components through retained no-follow directory descriptors, after root sealing, and requires a root-owned single-link `0600` scratch file with exact bytes and stable named/retained identities. No verbosity, runtime argument or test assertion is changed to produce evidence.
+
+An optional passive inotify probe in the finite Python fixture observes only notification metadata from the existing worker's private TMP. Three genuine process samples bracket arming. Its lifetime ceilings are eight 32-KiB batches and 2048 events under the original case deadline. The separate private log packet reports only fixed module-prefix/GUID event counts and closed unavailable/overflow/error flags; raw filenames and hit bytes are not exported. Prefix matches are not exact tracker bindings, missing events never prove absence, and the probe cannot recover counters or affect execution/acceptance. This helps distinguish potential systemd private-TMP deletion after nonzero exit from never-created files; neither explanation is inferred solely from an absent terminal file.
+
+## Failed-worker exit cache
+
+The [private root bridge](LinuxWorkerExitBarrier.cs) and
+[uninstrumented worker support library](../exit-barrier/README.md) coordinate one
+measurement snapshot after the genuine SDK host returns its incomplete manifest.
+The whole final `ProcessExit` delegate lives in the support library. It is registered
+after the required four modules have executed their actual SDK paths; the pinned
+Coverlet delegates therefore flush and close their original files first. Registration
+is lazy, so merely loading an assembly is insufficient. Missing required files fails
+measurement. Later execution is not attributed as a complete terminal snapshot.
+
+Before descriptor publication the root holder creates a generation-local, root-owned
+`0755` slot inside the retained worker private TMP, a root-owned single-link `0444`
+plan, and an actual-worker-owned `0700` child. The fixed plan binds the actual PID,
+start time, all credentials, cgroup, nonce and original absolute job deadline. The
+worker publishes its `0600` READY atomically and waits at most five seconds within
+that original deadline. The root's existing monitor services READY while the original
+pidfd remains live, rechecks its real kernel identity, and caches the unchanged
+source-pinned GUID/header/count bytes through retained descriptors. It publishes a
+root-owned readable `0444` ACK atomically only after all required bytes are cached.
+The worker then waits for a separate root `0444` RELEASE under the same five-second
+clock. Root observes its original pidfd still live after ACK, publishes RELEASE, and
+imposes no post-RELEASE liveness condition. This avoids racing a legitimate immediate
+exit when proving ACK preceded that exit.
+Directory checks permit child-list churn while retaining inode, device, ownership and
+mode; file reads require full stable metadata and named/retained identity.
+
+Only the original pidfd exit and retained systemd `ExecMainPID`, code1/status1 permit
+exclusive publication of cached bytes to host tracker paths. Standard Coverlet then
+performs its own normal accumulation and report merge. The v3 witness explicitly
+labels `pre_exit_after_original_handlers`, live capture and acknowledged ordering,
+and requires equal worker/cache/host hashes. Existing positive v1 handoffs retain
+their original post-exit path. The bridge adds no accepted proof or success status.
+Its source preparation and local builds are separate from required fresh Linux
+execution; native event observation and cache provenance must be checked before
+claiming measurement success.
+
+Private SDK startup continues to emit the same best-effort closed
+`evidence-worker-measurement-startup-v1` milestones before/after the original native
+start, kernel capture, measurement preparation and descriptor publication. The existing
+ten labels and record shape are unchanged. Separate
+`evidence-worker-measurement-startup-timing-v1` records report bounded elapsed milliseconds
+from the first `NativeDispatch` using the process monotonic stopwatch; the origin is captured
+once and is not reset by later milestones. Timing is capped at 600,000 ms, and an invalid,
+backwards or over-limit timestamp pair omits the timing record without clamping it. A
+timing-only `ServerDispatch` point is emitted after owner-reference guards and immediately
+before the original control-server call, without adding a new `startup-v1` milestone. Records
+contain only a fixed stage, elapsed value and `native_acceptance=false`; they carry no
+exception, path or identity. Optional timing serialization and output failures are discarded.
+The observations add no timeout or stage allowance and do not alter tokens, unit properties,
+owner guards, the original 30-second startup handshake or exit-cache protocol. A timing record
+does not prove worker readiness or acceptance.
+
+
+## SDK startup worker diagnostics
+
+The SDK-only controller also retains the original worker's joined diagnostic prefixes
+when startup ends before descriptor publication. The C3 controller already returns its
+fresh selected `generation`; after that original call returns, the SDK fixture passes
+that exact selection and role `worker` to the existing
+[C2 strict prefix reader](../../issue779-checkpoint2/run-native.py). It does not infer a
+PID, adopt another generation, retry a start, or change the original result. A missing
+selection or unavailable/invalid diagnostic source grants no observation.
+
+The three copied leaves (`stderr.prefix`, `stdout.prefix`, `state.json`) stay in the
+existing unretained controller working directory under a fresh private child. A small
+completion record is written only after all three copies validate; partial copies are
+not used. The finalizer reopens the copies with no-follow/nonblocking FDs, exact private
+ownership/modes, single-link/regular type and stable named metadata, and verifies the
+completion lengths/hashes. Each leaf retains the existing 1 MiB prefix bound. This is
+opaque diagnostic data, not a worker exit, signal, native outcome or acceptance proof.
+
+After the collector and original owner writers have joined, the finalizer appends fixed
+private worker sections to the existing `sdk-test-failure-diagnostics.log`, **before**
+its original collector-exit assertion. This also works for a failed collector with no
+provisional success receipt. Stderr is first. The combined log remains at its original
+8 MiB ceiling; insufficient room causes explicit diagnostic truncation, or no append
+if the marker itself cannot fit. No additional retained evidence files, generic quota,
+clock, unit policy, output allowance or product/runtime code changes. Missing or rejected
+copies do not prove absence and do not replace the original failure. Raw prefix/state
+bytes remain only in this private log, with no public echo of payload or exception text.
+
+The new `WorkerStartupDiagnosticDataTests` class in the
+[small-file controls](../test_sdk_failure.py) covers exact selection, invalid/expired
+selection, partial copies, one-field/node failures, private-only output, the shared log
+ceiling, unsafe destinations and finalization before the original collector failure.
+These controls create temporary data only; they establish neither a native worker
+failure cause nor a successful runtime measurement. Source29/30 startup cancellation
+remains undiagnosed until fresh retained worker bytes are actually inspected.
+
+
+## SDK support dependency data
+
+[`support_dependency_data(tool)`](../sdk_failure.py) validates only the two generated
+CLI runtime metadata files. It opens the tool directory and each fixed leaf without
+following its final symlink, uses nonblocking reads, requires single-link regular
+files, and verifies retained/named metadata before and after bounded reads. The CLI
+`.deps.json` ceiling is 1 MiB; `.runtimeconfig.json` is 64 KiB. A final named check
+covers both leaves before parsing. Ancestors are not authenticated by this data API;
+the original native deployment guards retain that responsibility.
+
+JSON rejects duplicate exact member names and non-JSON constants. Package and asset
+names remain ordinal and case-sensitive, so legitimate differently cased filenames
+are not conflated. Required structural keys must use their exact spelling. Unrelated
+metadata is allowed and discarded. The selected runtime target must be
+`.NETCoreApp,Version=v10.0`; one CLI project library must depend on exactly version
+`0.2.0.0` of `ForgeTrust.AppSurface.Evidence.ExitBarrier.Support`. Its sole versioned
+library row must be `reference`, with exactly its support DLL as the runtime asset
+and assembly/file versions `0.2.0.0`. Runtime configuration requires `net10.0` and
+exactly the NETCore and ASP.NET framework names, both `10.0.0`; framework order is
+irrelevant. No dependency file is edited or assembled by this reader.
+
+The result schema is `issue779-sdk-support-dependency-v1`, containing only the two
+original byte lengths/SHA-256 values and validated fixed target/version metadata,
+with `native_acceptance=false`. The workflow must capture this complete value as
+`original-supervision.json.exit_support_runtime` before instrumentation. The SDK
+controller compares the current published metadata and staged metadata to that value;
+the provisional receipt retains it and finalization requires the same original value
+after standard collector restoration. Missing or changed bindings fail closed. This
+API does not load an assembly, invoke the exit barrier, authenticate a process, issue
+admission, or establish coverage gain. Existing runtime/owner/collector guards remain
+required. The corresponding `SupportDependencyDataTests` in the
+[small-file controls](../test_sdk_failure.py) use temporary file data only.
+
+### Private SDK dependency regeneration
+
+The source31 Linux worker failed before running identity capture with a missing
+`ForgeTrust.AppSurface.Evidence.ExitBarrier.Support` assembly. A fresh local
+C3 → C3Sdk restore/publish sequence reproduced the same loader failure: the helper
+DLL was copied, but the incremental build reused C3's `.deps.json` without its
+helper reference. SDK 10.0.401's dependency-file incremental inputs do not include
+that changing raw reference. The [private workflow](../../workflows/issue779-checkpoint3-application.yml)
+now performs a nonincremental C3Sdk build, then publishes with `--no-build` using
+the same configuration, generated registration, helper path and variant. This
+regenerates dependency metadata through the SDK; no JSON graph is hand-edited.
+The local corrected image reaches the expected fixed invalid-control rejection.
+The dependency-data guard rejects the reproduced broken image, accepts the corrected
+image, and checks its actual bytes across instrumentation/staging/restoration.
+These loader/data checks establish no worker admission or native runtime success;
+a fresh complete Linux run remains required. Runtime policy and deadlines are unchanged.
+
+## Fixed patch comparison
+
+The [cutover workflow](../../workflows/evidencehost-runtime-proof.yml) supplies the
+existing `COVERAGE_GATE_DIFF_BASE` setting as
+`1991280e8af049db592ebcb705cbf66f4b4c6e8b`, verifies it is an ancestor of the selected
+source, records it, and explicitly passes it through the test-broker command.
+A later `origin/main` update cannot replace this original gate comparison. The
+canonical script, Codecov full-condition rule, thresholds, tolerance and exclusions
+are unchanged. Native fixture request base `416b30919e6c4d03b634d9d3fe558884b02f0b91`
+is separate input data and must not replace the gate's comparison commit.
+
+## Genuine owner reference-denial controls
+
+The private C3/C3Sdk [`LinuxWorkerMeasurement.CheckOwnerReferenceGuards`](LinuxWorkerMeasurement.cs)
+fixture runs after the authentic same-image worker starts and before server dispatch. It uses the
+original protected input, root activation, created accounts, retained workspaces, worker and server.
+Twenty-six fixed calls replace one reference with null and require the existing closed failure code;
+no owner, admission, lease, token, process identity or custody is fabricated. Only non-latching early
+reference checks are called. Listener claims, failure-latching listener checks, stop and custody
+transitions are excluded. A successful reference-denial call or unexpected exception fails the native procedure.
+
+The same pre-dispatch window also checks the actual run workspace's
+[`RequireControlOwnedBy`](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs)
+cancellation and live path, plus the application workspace's
+[`RequireControlOwnedBy`](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxApplicationWorkspace.cs)
+cancellation and live paths. An already cancelled token must reject with that exact token before native
+I/O; the original live job token must then pass the retained owner/account, named-node, copied-bundle
+and mounted-scratch rechecks. The run workspace gets the same cancelled-before-inspection and live
+retained-workspace pair. Either failure aborts the original procedure. These calls add no case
+or receipt row, close no admission, start no cleanup, and create no timer or alternative owner. They
+remain under the existing job deadline and do not replace the later physical stop/join and release checks.
+
+The root emits one closed `evidence-native-owner-reference-guards-v1` event with `generation`, the
+ordered 26 `rejected` labels, the two fixed `read_only_controls` labels and `native_acceptance: false`.
+The original [C3 runner](../../issue779-checkpoint3/run-native.py)
+requires exactly one event for the current generation. The [native measurement gate](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/NativeMeasurementTests.cs)
+requires the same labels for every original application case, alongside all original process,
+settlement, report and cleanup checks. Missing, duplicate or altered events fail verification. Portable
+parser tests establish only this data grammar; they do not execute native ownership checks. The
+subsequent unchanged consumer procedure supplies the adjacent valid ownership path, and still must
+prove physical completion. Ordinary product images contain neither the fixture implementation nor
+an injectable callback. These denials grant no native acceptance, proof or production registration.

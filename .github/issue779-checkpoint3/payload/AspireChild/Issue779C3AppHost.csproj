@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.4" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>AspireChild</AssemblyName>
+    <RootNamespace>AspireChild</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <NuGetLockFilePath>packages.$(NETCoreSdkRuntimeIdentifier).lock.json</NuGetLockFilePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(C3Variant)' == 'C3Readiness'">
+    <DefineConstants>$(DefineConstants);C3Readiness</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(C3Variant)' == 'C3FactoryStall'">
+    <DefineConstants>$(DefineConstants);C3FactoryStall</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(C3Variant)' == 'C3StuckDescendant'">
+    <DefineConstants>$(DefineConstants);C3StuckDescendant</DefineConstants>
+  </PropertyGroup>
+  <Target Name="ValidateC3Variant" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(C3Variant)' != '' and '$(C3Variant)' != 'C3Readiness' and '$(C3Variant)' != 'C3FactoryStall' and '$(C3Variant)' != 'C3StuckDescendant'"
+           Text="C3Variant must be empty, C3Readiness, C3FactoryStall or C3StuckDescendant." />
+  </Target>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <ProjectReference Include="../NativeHttpResource/Issue779C3NativeHttpResource.csproj"
+                      IsAspireProjectResource="false" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="CopyC3ProofPayload" AfterTargets="Build">
+    <ItemGroup>
+      <C3ProofDcp Include="$(DcpDir)**/*" />
+      <C3ProofResource Include="$(C3ResourceOutput)/*" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(DcpCliPath)')" Text="Pinned SDK DCP payload is unavailable; no readiness fallback is allowed." />
+    <Error Condition="'$(C3ResourceOutput)' == '' or !Exists('$(C3ResourceOutput)/NativeHttpResource.dll')" Text="The exact prebuilt C3 resource payload is required." />
+    <MakeDir Directories="$(TargetDir)dcp;$(TargetDir)resource" />
+    <Copy SourceFiles="@(C3ProofDcp)"
+          DestinationFiles="@(C3ProofDcp->'$(TargetDir)dcp/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(C3ProofResource)" DestinationFolder="$(TargetDir)resource" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

@@ -1,0 +1,17 @@
+--- packet/cases/N10/tooling/.github/issue779-csharp-native/run-native.py [extracted record predicates]
++++ procedures/n10/records.py [same predicates]
+@@ -47,1 +47,1 @@
+-def validate_fixture_result(value, generation, build_sha):
++def validate_fixture_result(value, generation, build_sha, SOURCE, CAPTURE_SHA):
+@@ -81,1 +81,1 @@
+-def validate_request_binding(request_raw, checksum_raw, generation, workflow):
++def validate_request_binding(request_raw, checksum_raw, generation, workflow, SOURCE, SOURCE_PARENT):
+@@ -131,1 +131,1 @@
+-def validate_n10_archive(values, parser_bytes, generation, build_sha, workflow, artifacts):
++def validate_n10_archive(values, parser_bytes, generation, build_sha, workflow, artifacts, SOURCE, SOURCE_PARENT, CAPTURE_SHA, PARSER_SHA):
+@@ -136,1 +136,1 @@
+-    result=decode_data(values["n10-fixture-result.json"]); validate_fixture_result(result,generation,build_sha)
++    result=decode_data(values["n10-fixture-result.json"]); validate_fixture_result(result,generation,build_sha,SOURCE,CAPTURE_SHA)
+@@ -147,1 +147,1 @@
+-    validate_request_binding(values["request.json"],values["request-policy.sha256"],generation,workflow)
++    validate_request_binding(values["request.json"],values["request-policy.sha256"],generation,workflow,SOURCE,SOURCE_PARENT)

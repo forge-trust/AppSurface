@@ -5,7 +5,7 @@ using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
-/// <summary>Runs explicit native acceptance producers and publishes a verifiable EvidenceHost manifest.</summary>
+/// <summary>Runs local native-validation procedures without issuing protected EvidenceHost claims.</summary>
 internal static class Program
 {
     internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -24,7 +24,8 @@ internal static class Program
         if (args.Length == 0 || args.Contains("--help", StringComparer.Ordinal))
         {
             Console.WriteLine("""
-                Native AppSurface EvidenceHost acceptance
+                Native AppSurface validation procedures (no protected admission)
+                --operation procedure|protected
                 --package <candidate.nupkg> --version <exact-version> --source-commit <sha>
                 --dotnet <absolute-dotnet-host> --output <fresh-evidence-directory>
                 [--repository <checkout>] [--scratch-parent <existing-directory>]
@@ -34,7 +35,9 @@ internal static class Program
 
                 Defaults: all journeys, 2 GiB scratch per producer, 1 GiB free-space floor.
                 Output is caller-owned durable evidence; only freshly owned scratch is cleaned.
-                A failed, skipped, truncated, timed-out or unclean run cannot produce a complete claim.
+                Procedure exit 0 means all selected local checks passed and cleanup completed.
+                Procedure reports never grant admission, native acceptance, or gate eligibility.
+                Protected execution remains unavailable until its compiled provider and capabilities are registered.
                 See tools/ForgeTrust.AppSurface.Evidence.Validation/README.md.
                 """);
             return args.Length == 0 ? 2 : 0;
@@ -43,6 +46,8 @@ internal static class Program
         try
         {
             var options = Parse(args);
+            cancellationToken.ThrowIfCancellationRequested();
+            RequireProcedureOperation(options);
             var repository = Path.GetFullPath(options.GetValueOrDefault("--repository", Directory.GetCurrentDirectory()));
             var output = Path.GetFullPath(Required(options, "--output"));
             if (Directory.Exists(output) || File.Exists(output)) throw new ArgumentException("Evidence output must be fresh.");
@@ -81,8 +86,8 @@ internal static class Program
                 producers.Add(new FanInProducer(fanIn));
             }
             var obligations = declarations.SelectMany(producer => producer.AssertionIds.Select((assertion, index) =>
-                new EvidenceObligation(producer.Id + "-" + index, "native-acceptance", "Verify the declared native acceptance contract.", [producer.Id], assertion))).ToArray();
-            var selected = new EvidenceProfile("native-acceptance", EvidenceProfileScope.Targeted, [], declarations, obligations);
+                new EvidenceObligation(producer.Id + "-" + index, "native-procedure", "Verify the declared local validation contract.", [producer.Id], assertion))).ToArray();
+            var selected = new EvidenceProfile("native-procedure", EvidenceProfileScope.Targeted, [], declarations, obligations);
             var inputDigest = EvidenceDigest.Sha256(JsonSerializer.SerializeToUtf8Bytes(new
             {
                 package = await ValidationProof.HashAsync(settings.PackagePath, cancellationToken),
@@ -95,27 +100,40 @@ internal static class Program
             }));
             var policy = new EvidencePolicy("appsurface-native-validation-" + inputDigest, "1.0.0", selected.Id, [selected], []);
             var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("tools/ForgeTrust.AppSurface.Evidence.Validation/Program.cs")]);
-            Directory.CreateDirectory(output);
-            await File.WriteAllBytesAsync(Path.Join(output, "evidence-plan.json"), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
-            await using var host = EvidenceHostBootstrap.Create(plan, registration =>
-            {
-                foreach (var producer in producers) registration.AddProducer(producer);
-            }, new EvidenceHostOptions(ArtifactDirectory: Path.Join(output, "artifacts")));
-            Console.WriteLine("Native evidence profile selected: " + string.Join(", ", declarations.Select(d => d.Id)));
-            var manifest = await host.RunAsync(cancellationToken: cancellationToken);
-            await File.WriteAllBytesAsync(Path.Join(output, "evidence-manifest.json"), EvidenceCanonicalJson.Serialize(manifest), CancellationToken.None);
-            ValidationProof.Require(EvidenceManifestBuilder.Verify(plan, manifest), "canonical manifest verification");
-            Console.WriteLine($"Claim: {manifest.ClaimKind}; cleanup: {manifest.Metrics.CleanupCompleted}; manifest: {Path.Join(output, "evidence-manifest.json")}");
-            foreach (var producer in manifest.ProducerResults)
+            var report = await NativeValidationProcedure.RunAsync(plan, producers, output, cancellationToken);
+            await File.WriteAllBytesAsync(Path.Join(output, "procedure-plan.json"), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
+            await File.WriteAllBytesAsync(Path.Join(output, "native-validation-procedure.json"),
+                JsonSerializer.SerializeToUtf8Bytes(report, JsonOptions), cancellationToken);
+            Console.WriteLine("Native validation procedures selected: " + string.Join(", ", declarations.Select(d => d.Id)));
+            Console.WriteLine($"Procedure passed: {report.ProcedurePassed}; cleanup: {report.CleanupCompleted}; protected admission: false; native acceptance: false; gate eligibility: false.");
+            foreach (var producer in report.ProducerResults)
                 Console.WriteLine($"{producer.ProducerId}: {producer.Outcome} {producer.Diagnostic}");
-            return manifest.ClaimKind == EvidenceClaimKind.TargetedComplete ? 0 : 1;
+            return report.ProcedurePassed ? 0 : 1;
         }
-        catch (OperationCanceledException) { Console.Error.WriteLine("Native validation cancelled; no complete claim."); return 130; }
-        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
+        catch (OperationCanceledException) { Console.Error.WriteLine("Native validation cancelled; no protected claim."); return 130; }
+        catch (EvidenceHostException exception)
         {
-            Console.Error.WriteLine("Native validation failed: " + exception.GetType().Name + ". See retained manifest and producer artifacts when available.");
+            Console.Error.WriteLine(exception.Message);
             return 1;
         }
+        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
+        {
+            Console.Error.WriteLine("Native validation failed: " + exception.GetType().Name + ". See retained procedure report and artifacts when available.");
+            return 1;
+        }
+    }
+
+    /// <summary>Separates ordinary procedure execution from protected claims before input or output I/O.</summary>
+    /// <remarks>A procedure result is not an execution mode or admission credential. The compiled protected
+    /// provider/capability registry does not currently admit these procedures; no CLI value can enroll them.</remarks>
+    private static void RequireProcedureOperation(IReadOnlyDictionary<string, string> options)
+    {
+        if (!options.TryGetValue("--operation", out var operation))
+            throw new EvidenceHostException("ASEVD401", "No native validation operation was selected.", "Select --operation procedure explicitly for local checks. Protected execution requires registered support; see docs/evidence/evidencehost-migration.md.");
+        if (operation == "protected")
+            throw new EvidenceHostException("ASEVD404", "Native validation has no registered protected producer capability.", "Complete protected qualification and registration; procedure reports cannot grant admission or gate eligibility. See docs/evidence/evidencehost-migration.md.");
+        if (operation != "procedure")
+            throw new EvidenceHostException("ASEVD401", "The native validation operation is unknown.", "Select --operation procedure explicitly for local checks; protected execution requires registered support.");
     }
 
     private static EvidenceProducerDeclaration Declaration(string id, int timeout, string[] assertions, bool transcript = false) =>
@@ -125,7 +143,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request"];
+        string[] allowed = ["--operation", "--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)

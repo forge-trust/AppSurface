@@ -1,0 +1,112 @@
+using Microsoft.Extensions.Hosting;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+
+if (args.Length != 4 || args[0] != "--scratch" || args[2] != "--case" || args[3] != "normal")
+{
+    throw new ArgumentException("Expected the root-selected scratch and fixed normal case.");
+}
+
+var scratch = Path.GetFullPath(args[1]);
+// The root creates this marker after arming its external watchdog and before dispatch.
+while (!File.Exists(Path.Combine(scratch, "armed")))
+{
+    await Task.Delay(25);
+}
+
+var builder = await CreateFactoryAsync();
+await using var application = builder.Build();
+try
+{
+    await application.StartAsync();
+    await application.WaitForShutdownAsync();
+}
+finally
+{
+    using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    await application.StopAsync(cleanup.Token);
+}
+
+async Task<IDistributedApplicationBuilder> CreateFactoryAsync()
+{
+    await File.WriteAllTextAsync(Path.Combine(scratch, "factory-entered"), "factory-entered\n");
+#if C3FactoryStall
+    using var signal = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => context.Cancel = true);
+    await Task.Delay(Timeout.InfiniteTimeSpan);
+    throw new InvalidOperationException("The compiled factory-stall variant unexpectedly continued.");
+#else
+    var payload = AppContext.BaseDirectory;
+    var socket = Path.Combine(scratch, "http.sock");
+    var appBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+    {
+        DisableDashboard = true,
+        EnableResourceLogging = true,
+        ProjectDirectory = scratch,
+        Args = ["--DcpPublisher:CliPath", Path.Combine(payload, "dcp", "dcp"),
+            "--DcpPublisher:WaitForResourceCleanup", "true"]
+    });
+    var storeBase = Path.GetFullPath(Path.Combine(scratch, ".aspire-store"));
+    if (!string.Equals(Environment.GetEnvironmentVariable("ASPIRE__STORE__PATH"), storeBase, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException("The Aspire store must use the root-selected scratch base.");
+    }
+
+    // Aspire 13.4.4 replaces the environment setting with build metadata during construction.
+    appBuilder.Configuration["Aspire:Store:Path"] = storeBase;
+    appBuilder.Services.AddHealthChecks().AddCheck("native-http-uds", new SocketHealth(socket));
+    appBuilder.AddExecutable("native-http", Environment.ProcessPath!, scratch,
+        [Path.Combine(payload, "resource", "NativeHttpResource.dll"), "--socket", socket, "--case", "normal"])
+        .WithEnvironment("PROOF_PROTECTED_TOOLS", Environment.GetEnvironmentVariable("PROOF_PROTECTED_TOOLS")!)
+        .WithEnvironment("PROOF_PROTECTED_OUTPUT", Environment.GetEnvironmentVariable("PROOF_PROTECTED_OUTPUT")!)
+        .WithEnvironment("PROOF_ALLOWED_INPUT", Environment.GetEnvironmentVariable("PROOF_ALLOWED_INPUT")!)
+        .WithHealthCheck("native-http-uds");
+    if (appBuilder.Resources.Count != 1 || appBuilder.Resources[0] is not ExecutableResource)
+    {
+        throw new InvalidOperationException("The closed catalogue permits exactly one executable resource.");
+    }
+
+    return appBuilder;
+#endif
+}
+
+internal sealed class SocketHealth(string path) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context,
+        CancellationToken cancellationToken = default)
+    {
+        using var handler = new SocketsHttpHandler
+        {
+            ConnectCallback = async (_, token) =>
+            {
+                var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                try
+                {
+                    await socket.ConnectAsync(new UnixDomainSocketEndPoint(path), token);
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            }
+        };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(1) };
+        try
+        {
+            using var response = await client.GetAsync("http://localhost/health", cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == System.Net.HttpStatusCode.OK && body == "native-http-ready"
+                ? HealthCheckResult.Healthy()
+                : HealthCheckResult.Unhealthy("Native HTTP readiness did not return the exact expected response.");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
+            return HealthCheckResult.Unhealthy("UDS health unavailable.");
+        }
+    }
+}

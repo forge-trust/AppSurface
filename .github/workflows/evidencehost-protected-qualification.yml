@@ -1,0 +1,68 @@
+name: EvidenceHost protected qualification prerequisite
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: evidencehost-protected-qualification-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  protected-context:
+    name: Check the protected qualification source
+    if: github.repository == 'forge-trust/AppSurface' && github.ref == 'refs/heads/main' && github.ref_protected
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Compare the immutable protected workflow context before native dispatch
+        run: timeout --signal=KILL 10 python3 -B .github/issue779-protected-qualification/entrypoint.py guard
+      - name: Exercise detached qualification boundary controls without API access
+        working-directory: .github/issue779-protected-qualification
+        run: timeout --signal=KILL 30 python3 -B -m unittest -v test_entrypoint test_completed_run test_completed_validation test_completed_c1
+
+  full-runtime-proof:
+    name: Full current runtime proof and unchanged gates
+    needs: protected-context
+    uses: ./.github/workflows/evidencehost-runtime-proof.yml
+
+  retain-partial-qualification:
+    name: Retain full-runtime qualification provenance without acceptance
+    needs: full-runtime-proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind the protected checkout and collect the current C1 aggregate after the full graph
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE779_FULL_RUNTIME_RESULT: ${{ needs.full-runtime-proof.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          output="$RUNNER_TEMP/protected-qualification"
+          mkdir -m 0700 "$output"
+          printf 'QUALIFICATION_EVIDENCE=%s\n' "$output" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$output/source.json"
+          QUALIFICATION_EVIDENCE="$output" timeout --signal=KILL 130 python3 -B .github/issue779-protected-qualification/entrypoint.py collect
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$output/source.json" --verify
+      - name: Retain exact bounded qualification material
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-protected-full-runtime-partial-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/protected-qualification
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,19 @@
+--- packet/cases/N15/tooling/.github/issue779-csharp-native/finalize_n15_observation.py
++++ procedures/n15/finalize_n15_observation.py
+@@ -5,2 +4,0 @@
+-SOURCE='5b4ed381badb91de47d793715d05b6ae7737e39e'
+-CAPTURE="4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540"
+@@ -130,1 +128,3 @@
+-    ap.add_argument("--job-deadline-boot-ms",required=True,type=int); a=ap.parse_args()
++    ap.add_argument("--job-deadline-boot-ms",required=True,type=int); ap.add_argument("--source-commit",required=True); ap.add_argument("--capture-sha256",required=True); a=ap.parse_args()
++    SOURCE=a.source_commit; CAPTURE=a.capture_sha256
++    need(re.fullmatch(r"[0-9a-f]{40}",SOURCE) and re.fullmatch(r"[0-9a-f]{64}",CAPTURE),"current-source-binding")
+@@ -139,1 +139,1 @@
+-    need(hashlib.sha256(parser_raw).hexdigest()=="b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf","parser-pin")
++    need(hashlib.sha256(parser_raw).hexdigest()=="d06806ea5248709c96e8d1cce0f6b97b1ae4029296609669e1cb88f3c6ec9fb3","parser-pin")
+@@ -203,1 +203,1 @@
+-    final=parser.assemble_final_record(partial,completion,a.generation); raw=canonical(final)
++    final=parser.assemble_final_record(partial,completion,a.generation,source_commit=SOURCE,capture_sha256=CAPTURE); raw=canonical(final)
+@@ -205,1 +205,1 @@
+-    save_fixed(root/"n15-record-summary.json",canonical(parser.validate_result(final,a.generation)),deadline)
++    save_fixed(root/"n15-record-summary.json",canonical(parser.validate_result(final,a.generation,source_commit=SOURCE,capture_sha256=CAPTURE)),deadline)

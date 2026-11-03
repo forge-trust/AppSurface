@@ -1,0 +1,231 @@
+{
+  "current_files": {
+    "README.md": {
+      "bytes": 15279,
+      "sha256": "c687dc984765f06be9cad1c8470b12da40180ee8c2d8860e4f7d15fb457cba12"
+    },
+    "adapter.py": {
+      "bytes": 2323,
+      "sha256": "4210464e68a6660aa28bf74df6c2ead7bbcaeecb570ce3d2f447705c9f4801e4"
+    },
+    "bridge.py": {
+      "bytes": 25883,
+      "sha256": "3780f6092395bba472b908b455dd1466b70aa1e7b8754b2cc80f7cff3c96dde7"
+    },
+    "helpers.py": {
+      "bytes": 4579,
+      "sha256": "626b7cd0b8542af5bc42ff11c2860668772e297bd39f47d4b60b8670cce254b8"
+    }
+  },
+  "native_execution": false,
+  "portable_controls": {
+    "exit": 0,
+    "passed": 8,
+    "scope": "portable data/file regressions only; fresh Linux required",
+    "sha256": "5cab993980a0bc34261b1d4379ecccd33148f56a9c3da75fcf3532341bac4063",
+    "test": "../../test_slot.py"
+  },
+  "review_corrections": [
+    "archive-specific exclusive original-byte retention under 33619968-byte bound",
+    "exact two ordinal stdout/stderr records and actual reads including empty files",
+    "N04/N05/N06/N08 raw N03-member binding without nonexistent enclosing digest field"
+  ],
+  "schema": "issue779-current-slot-ports-v1",
+  "source44_followup": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "scope": "case-sensitive Linux maps, explicit empty-helper modes, or failure-only terminal diagnostics as applicable",
+    "updated_paths": [
+      ".github/issue779-checkpoint1/procedures/slot/README.md",
+      ".github/issue779-checkpoint1/procedures/slot/bridge.py"
+    ]
+  },
+  "source48_failure_retention": {
+    "native_execution": false,
+    "original_retention_deadline_preserved": true,
+    "portable_controls": "../../test_failed_fixture_retention.py",
+    "scope": "failure-only unchanged actual archive retention before original exception rethrow",
+    "success_path_unchanged": true
+  },
+  "source49_initializer_correction": {
+    "baseline": "02ce79b4b15f4fa7de4574b8addfec6bcc5f9428",
+    "cases": [
+      "N04",
+      "N05",
+      "N06",
+      "N07",
+      "N08"
+    ],
+    "historical_patch_files_unchanged": true,
+    "incremental_five_shells_diff_sha256": "6746ffd160bdb02fe763f483ded4708b1a835a455f8e5a861d0d3cfcd1be4059",
+    "native_execution": false,
+    "portable_controls": "../../test_negative_source_binding.py",
+    "scope": "one readonly source snapshot after authenticated root-verify per file; original N03 guard unchanged"
+  },
+  "source49_metadata_sampling": {
+    "clocks_unchanged": true,
+    "files": [
+      "procedures/slot/checkpoint-none.sh",
+      "procedures/n12/checkpoint-n12-data-integration.sh"
+    ],
+    "native_execution": false,
+    "portable_control": "../../test_metadata_sample_batching.py",
+    "scope": "pin_file uses same physical full before tuple for size and nlink; ancestor combines UID/mode stat per component; physical hash/finaltuple/walks unchanged",
+    "time_gain_measured": false
+  },
+  "source50_record_framing": {
+    "cases": [
+      "N04",
+      "N05",
+      "N06",
+      "N08"
+    ],
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_tests": [
+      "../../test_n08_record_framing.py",
+      "../../test_n04_join_diagnostic.py"
+    ],
+    "scope": "N03 publisher emits terminal LF through jq -cS; strict parser unchanged. N04 adds closed numeric failure diagnostic only."
+  },
+  "source51_join_transition": {
+    "fresh_linux_required": true,
+    "native_causality_proven": false,
+    "native_execution": false,
+    "portable_test": "../../test_n04_join_race.py",
+    "scope": "On original-child identity-read failure require same-clock PID/proc/group absence before exact-child wait; preserve numeric status and fail closed on live mismatch, remaining group or expiry."
+  },
+  "source51_metadata_sampling": {
+    "clocks_unchanged": true,
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_control": "../../test_metadata_sample_batching.py",
+    "scope": "N06 pin_file and ancestor adopt complete typed sampling; None/N06/N12 ordinary alias components combine UID/mode query. All physical walks, symlink before/after checks, hashes and original clocks retained.",
+    "time_gain_measured": false
+  },
+  "source53_declaration_lookup": {
+    "native_execution": false,
+    "portable_control": "../../test_alias_declaration_lookup.py",
+    "scope": "None/N12 readonly bounded declaration-only alias row cache after original typed schema; all physical walks/hash/pins and clocks preserved",
+    "time_gain_measured": false
+  },
+  "source53_n05_sampling": {
+    "native_execution": false,
+    "portable_controls": [
+      "../../test_metadata_sample_batching.py",
+      "../../test_n05_stage_observation.py"
+    ],
+    "scope": "N05 adopts exact N06 pin_file/ancestor/alias_walk consolidated physical samples; existing six diagnostic stage observations unchanged",
+    "time_gain_measured": false
+  },
+  "source54_none_ordinary_os": {
+    "clocks_unchanged": true,
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_controls": [
+      "../../test_none_ordinary_os_batch.py",
+      "../../test_alias_declaration_lookup.py"
+    ],
+    "scope": "None initial/final ordinary OS audits use exact N06 full batch implementation with immutable declaration-only input cache; all physical file/ancestor/alias/hash comparisons remain mandatory; five closed timing observations use original fixture clock",
+    "time_gain_measured": false
+  },
+  "source55_batched_audit_fresh_clock": {
+    "clocks_unchanged": true,
+    "fresh_linux_required": true,
+    "measured_gain_claimed": false,
+    "native_execution": false,
+    "portable_controls": [
+      "../../test_fixture_clock_sampling.py",
+      "../../test_n12_ordinary_os_batch.py",
+      "../../test_alias_declaration_lookup.py"
+    ],
+    "scope": "N12 adopts exact None declaration-only cache and N06 complete physical batch audit. None/N12 left reads the same fresh uptime sample inline rather than through inner shell child; original comparisons/caps/native guard and suffix preserved."
+  },
+  "wrappers": [
+    {
+      "changes": [
+        "historical build/source boundary replaced by actual current root-verify",
+        "pinned current source capture replaces historical review file",
+        "current six-entry bootstrap environment",
+        "consolidated metadata fields from existing physical samples without removing checks"
+      ],
+      "historical_path": "N03/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "historical_sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a",
+      "native_execution": false,
+      "ported_path": "checkpoint-none.sh",
+      "ported_sha256": "1eeb864f971a2f2aa583b2f74675e8a11c44e4429e7698ee40b92fac05d32543",
+      "selector": "None"
+    },
+    {
+      "changes": [
+        "historical build/source boundary replaced by actual current root-verify",
+        "pinned current source capture replaces historical review file",
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
+      ],
+      "historical_path": "N04/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "historical_sha256": "5bca98a13e5a8a0360e579b15fed05b75d16c1fda4006aa8331e07035513d66d",
+      "native_execution": false,
+      "ported_path": "checkpoint-n04.sh",
+      "ported_sha256": "bd24236f17a06078606b5195809c155c32438d38c41155455c7e535cfab56df0",
+      "selector": "N04"
+    },
+    {
+      "changes": [
+        "historical build/source boundary replaced by actual current root-verify",
+        "pinned current source capture replaces historical review file",
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
+      ],
+      "historical_path": "N05/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "historical_sha256": "782a69fc2bce61df806dbb43ec63760aab6b77e5c604a2fa8fc3d33583b9e96e",
+      "native_execution": false,
+      "ported_path": "checkpoint-n05.sh",
+      "ported_sha256": "a8450c625bd8eeeae70b2bc9856227b0d4c2d33f7b854888b7308045c7058e7b",
+      "selector": "N05"
+    },
+    {
+      "changes": [
+        "historical build/source boundary replaced by actual current root-verify",
+        "pinned current source capture replaces historical review file",
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
+      ],
+      "historical_path": "N06/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "historical_sha256": "377abed92192c4d948dc42ea0eedaec3ad8537e3d8f935deb90ae3057257c761",
+      "native_execution": false,
+      "ported_path": "checkpoint-n06.sh",
+      "ported_sha256": "e6e77cbf96303e51dfa2b5e466b8290e54a0b49718f6759c246ba873154c57f6",
+      "selector": "N06"
+    },
+    {
+      "changes": [
+        "historical build/source boundary replaced by actual current root-verify",
+        "pinned current source capture replaces historical review file",
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
+      ],
+      "historical_path": "N07/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "historical_sha256": "718d6c357bcbb73010039d172ab76c3dd789b0bbf1089d9243aed4ddaab55678",
+      "native_execution": false,
+      "ported_path": "checkpoint-n07.sh",
+      "ported_sha256": "29e48717f01f790b165f1c23b64b3116e84e33a435b93ba7741aed788b81eb4f",
+      "selector": "N07"
+    },
+    {
+      "changes": [
+        "historical build/source boundary replaced by actual current root-verify",
+        "pinned current source capture replaces historical review file",
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard",
+        "bounded immutable OS-audit declaration lookup cache; physical per-file, ELF and full-membership checks plus original clocks remain unchanged"
+      ],
+      "historical_path": "N08/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "historical_sha256": "f6f17cf58811c3093f07b2a39817b45eeebfc5052431c85d4c9cfb29604cc384",
+      "native_execution": false,
+      "ported_path": "checkpoint-n08.sh",
+      "ported_sha256": "1079fdddf5cf875d6645eb36260254ecc85289f79cffbbcd94b645d1ba0c3743",
+      "selector": "N08"
+    }
+  ]
+}

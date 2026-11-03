@@ -26,6 +26,36 @@
     <BaseIntermediateOutputPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
   </PropertyGroup>
+  <!-- Private checkpoint selection is build metadata. Preserve package-owned compiler symbols. -->
+  <PropertyGroup>
+    <EvidencePrivateQualification Condition="'$(EvidencePrivateQualification)' == ''">None</EvidencePrivateQualification>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C4Accounts' or '$(EvidencePrivateQualification)' == 'C4AccountRollback'">$(DefineConstants);EVIDENCE_PRIVATE_C4_ACCOUNTS</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C4AccountRollback'">$(DefineConstants);EVIDENCE_PRIVATE_C4_ACCOUNT_ROLLBACK</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3' or '$(EvidencePrivateQualification)' == 'C3Sdk'">$(DefineConstants);EVIDENCE_PRIVATE_C3</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3Sdk'">$(DefineConstants);EVIDENCE_PRIVATE_C3_SDK</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C2'">$(DefineConstants);EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N04'">$(DefineConstants);EVIDENCE_PRIVATE_N04</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N05'">$(DefineConstants);EVIDENCE_PRIVATE_N05</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N06'">$(DefineConstants);EVIDENCE_PRIVATE_N06</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N07'">$(DefineConstants);EVIDENCE_PRIVATE_N07</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N08'">$(DefineConstants);EVIDENCE_PRIVATE_N08</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N09'">$(DefineConstants);EVIDENCE_PRIVATE_N09</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N10'">$(DefineConstants);EVIDENCE_PRIVATE_N10</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N11'">$(DefineConstants);EVIDENCE_PRIVATE_N11</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N12'">$(DefineConstants);EVIDENCE_PRIVATE_N12</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N15'">$(DefineConstants);EVIDENCE_PRIVATE_N15</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N16'">$(DefineConstants);EVIDENCE_PRIVATE_N16;EVIDENCE_PRIVATE_ACCEPTED_WORK</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N13'">$(DefineConstants);EVIDENCE_PRIVATE_N13;EVIDENCE_PRIVATE_ACCEPTED_WORK</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N14'">$(DefineConstants);EVIDENCE_PRIVATE_N14;EVIDENCE_PRIVATE_ACCEPTED_WORK</DefineConstants>
+  </PropertyGroup>
+  <Target Name="ValidateEvidencePrivateQualification" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(EvidencePrivateQualification)' != 'None' and '$(EvidencePrivateQualification)' != 'C2' and '$(EvidencePrivateQualification)' != 'C3' and '$(EvidencePrivateQualification)' != 'C3Sdk' and '$(EvidencePrivateQualification)' != 'C4Accounts' and '$(EvidencePrivateQualification)' != 'C4AccountRollback' and '$(EvidencePrivateQualification)' != 'N04' and '$(EvidencePrivateQualification)' != 'N05' and '$(EvidencePrivateQualification)' != 'N06' and '$(EvidencePrivateQualification)' != 'N07' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09' and '$(EvidencePrivateQualification)' != 'N10' and '$(EvidencePrivateQualification)' != 'N11' and '$(EvidencePrivateQualification)' != 'N12' and '$(EvidencePrivateQualification)' != 'N13' and '$(EvidencePrivateQualification)' != 'N14' and '$(EvidencePrivateQualification)' != 'N15' and '$(EvidencePrivateQualification)' != 'N16'"
+           Text="EvidencePrivateQualification must be None, C2, C3, C3Sdk, C4Accounts, C4AccountRollback, N04, N05, N06, N07, N08, N09, N10, N11, N12, N13, N14, N15 or N16." />
+  </Target>
+  <Target Name="RejectPrivateEvidenceQualificationPackage" BeforeTargets="Pack">
+    <Error Condition="'$(EvidencePrivateQualification)' != 'None'"
+           Text="Private Evidence qualification images cannot be packed as production packages." />
+  </Target>
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
   </ItemGroup>

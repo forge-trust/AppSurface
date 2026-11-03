@@ -825,8 +825,10 @@
           "ForgeTrust.AppSurface.Deployment.GcpCloudRun": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
           "ForgeTrust.AppSurface.Durable.PostgreSql": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Aspire": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Cli": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Supervision": "[0.1.0, )",
           "ForgeTrust.AppSurface.ReleaseContracts": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire.Cli": "[0.1.0, )",
@@ -943,6 +945,8 @@
         "dependencies": {
           "Aspire.Hosting": "[13.4.4, 14.0.0)",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }
       },
@@ -960,7 +964,8 @@
       "forgetrust.appsurface.evidence.coverage": {
         "type": "Project",
         "dependencies": {
-          "CliWrap": "[3.10.1, )"
+          "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.planner": {
@@ -971,6 +976,14 @@
       },
       "forgetrust.appsurface.evidence.readiness": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.supervision": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )",
+          "Tmds.DBus.Protocol": "[0.95.1, )"
+        }
       },
       "forgetrust.appsurface.evidence.validation": {
         "type": "Project",
@@ -1382,6 +1395,12 @@
         "dependencies": {
           "TextMateSharp": "2.0.3"
         }
+      },
+      "Tmds.DBus.Protocol": {
+        "type": "CentralTransitive",
+        "requested": "[0.95.1, )",
+        "resolved": "0.95.1",
+        "contentHash": "IbGhqZAqqgB/DkT70+lAk4MNv95tZtsTMFQ+S3uGy0aTfOkGVeFjeNJsX8dBI/3+CPnO5XW6lRQKGeFEgHElKw=="
       },
       "TreeSitter.DotNet": {
         "type": "CentralTransitive",

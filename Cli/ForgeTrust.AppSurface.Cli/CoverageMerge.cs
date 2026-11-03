@@ -194,7 +194,7 @@ internal sealed class CoverageMergeWorkflow
         CoverageRunMergeResult merge;
         try
         {
-            merge = await _reportGenerator.MergeAsync([reportGlob], reportGeneratorDirectory, cancellationToken);
+            merge = await _reportGenerator.MergeAsync(stagedReports, reportGeneratorDirectory, cancellationToken);
         }
         catch (CommandException exception) when (exception.Message.Contains("ASCOV114", StringComparison.Ordinal))
         {

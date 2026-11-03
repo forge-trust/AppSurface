@@ -43,8 +43,14 @@ public sealed class CoverageMergeTests
         Assert.True(File.Exists(Path.Join(result.OutputDirectory, "timings.json")));
         Assert.True(File.Exists(Path.Join(result.OutputDirectory, "reportgenerator-summary.txt")));
         Assert.EndsWith(Path.Join("TestResults", "coverage-merged", "coverage.cobertura.xml"), result.CoveragePath, StringComparison.Ordinal);
-        var mergeInput = Assert.Single(reportGenerator.CoverageFiles);
-        Assert.EndsWith(Path.Join("reportgenerator-input", "**", "coverage.cobertura.xml"), mergeInput, StringComparison.Ordinal);
+        Assert.Equal(2, reportGenerator.CoverageFiles.Count);
+        Assert.All(reportGenerator.CoverageFiles, path =>
+        {
+            Assert.StartsWith(Path.Join(result.OutputDirectory, "reportgenerator-input") + Path.DirectorySeparatorChar,
+                path, StringComparison.Ordinal);
+            Assert.True(File.Exists(path));
+            Assert.DoesNotContain('*', path);
+        });
         Assert.Equal(2, Directory.EnumerateFiles(Path.Join(result.OutputDirectory, "reportgenerator-input"), "coverage.cobertura.xml", SearchOption.AllDirectories).Count());
         var output = console.ReadOutputString();
         Assert.Contains($"Source: {Path.Join("TestResults", "coverage-shards")}", output, StringComparison.Ordinal);

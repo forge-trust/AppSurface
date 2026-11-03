@@ -1,5 +1,23 @@
 # Deferred work
 
+## EvidenceHost follow-ups after #779
+
+### Portable origin receipts
+
+**What:** Evaluate signed portable EvidenceHost receipts when a consumer needs verification outside the protected CI output channel.
+
+**Why:** The [#779 shared admission design](docs/designs/issue-779-evidencehost-trust-boundary.md) deliberately records `ValidatedNotAttested`; a structurally valid manifest cannot authenticate its own source.
+
+**Pros:** Gives external gate consumers a verifiable origin and explicit retention policy.
+
+**Cons:** Adds signing identity, authorization, key/identity lifecycle and retained evidence costs; it cannot prove correctness of subject-owned test logic.
+
+**Context:** Reuse the [release provenance follow-up](#release-provenance-follow-up-798) where its origin/retention requirements coincide. Preserve admission, registered assertion semantics and the separate CI containment boundary; do not simply rename a limited assertion to `Attested`.
+
+**Effort:** Human L / agent M, subject to consumer research.
+**Priority:** P3
+**Depends on:** #779 hostile proof, a real external consumer and a separate signing/retention design.
+
 ## Measure real Cloud Run observer adoption after #891
 
 **What:** Evaluate one consenting internal workflow using the exact execution observer and measure classification usefulness and replaced custom code.

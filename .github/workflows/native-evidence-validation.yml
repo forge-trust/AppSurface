@@ -1,4 +1,4 @@
-name: Native EvidenceHost acceptance
+name: Native Evidence validation procedure
 
 on:
   pull_request:
@@ -16,13 +16,14 @@ concurrency:
 
 jobs:
   native-evidence:
-    name: Native evidence (${{ matrix.os }})
+    name: Evidence procedure (${{ matrix.os }}, ${{ matrix.mode }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        mode: [storage, consumer]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,8 +38,8 @@ jobs:
         run: |
           $selection = @{ sdk = @{ version = '10.0.402'; rollForward = 'disable' } }
           $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) 'global.json')
-          if ((dotnet --version) -ne '10.0.402') { throw 'Native validation SDK selection failed' }
-      - name: Restore and build native validation
+          if ((dotnet --version) -ne '10.0.402') { throw 'Evidence procedure SDK selection failed' }
+      - name: Restore and build validation procedure
         id: build
         shell: pwsh
         run: |
@@ -46,33 +47,43 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Pack candidate and execute native journeys
+      - name: Run portable validation procedure
         shell: pwsh
         run: |
-          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
-          $feed = Join-Path $env:RUNNER_TEMP 'native-evidence-feed'
-          $proof = Join-Path $env:RUNNER_TEMP 'native-evidence-proof'
+          $version = "0.0.0-procedure.${{ github.run_number }}.${{ github.run_attempt }}"
+          $feed = Join-Path $env:RUNNER_TEMP "evidence-procedure-feed-${{ matrix.mode }}"
+          $proof = Join-Path $env:RUNNER_TEMP "evidence-procedure-${{ matrix.mode }}"
           dotnet pack Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=${{ github.sha }}" "/p:SourceRevisionId=${{ github.sha }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.$version.nupkg"
           $hostPath = (Get-Command dotnet).Source
-          dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll --package $package --version $version --source-commit '${{ github.sha }}' --dotnet $hostPath --output $proof --scratch-parent $env:RUNNER_TEMP
+          dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll --operation procedure --mode '${{ matrix.mode }}' --package $package --version $version --source-commit '${{ github.sha }}' --dotnet $hostPath --output $proof --scratch-parent $env:RUNNER_TEMP
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      # Retain the native fixture's failure proof before negative tests can fail.
-      # Both acceptance layers remain required; a failed journey cannot skip tests.
-      - name: Test native lifecycle contracts
+          $planPath = Join-Path $proof 'procedure-plan.json'
+          $reportPath = Join-Path $proof 'native-validation-procedure.json'
+          if (-not (Test-Path -LiteralPath $planPath -PathType Leaf)) { throw 'Procedure plan was not produced' }
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'Procedure report was not produced' }
+          if (Test-Path -LiteralPath (Join-Path $proof 'evidence-manifest.json')) { throw 'Procedure mode must not emit an Evidence manifest' }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if ($report.schema -ne 'appsurface-native-validation-procedure-v1') { throw 'Unexpected procedure report schema' }
+          if ($report.procedurePassed -ne $true) { throw 'Portable validation procedure did not pass' }
+          if ($report.cleanupCompleted -ne $true) { throw 'Procedure cleanup did not complete' }
+          if ($report.protectedAdmission -ne $false -or $report.nativeAcceptance -ne $false -or $report.gateEligible -ne $false) { throw 'Procedure report asserted protected admission, native acceptance, or gate eligibility' }
+          if ($null -eq $report.producerResults) { throw 'Procedure results are missing' }
+      # Retain procedure diagnostics before contract tests can fail. A procedure report is not an Evidence manifest.
+      - name: Test native lifecycle, tamper, and fan-in contracts
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: pwsh
         run: |
           dotnet restore Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests'
+          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests|FullyQualifiedName~NativeEvidenceProgramTests|FullyQualifiedName~NativeValidationProcedureTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Preserve native EvidenceHost artifacts
+      - name: Preserve native validation procedure artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: native-evidence-${{ matrix.os }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/native-evidence-proof
+          name: evidence-procedure-${{ matrix.os }}-${{ matrix.mode }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence-procedure-${{ matrix.mode }}
           if-no-files-found: warn
           retention-days: 7

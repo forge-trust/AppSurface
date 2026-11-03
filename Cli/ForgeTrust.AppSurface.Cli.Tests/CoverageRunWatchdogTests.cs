@@ -556,6 +556,8 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = TestDirectory.Create();
         using var console = new FakeInMemoryConsole();
+        using var releasePublication = new ManualResetEventSlim();
+        var artifactPublished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
@@ -563,6 +565,11 @@ public sealed class CoverageRunWatchdogTests
             CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
+        supervisor.ArtifactPublished = _ =>
+        {
+            artifactPublished.TrySetResult();
+            releasePublication.Wait();
+        };
         supervisor.BindOutputDirectory(output.Path);
         var operations = Enumerable.Range(0, 40)
             .Select(index => supervisor.Start("project", $"tests/{index}-{new string('x', 10_000)}.csproj", log: $"logs/{new string('y', 10_000)}.log"))
@@ -572,17 +579,22 @@ public sealed class CoverageRunWatchdogTests
         {
             var artifact = Path.Join(output.Path, "coverage-watchdog.json");
             await WaitForFileAsync(artifact);
+            await artifactPublished.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.InRange(new FileInfo(artifact).Length, 1, 64 * 1024);
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(artifact));
             Assert.InRange(document.RootElement.GetProperty("concurrentlyStale").GetArrayLength(), 0, 32);
             Assert.True(document.RootElement.GetProperty("concurrentlyStaleOmitted").GetInt32() >= 0);
+            // Artifact publication precedes the separately serialized warning write.
+            Assert.Empty(console.ReadErrorString());
+            releasePublication.Set();
             await WaitForErrorOccurrencesAsync(console, "Coverage watchdog warning", 1);
             Assert.DoesNotContain($"artifact=\"{output.Path}", console.ReadErrorString(), StringComparison.Ordinal);
             Assert.Contains("coverage-watchdog.json", console.ReadErrorString(), StringComparison.Ordinal);
         }
         finally
         {
+            releasePublication.Set();
             foreach (var operation in operations)
             {
                 operation.Dispose();
@@ -641,14 +653,34 @@ public sealed class CoverageRunWatchdogTests
     [Fact]
     public async Task ConsoleSink_ShouldBoundBlockedWritesAndKeepOnlyOneWriter()
     {
-        using var output = new BlockingWriteStream();
+        using var output = new GatedCaptureWriteStream();
         using var console = new FakeConsole(Stream.Null, output, Stream.Null);
         using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromMilliseconds(20));
 
-        await sink.WriteOutputAsync("first");
-        await sink.WriteOutputAsync("second");
+        try
+        {
+            var first = sink.WriteOutputAsync("first");
+            var second = sink.WriteOutputAsync("second");
+            await output.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Equal(1, output.WriteCount);
+            await first.WaitAsync(TimeSpan.FromSeconds(1));
+            await second.WaitAsync(TimeSpan.FromSeconds(1));
+
+            Assert.Equal(1, output.WriteCount);
+        }
+        finally
+        {
+            output.ReleaseFirstWrite();
+            await output.SecondWriteCompleted.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+
+        Assert.Equal(2, output.WriteCount);
+        var text = output.ReadString();
+        Assert.Contains("first", text, StringComparison.Ordinal);
+        Assert.Contains("second", text, StringComparison.Ordinal);
+        Assert.True(
+            text.IndexOf("first", StringComparison.Ordinal) < text.IndexOf("second", StringComparison.Ordinal),
+            $"Expected ordered writes, but received: {text}");
     }
 
     [Fact]

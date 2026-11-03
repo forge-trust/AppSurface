@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="NuGet.Packaging"><HintPath>$(MSBuildToolsPath)/NuGet.Packaging.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="NuGet.Common"><HintPath>$(MSBuildToolsPath)/NuGet.Common.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="NuGet.Versioning"><HintPath>$(MSBuildToolsPath)/NuGet.Versioning.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="NuGet.Frameworks"><HintPath>$(MSBuildToolsPath)/NuGet.Frameworks.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="NuGet.Configuration"><HintPath>$(MSBuildToolsPath)/NuGet.Configuration.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(MSBuildToolsPath)/Newtonsoft.Json.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="System.Security.Cryptography.Pkcs"><HintPath>$(MSBuildToolsPath)/System.Security.Cryptography.Pkcs.dll</HintPath><Private>true</Private></Reference>
+  </ItemGroup>
+</Project>

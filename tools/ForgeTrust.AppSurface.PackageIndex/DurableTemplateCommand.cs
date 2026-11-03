@@ -38,7 +38,14 @@ internal static class DurableTemplateCommand
             cancellationToken, nativeToolIdentity: () => nativeIdentity, nativeAcquisitionIdentity: () => acquiredIdentity);
     }
 
-    /// <summary>Runs the generated ordinary-startup smoke against one privately owned native PostgreSQL cluster.</summary>
+    /// <summary>Runs the generated ordinary-startup smoke against one privately owned native PostgreSQL cluster.
+    /// Linux uses <c>/tmp</c> and macOS uses <c>/private/tmp</c> for the cluster root; Windows and other platforms
+    /// use the system temporary directory. The short Unix paths keep PostgreSQL's socket path within its fixed limit.</summary>
+    /// <remarks>The smoke still enforces the 103-byte Unix-domain socket path limit in
+    /// <see cref="DurableTemplateNativePostgreSql"/>. Linux and macOS ignore user-selected temporary-directory
+    /// environment paths for this owned cluster because they can exceed that limit. The remaining setup budget is
+    /// sampled once and shared by the child environment and command timeout, so the timeout cannot drift below the
+    /// budget advertised to the child.</remarks>
     /// <param name="bin">Absolute PostgreSQL tool directory selected for the smoke runner.</param>
     /// <param name="root">Generated test project to run.</param>
     /// <param name="environment">Environment shared with the generated proof, copied before adding cluster credentials.</param>
@@ -58,8 +65,9 @@ internal static class DurableTemplateCommand
         Func<DurableTemplateNativePostgreSql, int, ValueTask>? disposeClusterAsync = null,
         Action<NativePostgreSqlToolIdentity>? acquisitionIdentitySink = null)
     {
-        // macOS user temp paths can exceed PostgreSQL's Unix-domain socket path limit.
-        var temporary = OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
+        // Linux and macOS user temp paths can exceed PostgreSQL's Unix-domain socket path limit.
+        var temporary = OperatingSystem.IsLinux() ? "/tmp" :
+            OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
         var ownedRoot = Path.Join(temporary, "appsurface-native-template-" + Guid.NewGuid().ToString("N"));
         var cluster = startClusterAsync is null
             ? await DurableTemplateNativePostgreSql.StartAsync(ownedRoot, runner, cancellationToken,
@@ -73,13 +81,14 @@ internal static class DurableTemplateCommand
             var childEnvironment = environment.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_ADMIN_CONNECTION"] = cluster.ConnectionString;
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PG_BIN"] = bin;
-            var setupRemaining = cluster.SetupBudgetRemainingMilliseconds;
-            childEnvironment["APPSURFACE_TEMPLATE_NATIVE_SETUP_REMAINING_MS"] = setupRemaining.ToString(System.Globalization.CultureInfo.InvariantCulture);
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PORT_MIN"] = "50000";
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PORT_MAX"] = "60000";
+            var setupBudgetRemainingMilliseconds = cluster.SetupBudgetRemainingMilliseconds;
+            childEnvironment["APPSURFACE_TEMPLATE_NATIVE_SETUP_REMAINING_MS"] =
+                setupBudgetRemainingMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             result = await runner.RunAsync(new ExternalCommandRequest("dotnet",
                 ["test", root, "--no-build", "--no-restore", "--filter", "FullyQualifiedName~NativePostgreSqlSmoke", "--logger", "console;verbosity=detailed"],
-                root, "native-smoke", "verifying ordinary generated host startup", setupRemaining + 35_000, childEnvironment,
+                root, "native-smoke", "verifying ordinary generated host startup", setupBudgetRemainingMilliseconds + 35_000, childEnvironment,
                 ExternalCapturePolicy.ReleaseProof), cancellationToken);
             // A completed child result cannot renew cleanup when its observation fails validation.
             // Preserve the initial allowance only for runner failures before a result exists.

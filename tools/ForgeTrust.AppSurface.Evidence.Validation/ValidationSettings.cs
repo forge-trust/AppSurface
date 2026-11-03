@@ -1,10 +1,10 @@
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
-/// <summary>Explicit candidate and workspace inputs for the repository's native acceptance journeys.</summary>
+/// <summary>Explicit candidate and workspace inputs for the repository's local validation procedures.</summary>
 /// <param name="RepositoryRoot">Checkout containing this validation suite.</param>
 /// <param name="PackagePath">Candidate CLI nupkg that must be installed and verified.</param>
 /// <param name="PackageVersion">Exact candidate version; no floating package selection.</param>
-/// <param name="ExpectedSourceCommit">Trusted candidate source commit checked against package metadata.</param>
+/// <param name="ExpectedSourceCommit">Caller-pinned candidate source commit checked against package metadata; not an admission credential.</param>
 /// <param name="DotnetPath">Explicit SDK host executable.</param>
 /// <param name="ScratchParent">Existing parent for freshly owned workspace leases.</param>
 /// <param name="EvidenceDirectory">Fresh caller-owned durable output outside scratch.</param>

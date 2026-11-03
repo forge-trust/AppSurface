@@ -1,0 +1,315 @@
+# Current-source C1 native acceptance adapter
+
+This private acceptance lane publishes fresh current-source CLI images for fourteen
+fixed compile selectors: ordinary `None` runs N01–N03, and N04–N16 each run their
+named case. Historical captures, images, review flags, command rows and TRX facts
+are not runtime inputs. C1 is uninstrumented and supplies no coverage credit.
+
+Native-driver failures retain a closed `issue779-checkpoint1-driver-failure-v1`
+record with `category`, `stage`, `error_kind`, nullable direct numeric `errno`
+(1–4095), `exit: 1`, `native_acceptance: false`, and `coverage_credit: false`.
+[`failure_diagnostic`](run-native.py) identifies only fixed source-owned stages
+such as input staging, helper preparation, audit initialization/build/inventory,
+dispatch and reconciliation. Fixed audit rejection codes are allowlisted; unknown
+messages use a fixed fallback. No traceback, filename, command, exception text or
+private process output is included. A diagnostic cannot replace a missing native
+record, authorize a retry, change a guard or make a failed control pass.
+
+For the audit's unresolved/ambiguous dependency rejection only, the driver also
+copies its existing private context to the fixed `native/os-audit-dependency.json`
+leaf. [`retain_dependency_failure`](run-native.py) requires the actual source-owned
+audit exception, its original absolute audit deadline and exact closed context;
+it preserves the bounded bytes (at most 32 KiB) without selecting a dependency.
+The requester, SONAME and up to eight candidates per group stay in this private
+`0600` file beneath the settled `0700` output. Exclusive no-follow creation,
+retained FDs and final identity/size checks prevent replacing an old result.
+Missing context, expiry, a pre-existing leaf or any retention error keeps the
+original failed exit; no raw path is added to the closed public failure record.
+The [real ordinary-file regression controls](test_dependency_retention.py) verify
+this diagnostic boundary, and supply no native or coverage credit.
+
+## Entry points and publication data
+
+`publish.py` is the parent-owned publisher. Its receipt records the actual CLI
+locked restore and Release publish, complete current source capture, complete tool
+and compact runtime inventories, actual SDK version 10.0.401, command exits and log
+hashes. `helpers` contains separately executed helper restore/publish pairs and
+complete helper images; it never adds synthetic rows to the two CLI commands.
+Build children use umask `022` within owner-private input parents so their fresh
+files have the `0644`/`0755` modes required by the image contract. The parent
+must own the exact `0700` tool parent before any build starts, and keeps its
+private umask, `0700` directories and `0600` logs. A real
+isolated helper build under umask `077` produced `0600` DLL/PDB/JSON files and
+demonstrated why the build child's creation policy must be explicit.
+
+`binding.prepare_publish_image(root, *, deadline)` then prepares only the newly
+built CLI/helper outputs for inventory. Package copies may retain owner-only
+execute/read modes. The helper first audits the complete owned tree beneath an
+owned `0700` parent, rejecting links, hardlinks, special objects, foreign owners,
+writable-by-others modes and excessive bytes/nodes. It sets canonical file modes
+to `0644` or `0755` according to the existing execute bits and directory modes to
+`0755`, using checked file descriptors. File bytes are preserved. Substitution
+or growth is an error, never permission to modify a replacement. The ordinary
+complete hash/mode inventory follows this packaging step, and native staging
+still independently rechecks those measured bytes and modes. This helper grants
+no admission and must not be used to repair an SDK, captured source or an
+already admitted image.
+The return is only `{"files": count, "directories": count}`, excluding the root
+from the directory count. A late failure may leave earlier owned nodes with
+canonical modes; discard that failed publication and start with a fresh output.
+The operation does not promise atomic rollback and cannot make a failed build
+eligible for a receipt.
+
+Publication failures emit `issue779-checkpoint1-publisher-failure-v1` with exactly
+`schema`, a closed `category`, `error_kind` (`input`, `os`, or `process`), and
+nullable numeric `errno` in 1..4095. Unknown errors use a fixed family category;
+paths, argv, exception text and raw process output remain outside this record.
+The protected runtime must be the actual SDK-free FDD runtime, while the publisher
+may use a separate SDK host. Images and source roots must be disjoint.
+
+[`prepare-runtime.py`](prepare-runtime.py) exits 1 when preparation is rejected.
+Its failure stdout is one `issue779-checkpoint1-runtime-failure-v1` JSON object:
+`category`, `error_kind` (`input` or `os`), and nullable `errno` in 1..4095, plus
+`schema`. Known custody categories identify the failed guard; unknown input
+errors use `runtime-input-invalid`, and OS errors use `runtime-os-error`. No raw
+exception text, path or stack is emitted. Retain `runtime-preparation.log` to
+diagnose a failed copy before attempting publication. A diagnostic is not a
+runtime receipt, an OS qualification, or permission to continue after failure.
+The workflow also retains `runtime-input-metadata.json`: a read-only snapshot of
+five fixed execution-installation directory roles and bounded numeric .NET 10 version directories.
+It records modes, numeric ownership, link counts and closed read errors using a
+five-second clock, six-second process bound and 128 entries per version container. It neither changes the SDK
+nor substitutes for the runtime copy's retained-FD, mode and byte checks.
+The C1 workflow sets `DOTNET_INSTALL_DIR` before the pinned setup action, under a
+fresh owner-private `0700` parent. It installs SDK `10.0.401` there rather than
+reusing the image's shared SDK directory. The observed shared runner installation
+had root-owned `0777` directory roles and was rejected by the unchanged `0755`
+contract. Fresh installation addresses that prerequisite without changing the
+shared SDK or normalizing unsafe source permissions in the copy helper.
+
+The build SDK and execution runtime have separate sources. The compiler and
+helper publisher still use that private, pinned `10.0.401` installation. For
+execution, the Ubuntu 24.04 workflow installs the distribution's `dotnet-sdk-10.0`
+package and copies only its host, hostfxr and matching .NET/ASP.NET frameworks
+from the fixed `/usr/lib/dotnet` installation. The distribution SDK is installed
+to satisfy the copy helper's existing SDK-root contract; its `sdk`, `packs` and
+`templates` trees remain outside the copied runtime. The actual copy receipt
+records that installation and every copied byte and mode. The package install
+log, APT candidate/origin log and `runtime-packages.tsv` retain the selected
+feed and actual package versions separately.
+
+Both worker and measurement jobs bound APT's connection/data inactivity to 20
+seconds and allow two failed-download retries. Setup has separate finite phases:
+180 seconds to update indexes, 600 seconds to download the distribution SDK
+packages with `--download-only`, then the existing 240 seconds to install them
+with `--no-download`. The last phase fails if the required verified packages are
+not already available in APT’s cache. HTTP pipelining is disabled for these
+setup commands so stalled mirror responses cannot hold an entire request queue.
+These are [APT acquisition options](https://manpages.debian.org/trixie/apt/apt-transport-http.1.en.html#Connection_Configuration)
+and [download retries](https://manpages.debian.org/trixie/apt/apt.conf.5.en.html#Retries),
+not a native-control retry or a change to a product process deadline. The
+[APT download and install switches](https://manpages.debian.org/trixie/apt/apt-get.8.en.html#OPTIONS)
+separate variable network transfer time from package installation. Exhausting
+either setup phase still fails before copying a runtime or launching controls.
+The [worker](../workflows/issue779-checkpoint1-worker.yml) and
+[measurement](../workflows/issue779-checkpoint1-measurement.yml) workflows replace the runner's known Azure or
+`us-east-2.ec2.archive.ubuntu.com` HTTP Ubuntu mirror entry with Ubuntu's
+[canonical HTTPS archive](https://archive.ubuntu.com/ubuntu/). They retain the
+public mirror list before and after that replacement as
+`runtime-mirrors-before.txt` and `runtime-mirrors-after.txt`. Setup requires the
+expected Azure or EC2 entry as a complete URL token before replacement, then
+requires the canonical entry and absence of every HTTP URL afterward. Empty,
+unknown, commented-only, or already-canonical-only inputs fail before rewriting;
+an unrelated HTTP entry still fails the postcondition. Other HTTPS entries and
+priority metadata remain visible in both saved lists. This handles both observed
+runner configurations while avoiding stalled HTTP transfers, without changing
+Ubuntu package versions or signature checks. The [real shell regression controls](test_runtime_mirrors.py)
+execute each workflow's actual preflight against temporary mirror files with
+GNU sed and Bash on Linux; they neither invoke APT nor supply native credit.
+The APT candidate/origin log records the actual selected archive. The complete
+OS audit stays in force; a mirror change or transport retry does not qualify a
+runtime image.
+The worker job has a 50-minute outer limit so its sequential bounded package,
+copy, publication and native phases leave time for setup and private retention;
+the native procedure's existing 900-second outer process limit and original
+per-control clocks are unchanged.
+
+This separation addresses the measured missing `liblttng-ust.so.0` dependency of
+the generic runtime's tracing provider. The [Ubuntu .NET 10 runtime package](https://packages.ubuntu.com/noble/dotnet-runtime-10.0)
+declares the distribution's `liblttng-ust1t64` dependency. Use the supported
+[Ubuntu .NET package feed](https://learn.microsoft.com/dotnet/core/install/linux-ubuntu-install),
+rather than replacing a library SONAME, dropping the tracing provider or making
+an unresolved dependency eligible. The unchanged native OS audit must still
+pin and resolve the complete copied runtime and actual OS libraries before any
+control executes. Package installation and a successful copy alone do not
+qualify the runtime or prove a native control passed.
+
+N04 and N08's fixed Python-standard-library membership passes look up each
+audited file declaration in the read-only OS declaration cache initialized from
+the complete, already pinned audit. The cache returns only the recorded SHA256;
+it does not cache physical file results. Every member still passes the unchanged
+`verify_os_path` checks, including fresh alias-chain sampling and file pinning,
+and the complete stdlib inventory and audit are checked again afterward. This
+avoids reparsing the same JSON declaration for each library member. It is a
+bounded parsing optimization; it does not diagnose or claim to fix any earlier
+N04 or N08 incident. The N08-specific
+[declaration controls](test_n08_stdlib_declarations.py) exercise cached lookup,
+malformed-cache rejection, physical verification and the unchanged original
+240-second root bound without executing the native procedure.
+
+N04's ELF classification reads exactly the first four bytes of every verified
+stdlib member with one bounded `od` command, then removes only the command's
+fixed whitespace in Bash. This replaces three subprocesses per file while
+preserving the same `7f454c46` comparison. A failed read rejects before a member
+can be classified as non-ELF. The [binary-prefix regressions](test_n04_stdlib_magic.py)
+exercise actual empty, short, ELF and non-ELF files, plus read-error and deadline
+rejection. Hash pinning, alias verification, ELF audit membership, both complete
+inventory checks and the original prelaunch fit guard remain required. This
+reduces classification overhead; it does not establish that a native procedure
+fits its original allowance or that the coverage gate passes.
+
+Required helper IDs are `peer` for None, N04–N08, N11 and N12, plus `n04` for N04 and
+`n07` for N07. Other selectors require an empty helper map. Projects and assembly
+entries are fixed in [`binding.py`](binding.py). Each helper phase is named
+`helper-ID-locked-restore` or `helper-ID-publish`, uses warnings as errors and
+Release, and carries no runtime qualification selector. Full helper dependencies
+are retained through the actual image map, not a copied entry DLL alone.
+
+The current source capture uses `issue779-checkpoint2-source-v1` and binds every
+tracked file's SHA256, Git blob and mode. The build receipt uses
+`issue779-checkpoint1-build-v1`. `binding.validate_capture`, `validate_image`,
+`validate_build`, `validate_helper_commands` and `required_helpers` validate detached
+data only. `inventory(root, entry, *, deadline)`, `verify_source`, `verify_image`
+and `verify_build` additionally inspect actual files, bounded retained FDs, logs,
+complete inventories and immutable Git objects. All deadlines are absolute
+`time.monotonic()` values. Read-only Git uses command-local `safe.directory` for
+that one canonical source root; no global or wildcard trust setting is changed.
+
+## Fixed adapter CLI
+
+```text
+run-native.py prepare --source-capture FILE --source HEAD --selector SELECTOR
+  --tool TOOL --runtime RUNTIME --build-receipt FILE --output FRESH_PLAN_DIR
+run-native.py run --plan PLAN_DIR/plan.json --output FRESH_NATIVE_DIR
+  --workflow-identity github-actions-RUN-ATTEMPT
+run-native.py aggregate --source-capture FILE --receipts FOURTEEN_NATIVE_DIRS
+  --output FRESH_AGGREGATE_DIR
+```
+
+Preparation performs real prerequisite checks and starts no native work. `run`
+requires Linux root; the parent workflow owns the `sudo` entry. It uses a fixed
+source-owned selector table, verifies the actual source before importing an
+adapter, and executes the exact hash-checked adapter bytes. A missing/incomplete
+port is rejected before unit I/O. One original 900-second outer deadline includes
+verification, staging, native work, cleanup and retention. Each procedure retains
+its own original product, fixture and containment clocks within that deadline.
+
+The dispatcher creates a fresh root-owned 0700 native output directory, applies
+umask 077, and writes these five initial 0600 files before calling an adapter:
+`plan.json`, `source.json`, `build-receipt.json`, `procedure-inventory.json`, and
+`execution.json`. The latter binds the fixed workflow identity and fresh input
+generation. Adapters must adopt that exact existing directory and create their
+additional leaves exclusively. Sealed source/tool/runtime trees stay in separate
+root-private retained roots; they must not be copied into the artifact output.
+
+Every adapter implements these two dispatcher entry points:
+
+- `execute(context, *, deadline)`: actual native procedure, returning one case row
+  or, only for None, ordered N01/N02/N03 rows.
+- `verify_retained_evidence(context, *, deadline)`: mandatory actual finite raw-leaf
+  readback plus original case parsers, returning the same row or rows. Both `run`
+  and `aggregate` call it and require exact row equality; an evidence JSON hash
+  alone cannot pass. There is no fallback to a lower-level data validator.
+
+A family's lower-level `validate_evidence` is an internal detached data parser.
+Its signature is family-specific (some require raw build/member bytes and the
+original deadline); the CLI never calls it directly or assumes a three-argument
+shape. It never establishes a native holder or performs a launch.
+
+The context has exactly `source`, `selector`, `capture_path`, `capture_sha256`,
+`build_receipt_path`, `build_receipt_sha256`, `tool_root`, `runtime_root`, `output`,
+`generation`, `binding_validator`, `binding_validator_sha256`, and
+`workflow_identity`. The workflow grammar is
+`github-actions-[1-9][0-9]*-[1-9][0-9]*`. A case row has exactly `case`, `passed`,
+`skipped`, `procedure_sha256`, and `evidence_sha256`; success requires true passed
+and false skipped. A failed/missing record, raw leaf, parser, command, join or
+cleanup never publishes `result.json` as a successful selector.
+
+## Reconciliation and limits
+
+Each native output retains its plan and original prerequisite bytes. Aggregate
+checks their hashes against the same current source capture and current procedure
+inventory, rechecks its local current source before loading parsers, re-reads the
+fixed raw leaves, and requires exactly fourteen distinct selectors and all sixteen
+named cases once, with no skips. It does not rebuild, dispatch, remerge coverage,
+edit counters, or promote proof/catalogue authority. Detached receipt models alone
+cannot pass this command.
+
+Procedure availability is recorded separately from native results. During porting,
+`procedures/inventory.json` may contain incomplete selectors; those selectors and
+whole-lane aggregation remain closed. Source-ready adapters, static parsing and
+portable tests are not a fresh sixteen-case Linux result. Fresh locked builds,
+peer review, portable validation and actual Linux acceptance remain required.
+
+[N16's port](procedures/n16/README.md) documents its concrete native boundary.
+The [slot bridge](procedures/slot/README.md) documents archive custody, complete
+command-log readback and the four negative fixture prerequisite schemas.
+The [N09 retained-slot port](procedures/n09/README.md) preserves its original raw
+projection and final path comparison.
+The [owner-death adapter](procedures/owner-death/README.md) owns the reusable current
+input materializer and N13/N14 bridge. Source changes to a fixed native predicate
+or source/report mapping require an explicit inventory and review update.
+
+## Shared OS audit helper roots
+
+`procedures/os_audit.py` exposes `Audit.build(runtime, tool, include_tool, helper,
+*, additional_helpers=())`. Every caller must call `initialize_tools()` first.
+The optional keyword is a tuple with at most one canonical, disjoint additional
+helper root. N04 and N07 pass their actual coordinator helper in addition to the
+peer helper; N11/N12 and other callers keep the empty default. Every helper is
+inventoried before and after and its ELF closure is inspected even when
+`include_tool` is false. All original OS/ELF/hash/alias, membership, deadline and
+output bounds apply to the additional helper; it cannot replace or waive peer.
+
+For N09, N10, N15 and N16, which require an empty helper image,
+[`create_empty_helper(path, *, deadline)`](procedures/os_audit.py) creates only a
+fresh `empty-audit-helper` directory under a canonical caller-owned retained
+parent. It exclusively creates the directory, retains no-follow directory FDs,
+checks identities and emptiness, then explicitly sets `0555` before the unchanged
+audit. This avoids umask `077` turning a requested `0555` creation into `0500`.
+The original absolute deadline applies; N15 also keeps its earlier work deadline.
+Existing nodes are rejected and partial failed generations are retained, never
+adopted or removed. The helper prepares metadata only; root ownership, protected
+ancestors, complete hashes and OS/ELF qualification still come from the actual
+audit. The [ordinary-file controls](test_empty_helper.py) claim no native result.
+
+## Private root execution measurement
+
+The [private C1 measurement wrapper](measurement-README.md#root-only-collection-scope) measures root `Linux*` and `Supervision*` types in the current Supervision module before the fixed native procedures stage their selected tool image. A `issue779-checkpoint1-build-v2` receipt retains the exact original v1 publication, command terminals and complete image inventory; its additional measurement object binds the original receipt bytes, pinned collector, and the observed Supervision DLL/PDB pair. Only that pair may differ, its DLL must change, and all other managed pairs, files, directory modes, runtime and helper publications remain exact. The consumer predecessor and unchanged solution gate still measure all seven modules, including the shared [protected CLI implementation](../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md).
+
+`binding.validate_measured_build` is a detached data check. `binding.verify_build` additionally reads the original v1 receipt and collector through the existing bounded stable-file reader, compares all original publication fields, and verifies the actual staged image before native execution. These checks cannot create an owner, bypass the OS audit, or establish a native result. The wrapper leaves the original run, product, stop and cleanup clocks in charge. Isolated worker tracker bytes are not imported by this root-only lane.
+
+The [isolated measured-selector workflow](../workflows/issue779-checkpoint1-measurement.yml)
+adds a fixed `None → N04 → N05 → N06 → N07 → N08 → N09 → N10 → N11 → N12 → N13 → N14 → N15 → N16`
+sequence after packaged C2 acceptance. All fourteen original procedures are measured;
+`None` accounts for N01/N02/N03. Standard Coverlet merges only the immediate
+predecessor, preserving the single initial C2 baseline.
+Each selector gets a fresh VM, the ordinary current publisher and the original
+native procedure. The [chain data reference](measurement-chain-README.md)
+describes source/run/attempt, predecessor, image, report and retained-result
+bindings. This runs all sixteen original cases while collecting the root component's
+normal-exit counters; case execution alone does not imply worker coverage. It neither promises coverage from deliberately killed owners nor
+imports isolated worker tracker files. The separate fourteen-selector matrix and
+its sixteen-case aggregate remain mandatory. These are private CI fixture
+orchestrators; the [C# runtime cutover](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-4-cutover-and-full-verification)
+continues to use the C# owner/server and does not restore the retired Python runtime.
+
+The [segmented measurement chain](measurement-chain-README.md#validation-and-bounds)
+retains each selector’s raw report and native evidence in its own artifact,
+with raw immediate-predecessor inputs and the fixed
+`check-retention.py --measurement ROOT` contract: 192 MiB, 1,024 files and 2,048
+nodes per artifact. Gate validation reads all fourteen actual segments in order;
+earlier native evidence is never replaced by manifest hashes. Ordinary C1 retention remains 96 MiB/512 files/1,024 nodes. Both contracts
+reject links, special nodes, unstable files and oversized leaves before changing
+permissions, retain exact bytes, and publish private 0700/0600 artifacts. These
+limits do not change product quotas or the solution/patch coverage thresholds.

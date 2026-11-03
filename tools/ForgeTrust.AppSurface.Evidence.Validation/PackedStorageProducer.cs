@@ -96,7 +96,15 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
                 Environment = environment,
                 CheckBudget = _ => { _workspace.CheckBudget(); return ValueTask.CompletedTask; },
             };
-            var result = await _commands.RunAsync(request, cancellationToken);
+            EvidenceCommandResult result;
+            try { result = await _commands.RunAsync(request, cancellationToken); }
+            catch (EvidenceCommandException exception)
+            {
+                // Runner diagnostics contain fixed categories and numeric HRESULTs, never child text or paths.
+                // Retain the first command failure even if subsequent workspace cleanup also fails.
+                _transcript.Add(new { command = arguments, commandFailure = exception.Code, diagnostic = exception.Message });
+                throw;
+            }
             _transcript.Add(new
             {
                 command = arguments,

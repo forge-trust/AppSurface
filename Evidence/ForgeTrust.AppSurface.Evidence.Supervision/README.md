@@ -1,0 +1,2445 @@
+# Evidence.Supervision
+
+The [restricted application owner](application-execution.md) extends the same C# run owner, output budget and aggregate shutdown used for [producer execution](producer-execution.md). The [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) records checkpoint validation separately from the final production cutover.
+
+> **Current integration status (2026-10-18):** Checkpoints one (16 Linux controls), two (seven producer/custody controls), and three (seven application/CLI/SDK controls) passed their recorded native revisions. Runtime supervision now uses C# in the same executable; the Python runtime has been retired. The [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md) records the current packaging, consumer and unchanged coverage gates. Production application registration and Trusted acceptance remain closed. Dated preparation notes below are historical, not the current validation result.
+
+
+## Protected qualification support records
+
+The private SDK [cleanup progress and failed lifecycle retention](../../.github/issue779-checkpoint3/lifecycle-stalls-source-preparation.md#failure-diagnostics-after-revision-119)
+localize original cleanup attempts without granting a successful join, custody transfer or acceptance.
+Ordinary images contain no cleanup progress emitter. A failed native case remains failed even when
+its later fixture containment and diagnostic read complete.
+
+The internal [support-record parser and matcher](protected-support.md) accept canonical, bounded
+record data only when its exact bytes match a separately supplied expected digest. They freeze parsed
+collections and compare current provider/workflow/deployment facts. They do not authenticate those inputs
+or create admission. The application support shape names the existing `evidence-worker-linux-v2`
+protocol, independently of the record schema version. The
+[protected qualification prerequisite](../../.github/issue779-protected-qualification/README.md) must run
+on reviewed protected `main`; independent final evidence verification and support registration remain
+required. The root request path remains Observation-only and Planner still rejects accepted proof.
+
+## Account identity during teardown
+
+The internal [producer cleanup procedure](producer-cleanup.md) preserves pending-stop, stopped observation, pump joins and local closes in their original failure-preserving order. It creates no native owner or settlement fact.
+
+The [declared-length file reader](#declared-length-file-io) shares positional read arithmetic and strict EOF
+checks across retained deployment, application bundle and terminal custody reads. Each native caller
+retains its original metadata/name checks, deadline and buffer policy.
+
+The [producer settlement policy](producer-settlement.md) keeps report readiness separate from physical cleanup. Its copied-data controls cannot authenticate a producer; the native process still checks its original owner, accounts, workspace, quota and original task joins.
+
+The [account utility cleanup procedure](account-utility-cleanup.md) orders one retained utility's original
+stop, output, backend and physical-settlement callbacks. It carries no owner, deadline, token, cgroup,
+pipe, backend or settlement fact; the private account caller retains those native operations and final
+projections. Its first stop/group callback preserves the original compound catch, so a failure skips the
+rest of that phase while later pipe and backend cleanup still runs.
+
+The [workspace owner data policy](workspace-policy.md) enforces the existing captured UID/GID and generated-root comparisons after each wrapper’s original reference checks. It cannot construct or authenticate an owner or workspace.
+
+After `BeginRootTeardown`, new work admission is closed. The private N08/N09 cancellation
+projection therefore reads the original results GID through
+[`LinuxRunAccounts.RequireControlOwnedBy`](LinuxRunAccounts.cs), using the reference-equal
+owner and its original cleanup token. This accessor returns the retained identity snapshot
+only while the account holder remains open, unquarantined and valid. It does not grant work
+admission or permit account deletion. The active-only `ResultsGid` property remains unsuitable
+for this phase and continues to reject after work admission closes.
+
+The [root composition](LinuxEmptyObservationExecution.cs) captures the snapshot before
+custody closes accounts. Every original worker, server, output, custody and final deadline
+check still applies. The native N09 cancellation fixture must independently verify those
+facts; successful metadata encoding or local tests alone do not complete that control.
+
+## Control transport and artifact directory failures
+
+The [control drain procedure](control-drain.md) joins the server’s original signal, accept, handler and stop tasks in the failure-preserving order required by native shutdown. Portable task/barrier controls verify that bookkeeping; the native server retains authentication and physical settlement.
+
+[`LinuxRunWorkspace.RequireControlOwnedBy`](LinuxRunWorkspace.cs) rechecks the retained `/`, `/run`,
+generation, worker-control and broker directories, plus the sealed descriptor. The exact policy selection
+comes from `LinuxWorkspaceLayout.RequiresControlInspection`; unknown or reconstructed policy objects reject.
+The [listener](LinuxControlListener.cs) additionally rechecks its retained parent, socket name and metadata,
+endpoint and authenticated owner/worker identities. Original cancellation and deadline checks still apply.
+
+The worker-owned output parent and subject-owned raw-results directory are siblings of the protected control
+path. Their substitution must fail allocation or work inspection while leaving authenticated stop/wait
+available. Full work inspection continues to check every directory. This separation does not clear workspace
+quarantine, reopen work admission, permit account deletion, or turn failed allocation into successful output.
+Closed, quarantined or custody-transferred workspaces still reject control use. The N07 native control must
+independently establish the allocation rejection and physical teardown; portable policy controls alone do
+not establish those Linux outcomes.
+
+## Ordinary execution and private qualification images
+
+The [C# migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) requires one source graph for ordinary supervisor and worker roles. [EvidenceNativeQualification](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) is internal build metadata with a production default of `None`. Ordinary execution creates no N04 root-helper rendezvous, cancellation-stage barrier, N15 stderr frame or wait, stderr phase observer, or root-injected SIGINT. The ordinary worker follows authenticated planning, allocation, activation, cleanup and collection.
+
+Private qualification builds use the closed MSBuild property `EvidencePrivateQualification` with exactly one of `N04`, `N07`, `N08`, `N09`, `N10`, `N11`, `N12`, `N13`, `N14`, `N15` or `N16`; its default is `None`. [Directory.Build.props](../../Directory.Build.props) appends the corresponding private symbol across the complete graph while preserving package-owned symbols. Unknown property values reject before build; multiple manually supplied checkpoint symbols fail compilation. Private qualification builds reject `Pack` so their assemblies cannot be published as production NuGet packages. N04 preserves the original authenticated peer replacement check; N08/N09 retain the original stage/caller tokens and the original root-owned, joined signal procedure. N10 uses the [private pending-start checkpoint](LinuxN10PendingStartCheckpoint.cs) only after the original validated `StartTransientUnit` reply; its frame is a cancellation trigger, not a late-unit or settlement receipt. The same original startup token remains in force. N11 uses the [compile-owned synchronous input factory](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceFixedSynchronousInputFactory.cs) inside the authenticated worker's original tracked Admission callback; its deliberate synchronous stall must be terminated by the existing lifecycle and external owner. N13/N14 hold that accepted request for external owner termination; N15 holds the original validated worker-start reply under its original startup token. N16 adds only the fixed authenticated request described below. See the [Contracts qualification reference](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#ordinary-execution-and-private-qualification-images) for selection constraints. No argument, environment variable, descriptor field, public callback or candidate digest selects these behaviors. These builds must remain private qualification artifacts and are not deployable production artifacts or accepted consumer proof.
+
+Checkpoint two additionally supports `C2` for the fixed [retained-report mutation control](c2-artifact-mutation.md). This is a separate same-source nonpackable image, with no runtime selector or enrollment. Ordinary `None` omits its write hook; the genuine native positive still uses ordinary code. The current [seven-case fixture](../../.github/issue779-checkpoint2/README.md#seven-case-completion-inventory) must prove all ordinary and failure controls before checkpoint completion.
+
+
+The internal API exposes `Current` (`None`, `PeerReplacement`, `ParentIdentitySubstitution`, `CancellationBeforeAllocation`, `CancellationBeforeActivation`, `PendingStartRace`, `SynchronousWorkerStall`, `LeaderExitWithDescendant`, `OwnerKilledDuringAcceptedWork`, `OwnerStoppedDuringAcceptedWork`, `PendingStartOwnerDeath`, `AcceptedBlockedWork`), `PeerReplacementEnabled`, `ParentReplacementEnabled`, `CancellationEnabled`, `PendingStartRaceEnabled`, `WorkerStallEnabled`, `DescendantEnabled`, `OwnerDeathAcceptedWorkEnabled`, `PendingStartOwnerDeathEnabled`, `AcceptedBlockedWorkEnabled`, `N16StopWaitEnabled`, and `CreateCancellationCheckpoint()`. The cancellation checkpoint factory returns null for every image except N08/N09; cancellation images receive a single internal checkpoint whose wait remains inside the tracked callback. Root server construction and pump observation use the same build-owned selection. Native identities, deadlines, pending ownership, physical joins, FD custody, account closure and failure latches still apply independently of that selection.
+
+A private image must compile Contracts, Supervision, Evidence.Cli and the executable from the same selected source and symbols. Mixing assemblies compiled with different selections is unsupported. Data/token tests do not establish genuine Linux execution; each native checkpoint still requires its own immutable source/image binding and retained kernel observations. The historical private-image sections below describe their original source snapshots rather than a passing result for this integrated source.
+
+The reusable [current worker workflow](../../.github/workflows/issue779-checkpoint1-worker.yml) runs fourteen isolated selectors and reconciles the sixteen checkpoint-one controls on one committed revision. Each selector publishes its actual current CLI in Release, binds the complete source and image inventories, then executes its fixed Linux procedure. Detached build/receipt grammar tests and the historical all-sixteen result cannot replace that execution. The [runtime cutover record](../../docs/evidence/issue779-csharp-runtime-cutover.md#native-evidence-and-current-acceptance) distinguishes this required lane from producer, application and numerical coverage acceptance.
+
+
+Internal C# supervision for the [EvidenceHost trust boundary](../../start-here/evidencehost.md).
+The library is part of the protected CLI deployment and is not an independently supported NuGet API.
+It references Contracts and Planner; root composition does not load Coverage or Aspire to supervise processes.
+
+The [design](../../docs/designs/issue-779-csharp-supervision-core.md) and
+[checkpoint plan](../../docs/plans/issue-779-csharp-supervision-migration.md) define the migration.
+The current source composes empty, coverage and compiled-application Observations through the reserved supervisor
+entry. The early worker entry retains real peer authentication.
+Supported Linux root, protected launch inputs and actual single-use owner activation are checked before
+children start. Actual Linux checkpoint results are linked in the [cutover record](../../docs/evidence/issue779-csharp-runtime-cutover.md).
+Types and portable tests alone do not establish native acceptance or Trusted qualification.
+
+### N12: leader exit with an inherited output holder
+
+The private `N12` build adds a closed same-executable child role, [`LinuxN12Descendant`](LinuxN12Descendant.cs). The normal worker authenticates, performs its real empty Observation, and returns through the existing exit protocol before this private procedure starts the current pinned host and managed entry. The child inherits stdout; only its acknowledgement stderr is redirected to a parent-owned pipe. The parent requires a complete, canonical ACK containing the actual `Process.Id` before it writes `N12-descendant:<pid>` into its original stderr and exits normally. No caller case, shell, alternate executable, resource or application registration is accepted. The five-second ACK cap borrows the original caller token; the original systemd worker/job deadline still contains the entire operation. This cap creates no renewed job allowance.
+
+[`SupervisionDescendantObservation`](LinuxN12Descendant.cs) receives this first-frame PID data from the original received-byte-charged stderr pump. It adds no second output reader and does not authenticate a process. After the actual original leader monitor joins, [`LinuxWorkerProcess.ObserveLeaderExitWithDescendantAsync`](LinuxWorkerProcess.cs) captures the child through real retained root proc handles and requires a distinct live PID, matching complete worker UID/GID tuples, kernel starttime and the exact generated cgroup. The same original output task must still be unfinished and the selected recursive cgroup must be populated and unfrozen. A missing child, malformed frame, foreign identity, early EOF or expired original allowance fails the run.
+
+The existing stop procedure then stops the entire original worker unit, joins the leader monitor and both output pumps, checks actual EOF/received-byte accounting, and independently rechecks the selected kernel group. The detached [`LinuxN12LeaderExitObservation`](LinuxN12LeaderExitObservation.cs) record is limited to 4 KiB and is emitted only after these joins, **before** root filesystem custody and account closure. Its `custody_and_accounts_not_yet_closed` field is true, and `native_authority`/`native_acceptance` are false. Native verification must additionally require the final root process exit zero, successful cleanup summary, exact source/deployment binding and account/FD custody facts. An intermediate record alone cannot pass N12.
+
+Ordinary `None` and every other private build reject `evidence n12-output-holder` before configuration and create no descendant observer or child. The role offers no help or artifact/control protocol, and cannot create an admitted worker. Pure grammar/data tests and owned-stream barriers validate parsing and join ordering only; they do not establish real Linux descendant containment. Actual N12 remains a required row in the [migration gate](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker).
+
+### N15: supervisor death during pending worker start
+
+Only the compile-owned `N15` image pauses the real [`LinuxWorkerProcess.StartCoreAsync`](LinuxWorkerProcess.cs) start. After [`LinuxSystemdBackend.StartWorkerAsync`](LinuxSystemdBackend.Start.cs) has joined the actual `StartTransientUnit` call and validated its returned job object path, it writes one bounded JSON line to the original root stderr containing the fixed N15 case/phase plus the selected worker unit and that validated reply path. The frame is a harness trigger only. The original `StartWorkerAsync` task then waits on the same startup token supplied by [`SupervisionPendingStart.StartAsync`](SupervisionPendingStart.cs); it creates no replacement deadline, retry, release API, admission or join claim. The pending-start reservation stays held and `StartJoined` stays false until that original token cancels or the owner process is terminated.
+
+This source preparation is partial for native N15. [`LinuxEmptyObservationExecution`](LinuxEmptyObservationExecution.cs) binds and listens on the control socket before it starts the worker, but it creates and runs [`LinuxEmptyObservationControlServer`](LinuxEmptyObservationControlServer.cs) only after `worker.StartAsync` completes. While the N15 barrier holds that task, the real worker can connect to the listening backlog but no server accepts it or answers its handshake. The worker's existing [`EvidenceLinuxWorkerSupervisor.ConnectAsync`](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxWorkerSupervisor.cs) handshake has the fixed 30-second Admission cap, which begins in the worker and may already be running before the frame reaches the fixture. The fixture must obtain the actual systemd `MainPID`, start time and cgroup before that existing handshake expires; otherwise the worker may exit before PID verification. A deterministic case still needs a separately reviewed, compile-private worker preconnect hold or a demonstrated source-existing hold that preserves the actual worker and original bounds. Do not manufacture a process, send READY, or treat this frame as worker readiness or native evidence. The existing [`SupervisionPendingStartTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionPendingStartTests.cs) test procedure ordering only; no build, test, or native run is claimed for this preparation.
+
+### N16: accepted blocked work with concurrent stop and wait
+
+Only the compile-owned `N16` image recognizes the exact operation-only request `{"op":"n16-accepted-work"}`. The authenticated server checks its original owner and registers a `SupervisionWorkRegistry.Workload` before starting the fixed body, all inside [the owner admission gate](LinuxOwnerActivation.cs). Every managed admission closure and owner disposal takes that same gate. A check before taking the gate is insufficient: STOP or containment could begin teardown between the check and dispatch. The gate is released before any asynchronous wait and grants no authority by itself. The body signals an in-image entry barrier and then waits on its server-owned release task. The server writes the fixed intermediate `{"ok":true,"phase":"work-accepted","body_blocked":true}` frame, keeping the original request connection and handler pending. The worker validates that exact frame through its original root-PID-pinned socket and issues STOP and WAIT concurrently over separate authenticated connections while the original request is still pending. The request accepts no executable, callback, producer, application, lease, or caller-selected work data.
+
+In this image only, a WAIT handler that arrives before STOP waits on the stop-start barrier using its existing request token. The original stop callback first observes the actual WAIT handler while the accepted body and request are blocked, then releases and joins the fixed body; the registry drains after that callback. All three handlers wait outside the reply-order gate, avoiding self-join and gate deadlock. The original request returns its final `{"ok":true,"work_joined":true}` frame only after the body joins. A canceled handler wait does not remove its original workload: final containment releases and joins that body even on timeout or missing WAIT. STOP and WAIT use fresh cleanup tokens, with the root's existing cumulative bound. Existing deadlines remain in force, and admission never reopens. Other images reject the private operation and retain their existing WAIT behavior.
+
+The worker joins all original request tasks, then sends the ordered EXIT exchange so the server's preceding post-write commits settle before worker termination. After these control exchanges the private worker deliberately fails with `ASEVD410`; it creates no admission, artifact slot or manifest. Only after the original server, worker monitor, pending stop, pumps and selected group have joined can the root emit the bounded `issue779-accepted-blocked-work-v1` event record and [negative kernel observation](LinuxNegativeKernelObservation.cs), before final filesystem custody and account closure. The event projection also requires the committed EXIT and original server completion, so receiving earlier reply bytes or later physical cleanup cannot substitute for that ordering. Every event field requires the original task or an actual authenticated write commit; neither detached JSON nor successful cleanup can upgrade that negative result. After strict custody account deletion, every original local-owner/handle close and the final captured monotonic deadline check, the root attaches the separate `issue779-accepted-work-root-cleanup-v1` record to its original negative exception. Missing final cleanup data cannot prove settlement; the deliberate root exit 1 is also the exit for cleanup failure. [Detached cleanup encoding](LinuxEmptyObservationExecution.cs) establishes data shape only. The native fixture must bind all three records to the actual source/root image and independently verify terminal custody, generated account absence and absence of publication. This is a managed workload/control concurrency case, not a producer or descendant-process proof.
+
+On an N16 failure before the accepted-work projection write was attempted, the joined root path may attach one [`LinuxN16ProgressDiagnostic`](LinuxN16ProgressDiagnostic.cs) snapshot to its existing negative execution exception. It snapshots only the existing original-server milestone flags and the whole-millisecond age of the last recorded milestone from the monotonic clock. An unobserved milestone uses `Unknown` and a null duration. The fixed JSON is capped at 1 KiB and contains no owner reads, paths, argv, errors or caller data; it grants no authority and cannot change the first failure. An attempted accepted-work projection suppresses this snapshot, including after a partial write. The CLI emits a valid snapshot through its existing terminal error writer alongside the original failure record; no additional stderr write, cleanup token, task, or deadline is introduced. Invalid snapshot encoding falls back to the same original negative exception, and caller cancellation keeps its existing handling. Missing data establishes no milestone or cleanup fact. Consumers of the private N16 stderr stream must recognize this optional failure-only schema explicitly; ordinary, N13 and N14 images do not compile or emit it. The [data-only codec tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN16ProgressDiagnosticTests.cs) verify the closed shape and clock bounds, not native execution.
+
+Historical local macOS validation, before this progress diagnostic was added, ran the private N16 and ordinary configurations: 115 and 109 Supervision controls, plus 36 and 27 CLI controls, all passing (287 total), with zero compiler diagnostics. Locked package data stayed unchanged. The initial NuGet-cache and local process-settlement attempts remain separate failed harness records. Two exact-scope whitespace formatters exited zero without changing source; the CLI formatter first reported a workspace-loading warning, and a later diagnostic run reported none after clean restores and builds.
+
+The first cleanup-token progress diagnostic, before terminal exception attachment, passed one scoped local validation: locked restore, four-file whitespace formatting, 17 N16 data/framing/final-close controls, and ordinary/N13/N14 source builds. All six commands exited zero in 26.476 seconds with zero compiler diagnostics and unchanged lock files. The later terminal exception attachment passed 22 focused data/framing/final-close controls, an N16 CLI source build, and ordinary/N13/N14 Supervision source builds. Its six-command retry exited zero in 42.136 seconds with no compiler diagnostics, unchanged source and lock files, and every owned process group absent. The initial attempt's inaccessible test constructor caused a compile failure before test execution; that result remains preserved separately. The corrected test obtains its exception through the existing final-close validation API. Native runtime behavior and optional record retention remain unverified. These deterministic barrier and ledger controls are local tests only. They do not establish authenticated Linux execution, root process ownership, OS containment, or N16 native acceptance; those remain required by the [checkpoint-one native gate](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker).
+
+
+### N13/N14: accepted work held for external owner death
+
+The `EvidencePrivateQualification` build property may select `N13` or `N14`; these values compile exactly one fixed private image through the same project graph. Ordinary `None` retains its existing protocol grammar and has no accepted-work branch or phase frame. There is no argument, environment, JSON field, public API, producer, lease or application selector. The request is the existing operation-only authenticated N16 request. The server registers the actual fixed workload under its existing owner admission gate, writes the same intermediate acceptance frame on the original authenticated connection, then emits one fixed ASCII phase line to its original stdout only after that write and flush complete. The line is a harness synchronization trigger only; it does not authenticate a new peer, record a kernel fact, or establish acceptance.
+
+The N13/N14 worker retains the original accepted-work request and waits for the actual connection to terminate. It sends no STOP, WAIT or EXIT and does not release the server body. The owner-loss driver must terminate the owner using externally measured, identity-bound OS facts; source code does not synthesize SIGKILL/SIGSTOP, a timer, or a successful join. N13 expects owner SIGKILL to make the existing worker `After`/`BindsTo` and control-group policy terminate the dependent unit. N14 expects the already configured owner `RuntimeMaxUSec` and stop/final-kill policy to terminate a SIGSTOPped owner and its dependent unit. Both still require independent unit/PID/start-time/cgroup, pump, account and final custody evidence under the original deadline. If termination or strict cleanup is uncertain, retain output and custody as quarantined failure.
+
+**Pitfall:** the N13/N14 phase line is emitted by the root server after a real response write, but the line itself is not native readiness evidence; the case harness must independently bind the live owner and worker process to their generated units and cgroups before signaling. The current source seam is not a native-run receipt or acceptance claim.
+
+## Process roles
+
+The protected AppSurface image supplies two explicit roles before normal CLI discovery or configuration:
+
+```text
+appsurface evidence supervise --request /run/protected-run/request.json
+appsurface evidence worker --control /run/protected-run/broker/control.sock
+```
+
+`EvidenceProcessRoleParser.IsReserved` intercepts worker/supervise attempts, including case aliases.
+`Parse` requires exact lowercase role and option names, one absolute normalized path, no extra arguments,
+and at most 100 UTF-8 bytes for a socket or 4096 for a request path. `--help`/`-h` prints fixed usage
+without executing a role. Malformed role data returns fixed `ASEVD402` without echoing supplied values.
+Parsing paths does not authenticate their owner. Worker execution still uses
+[Contracts' root-peer and runtime binding](../ForgeTrust.AppSurface.Evidence.Contracts/README.md).
+
+The supervisor entry calls `LinuxEmptyObservationExecution.RunAsync` directly, before ordinary command
+configuration. Unsupported platforms and non-root callers reject before account, file or unit setup.
+The native implementation supplies every owner; the entry accepts no backend, plan or runtime callback.
+Only after execution, verification and cleanup return does stdout receive canonical JSON with exactly
+`Mode`, `ClaimKind`, `Eligibility`, `ExecutionVerdict` and `CleanupCompleted`, copied from the actual
+manifest. Failure emits a fixed diagnostic and no success record. This empty informational result
+does not enroll an application, authorize Trusted execution or replace native acceptance.
+
+Managed early dispatch occurs after CLR startup. The protected OS bootstrap must also clear
+runtime hooks, profilers, probing overrides and additional dependencies **before** starting .NET,
+and bind the actual runtime host plus managed entry for framework-dependent deployments.
+
+## Protected launch inputs
+
+`EvidenceSupervisorRequest.Parse(ReadOnlyMemory<byte>)` accepts at most 64 KiB of strict UTF-8 JSON.
+The closed checkpoint-one schema is `evidence-supervisor-linux-v1`, with mode `observation`. It requires
+`tool_root`, `runtime_root`, `runtime_host`, `entry_path`, `policy_file`, `subject_root`, `base_revision`,
+`subject_revision`, `workflow_identity`, `paths`, `observation_profile_ids`, `observation_producer_ids`,
+`job_deadline_utc`, `admission_seconds`, `start_seconds`, `collection_seconds`, `cleanup_seconds`, and
+`stopping_seconds`. Optional `diff_file`/`diff_sha256` are paired; `solution` is optional. Revisions use
+40 lowercase hexadecimal characters, diff SHA-256 uses 64. Lists are detached read-only snapshots;
+unknown, duplicate, case-alias, missing and malformed fields return fixed `ASEVD402`.
+
+These are protected input choices, not account IDs, arbitrary argv, environment, unit properties or proof.
+Runtime/entry/policy/diff paths must lie beneath their declared roots; tool/runtime and subject roots
+must be disjoint. Parsing establishes neither filesystem ownership nor revision provenance.
+
+`EvidenceProtectedLaunchInput.Open` is a separate native factory. It requires actual root Linux x64,
+opens the request component by component without symlinks, and retains its ancestors and file.
+`LinuxProtectedDeployment.Open` inventories **every** file in the runtime and tool trees; a supplied
+file list cannot omit dependencies or probing candidates. Nodes must be root-owned, untrusted-unwritable,
+of the expected ordinary type, and stable by device/inode/owner/mode/link count/size/change times.
+Deployment ancestors grant public search; inventoried directories grant public read/search and files public read so the selected worker can load them;
+private request ancestors need no public traversal. This does not add any worker write path.
+
+The inventory is bounded to 8192 retained nodes per tree, 32 descendant directory levels, 256 MiB per
+nonempty regular file and 1 GiB total file bytes. Request bytes remain bounded to 64 KiB. Kernel
+`getdents64` supplies directory names; child type is checked through retained `statx`, not its directory
+entry hint. Descendants cannot cross mounts. Absolute ancestors may cross root-selected filesystem mounts,
+while their root ownership and name binding remain checked. Ancestor-only comparisons ignore unrelated child-list changes; inventoried directories retain complete change metadata and are rechecked after the final file hashing pass. No managed pathname fallback is used.
+
+After each workspace opens a child relative to its retained parent and samples that opened descriptor with
+`statx`, [LinuxNamedMetadataComparison](LinuxNamedMetadataComparison.cs) applies the shared data-only
+name-binding rule: directories compare device/inode/owner/group/mode while ignoring child-list churn, and
+non-directories require exact sampled metadata. Keep `openat2`, descriptor ownership and sampling at the native
+caller; this helper cannot validate a pathname, authenticate a sample or establish workspace custody. Its
+[focused data-only controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNamedMetadataComparisonTests.cs)
+check adjacent accepted directory metadata and single-field rejection, not native filesystem behavior.
+
+The factory binds the actual executing runtime host and managed entry and measures entry/policy/diff
+bytes from the retained inventory. It freezes the protected UTC deadline once against the system
+monotonic clock, counts opening/auditing time, latches expiry, and checks the original remainder before/after each native inventory/read operation and after final hashing. `LinuxInputDeadline` is monotonic deadline data, never admission; it carries the original timestamp and allowance into those loops without resetting either. `Recheck` verifies all retained names/metadata and hashes before use. Callers join readers
+and pending starts before `Dispose`. These objects prove retained inputs only: protected pre-CLR
+bootstrap, single-use owner activation, accounts, unit/kernel binding and admission remain required.
+
+The native operations are shared with
+[Contracts' exclusive artifact root](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) through
+`EvidenceLinuxFileSystem`, preserving its unsupported-openat2/no-fallback behavior and known errno.
+Portable metadata/directory-record controls create no native retained-input object.
+
+## Control request data
+
+`EvidenceControlProtocol.Parse(ReadOnlyMemory<byte>)` accepts one complete JSON object of at most 64 KiB
+including whitespace and escaping. It returns one immutable internal request type for ready, stop, wait,
+exit, run, artifacts, artifact, application-start or resource-wait. Members are exact and closed;
+missing, unknown, duplicate, case-alias, null and wrong-type members reject with fixed `ASEVD420`.
+
+Run requests have at most 128 arguments and each string token has at most 4096 decoded UTF-8 bytes.
+Artifact requests preserve the client fields `relative_root`, `relative_path` and nonnegative `offset`;
+the server selects chunks of at most 128 KiB, and rejects a caller `count` or alias `path`. Application/resource identifiers
+and digests use the existing closed grammar. The server must authenticate the peer and select a compiled
+procedure after parsing. An executable token, path or digest creates no permission or runtime lease.
+
+## Pending work and control handlers
+
+If the worker exits or the request lifetime fails before EXIT intent, the
+[control server](LinuxEmptyObservationControlServer.cs) begins the owner's original cumulative
+teardown and calls [`SupervisionControlSequence.BeginFailedDrain`](SupervisionControlSequence.cs)
+before joining request handlers. A handler can be waiting for a descendant that this stop must end;
+joining that handler first would defer containment until the original job expired. The sequence
+retains one shared stop task and its first cleanup token, closes workload admission and permanently
+records protocol failure. The server still joins the original handlers, stop task, control ledger,
+listener and worker separately. Successful containment cannot acknowledge EXIT or clear failure.
+Orderly EXIT preserves the existing response-write ordering. No cleanup allowance is renewed.
+
+`SupervisionWorkRegistry.BeginWorkload` reserves ownership **before** asynchronous dispatch. Its explicit
+`Workload.Complete` is bookkeeping by the owner after pending dispatch and actual OS work settle. In the
+compile-owned private N16 image only, the server also registers its fixed managed blocked body before
+starting that body; STOP releases and joins that original task before reporting the managed workload
+settled. This does not represent a kernel process, producer, or application-work join.
+Disposing a scope cannot silently establish workload exit. Limits default to 64 simultaneous workloads
+and 32 control handlers; construction can lower those caps only.
+
+`CloseAndJoinWorkloadsAsync` closes workload admission permanently and joins only workloads.
+It deliberately excludes control-handler scopes, so an authenticated stop/wait handler does not wait
+for itself. `CloseAndJoinControlsAsync` is the separate final server-drain operation; call it after
+the server stops accepting handlers and outside a handler being joined. Canceled waits retain ownership
+and cannot reopen admission. The first closed failure category remains latched.
+
+`IsSettled` is ledger data, not proof of a stopped process or a final completion receipt.
+The owner must also join actual units, pumps and pending start operations and recheck its original deadline.
+The [two completion scopes](../../docs/designs/issue-779-csharp-supervision-core.md#state-deadlines-and-completion)
+keep workload cleanup distinct from the worker's own final exit.
+
+## Counted output
+
+### Native output-pipe fact policy
+
+`LinuxOutputPipes.Create` keeps the existing native sequence: `pipe2(O_CLOEXEC)`, ownership transfer,
+`fcntl` access and descriptor-flag reads, then two `stat` samples. `LinuxOutputPipeFactsPolicy` is the
+single internal data policy used at those same boundaries. It rejects negative or equal descriptors,
+requires read/write access modes and `FD_CLOEXEC`, and requires both samples to be root-owned FIFOs with
+one shared device and inode. A failed descriptor or `fcntl` observation is rejected before metadata is
+read, preserving the syscall failure order and all existing close handling.
+
+The policy consumes copied observations only. It creates no descriptor, process, account, admission,
+unit, or output authority, and it is not a public pipe-construction or injection API. The native factory
+continues to own every actual descriptor and retains the existing transfer and close ordering. The focused
+policy tests use adjacent copied facts for one-field rejection cases; they do not claim native pipe creation
+or Linux acceptance. `LinuxOutputPipes` still requires real root Linux x64 and its existing lifecycle limits.
+
+`SupervisionOutputCollector.CollectAsync` owns both stdout/stderr tasks through actual settlement.
+One pair shares a received-byte limit, default 16 MiB, with at most a 1 MiB retained prefix per stream.
+Both can be lowered. All returned bytes are charged before retention, including discarded and late
+in-flight bytes. Quota or read failures signal sibling cancellation and remain unsuccessful.
+
+Caller cancellation never detaches a pump. A stream that ignores cancellation remains owned until
+the independent unit-stop path causes it to settle. The immutable receipt distinguishes EOF, read failure,
+cancellation, overflow and byte accounting. Two EOFs and an error-free receipt establish stream completion
+only. The run owner must share or aggregate quotas across all process pairs before final completion.
+
+### Run-wide accounting primitive
+
+[`SupervisionRunOutputBudget`](SupervisionRunOutputBudget.cs) is the checkpoint-two internal
+ledger for several real stream pairs. Its constructor accepts one positive aggregate limit,
+at most the existing16MiB contract. `CollectAsync(collector, stdout, stderr, token)` registers
+the original task and both stream references before pump dispatch. Collector/stream reuse,
+closed registration and more than64 pairs reject before reading the rejected streams. The
+existing collector still supports its standalone pair API for account utilities and callers
+that do not participate in a run ledger.
+
+Every actual returned read charges both its pair counter and the shared ledger, including
+bytes returned after a sibling failure. Quota, read and cancellation failures stop registered
+siblings without detaching ignored reads. `CompleteAsync` irreversibly closes registration,
+joins the entire original task set and then reconciles every pair's byte sum against the
+aggregate. Repeated completion calls share the same task. An earlier successful pair receipt
+cannot prove final run success when another pair later fails. `Dispose` rejects until explicit
+completion has joined; it does not close caller-owned streams or terminate any process.
+
+The native coverage composition shares this ledger between the actual producer pair and the
+worker pair; the reporter relays its original output through the worker's charged streams.
+Native coverage selects `drainOnQuotaExceeded: true` at ledger construction. The default remains
+stop-on-quota for standalone/procedure callers. In the native policy, `StopToken` still closes the
+original job on overflow, but `PumpStopToken` is cancelled only for an additional non-quota failure.
+Original pumps continue charging and discarding every returned byte until real EOF, under the
+original owner drain deadline. They retain no new prefix bytes after quota. Read failure, owner
+cancellation, signalling failure or missing EOF cannot establish complete drainage.
+
+Pair and ledger `Drained` predicates describe exact joined stream accounting and allow a sticky
+quota failure; `Successful` remains false. The worker may use its original drained pair for physical
+finalization, but filesystem custody additionally requires the completed entire run ledger to be
+`Drained`. Native retained-unit/PID checks, monitor and pending-operation joins, empty cgroup after
+pump settlement, server joins, tree sealing and strict account deletion remain mandatory. This lets
+a failed quota run release identities after real cleanup without admitting reports or publishing a
+successful run. These stream predicates alone create no process ownership or artifact/admission
+capability and renew no deadline. See [producer execution](producer-execution.md).
+
+## Retained producer reports
+
+The [producer runtime reservation reference](producer-execution.md#original-runtime-reservation-arithmetic)
+explains how the original job remainder covers stopping, collection and cleanup before the capped
+runtime can reach native dispatch. Its pure arithmetic controls do not grant process authority.
+
+[`LinuxRetainedReportSet`](LinuxRetainedReportSet.cs) supplies the first internal report-file
+primitive for checkpoint two. The [report reader reference](report-custody.md) describes its
+root-selection metadata, mandatory descriptor-relative Linux opens, exact inventory, ownership
+and link checks, byte limits, hashing, monotonic chunks and sticky failure/closure behavior.
+Its separate portable read-engine seam does not construct a root report set.
+
+The caller must eventually supply the root-selected results tree only after authentic producer
+group and pump joins. This packet does not connect the reader to a server operation or grant
+collection authority from a Boolean, supplied inventory or digest. Root account retention,
+exclusive consumer writes, the real reporter and numerical gate remain integration obligations.
+The existing final worker evidence custody retains its separate lifecycle and policy.
+
+## Linux systemd backend
+
+`LinuxSystemdBackend.ConnectAsync` requires root on Linux x64 and uses the fixed system bus socket
+`/run/dbus/system_bus_socket`, with auto-reconnect disabled. It resolves systemd's unique bus owner,
+authenticates that connection as UID 0 / PID 1, and sends subsequent operations to the pinned unique name.
+Responses require the expected sender and signature. A dropped or malformed connection fails closed.
+
+The pinned [Tmds.DBus.Protocol 0.95.1](https://github.com/tmds/Tmds.DBus/tree/rel/0.95.1)
+client supplies message serialization and transport. Its MIT license is included in
+[CLI third-party notices](../../Cli/ForgeTrust.AppSurface.Cli/THIRD-PARTY-NOTICES.md#tmdsdbusprotocol).
+No shell command or environment-selected bus is used.
+
+`LinuxUnitName.Create` uses one closed role plus the run GUID. `ReadCurrentUnitAsync` and `ReadUnitAsync`
+return bounded typed properties; missing or wrong-type required values reject rather than become zero.
+Generic state comes from the Unit interface; service execution facts and `ControlGroup` come from the
+[systemd Service interface](https://raw.githubusercontent.com/systemd/systemd/v255/man/org.freedesktop.systemd1.xml).
+`StopUnitAsync` requests a job; `KillUnitAsync` signals all processes of the retained unit with SIGKILL.
+Neither operation's reply establishes physical exit. The root owner must verify kernel UID/GID/PID,
+retain the selected cgroup across systemd collection, and observe group emptiness and actual stream EOF.
+
+`SupervisionOperationJoin.RunAsync` aborts the connection on caller cancellation and joins the original
+operation before returning cancellation. A canceled D-Bus start may already have been accepted, so
+pending unit ownership must survive cancellation and ambiguous replies. A fresh independently
+authenticated stop connection can remain usable when a workload connection is aborted.
+
+## Worker unit and control connection
+
+`LinuxWorkerUnit.Create` produces only the fixed same-image worker recipe. The root owner supplies
+independently validated runtime/entry paths, a same-run generated owner/worker pair, actual nonroot account
+IDs, selected paths, retained stdout/stderr write ends and the original remaining allowance. It cannot
+accept extra argv, caller environment or arbitrary unit properties. `StartWorkerAsync` serializes
+`StartTransientUnit` directly on the authenticated D-Bus connection and returns a job path only.
+Reserve pending ownership before the call and retain it through cancellation, ambiguous replies and
+late creation. A reply cannot establish readiness, physical exit or completion.
+
+The worker uses the existing 64-task/1-GiB ceilings, no new privileges, empty capabilities and supplementary
+groups, strict system/home protection, private temporary storage and control-group killing. Its sole
+explicit writable host path is the selected worker output parent. Runtime plus stop allowance fit within
+the original job remainder, capped at one hour with stopping at most 30 seconds. The control socket cannot overlap the writable output parent. `BindsTo`/`After` target the exact owner; that owner must already have the
+single-use activation guard. Worker `RemainAfterExit` retains inspection metadata, not a live-work receipt. `AddRef=true` keeps
+that unit referenced by the original authenticated starting connection through both pending-stop calls
+and final kernel/pump joins; the owner closes that connection afterward.
+Worker `RestrictSUIDSGID=false` preserves the previously measured openat2 compatibility requirement;
+subject policy is unaffected. Fixed environment, empty pass-through and explicit startup-override removals
+are worker settings; they do not prove that the privileged runtime was sanitized before CLR startup.
+
+`LinuxControlConnection.Accept` takes an actual accepted UNIX stream socket and a privately constructed
+`LinuxProcessIdentity`. It checks real/effective root Linux x64, live retained worker PID/start-time/UID4/GID4/cgroup,
+and actual `SO_PEERCRED` PID/UID/GID. A tuple parsed from JSON cannot select a connection. Every network
+read/write rechecks the retained process and kernel peer, using that operation's original token. Only its
+private socket factory constructs an authenticated connection. The owner retains the process identity until
+all connection users join. Procedure selection, admission and physical cgroup exit remain separate work.
+
+The internal [`LinuxPeerCredentials`](LinuxPeerCredentials.cs) utility reads only root UID state and the exact
+12-byte kernel `SO_PEERCRED` tuple from an already-owned safe socket handle. `Require` compares the retained
+worker PID, UID and GID and returns the same fixed `ASEVD402` rejection for any mismatch. `RequirePeer` keeps
+the disposed-socket guard before this syscall, and preserves its owner checks and original cancellation token
+around it. The utility does not create a connection, owner or admission capability. The root-only
+[`LinuxPeerCredentialsNativeTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxPeerCredentialsNativeTests.cs)
+uses a real UNIX stream and a child dropped to UID/GID 65534 by `setpriv`; on other hosts these tests skip.
+Passing this utility test proves only the helper's kernel tuple comparison, not `Accept`, worker ownership,
+request authorization or protected operation completion.
+
+### Retained listener ownership
+
+`LinuxRunWorkspace.ClaimListenerParent` claims one listener attempt before opening the fixed broker parent,
+requiring the same actual owner and account holder. `RequireOwnedBy` rechecks that binding and every retained
+directory/descriptor. The caller owns the returned parent handle through actual accept/connection settlement.
+Neither API accepts a caller pathname or creates worker admission.
+
+`LinuxControlListener.Bind` exclusively binds `worker/broker/control.sock`. It never adopts or unlinks a collision.
+The actual socket inode is retained with `O_PATH`, sealed root:worker **0660** through descriptor-relative
+`fchownat`/`fchmodat2` with `AT_EMPTY_PATH`, and rechecked against its retained parent/name before listening.
+This requires Linux x64 with openat2/statx/fchmodat2 support; there is no pathname chmod fallback. The
+[Linux 6.8 implementation](https://github.com/torvalds/linux/blob/v6.8/fs/open.c)
+defines those descriptor-relative operations. Parents retain the existing 0750/0710 policies; the worker's
+unit write grants are unchanged. `LinuxControlListenerPolicy` checks sampled metadata only and cannot bind a socket.
+
+Bind before starting the worker, then capture its actual service PID/kernel tuple and publish the sealed
+descriptor before `AcceptAsync`. If publication fails, any already-started worker remains owned and must be stopped
+and joined before account teardown. The first accept pins that same retained `LinuxProcessIdentity` object for
+all later connections. One accept may be pending at a time, with at most 32 retained connections. Cancellation
+closes the listening socket and joins the actual pending accept, including any late accepted socket; a canceled
+wait cannot drop pending ownership. Failure closes admission. The existing worker peer must remain alive and
+authenticated at every network operation. A replacement object or root/producer/application process rejects.
+
+`ReleaseAsync` joins the close of one retained connection. `DisposeAsync` shares the listening-socket close,
+actual pending accept join, all retained connection closes, and finally the native path-handle close. The
+server registers handler ownership **before** awaiting accept and joins each handler's read/write tasks as
+well: listener disposal alone cannot prove handler, worker, pump or cgroup completion. Socket/descriptor paths
+are preserved; final artifact custody and account deletion follow actual users joining. The private root
+dispatcher and final run are [composed below](#empty-observation-root-execution-and-final-files); the native
+checkpoint controls remain required before the CLI supervisor role opens.
+
+`SupervisionAcceptOwnership<T>` is portable procedure ownership only. It registers each pending accept before
+calling its delegate, retains each successful result before task publication, and owns exactly one close for
+release/disposal. A late result after closure is closed and joined before rejection. The seam creates no
+`LinuxControlListener`, `LinuxProcessIdentity`, authenticated connection, admission or physical-exit receipt.
+Unexpected accept faults remain failed even after cancellation/disposal closes admission. Only the fixed
+`SupervisionAcceptShutdownException` marks a deliberately interrupted actual accept, and only after closure
+or original-token cancellation; it proves no physical exit. The native adapter emits it for its own closed
+socket or narrowly identified cancellation/abort from the actual socket operation. Inspection and other I/O
+failures remain failures. Listener disposal invokes the generic reentrancy guard before mutating native close
+state and waits for its registered drain before closing retained path FDs.
+
+The accept token belongs to the control server's lifetime. An individual workload/handler deadline must not
+cancel the listener as a shortcut for stopping that work. The pending dispatcher must preserve cleanup control
+traffic while the original owner/worker remain authenticated, close new workload admission separately, and
+enforce the original job/cleanup allowances. Listener creation requires active owner/workspace checks;
+retained operations use authenticated cleanup continuity. The [server and final run](#empty-observation-root-execution-and-final-files)
+compose those checks; native acceptance remains pending.
+
+### Worker descriptor publication data
+
+`EvidenceWorkerDescriptorData.Create` takes the parsed observation request, generation, selected PID/account
+comparison data, fixed workspace layout, measured output-parent identity, entry/policy digest spellings and
+original positive remainder. It serializes the existing
+[Contracts worker descriptor](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#closed-descriptor-schema)
+as v1: 38 required fields plus nullable `diff_file`, `diff_sha256` and `solution`. Its two-segment run ID and
+worker unit/cgroup come from the generation; provider/platform are the existing `github-actions`/`linux-x64`,
+mode is observation and proof digest is empty. No application metadata or Trusted enrollment is introduced.
+
+When root-selected application metadata is present, the same serializer emits the existing v2 application
+descriptor and validates it through the [closed application protocol](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#closed-descriptor-schema).
+`EvidenceApplicationDescriptorData.Serialize` projects each producer's eight existing wire fields explicitly:
+ID, kind, version, required resources, assertions, artifact slots, timeout and coverage gate. The protocol
+implicitly uses managed retention and omitted execution settings. Full retention or any explicit execution
+object rejects with `ASEVD402` before serialization, including an explicit object spelling default values.
+Use omitted settings for this closed v2 path; the wider ordinary producer envelope does not extend its wire
+grammar. This prevents new public record properties from leaking into a strict protected descriptor or being
+silently discarded. Gate thresholds, source scope, process capabilities and admission checks are unchanged.
+
+The serializer checks the complete fixed layout/account relation and existing Contracts structural parsers.
+`LinuxWorkspaceLayout.AccountData` retains all five immutable account scalars: directory owners alone do not
+contain the subject's separate primary group and cannot substantiate that complete comparison.
+Both byte getters return detached copies. The standalone descriptor fits 65,536 bytes; the complete ready
+JSON object `{ok:true,descriptor:...,job_remaining_seconds:...}` fits **65,535 bytes**, reserving its framing LF.
+Limits count emitted UTF-8 bytes including JSON escaping and every wrapper member; overflow rejects without
+truncation. The remainder must be positive and at most one hour. No clock or deadline is reset.
+
+This type is data only, including its field-based identity overload for portable controls. The root run must
+authenticate live service/kernel PID/UID/GID/cgroup, actual broker PID, retained input hashes and output parent
+before invoking it. Bind the listener, start the worker, capture the actual PID, then seal these descriptor
+bytes before processing ready. A positive serialized ready object cannot establish admission or physical exit;
+server dispatch and original deadline checks remain mandatory. A larger valid launch request may still reject
+when the expanded descriptor or escaped ready response cannot fit the existing wire bound.
+
+`SupervisionControlLineFraming` is an intentional unauthenticated portable seam: one request attempt and
+one response, each at most 64 KiB **including LF**, no CR, counted reads, closed codec validation, and no
+second dispatch on that socket. Extra bytes returned with LF reject; future bytes are not drained because
+the existing client waits for a reply without half-closing. Cancellation closes the actual socket/stream
+and awaits the original I/O even if it ignores cancellation. Close initiation is distinct from completion: `DisposeAsync` joins the actual close and rejects close failure; response/failure/cancellation paths also join any concurrent close. The final handler owner must join both I/O and async disposal before draining its ledger. A blocked I/O requires independent unit
+termination. The current reply bound covers checkpoint one; artifact chunks require the explicitly bounded
+checkpoint-two response shape. No server/dispatcher composition is inferred from this transport.
+
+### Root work reply encoding
+
+The internal [root control reply codec](SupervisionControlReplyData.md) serializes the existing
+application-start, readiness, process-output, report-inventory and artifact-chunk fields. The
+control server retains its operation, owner and cancellation checks and its original response write.
+Artifact bytes are base64-encoded before the retained end-of-file check, preserving evaluation order.
+These data methods create no owner, readiness or admission authority.
+
+## Root owner activation and process lifetime
+
+`LinuxSystemdBackend.ReadOwnerAsync` reads the current process's service through the already
+PID-1/UID-0-authenticated manager. The native projection requires struct arrays for `Conditions`,
+`ExecStart` and `EnvironmentFiles` before `LinuxOwnerFacts.Parse` performs its bounded compound-field
+projection. Portable variant-array fixtures test metadata only. They cannot pass the native wire-kind
+check or construct a backend/activation. The v255 references are
+[Unit conditions](https://github.com/systemd/systemd/blob/v255/src/core/dbus-unit.c),
+[command tuples](https://github.com/systemd/systemd/blob/v255/src/core/dbus-execute.h) and
+[termination properties](https://github.com/systemd/systemd/blob/v255/src/core/dbus-kill.c).
+
+`LinuxOwnerFacts.Require` is a pure check, not an authority factory. It requires the generated
+`appsurface-evidence-owner-<32 lowercase hex>.service`, actual owner PID in both main fields,
+root numeric user/group, loaded/active/running exec service, exact generated kernel cgroup,
+control-group kill, restart disabled and `RemainAfterExit=false`. Forced final SIGKILL must remain
+enabled. The owner's activation timestamp and finite runtime plus stop must fit the original
+monotonic job allowance; neither a new operation nor cleanup resets that deadline.
+
+The protected bootstrap clears inherited environment **before CLR startup** with one fixed
+`/usr/bin/env -i` command. Its 14 argv entries are the env executable, `-i`, the six ordered assignments
+in `LinuxOwnerFacts.FixedEnvironment`, then the pinned runtime host, managed entry, `evidence`,
+`supervise`, `--request` and retained request path. The service has no pass-through environment or
+environment files. Extra assignments, changed order or arguments reject. Runtime, entry and request
+paths must be canonical absolute paths without `$` or `%`, because systemd expands command arguments
+before execution. The runtime-host path also cannot contain `=`: env would treat it as another
+assignment and choose the following operand as the command. Entry/request paths occur after that
+command and may contain `=` when otherwise canonical. The managed input owner still pins the actually executing dotnet image and entry;
+the configured service executable is env. `Type=exec` establishes initial env execution, not managed ready.
+
+`LinuxOwnerFacts.ManagedArguments(role, runtimeHost, entryPath, controlPath)` also supplies the worker's
+fixed 14-element argv. The sixth fixed assignment is `XDG_RUNTIME_DIR=/tmp`, selecting the existing
+runtime IPC temporary directory for named mutexes when `HOME=/nonexistent` is intentional. The
+[.NET runtime compatibility discussion](https://github.com/dotnet/runtime/issues/135726) describes why
+an unavailable home requires an explicit runtime directory. It is a
+literal, never a caller-selected pathname; missing or different values reject in both bootstrap argv
+and service environment. Worker `PrivateTmp` remains enabled, and no read/write mount is added.
+Only the two reserved roles are permitted. Worker uses `evidence worker --control`
+after the same command boundary; its existing 4096-byte deployment operand bound is retained, while
+supervisor operands are bounded to 4095 bytes. The worker recipe separately applies its 100-byte socket
+bound and protected/writable path disjointness. Runtime `=` is rejected for either role; positional entry
+and control paths may contain `=`. This shared helper is copied read-only data, not a process launcher or
+readiness receipt. The worker's five Environment entries, eighteen UnsetEnvironment entries, numeric
+identities, 64-task/one-GiB ceilings, zero capabilities and thirty unit properties are retained.
+
+This recipe depends on the trusted OS env executable, loader/libraries, locale infrastructure,
+manager configuration and bootstrap environment; env itself runs before it clears inheritance. The
+bootstrap must pin a genuine native dotnet image rather than a script: `execvp` can invoke a shell after
+an `ENOEXEC` failure. Managed checks cannot undo a startup hook that already executed, and matching
+service metadata does not authenticate the OS. The source review used
+[Coreutils v9.4 environment replacement](https://github.com/coreutils/coreutils/blob/v9.4/src/env.c#L772-L837),
+[systemd v255 argument expansion](https://github.com/systemd/systemd/blob/v255/src/core/exec-invoke.c#L4716-L4756)
+and [glibc 2.39 fallback](https://github.com/bminor/glibc/blob/glibc-2.39/posix/execvpe.c#L75-L82);
+these examined implementations are not a claim about installed runner versions.
+
+The bootstrap also creates `/run/appsurface-evidence-owners/<generation>/armed`: a root:root 0600
+ordinary single-link file containing the 32 lowercase generation characters and LF, beneath a
+root:root 0700 generation directory. Its sole systemd condition is successful
+`ConditionPathExists` for that exact file, without trigger or negation. `LinuxOwnerActivation.OpenAsync`
+binds the actual current service and repeated root proc identity, rechecks protected inputs, then
+`LinuxOwnerGuard.Consume` uses retained descriptors and `renameat2(RENAME_NOREPLACE)` to move `armed`
+to `consumed`. There is no delete/create fallback and no rearming after failure. The bootstrap must
+retain that generation until every pending dependent start and unit has settled; closing a managed
+handle is insufficient permission to recreate or remove it.
+
+`RequireActive` rechecks actual process identity, consumed bytes/name and original deadline before
+new work. Failure closes new work permanently. `RequireCleanup` permits cleanup inside the original
+stop/job bounds after cancellation: it repeats complete native inspection through the original retained
+root proc descriptors, with the original PID/start time and consumed guard, without reopening admission.
+Native integrity rejection also closes cleanup; ordinary caller cancellation closes work admission
+without inventing integrity loss. `Dispose` closes retained guard/proc handles only after
+all users and pending starts join. An owner record never grants worker admission or consumer proof.
+
+Only the private N04, N08, and N09 images emit a best-effort owner-activation diagnostic line to
+stderr when `OpenAsync` already fails. Each image has its own schema:
+`issue779-n04-owner-activation-diagnostic-v1`, `issue779-n08-owner-activation-diagnostic-v1`, or
+`issue779-n09-owner-activation-diagnostic-v1`. The closed `stage` is one of `input-recheck`, `backend-read`,
+`unit-parse`, `facts-require`, `identity-capture`, `guard-consume` or `active-recheck`; the only other
+field is the fixed `native_acceptance: false`. The line contains no exception, identity, path or sampled
+value. Diagnostic-write failures are swallowed so the original failure remains primary. The stage is
+set immediately before the existing operation and does not split, reorder, retry, add deadline checks,
+or change the outward `ASEVD402`/`ASEVD410` error or existing `evidence-native-observation-failure-v4`
+record. Ordinary and other qualification images compile the diagnostic code out. The formatter and
+write-failure controls are in
+[LinuxN04OwnerActivationDiagnosticTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN04OwnerActivationDiagnosticTests.cs).
+Passing them is not native N04, N08, or N09 evidence; the line is failure diagnosis only and does not
+convert an owner activation failure into a successful cancellation observation.
+
+`LinuxProcessIdentity.Capture`/`CaptureOwner` retain actual proc descriptors on root Linux x64.
+The portable `LinuxProcessData` helpers decode bounded UID4/GID4, stat PID/start time and one unified
+cgroup row. Actual capture requires the proc filesystem and repeated named-object bindings; recheck
+rejects missing, reused, moved, zombie or differently credentialed processes permanently. A cancelled
+inspection produces no successful check; a later cleanup operation repeats the entire native inspection.
+Actual native rejection remains permanent even if cancellation happens concurrently. Proc file size/timestamps are not byte limits. A live PID or matching cgroup string
+does not establish cgroup emptiness or physical exit. Kernel reads are synchronous; the independently
+armed owner lifetime contains a stalled read.
+
+`SupervisionPendingStart` reserves the selected unit before invoking its start procedure. Stop closes
+admission, attempts stop, joins the **actual** reserved start task, and stops again so late acceptance
+cannot escape an earlier stop snapshot. Concurrent callers join one sequence. Procedure failure stays
+latched; a cancelled caller does not detach an ignoring task or renew the cleanup deadline. Its
+`Snapshot.IsSettled` means procedure settlement only: the caller still needs actual kernel group and
+pump joins. Its internal procedure seam creates no protected authority.
+
+### Account preparation boundary
+
+`LinuxRunAccountNames` and `LinuxRunAccountCommand` provide generated names and the fixed absolute
+`useradd`, `groupadd`, `userdel`, `groupdel` argument/environment data. Pending names are reserved
+before dispatch and remain in reverse cleanup obligations even when utility acceptance is ambiguous.
+`LinuxRunAccountNss` performs bounded forward/reverse libc identity inspection under the actual owner;
+identities and supplementary groups must satisfy separation. NSS configuration/provider custody is
+part of the protected bootstrap, and a stalled provider remains inside the external owner lifetime.
+
+`LinuxRunAccounts.CreateAsync` now owns actual account creation through a private factory. It takes
+an irreversible account-creation claim on the actual owner before constructing a holder or doing NSS work.
+`SupervisionSingleAttempt.Claim` is the atomic bookkeeping primitive retained privately by that owner;
+it has no release/reset or native authority. Concurrent/replayed factories reject before entering
+rollback. The factory then observes all generated
+names absent before reserving any obligation, records implicit groups and users before
+utility dispatch, and keeps every accepted or ambiguous attempt until it physically settles. Successful
+creation requires both named and reverse-number libc NSS mappings, distinct nonroot identities, private
+empty supplementary membership, and the original live owner. `RequireOwnedBy` checks the same actual
+owner and rejects metadata snapshots, closed account use and failed creation.
+
+`CloseAsync` closes identity admission before one shared reverse cleanup task. Call it **after** closing
+consumer admission and joining every pending start/consumer, and after securing workspace/artifact custody
+against UID reuse. It attempts the retained reverse obligations, permits skipping an automatically deleted
+private group only on actual NSS absence, validates known created identities before deletion, and requires
+all names absent afterward. Utility failure remains failure. Uncertain utility exit or name absence
+quarantines identities; a later attempt cannot convert that cleanup into success. Creation failure uses
+this same cleanup path within the original protected cleanup allowance. Account-db/NSS configuration
+and providers remain part of the trusted OS bootstrap, with a stalled native provider contained by the
+independent owner lifetime. No supplied numeric snapshot constructs account ownership.
+
+`LinuxAccountUnit` selects only `/usr/sbin/useradd`, `groupadd`, `userdel` or `groupdel` with generated
+names and individual fixed arguments. Each utility is a fresh short systemd child with root UID/GID,
+only CHOWN/DAC_OVERRIDE/FOWNER capabilities, no new privileges, strict system/home protection, private
+temporary storage, protected cgroups, 64 tasks and 1 GiB memory. Root utility account-db/log writes are
+limited to `/etc` and `/var/log`; these do not change worker or subject path grants. Runtime is capped
+at ten seconds and stopping at five, with their sum inside the original job remainder. Cleanup tokens
+remain linked to the one original cleanup phase. `After` and `BindsTo` target the exact single-use owner.
+
+The unit uses `RemainAfterExit=true` for terminal inspection and `AddRef=true` to retain its metadata
+on the original authenticated starting connection through stop and joins. In
+[systemd v255](https://github.com/systemd/systemd/blob/v255/src/core/dbus-unit.c#L2222-L2241), AddRef
+belongs to the calling bus connection; release follows connection disposal. It creates no process-exit
+receipt. A service can also
+[prune its cgroup in the exited state](https://github.com/systemd/systemd/blob/v255/src/core/service.c#L1147-L1150),
+so terminal inspection accepts an empty cgroup property while retaining the exact generated kernel path.
+Uninitialized main PID/code values do not establish success.
+
+`LinuxAccountUtility.Create` retains one actual utility owner before `ExecuteAsync` can dispatch. It
+starts both pumps before the typed D-Bus start, bounds each pair to 128 KiB received and 4 KiB retained
+per stream, joins the actual start before closing local write copies, then requires zero-exit terminal
+facts. Cleanup uses independently authenticated stop calls around the pending-start join, verifies the
+actual kernel group, joins both pumps and all descriptor closure, and rechecks the owner. `PhysicallySettled`
+is emitted only by that actual executor and permits strict rollback after a failure; it grants no
+admission or passed result. An unknown surviving writer keeps the original task owned until the external
+OS lifetime terminates it. There is no detached timeout task or shell launch.
+
+### Root workspace, cgroup and pipe custody
+
+`LinuxRunWorkspace.Create` requires the actual live owner and its created accounts and exclusively
+prepares `/run/appsurface-evidence-<generation>` with root:worker `0750`, a root:worker `0710` worker
+control child and its root:worker `0710` broker child, plus worker:worker `0700` output and
+subject:results `0710` raw-results siblings. The descriptor is `worker/worker-control.json`; the socket
+is `worker/broker/control.sock`. Keeping output outside the descriptor's control root preserves
+[the existing strict client contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md). Existing paths
+reject without adoption or chmod. Descriptor publication is one attempt: root `0640` creation, exact
+bounded bytes, fsync, root:worker `0440` sealing, retained reader, SHA-256 and named identity rechecks.
+The root starts the pending worker and captures its actual kernel PID before producing this descriptor;
+sealing must finish before any ready response or admission. A guessed PID cannot be published to make
+file publication precede exec. The worker waits on the authenticated control channel in that interval.
+`OutputParentIdentity` reports the measured identity for the existing exclusive allocator; slot `evidence`
+is not allocated by workspace creation. Quarantine and disposal retain paths/artifacts. Listener binding
+and `0660` socket sealing remain separate composition. The separate subject cannot traverse the `0750`
+outer root: checkpoint two must compose retained namespace access without relaxing these grants.
+
+`LinuxCgroupProbe.Read` opens the fixed cgroup-v2 kernel mount and `system.slice` through retained
+root descriptors, then the exact generated unit. It bounds `cgroup.events` to 1024 bytes and requires
+closed `populated`/`frozen` rows, actual cgroup2 type and repeated named object identity. A missing leaf
+can be observed only at initial acquisition under the verified parent; later pruning rejects. The
+immutable sample is kernel data, not an exit receipt, and is used only after actual start/stop settlement
+and before/after pump joins. No pathname scan or sampled PID alone proves completion.
+
+`LinuxOutputPipes.Create` owns actual root Linux x64 anonymous CLOEXEC pipes with checked read/write
+modes and matching FIFO identity. Begin collection before dispatch and retain both borrowed write handles
+until the actual start has joined. `CloseWriteCopies` never closes systemd's transferred descriptors.
+`JoinAsync` returns the original collector task. Shared `DisposeAsync` joins it before closing readers
+and preserves close failure; cancellation cannot fabricate EOF. Its portable ownership seam supplies no
+native pipe or account authority.
+
+`LinuxOutputPipes.WrapOwnedRead(SafeFileHandle)` transfers an exclusively owned read handle to a
+4096-byte buffered read stream without duplicating the descriptor. The three-argument
+[`FileStream` handle constructor](https://learn.microsoft.com/dotnet/api/system.io.filestream.-ctor)
+derives the stream's asynchronous mode from the handle. A newly wrapped raw Unix descriptor is not
+marked asynchronous: passing `isAsync: true` explicitly rejects that handle before collection begins.
+The caller retains the handle if construction fails; successful construction transfers it to the stream.
+Do not toggle handle flags or force the Windows overlapped mode to work around this mismatch.
+`ReadAsync` remains available with the derived mode; the [counted collector](#counted-output) retains
+and joins both original read tasks. This wrapper is a stream-ownership seam, not a Linux pipe factory:
+the actual factory still performs every platform, root UID/GID, FIFO, access-mode and CLOEXEC check.
+Its real anonymous-pipe regression uses the same wrapper without root privileges, checks both byte
+prefixes and pending EOF while writers remain open, and closes readers only after the paired join.
+The test also collects on Windows without forcing Unix or overlapped flags; it makes no Linux
+factory, cgroup, account or native acceptance claim on any platform.
+
+At this foundation checkpoint the early supervisor role remained closed until root server dispatch, worker/kernel binding, final
+custody and all sixteen native controls are complete. These account/workspace paths do not enroll a
+production catalogue entry or qualify Trusted execution.
+
+### Same-image worker ownership
+
+`LinuxWorkerProcess.Create` requires reference-equal actual launch input, owner, account holder,
+workspace and bound listener. `LinuxOwnerActivation.ClaimWorkerCreation` consumes one irreversible
+worker claim before native acquisition; equal JSON fields cannot replace the retained input.
+`LinuxControlListener.RequireOwnedBy` similarly validates actual owner/account/workspace references.
+These helpers reopen no admission and change no worker grants or unit policy. `Layout` exposes immutable
+workspace comparison data only, for the existing [descriptor serializer](#worker-descriptor-publication-data).
+
+`StartAsync` reserves the entire startup through `SupervisionWorkerLifetime` before creating pipes or
+connecting to systemd. Both pumps start before the separately reserved `StartTransientUnit` call. Local
+write copies close only after that original start task joins. The starting connection retains AddRef
+through unit/group/output settlement. Cancellable status reads use a separate authenticated observation
+connection so their cancellation cannot dispose the starting reference. The original exit-monitor Task,
+not a result signal, is retained and joined before either observation connection or proc handles close. Running service facts must match the fixed recipe before actual
+Linux PID/starttime/UID/GID/cgroup capture. Descriptor publication follows capture and precedes ready.
+`RequireWorker` returns that same private native identity while startup remains usable; `CreateReadyData`
+uses a fresh original deadline remainder and verifies that the standalone descriptor matches the sealed
+file. Uploaded metadata or guessed PID values cannot construct the holder.
+
+`LinuxWorkerUnit.HasRunningMain` and `HasFinished` are detached predicates, not native capabilities.
+They require the generated unit and exact sampled recipe policy. A running match needs active/running,
+matching positive main PIDs and the exact generated cgroup. A terminal normal-exit record needs main PID
+zero, retained positive execution PID and CLD_EXITED; status 0–255 remains the actual outcome. Nonzero
+is failed execution. `HasStopped` separately requires inactive/dead or failed/failed with a retained
+normal or signal termination record; active/exited cannot match stopped settlement. Empty pruned terminal
+cgroup metadata is permitted only as data; actual group and output joins still follow. Uninitialized zero code/status cannot establish completion.
+
+Startup uses [`LinuxWorkerUnit.ClassifyStartup`](LinuxWorkerUnit.cs) and its internal
+`LinuxWorkerStartupState` data enum. It checks the exact running-main predicate first and returns
+`Running` only for that sample; the holder must then perform the original kernel identity capture.
+Otherwise a normal finished or stopped record returns `Terminal`: inactive/dead or failed/failed
+signal termination (including dumped code3/signal6 and killed code2/signal9) rejects startup with the
+existing fixed `ASEVD410` diagnostic immediately on observation, rather than waiting for the startup
+deadline to cancel. A recorded normal exit, including status zero, also rejects startup. This does
+not accept a failed exit, publish identity, or establish settlement. Uninitialized inactive/dead
+code0 data and mixed active/running zero-main data remain `Pending` under the original startup token.
+Malformed signal statuses and foreign unit/policy samples retain the same closed diagnostic without
+an inner exception. The original stop, operation/task, actual group, and pump joins still run even
+when no worker identity was captured. This classification changes no timeout, unit policy or cleanup
+authority. The separate private SDK helper dependency/build fix remains necessary for the observed
+loader failure; earlier rejection only makes a terminal startup failure observable without waiting
+for cancellation. Detached classifier tests establish this data behavior, not native execution.
+
+The internal [worker cleanup procedure](worker-cleanup.md) preserves the finalization order and immediate
+failure latches while allowing ordinary task/barrier verification. Its borrowed operations create no native
+authority; the private worker retains every unit/group read, original task, deadline and publication guard.
+
+`WaitForExitAsync` joins the original monitor of the authenticated unit's captured main PID. The monitor
+cannot demand live proc files after a running sample: natural exit can occur between those observations.
+Live kernel continuity is checked separately on every admitted control I/O. `StopAndJoinAsync` closes
+startup, cancels its retained monitor token, contains pending unit dispatch, joins the entire original
+startup, and finalizes group/output/backend ownership. It uses one cumulative cleanup allowance inside
+the unchanged original owner/job deadline. Finalization also requires authenticated stopped-unit facts
+on the original starting connection, checked again after group/pump/monitor joins and before releasing
+AddRef. Missing terminal facts, signal termination without a stopped state, or lost retention cannot
+publish physical settlement. Startup faults and cancellation stay failed after cleanup.
+`PhysicallySettled` reports successful containment/task/FD settlement even after a nonzero worker
+outcome, allowing subsequent custody work. Any monitor, output, stop, inspection or close failure
+prevents this projection; finalization clears it before rejecting. It is not a generic “all tasks ended” flag; `RequireSuccessfulCompletion` additionally requires a naturally recorded zero exit,
+successful joined output and no earlier failure. Neither projection is consumer proof or admission.
+
+The worker holder is outside the producer workload ledger. A worker's STOP/WAIT request must join
+producer/application work while that worker remains alive. The EXIT handler sends its ACK and finishes
+before the outer server joins worker exit. Join all handler tasks before holder disposal; closing retained
+connections does not substitute for those joins. `DisposeAsync` shares native settlement, listener drain
+and proc-handle closure and deletes no filesystem paths or accounts. Do not renew a stop timer or use a
+canceled wait wrapper in place of any original task.
+
+The account holder retains the actual worker before startup. Process exit, decoded receipts and worker
+disposal never release that reservation. The [terminal root custody phase](#terminal-root-custody-and-shared-teardown)
+now owns the strict deletion task after sealing the complete retained tree. Ordinary `CloseAsync` still
+rejects before account deletion when a worker is retained; only that private native custody holder may
+start the account-close procedure. Failure preserves paths and quarantines identities. The
+[remaining native checkpoint](../../docs/plans/issue-779-csharp-supervision-migration.md) still gates the
+supervisor entry and requires actual Linux custody and account-reuse controls.
+
+`SupervisionWorkerLifetime` is a portable procedure seam only. It reserves startup before callbacks,
+closes it irreversibly, attempts containment, joins even cancellation-ignoring startup, then attempts
+finalization. Both phases run outside its lock, share one sticky result, and reject callback self-join,
+including after an await. Original caller cancellation remains observable after startup returns and rejects use and successful
+completion; stop-induced cancellation of the linked monitor token is distinct. Cancellation-source
+disposal occurs only after finalization. Its tests exercise
+actual task barriers; they construct no native worker, admission or accepted proof.
+
+### Protected empty Observation preflight
+
+`EvidenceEmptyObservationPlan.Resolve(request, policyBytes, expectedPolicySha256, diffBytes, token)`
+is a data-only planner preflight for [checkpoint 1](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker).
+It counts and copies each nonempty input up to the existing canonical JSON 20 MiB limit before parsing,
+checks the original policy byte hash, validates the complete policy and invokes the real planner. This
+byte hash differs from a canonical policy digest when the original JSON has different whitespace.
+The allowed profiles must all exist, have targeted scope, and declare no resources, producers or obligations;
+the allowed producer list must be empty. The real policy must still have its legitimate nonempty conservative
+profile. Unmatched or mixed paths retain the planner's conservative fallback and therefore reject this
+checkpoint. Declared protected diff bytes are required and hash checked; diff paths, including renamed
+previous paths, participate in the same resolution as the worker. No empty path or substitute plan is fabricated.
+
+`FromInput` accepts only the genuine privately constructed `EvidenceProtectedLaunchInput`. Its
+`ReadPolicyBytes` and `ReadDiffBytes` expose copies of already inventoried exact files, through retained
+FDs and measured hashes. `LinuxProtectedNode.ReadBounded` checks the counted limit before allocation;
+`LinuxProtectedDeployment.ReadFile` requires an existing inventory entry, original byte hash, metadata,
+EOF and named binding. Full input rechecks bracket resolution under the original monotonic allowance.
+The returned plan creates no context, admission, provider, process lease or accepted proof. Invalid plan
+data returns fixed ASEVD406 without input text; cancellation returns no plan. Native input errors retain
+their fixed diagnostic. The worker independently resolves and admits its own protected inputs.
+
+[`EvidenceEmptyObservationPlan.AsOptionalDiff(byte[]?)`](EvidenceEmptyObservationPlan.cs) is the
+data-only adapter used by `FromInput` after the retained diff read. Null means no declared diff and
+returns nullable absence (`HasValue == false`). Every array remains present, including an empty array;
+`Resolve` still rejects undeclared present bytes and declared empty bytes, and preserves its counted
+input and digest checks. The adapter views the supplied array rather than creating a protected input,
+copying native ownership or granting admission. `Resolve` performs its existing counted copy.
+
+The null branch must be explicitly typed as `ReadOnlyMemory<byte>?`: an untyped null in a conditional
+with a `ReadOnlyMemory<byte>` branch can use the array-to-memory implicit conversion and become a
+present empty struct before nullable wrapping. Existing tests passed nullable absence directly to
+`Resolve`, bypassing this adapter. The focused [planner/data regression controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceEmptyObservationPlanTests.cs)
+now route absent, present-empty and declared valid bytes through the same adapter used by `FromInput`.
+They establish no native input, worker execution, cleanup or acceptance; native checkpoints remain pending.
+
+### Authenticated control server and cleanup continuity
+
+`LinuxEmptyObservationControlServer.Create` binds reference-equal actual input, owner, account holder,
+workspace, listener and worker; `LinuxWorkerProcess.ClaimControlServer` consumes its only server-holder
+attempt before acquisition. Construction requires completed actual worker startup and the protected
+empty-plan preflight above. Equal JSON fields cannot adopt another worker. The current server handles
+only READY, STOP, WAIT and EXIT. The other five request forms reject; they remain later native checkpoints.
+The reserved CLI supervisor entry now reaches the guarded empty-run candidate; bootstrap and custody
+must authenticate during execution, and all N01–N16 remain required before runtime cutover.
+
+`RunAsync` owns one original accept task and at most 32 original handler tasks. Each control scope is
+registered before handler I/O; accepted connection close and original read/write joins both remain
+mandatory. Successful completed handlers are joined before their task references are removed. The accept
+token belongs to the independent root/control lifetime. Handler I/O has the protected admission bound,
+capped by the original remainder. Closing that listener never reopens or rebinds it. Final server drain
+closes acceptance/results, joins original accept and handler tasks, closes the descendant ledger and joins
+controls. It never calls the worker's final stop/join from within a handler.
+
+`SupervisionControlSequence` is a portable procedure seam, not a native authority factory. READY has
+one reply claim; successful response write and close precede its commit. STOP immediately closes work
+admission and shares one actual containment/drain task. WAIT is positive only after all actual descendant
+start/work/output joins and zero closed workload registrations. In this specific server no descendant work
+is dispatched, so these observations describe a genuine empty set. The worker and active control handler
+are excluded. EXIT requires committed READY and positive WAIT plus successful closed ledger state. A reply
+semaphore orders ACK commits when the client receives LF and sends its next request before the root
+continuation runs. STOP may close work while a previously claimed READY is writing; successful prior
+READY can still commit, while a new READY claim after STOP rejects. Failed writes consume their claim,
+latch failure, forbid EXIT success and permit only cleanup. Final worker exit and custody follow separately.
+
+`SupervisionControlSequence.JoinStartedStopAsync()` joins only the STOP task already registered by
+`StopAsync`. It rejects without dispatch when no STOP exists. The server awaits this join for WAIT
+**before** acquiring its reply semaphore, then calls `ClaimWait` while ordering response writes as before.
+The method snapshots the retained task under the sequence lock and awaits it outside that lock; it
+creates no cancellation source, replacement token or deadline. The first STOP's owner cleanup token
+continues to bound the actual procedure. Cancellation-ignoring callback or workload ownership remains
+pending until the original task settles. A failed STOP remains failed; after its callback and ledger drain
+join, bounded authenticated response I/O can commit only a negative WAIT, never a positive EXIT.
+
+Do not call `StopAsync` to implement WAIT: that would initiate containment when none was requested.
+Do not acquire reply ordering before joining STOP, join the requesting handler/worker as a workload,
+or use a canceled proxy wait as completion. Same-owner callback reentry is rejected to prevent self-join.
+Multiple WAIT joiners observe the same STOP, but `ClaimWait` still permits only one reply claim. These
+are [procedure and ledger checks](#pending-work-and-control-handlers), not native settlement or admission.
+
+Cleanup borrows the [owner-held collection/cleanup expiry](#terminal-root-custody-and-shared-teardown),
+capped by the original job. Unit stopping and request I/O retain their smaller local bounds. Fresh
+connections or repeated STOP/WAIT cannot replace the owner token, reset a failure or reopen work.
+`RequireControlIdentity` checks actual retained root PID/start time, consumed marker and original deadline;
+`RequireControlOwnedBy` repeats account/workspace identity, named directories and sealed descriptor checks.
+The connection factory additionally binds the worker's generated unit to this actual owner generation.
+Every read/write checks the original worker proc identity and actual SO_PEERCRED. Transport continuity
+grants no active work: READY and later execution procedures must separately require active admission.
+
+Per-request cancellation is checked outside the synchronous default-token native continuity inspection,
+so it closes that socket rather than invalidating a shared kernel identity. Canceled read-only workspace
+inspection closes work admission but creates no new integrity quarantine. Interrupted mutation, actual
+PID/UID/GID/cgroup/path/socket/descriptor substitution, or expired original lifetime remains rejected.
+Existing quarantine is never cleared. Synchronous inspection still relies on the independently armed OS
+owner to contain stalls; a managed token alone does not provide physical termination.
+
+## Verification boundaries
+
+### Original worker-stop timing diagnostics
+
+The private N11 stalled-worker image records numeric observations at the original
+`LinuxWorkerProcess` containment, systemd stop request/reply, terminal unit and empty
+group inspection, monitor/pump join, final inspection, and stop-task completion.
+The [failed-settlement record](LinuxFailedSettlementObservation.cs) adds `stop_timing`
+only when the N11 holder has a reliable [monotonic snapshot](LinuxWorkerStopTiming.cs).
+Ordinary and cancellation frames retain their original shape. No supplied JSON or
+timestamp creates an owner, admission, physical exit or native acceptance.
+
+`EvidenceProtectedLaunchInput.DiagnosticRemaining` copies the existing monotonic job
+remainder without latching expiry or replacing the execution guards. At first stop
+entry, the holder records that remainder, the unchanged stopping allowance, and the
+actual worker recipe's `RuntimeMaxUSec`. Event values are elapsed milliseconds from
+that entry. Repeated calls keep the first samples; missing events remain null, and a
+clock failure makes timing unavailable. The numeric object is at most 1 KiB within
+the existing private frame bound. It starts no timer, dispatches no new operation,
+and cannot extend job or cleanup time.
+
+A systemd stop reply measures request completion, not signal delivery. Timing proof
+requires the matching stopped-unit/empty-group observation and original joins within
+the recorded original allowance; a shell launcher duration is insufficient. Native
+tests must bind this private record to the actual run and selected unit. Local
+bookkeeping tests establish no Linux shutdown bound or checkpoint credit.
+
+Portable tests cover grammar, data snapshots, pending ownership, control-handler separation, output
+accounting and cancellation joins. They create no protected admission or kernel exit receipt.
+The checkpoint's 16 real Linux cases are mandatory before protected runtime cutover; wiring the guarded
+candidate for those checks does not satisfy that gate.
+Production compiled registration and consumer proof tables remain closed throughout foundation work.
+
+**Historical worker-lifetime source validation:** the final exact-file formatter and full core source build/test
+passed **721/721**, with zero failures, skips, timeouts and compiler warning/error diagnostics in **3.565 seconds**.
+All 56 source hashes matched before/after and independently verified current bytes. Formatting changed
+no bytes, and both owned process groups were absent. The local run used macOS arm64/.NET 10.0.102,
+`--no-restore -p:UseSharedCompilation=false`. Final receipt:
+`/private/tmp/issue779-csharp-worker-validation/attempt-6/receipt.json`, SHA-256
+`1e744eb4b530760bd1f4a16cacf105ac8c790da3e38a9b66aadea7bc5fcb1fc4`. Earlier attempts remain
+separate history, including the first test compile failure. This source/portable result does not establish
+systemd, root/worker authentication, physical settlement, custody or the unchanged coverage gate. The
+[next checkpoint](../../docs/plans/issue-779-csharp-supervision-migration.md) still requires root dispatch,
+cleanup-only authentication, native custody/bootstrap and all N01–N16 before runtime cutover.
+
+**Historical control-server source validation:** scoped formatting and the rebuilt full core test project passed
+**772/772** in **4.705 seconds**, with zero failures, skips, timeouts or compiler warning/error diagnostics.
+All 61 source bindings matched before/after and independently verified current bytes; formatting changed no
+source bytes and both owned process groups were absent. The added procedure/data cases comprise 22 control
+sequence cases, 28 genuine planner/preflight cases and one owner-generation comparison Fact. The native
+server, cancellation→cleanup transport and filesystem holder checks were source reviewed; they were not
+executed on Linux by this macOS arm64/.NET 10.0.102 run. The first attempt's wrong member reference and
+malformed XML comment stopped compilation before tests and remain in a separate failed receipt. Successful
+receipt: `/private/tmp/issue779-csharp-control-validation/attempt-2/receipt.json`, SHA-256
+`fe2674fd0193dad043550d85179016745acabb61b8b66e03e117f80ced6f87e2`.
+Public root dispatch, native bootstrap/custody proof, N01–N16, subsequent producer/application checkpoints and the
+unchanged coverage gate remain required before claiming runtime migration or Trusted acceptance.
+
+### Terminal root custody and shared teardown
+
+`LinuxOwnerActivation.BeginRootTeardown` irreversibly closes work admission and starts one owner-held
+monotonic expiry. An actual worker reservation retains the existing separate collection and cleanup
+reserves together, capped by the original job deadline; pre-worker account rollback retains only cleanup.
+Stopping remains a smaller unit-operation limit and is not added again. `CleanupRemaining` never starts
+this clock during successful account creation. `RootTeardownToken` is borrowed: neither the server nor
+worker may cancel or dispose its source. `TeardownCancellation` borrows that same source before Begin so
+already-running monitor, pump, request and accept operations receive the first expiry. Linking it does
+not start the clock. Continued exit observation uses `RequireCleanupLaunchInput`,
+which repeats original input/root/guard checks without permitting new work.
+
+`SupervisionTeardownDeadline` is the deterministic scheduling seam. `Begin` retains the first timestamp,
+reservation, timer and token; repeated or concurrent calls cannot renew them. `Remaining` also checks
+monotonic elapsed time when a timer callback is delayed. Failed/expired/disposed state rejects. Its
+`IsStarted` value and pre-Begin `Cancellation` token are scheduling data; neither starts the timer, and
+its test clock constructs no native owner or custody. Expiry requests interruption, while every original
+operation still has to join, including an operation which ignores cancellation.
+
+`LinuxRunWorkspace.TakeRootCustodyAsync` reserves one original task and binds the exact native input,
+owner, account, worker and server references. Replays with the same references join that task; later
+tokens cannot replace its original cancellation token. Beginning custody closes live workspace use. The server must have joined actual accept,
+handler, response and connection-close tasks; the worker must have joined original start, stop, monitor,
+unit, cgroup and output tasks. Both are freshly checked before native transfer. Protocol failure may
+remain failed while physically settled paths become root-owned; it never becomes successful execution.
+
+The private `RootCustody` preflights every fixed generation node through retained descriptors before any
+ownership change. Fresh directory descriptions avoid reusing a `getdents` cursor. Evidence files first
+receive an `O_PATH` type/owner/link/length check, then bounded nonblocking reads, EOF, SHA-256 and named
+inode checks. The sealed descriptor must match its original byte hash. Checkpoint one permits only the
+fixed descriptor/socket and `output/evidence/{evidence-plan,evidence-manifest,evidence-summary}.json`;
+raw-results must be empty. A cancelled run may have no evidence slot or a known partial file set.
+Unknown, linked, special, substituted or oversized nodes reject without deletion.
+
+All account-associated nodes then become root:root under a **separate terminal policy**: directories
+`0700`, regular files `0400`, retained socket `0600`. Device/inode/type/link count/length/mtime and bytes
+must remain bound; only the intentional ownership, permissions and ctime change. Original workspace and
+worker owners close before custody issuance, while the root copies remain held for subsequent reads and
+account cleanup. This policy does not weaken the live workspace checks or change worker write grants.
+
+`RootCustody.ReadFile` returns copied bytes only from one of the three fixed evidence files after full
+terminal-tree checks. A partial set is custody for failure, not successful publication. These bytes,
+`LinuxCustodyData` comparisons and `SupervisionCustodyTransfer.SuccessfulCompleted` are not admission
+or accepted proof. Successful evidence verification remains an additional step in the
+[checkpoint-one exit gate](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker).
+
+`RootCustody.CloseAccountsAsync` reserves its whole task before dispatching strict account deletion.
+The account owner rechecks that exact custody before and after each operation and final NSS absence.
+A private dispatch-context guard prevents invoking account closure merely by passing around the holder.
+The original worker reservation stays retained. Root descriptors cannot be disposed during this task,
+and partial deletion or final native failure stays failed. No account deletion is retried into success.
+Workspace disposal likewise cannot close original descriptors during a pending transfer; only that
+actual transfer may close them after retaining and inspecting its own copies.
+
+`SupervisionCustodyTransfer` owns validation → complete preflight → mutation → local close → final check.
+Callbacks are fixed private native methods in production and run outside bookkeeping locks. Its portable
+procedure tests exercise failures and ignored cancellation, but cannot issue `RootCustody`. Every
+dispatched original task is joined; both close and final check are attempted after earlier failure. The
+shared root expiry and independently enforced OS lifetime remain required around synchronous native work.
+Partial transfer closes retained local handles, preserves paths, quarantines accounts, and publishes no
+success. Neither deadline expiry nor JSON completion replaces physical settlement.
+
+**Recorded custody/teardown source validation, before full-run composition:** exact-file formatting and the rebuilt full core test
+project passed **897/897**, zero failures, errors, skips, timeouts or warning/error diagnostics in
+**6.333 seconds**. All 68 source hashes matched before/after and independently verified current bytes;
+formatting changed no source bytes and all three owned process groups were absent. The run used macOS
+arm64/.NET 10.0.102, `--no-restore` and `UseSharedCompilation=false`. Receipt:
+`/private/tmp/issue779-csharp-custody-validation/attempt-3/receipt.json`, SHA-256
+`d7439a39401750c0defc5dab8031c406660aa3e1870306d7cb04c71468097fb6`; TRX SHA-256
+`12c653f3afa20b2a47dca388b5200db3eaa2a3c865555357b68cdea1a807cd4e`.
+
+Earlier attempts remain separate: attempt one passed 894 cases but retained an xUnit analyzer warning
+missed by its original case-sensitive diagnostic scan; the assertion and scanner were corrected.
+Attempt two passed the same 894 cases without diagnostics but predates the final original-task retention
+and late-expiry propagation changes. The final run includes 59 custody metadata controls, 40 custody
+procedure controls and 26 teardown scheduling controls. These construct no native custody holder.
+Independent source review corrected cancellation reaching already-pending monitor/accept I/O. Native
+Linux I/O abort/join, FD sealing, account deletion and the N01–N16 checkpoint remain unexecuted.
+
+## Empty Observation root execution and final files
+
+`LinuxEmptyObservationExecution.RunAsync(requestPath, token)` composes only the genuine checkpoint-one
+procedure. The reserved supervisor entry invokes this internal native implementation as a guarded
+candidate for [N01–N16 acceptance](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker).
+Native acceptance and runtime cutover have not been established.
+It has no supplied backend, account owner, plan, handler, producer, application or transport callback.
+The fixed order is retained input → authenticated backend/owner activation → actual empty plan →
+accounts → workspace → listener → same-image worker → ready/stop/wait/exit server.
+
+### Closed native failure diagnostics
+
+The private checkpoint records the first recoverable root execution or cleanup fault with
+[`EvidenceNativeObservationFailure`](EvidenceNativeObservationFailure.cs). This is detached diagnostic
+data, never a native owner, admission, custody holder or accepted result. Each actual setup/await/check
+and cleanup operation supplies a fixed `EvidenceNativeObservationPhase` immediately before that
+operation. `EvidenceNativeObservationFailureLatch.Capture(phase, error)` retains only the first closed
+projection; later account, FD, backend or final-deadline failures cannot overwrite an earlier worker
+startup failure. Capture is best effort and cannot replace the original execution/cleanup outcome.
+No operation order, token, clock, gate, authority check, work grant or join is changed.
+
+The reserved supervisor entry emits one stderr JSON line with exactly six fields, followed by the
+unchanged fixed ASEVD410 admission message and numeric exit1:
+
+```json
+{"schema":"evidence-native-observation-failure-v3","phase":"WorkerStart","error_kind":"Admission","diagnostic_code":"ASEVD410","account_failure":null,"control_failure":null}
+```
+
+The example is shape documentation, not measured attempt14 cause. `phase` and `error_kind` are the
+closed PascalCase enum values in the [diagnostic source](EvidenceNativeObservationFailure.cs).
+`diagnostic_code` is nullable and allows only ASEVD402/404/407/409/410/420/421 from an actual
+`EvidenceAdmissionException.Code`; messages and inner exceptions are never searched. Known account,
+pipe and control-line classes have finite family labels; unrecognized exceptions map to `Unknown`.
+No arbitrary type name, message, stack, path, inner error or caller content survives the projection.
+`ToJson()` returns no LF; the entry writes the LF. All possible packets are below1024 UTF-8 bytes.
+The JSON is additional failure evidence, not a replacement for the original numeric process outcome.
+
+
+#### Account first-fault detail (v2)
+
+The nullable `account_failure` field is populated only by the negative account lifecycle exceptions in
+[`LinuxRunAccounts`](LinuxRunAccounts.cs). Other failures, unknown exception types, `Exception.Data`,
+inner errors and canaries cannot supply it. The nested object has exactly nine fields:
+`preparation_stage`, `utility_stage`, `operation`, `error_kind`, `diagnostic_code`, `account_code`,
+`exec_main_code`, `exec_main_status`, `dbus_category`. Enum names are finite, invalid enum data becomes
+`Unknown` or null, and numeric fields are nullable. It contains no account/unit name, path, raw error,
+message, stack, NSS contents, output or native owner. The whole v2 JSON plus LF remains at most 1 KiB.
+The version change is intentional: consumers expecting exactly four v1 fields must update their closed
+schema before collecting v2, rather than silently ignore an unknown property.
+
+[`LinuxAccountUtility.FirstFailure`](LinuxAccountUtility.cs) captures the first actual execution or
+cleanup exception before boolean normalization and before whole-run teardown. Actual failed output or
+physical-join predicates retain only their existing fixed rejection. The outer account owner retains
+that detached projection before marking reservations failed and starting reverse cleanup. A later
+rollback failure still selects the existing `CleanupFailed` outcome and quarantine, but cannot replace
+the earlier preparation fault. If cleanup alone first fails, its actual cleanup stage is retained.
+`LinuxRunAccountException.Failure` remains the outer operation outcome; nested `account_code` describes
+an original caught account exception, when one exists. Neither value proves account deletion or absence.
+A diagnostic capture failure is best effort and never changes flags, guards, task joins or the original
+operation exception. Creation cancellation remains an `OperationCanceledException` with the original
+caller token, carried by an internal negative subtype so its closed data can survive rollback; no raw
+inner exception is retained. Quarantine still takes precedence when cleanup cannot safely settle.
+
+`ObserveTerminalData` copies code/status only after an actual `ReadUnitAsync` result for the selected
+loaded unit: MainPID zero, ExecMainPID positive, initialized code, and active/exited, inactive/dead or
+failed/failed state. Missing, foreign, running, uninitialized or invalid numeric rows remain null;
+zero is never invented. A reported status of zero is retained only with an initialized observed code.
+The existing `HasFinished` policy still rejects nonzero/signal failures. Diagnostic numbers neither
+prove success nor replace independent stops, original-start join, kernel-group checks or pump EOF.
+
+[`LinuxSystemdBackend.FirstStartFailure`](LinuxSystemdBackend.Start.cs) retains a first closed projection
+before the existing dispatch catch disposes and emits fixed ASEVD410. Only an actual pinned Tmds
+`DBusErrorReplyException.ErrorName` selects an allowlisted category; all unknown names become `Other`.
+Non-D-Bus faults have null `dbus_category`. The utility reads only its same retained starting backend.
+`ErrorMessage`, messages and inner exceptions are never read. Error replies erased elsewhere (including
+connection acquisition, stop or pending-start normalization) cannot be reconstructed from text; their
+existing closed error/stage is the honest boundary. This diagnostic does not repair account policy or
+establish the cause of the earlier `AccountCreate/Accounts/null` native failure.
+
+New regression intentions cover first fault versus rollback outcome, original cancellation tokens,
+closed schema/canaries, terminal versus uninitialized numeric samples and exact error-name mapping.
+These are detached data controls: no root accounts, live NSS, supervisor or native capability is faked.
+They are source-defined and unexecuted at this handoff; main owns compiler/formatter/tests and subsequent
+native diagnosis. Account command grammar, permissions, limits, unit properties, clocks, cleanup ordering
+and authority remain unchanged.
+
+`EvidenceNativeObservationException` is internal and negative-only because the existing admission
+exception is sealed. It carries the closed packet and exactly the old fixed ASEVD410 text, without a
+raw inner exception. The final cleanup/result rejection throws it; only the selected reserved supervisor
+entry consumes it. Successful execution emits no diagnostic packet. Unsupported/unprivileged
+`RequirePlatform` remains before protected I/O and outside capture. The original final caller-cancellation
+check is unchanged: clean cancellation still produces the existing ASEVD402 cancellation outcome,
+without a new packet. Fatal exceptions excluded by the existing recoverability filter remain excluded.
+If no caught fault exists at a negative result check, the fallback is explicitly `ResultCheck`/`Unknown`,
+not an invented native exception or successful cleanup claim.
+
+The new portable controls exercise schema bounds, code filtering, canary rejection, actual closed
+exception families and first-fault/closure precedence only. They have been defined, not executed, in
+this private source-preparation lane. Build/peer review and genuine native execution remain pending.
+Attempt14 retained only a generic ASEVD410 and no worker-live/final files; its actual first cause remains
+unmeasured. This diagnostic adds observation for a subsequent run and waives none of the
+[native checkpoint requirements](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker).
+
+Success joins the original server task, then the worker's natural exit monitor **before** unit stop.
+Stopping immediately after EXIT could terminate the worker between its ACK and normal return. The
+server's `RequireSuccessfulCompletion` requires that original task to have succeeded, all protocol ACKs
+to be committed and both ledgers settled. Physical custody following a failed protocol never passes it.
+`RootCustody.VerifyObservationFiles` also requires the worker's natural zero-status exit, successful
+original joins/output and a fresh terminal-tree check. It resolves the expected plan again from the
+same retained protected policy/diff bytes before examining all three copied final files.
+
+`EvidenceEmptyObservationFiles.Verify(expected, planBytes, manifestBytes, summaryBytes, token)` is a pure
+data guard. It copies only after all lengths pass: nonempty plan/manifest at most the existing 20 MiB
+canonical JSON bound, and nonempty summary at most 4096 bytes. Native `ReadFile` applies that lower summary
+bound before allocation too. Complete canonical plan equality includes policy, normalized changed paths,
+matched rules and digests; the expected plan is independently reconstructed by the real planner. A digest
+alone does not replace that comparison. Canonical manifest bytes must pass `EvidenceManifestBuilder.Verify`
+and describe empty targeted informational Observation: Passed, ObservationOnly, Informational,
+NotRequired envelope, no envelope assertion, resources, producers or obligations. Cleanup must succeed,
+terminal/cleanup diagnostics must be absent and timing metrics must be coherent with the empty stages.
+
+The summary has exactly seven canonical fields: `Mode`, `ClaimKind`, `Eligibility`, `ExecutionVerdict`,
+`EnvelopeStatus`, `Procedure` and `SandboxAttestation`. The first five match the manifest; Procedure is
+`registered-protected-producer` and attestation is false. Missing/extra/duplicate/aliased properties,
+alternate encodings, changed plan or false success reject with fixed ASEVD410 and no supplied text/inner
+exception. Original caller cancellation remains cancellation. Returned manifest data supplies no native
+custody, admission, enrollment or accepted consumer proof.
+
+After data verification the actual run still joins strict account deletion, closes root custody and all
+original native/local owners, and checks the original monotonic remainder after those closes before it
+returns. That final comparison uses only the remainder captured immediately before closing its owner;
+it grants no fresh allowance. `RequireFinalClose(clock, startedAt, remaining, token)` exposes this timing
+comparison for portable controls only; the native run supplies `TimeProvider.System` and its actual
+remaining interval. It rejects expiry, a regressed clock and invalid remainder without creating authority.
+The borrowed teardown token is checked before its owner closes: owner disposal deliberately cancels
+borrowers, so that expected cancellation cannot distinguish normal closure from expiry afterward.
+Any prior execution/cleanup/close failure stays failed. Failure cleanup
+interrupts listener I/O and joins the original server outside handlers, then joins worker containment.
+It attempts all remaining closes even if an earlier attempt failed; no successful file set repairs failure.
+
+`RetainWorkspaceForCustody` binds the actual private workspace to its account owner **before the first
+directory mutation**. Partial workspace creation can leave account-owned paths even without a worker.
+Ordinary account close now rejects that reservation too; only complete native root custody permits
+deletion. If startup fails before a sealed descriptor and actual server exist, this implementation has
+no partial-tree custody fallback: it preserves paths and accounts for root quarantine. Closing FDs or
+absence of a worker does not authorize UID/GID reuse. This conservative failed-run disposition must be
+observed explicitly by native controls and is never reported as successful cleanup.
+
+**Previous empty-run/bootstrap source validation:** exact-file formatters and a rebuilt full core test
+project passed **982/982** across 29 classes, with zero failed, skipped, timed-out or warning/error
+diagnostic cases in **5.941 seconds**. All 72 source hashes matched before/after; formatters changed no
+bytes and all three owned process groups were absent. This used macOS arm64/.NET 10.0.102,
+`--no-restore` and `UseSharedCompilation=false`. Receipt:
+`/private/tmp/issue779-csharp-empty-observation-validation/attempt-3/receipt.json`, SHA-256
+`5fe5fe15f7573dc034b59141227486edd71f2b8309d6a1e76b1a311e4108bfcc`; TRX SHA-256
+`06f6fdedbd86a77776c739827662d2f315d75233cb8bc3e9766857837915584c`.
+
+The first run passed 975/976: the null-expected test serialized null before calling its intended guard.
+That fixture was corrected and the next run passed 976/976. A subsequent source review found that an
+equals sign in the runtime operand would be consumed as an env assignment; the final run includes
+106 owner-contract cases, 45 final-file data cases and three final-close timing cases after that fix.
+All prior receipts remain separate. Source checks create no native owner or root custody and establish
+no Linux acceptance, consumer qualification, Trusted enablement or numerical coverage-gate result.
+
+
+**Current reserved-entry and worker-bootstrap source validation:** core **987/987** and CLI entry
+**10/10** passed with zero warnings/errors/skips/timeouts in 22.829 seconds. Four exact-project
+formatters changed no bytes; all 72 before/after hashes matched and all six process groups were absent.
+The [migration record](../../docs/plans/issue-779-csharp-supervision-migration.md#2026-10-06-guarded-same-image-cli-candidate-and-worker-bootstrap)
+binds the receipt/TRXs and five built-CLI QA outcomes, and preserves the initial QA heading mismatch.
+These local macOS checks establish no native Linux process/custody or N01–N16 acceptance.
+
+
+#### Control first-fault detail (v3)
+
+The private [empty Observation control server](LinuxEmptyObservationControlServer.cs) retains a sticky, best-effort [LinuxControlFailure](EvidenceNativeObservationFailure.cs) projection at actual setup, handler and cleanup catches. It stores no exception object. Each core procedure and concurrent handler has its own fixed stage; parsed operation is null until actual request decoding completes. Capture allocation failure is swallowed and changes no admission, failure latch, original exception, task join, token or clock. The original peer check before the existing core try is covered by a diagnostic-only rethrow wrapper. The compile-owned N07 checkpoint-owner factory also precedes the core catch: its original recoverable exception is projected under `N07CheckpointCreate` and rethrown unchanged. Exceptions from the N07 `BeforeNextAcceptAsync` call are projected under `N07BeforeNextAccept`. Both are closed labels only; neither identifies the rejecting owner predicate or changes lifecycle behavior. Existing sequence failure and response/cleanup order are preserved.
+
+The nullable sixth field `control_failure` appears only when the outer first-failure projection is ServerRun or ServerCompletion. It contains exactly `stage`, `operation`, `error_kind`, `diagnostic_code`, with clamped closed enums and existing error/code projection. Consumers must explicitly require the v3 six-field schema; v2 exact-field consumers cannot silently accept it. Existing nine-field account detail is unchanged. Whole packet plus LF stays below1KiB.
+
+The N07 stage additions passed the 98 scoped [failure-data controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs) under the N07 build selector, followed by N16 and ordinary source builds. All four retry commands exited zero in 15.618 seconds with no compiler diagnostics, unchanged source and lock files, and owned process groups absent. The first attempt failed before test execution because the public theory parameter used an internal enum; the corrected theory passes its underlying integer and retains both original enum cases. These local controls verify diagnostic shape and compatibility; they provide no Linux execution or N07 acceptance evidence.
+
+`WorkerTerminalTaskCompleted` is recorded only at the final protocol rejection after handler joins when the original worker terminal task has completed and EXIT is still uncommitted; it does not invent a worker exit status, successful OS exit or physical settlement. Caught handler or cleanup faults retain their actual fixed stages and operation, and cannot overwrite an earlier retained projection. Expected pending accept cancellation during listener drain is not captured as an execution fault. Listener disposal independently records an unexpected drain failure. This diagnostic observes the first retained catch/category, not global chronological ordering among concurrent native events. No code reconstructs raw bytes, peer identities, messages, stacks, PIDs or paths.
+
+Attempt37730854250 reached actual worker/server construction and then ServerRun/Admission/ASEVD410; the first underlying server cause remains unmeasured. Repeated protected-plan hashing and connect timing are candidates only, with no measured expiry and no justified clock change. The initial source handoff defined nine data-only regression facts without execution. Subsequent local [supervision test-project](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj) validation passed **1038/1038**, including **37** native-failure diagnostic cases, with zero failures/skips/compiler diagnostics. Locked restore, two exact-file formatting commands and the source test all exited zero in **10.016 seconds / 180 seconds**; no formatter changes occurred. Receipt `/private/tmp/issue779-csharp-control-first-fault-validation/attempt-1/receipt.json` SHA-256 `12ff97e34dc282fc1dc6b995646b37f37e81de76ab22a935fd4bda439fe17a11`; TRX SHA-256 `8eab8d78f680abddcf7c5aaf31326fc89e7296f5d7e0ca7d2fceea4ef17268b3`. Independent runtime review cleared the diagnostic-only execution flow; this paragraph corrects the earlier preparation status after validation. Linux native proof and the actual inner ServerRun cause remain pending.
+
+### Listener acceptance failure checkpoints
+
+The [native first-failure diagnostic](EvidenceNativeObservationFailure.cs) keeps its
+existing `evidence-native-observation-failure-v3` shape. When actual listener
+acceptance fails, `control_failure.stage` identifies the last original check:
+listener state, cancellation, workspace, parent, socket metadata/name, endpoint,
+worker selection, owner identity, worker identity, descriptor, native accept or
+accepted peer. These are diagnostic categories and provide no authentication,
+admission, physical-exit or cleanup authority.
+
+The [listener](LinuxControlListener.cs) retains only its first closed projection.
+The [server](LinuxEmptyObservationControlServer.cs) reads that same retained
+listener after an `Accept` or `AcceptJoin` failure; it never replaces an earlier
+server failure. Original exceptions, quarantine, socket disposal, checks, tokens,
+limits and account custody ordering remain in effect. A checkpoint identifies a
+failed check, not which underlying kernel fact failed. The portable projection
+controls cannot establish that a native check ran or that a worker was accepted.
+
+
+### Closed retained-process recheck diagnostics
+
+[`LinuxProcessIdentity.FirstFailure`](LinuxProcessIdentity.cs) retains diagnostic data from the first
+recoverable integrity rejection in `Recheck`, before its existing sticky rejection and fixed
+`ASEVD402` normalization. The original caller-cancellation catch remains unchanged and does not
+latch an integrity failure. `Process*` values in the existing
+[`LinuxControlFailureStage`](EvidenceNativeObservationFailure.cs) distinguish closure/rejection,
+each retained and named proc node, bounded reads from parsing, selected PID/nonzero start time/live
+state/all-four UID/all-four GID/exact cgroup, and initial, within-read and repeated continuity checks.
+They use the existing four-field control object and six-field v3 root envelope; no proc bytes, PID,
+ID values, paths, unit names or exception objects are retained. Every original check must still pass.
+
+The [`listener`](LinuxControlListener.cs) preserves an actual worker's earlier `FirstFailure` when
+its existing `RequireWorker` recheck throws, then rethrows the same error. Existing listener and
+server first-fault latches retain an earlier fault instead of replacing it with later process or
+cleanup data. A stage identifies the existing operation/check which rejected; it does not establish
+why the kernel state changed, prove that a process exited, or grant authority. A null detail is not
+proof of success. Retained/named node stages cover the original inspection/open/comparison together;
+no new native read, syscall, timer, cancellation rule or process selection is introduced.
+
+The diagnostic `LinuxProcessData.RequireExpected(..., ref stage)` overload shares the original
+ordered sample predicates with the existing overload. It accepts detached data for procedure tests,
+not a native identity, owner, lease or admission. New data controls cover each failed sample predicate
+with a valid neighbor, closed owner selection, first-fault propagation/precedence and all finite
+process stages' unchanged schema and byte bound. They are defined but not executed at source freeze.
+Attempt25 measured `ListenerWorkerIdentity/ASEVD402`; its exact inner predicate and native cause remain
+unmeasured. This source preparation makes no Linux or native acceptance claim.
+
+#### Retained PID-directory inspection subchecks
+
+Attempt26 retained the closed `ProcessRetainedProcess/Admission/ASEVD402` checkpoint. It does not
+distinguish an inspection rejection from changed metadata. The separate fixture observer's
+post-exec credential/image sample does not establish proc-directory metadata continuity across
+that root check; its `ready_protocol_observed:false` field is a literal, not a wire observation.
+
+Only the retained PID-directory branch of [`LinuxProcessIdentity.CheckBindings`](LinuxProcessIdentity.cs)
+now refines that checkpoint. It uses one original `fstatfs` result, the unchanged shared
+[`StatFd`](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxFileSystem.cs) call with its existing
+required mask, the nonzero-inode and directory-type predicates, then the original complete
+device-major/device-minor/inode/UID/GID/mode equality rejection. Finite
+[`LinuxControlFailureStage`](EvidenceNativeObservationFailure.cs) values identify the operation or
+the first unequal field in that order. No native result is read twice, and no extra probe, retry,
+timer, token, permission rule or process selection is introduced. All other retained nodes and
+all named-node checks retain their existing inspections. The same stages cover both original
+binding passes and do not distinguish which pass failed.
+
+[`LinuxProcessData`](LinuxProcessIdentity.cs) exposes pure filesystem-result/type, inode/mode and
+detached metadata comparison guards used by that actual branch. Its immutable
+`LinuxProcessIdentity.ProcNodeMetadata` record holds sampled values only; constructing it creates
+no descriptor, live process, admission, lease or authority. The helpers preserve the original
+predicates. In particular, the type guard adds no permission requirement, and the final equality
+guard still rejects every changed field. Native call exceptions retain their original family;
+the existing recoverable catch and sticky first-fault latch remain responsible for rejection.
+
+The existing four-field control object, six-field v3 root envelope and 1KiB bound remain unchanged.
+No values, errno, paths, process IDs, messages or exception objects are added to the projection.
+Sixteen new pure cases in five methods cover native-result data failures with valid neighbors,
+inode/type ordering, each metadata field, first-fault precedence and closed bounded canary-safe
+projection. They are defined and unexecuted at source freeze. These controls cannot establish
+native inspection, worker acceptance, a kernel transition or N01–N16 completion. Actual native
+cause and any runtime correction remain pending fresh measured evidence.
+
+
+## EXIT accept-admission quiescence
+
+The closed [empty Observation server](LinuxEmptyObservationControlServer.cs) separates EXIT intent from
+successful response commit. After the existing `ClaimExit` prerequisites, intent prevents any additional
+accept/handler dispatch. The server joins [the listener's](LinuxControlListener.cs)
+`CloseAcceptAdmissionAsync()` before writing the final ACK. Admission quiescence closes the listening socket
+once and joins the original pending accept and any unpublished late-result close. It retains the already
+published EXIT connection and original named/parent handles until that handler's write, release, cleanup-bound
+and owner checks finish. An accepted result which wins the same `WhenAny` race as intent is retained for later
+close, never newly dispatched. Intent itself sets neither `ExitAcknowledged` nor the final completion signal.
+
+The portable [accept owner](SupervisionAcceptOwnership.cs) exposes internal `Task CloseAdmissionAsync()`.
+One original task is reserved under its admission gate before callbacks; concurrent/repeated calls share
+completion, including sticky failure. It closes no already published result. Full `DisposeAsync()` still joins
+that admission task and attempts every retained result close. Native listener prechecks and pending registration
+share the same gate as closure. A late actual socket still undergoes retained workspace, name, worker and peer
+checks before its owned close; cancellation cannot convert a corrupt identity into ordinary shutdown. Only the
+listener's own endpoint query is unavailable after its actual close, having been checked before native accept.
+No timer, grant, quota, admission token, lease or kernel-exit fact is created by these procedure APIs.
+
+On orderly EXIT intent, the root joins original registered handlers before full listener disposal so the EXIT
+connection remains writable through its ACK. On non-EXIT failure it retains the original full-close-first
+interruption path. Callbacks must not reenter their same owner: accept, release, admission close and full disposal
+reject fixed ASEVD410 before a self-join. An ignored cancellation or blocked late close remains owned and awaited;
+independent containment and the original root deadlines must handle a stall. A close, pending accept, peer check
+or response failure cannot commit successful EXIT and still requires all cleanup attempts.
+
+The added deterministic controls in [SupervisionAcceptOwnershipTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptOwnershipTests.cs)
+exercise retained live connections, original pending/late-close barriers, shared completion, unexpected faults,
+callback reentry and failed ACK commit through intentional portable bookkeeping. They do not construct a Linux
+owner or prove native admission, worker exit, account deletion or coverage qualification. Source preparation
+executes no tests. The source-supported EXIT ordering hazard is independent of attempt27's measured retained
+PID-directory UID mismatch: numeric UID values and its temporal relation to EXIT remain unmeasured.
+
+### Reserve under a gate; dispatch after releasing it
+
+`SupervisionAcceptOwnership<T>.RegisterAccept` and `RegisterAdmissionClose` return portable procedure handles with the original `Task` and a one-time `Dispatch` operation. Registration does not invoke the supplied native callback. The enclosing listener can therefore combine its existing worker precheck with reservation atomically, release its gate and the server execution gate, and then dispatch. Closing admission joins a reserved accept even if its caller has not dispatched yet; forgetting to dispatch leaves that original work owned and cannot establish successful cleanup. Repeated closure reservations share the original completion, and a redundant dispatch gate cannot release the first reservation. These internal handles provide bookkeeping only and cannot construct a Linux listener, process identity or protected admission.
+
+The [control server](LinuxEmptyObservationControlServer.cs) reserves the actual accept under its execution gate and dispatches afterward. The [listener](LinuxControlListener.cs) reserves the pending operation under the same gate as its worker prechecks, and reserves admission closure before releasing that gate. Existing callbacks, endpoint/name checks, peer authentication and sticky failures remain required. Three additional [portable ownership controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptOwnershipTests.cs) exercise the registration/closure gap, callback dispatch outside an enclosing gate, and repeated closure while an original accept remains reserved. They supply no Linux execution or physical-exit evidence.
+
+### Listener closure first-fault diagnostics
+
+Attempt28 retained the closed `ServerRun / ListenerClose / Admission / ASEVD402` control record with
+no operation, wrapped by root `ASEVD410`. It did not retain the original socket error, failed native
+close operation or exact admission-drain cause. This is a measured checkpoint, not a diagnosis of
+`ConnectionAborted`, process identity change or successful EXIT.
+
+The [listener](LinuxControlListener.cs) captures listening-socket, retained named-socket and parent-handle
+disposal failures before their original failure handling. Its instance accepted-connection close wrapper
+awaits the original `DisposeAsync()` ValueTask, captures `ListenerAcceptedClose` on failure and rethrows
+the same exception. The portable owner still reserves the original callback and joins its outcome;
+no extra dispatch, token or close attempt is introduced. Admission-drain wrapping retains an earlier
+listener record. Existing closure catches in the [server](LinuxEmptyObservationControlServer.cs) now
+forward that actual `FirstFailure` through the existing [first-fault latch](EvidenceNativeObservationFailure.cs).
+An already latched server fault still wins. All original closes, failure flags, quarantine, task joins,
+exception filters, cancellation tokens, deadlines and peer/name/process checks remain required.
+
+`LinuxControlFailure.NativeAcceptStage(SocketError)` maps unexpected native accept errors to exactly
+`ListenerNativeAcceptOperationAborted`, `ListenerNativeAcceptInterrupted`,
+`ListenerNativeAcceptConnectionAborted` or `ListenerNativeAcceptSocketOther`. Invalid enum data also uses
+`SocketOther`. This pure internal projection is called only after the existing intentional-shutdown
+filters, only for a `SocketException` at the actual native accept checkpoint. It does not classify shutdown,
+change exception families, suppress rejection or retain a numeric error. All nine added stages use the
+existing four-field control object, six-field v3 root envelope and 1KiB bound; no raw exception, message,
+path, process ID or socket-error number is published.
+
+The [pinned .NET 10.0.12 accept source](https://github.com/dotnet/runtime/blob/4271d88e0aebf3d04f188f1334c2220d80555ef6/src/libraries/System.Net.Sockets/src/System/Net/Sockets/Socket.Tasks.cs#L1351-L1375)
+throws cancellation for abort errors only when the original token is canceled; otherwise it constructs
+a `SocketException`. The existing owned-close adapter already recognizes `OperationAborted` and
+`Interrupted`. `ConnectionAborted` remains an unexpected sticky failure and a source-supported hypothesis,
+not attempt28's measured cause. No shutdown filter is widened by this diagnostic change.
+
+Sixteen new pure cases in [EvidenceNativeObservationFailureTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs)
+cover all four socket categories, all nine stage projections, invalid enum/canary rejection, precise
+listener-to-server/root wrapping and concurrent server-first precedence. They are defined and unexecuted
+at this source freeze. Native socket disposal behavior and N01–N16 acceptance still require separate
+actual Linux evidence; this source preparation issues no capability, lease, proof or successful-close fact.
+
+### Custody first-fault data and bound socket names
+
+The reserved root candidate now emits `evidence-native-observation-failure-v4`: exactly seven root fields (`schema`, `phase`, `error_kind`, `diagnostic_code`, `account_failure`, `control_failure`, `custody_failure`), bounded below1KiB including the terminating LF. Existing account and control objects keep their nine-field and four-field shapes. The new nullable five-field `custody_failure` describes `procedure`, `node_kind`, `operation`, `error_kind`, and `diagnostic_code`. See the [closed DTOs](EvidenceNativeObservationFailure.cs), [actual retained custody transfer](LinuxRunWorkspace.Custody.cs), and [root Record wiring](LinuxEmptyObservationExecution.cs).
+
+`LinuxRunWorkspace.FirstCustodyFailure` exposes copied immutable diagnostic data from its actual private holder; it does not expose that holder or issue custody, admission, account deletion, or successful execution. `LinuxCustodyFailure.Capture` projects only finite enums and allowlisted codes. `FromTransfer` combines the completed original procedure's actual first category with a matching earlier callback fault; `LinuxCustodyFailureLatch` retains the first projection through later cleanup. Callers must not use these data APIs as a native factory or assume that null means success. Root attachment is restricted to Custody, CleanupCustody, FileVerification and AccountsClose. A post-transfer file/account failure has procedure None when the original transfer recorded no failure, rather than inventing a failed transfer category.
+
+Capture/rethrow instrumentation records context before the original procedure catches normalize errors; it never retries, changes a guard, dispatches another task, reads extra native metadata, changes a syscall argument, or renews the original deadline. The completed transfer category is read only after its task joins, so observing diagnostic data cannot change the original first-fault/cancellation ordering. Cancellation that skipped the forward procedures cannot credit a later close error as the original cause: its node and operation are absent/Unknown. Independent original-owner close and final recheck attempts still run and join; a partial transfer remains quarantined with paths/accounts retained. Invalid supplied enum data clamps to None/Unknown/null; raw paths, IDs, error numbers, messages, inner exceptions and exception references are never retained.
+
+Attempt29's measured first packet was Custody/Admission/ASEVD402 without an inner custody operation. This schema change records future failures; it does not identify that historical failing syscall or establish N01 acceptance. Separately, pinned [.NET10.0.12 Socket source](https://github.com/dotnet/runtime/blob/v10.0.12/src/libraries/System.Net.Sockets/src/System/Net/Sockets/Socket.cs) registers a UnixDomainSocketEndPoint bound filename and attempts File.Delete during Socket disposal. That automatic name lifetime conflicts with custody's requirement to reopen the same named socket after listener disposal unless deletion fails. In this combined candidate, the internal [LinuxOwnedUnixEndPoint adapter](LinuxOwnedUnixEndPoint.cs) supplies the standard UNIX address serialization directly to Bind while leaving pathname lifetime with the actual workspace. The listener still physically closes and joins the original socket operations, checks the returned kernel endpoint and retained inode/name, and requires the same named socket during root custody. The adapter performs no filesystem operation or authentication and grants no custody or admission. Its [supported-UNIX regressions](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOwnedUnixEndPointTests.cs) verify disposal retains an owned name, collisions reject, and replacement sentinel bytes survive; these local checks do not replace genuine Linux root custody qualification or establish that attempt29 measured an unlink. Runtime upgrades require rechecking this pinned implementation relationship.
+
+Fourteen new portable diagnostic cases are defined but unexecuted in this preparation. The original82 cases retain their behavior apart from the two explicit v3-to-v4 schema expectations and the six-to-seven-field DTO shape assertion. Native issuance, full retained tree/bytes rechecks, root identity, actual joins, strict account cleanup and final manifest publication remain independent requirements. Main owns formatting, source build/tests, peer review, capture and any native rerun; none was executed in this source preparation.
+
+
+## Detached negative-control kernel observations
+
+The internal [LinuxNegativeKernelObservation](LinuxNegativeKernelObservation.cs) is bounded observation data for future source-selected N05/N06 images. The normal [LinuxWorkerProcess](LinuxWorkerProcess.cs) exposes `CaptureNegativeObservation(input, owner, accounts, workspace, server, token)` only through its privately-issued actual holder: reference-equal originals, original startup/pending-stop/monitor/server/pump joins and a fresh existing selected-cgroup check must pass. No caller PID, new Boolean grant, arbitrary unit, callback, permission exception, new timer, proof or admission is accepted. The projection reuses the custody guard's one cgroup read; it neither recaptures a dead process nor substitutes a later PID for the original retained identity.
+
+The [control server](LinuxEmptyObservationControlServer.cs) records a past READY event only after the original peer-bound response write, connection release, owner checks and successful `CompleteWrite`. Its internal `RequireNegativeReadyDescriptor` requires original references and joined server owners before returning the workspace's immutable descriptor hash. A later negative protocol failure does not erase that past event; it still cannot satisfy the separate whole-protocol success guard. Original root SO_PEERCRED and every accepted-worker identity/name check remain mandatory. Missing READY or a failed/unavailable original natural monitor rejects observation rather than inventing identity or terminal status.
+
+Schema `issue779-negative-kernel-observation-v1` has twelve fixed root members: schema, generation, worker_unit, process, ready, terminal, cgroup, pumps, joins, observation_only, native_authority and native_acceptance. JSON is at most4096 bytes before copied return (the caller's LF is additional). Process data retains initial PID/starttime/UID4/GID4/exact generated group; selected natural systemd terminal data retains ExecMainPID/Code/Status and closed state labels. Signals and uninitialized terminal reject; a normal status zero remains recordable data and never qualifies a negative case. Group absence has null kernel identity/population values. Complete joined output has both EOFs, no collection failure or discarded bytes and exact received/retained counters; only full-byte SHA256 values are serialized, never output text. Returned byte arrays are independent snapshots.
+
+`CreateDetached` is an intentional pure metadata seam, covered by [LinuxNegativeKernelObservationTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs). Constructing matching data or JSON does not authenticate a kernel observation, callback, peer, process, root owner, custody, lease, qualification or acceptance. The fixed `joins`/READY labels describe the production projection's checked provenance; detached test calls cannot establish it. Both native authority and acceptance remain false. Original cancellation propagates with its original token before encoding; no allowance resets. Malformed data yields only a fixed ASEVD410 without input or inner exception.
+
+This preparation defines38 new pure cases and runs none. Variant emitters and private fixtures are deliberately unwired: main must source-bind complete rebuilt N05/N06 images and wire bounded root-private observations only at their existing guarded postjoin points. Actual409 allocation output, unchanged occupied/symlink nodes and sentinel bytes, original root410, expected terminal status, quarantine/NSS disposition, genuine positive prerequisites and authenticated canonical retention remain separate checks. If existing ownership or terminal guards cannot pass, retain failure and the missing fact; never weaken those guards or treat copied observation fields as authority. No native N05/N06 or all-sixteen-control acceptance is claimed here.
+# Fixed private N04 READY checkpoint image (source preparation only)
+
+This private fork adds [`LinuxN04CheckpointOwner`](LinuxN04CheckpointOwner.cs) to the
+genuine [`LinuxEmptyObservationControlServer`](LinuxEmptyObservationControlServer.cs).
+It is a compile-time fixed image. There is no public, CLI, environment, request, callback,
+caller PID or Boolean activation selector. The ordinary production registry, eligibility,
+proof and custody APIs are unchanged. Parent-reported CI31 N01/N02/N03 results are separate
+from this source preparation; no N04 helper or native N04 execution has occurred here.
+
+## API, ordering and retained I/O
+
+`Create(input, owner, accounts, workspace, listener, worker, token)` accepts the exact original
+native holders and runs the existing `worker.RequireServerOwner`/`RequireWorker` guards.
+Acquisition happens inside the already registered original server run, so a failure before
+`RunAsync` starts cannot leave a new checkpoint listener. Its root-only fixed path is
+`/run/appsurface-evidence-n04-<owner.RunId:N>/checkpoint.sock`, outside the production
+workspace. `/`, `/run`, the fresh root0:0 directory0700 and socket0600 are retained and
+checked by descriptor and current name. Every leaf uses openat2 no-link/beneath/no-XDEV
+resolution; `/run` retains the original mount-capable ancestor resolution. Socket nlink1,
+zero length, exact UID/GID/mode and inode/metadata are mandatory. Collisions reject without
+adoption or unlink. [`LinuxOwnedUnixEndPoint`](LinuxOwnedUnixEndPoint.cs) leaves name lifetime
+with this owner; closure retains the root-private namespace for quarantine.
+
+`ReserveNextAcceptBeforeHandlerDispatch()` runs before the first handler dispatch is released.
+`BeforeNextAcceptAsync(originalToken)` waits before the next listener `RegisterAccept`,
+including its synchronous worker/path checks. It also observes the original worker monitor
+task; worker termination or cancellation rejects rather than reopening admission. This gate
+is separate from EXIT intent and `CloseAcceptAdmissionAsync`; the original EXIT barrier is
+not repurposed or weakened.
+
+After genuine `CreateReadyData`, `ReadyPreparedAsync(originalRequestToken)` accepts exactly
+one separate UNIX peer with actual SO_PEERCRED positive PID distinct from this root process,
+UID0/GID0. The same socket and kernel peer PID remain pinned for both exchanges. The server
+sends ASCII `N04 READY_PREPARED <owner.RunId:N>\n` and requires the exact fixed
+`N04 RELEASE_READY <owner.RunId:N>\n` response. The retained worker may be stopped by the
+separately authenticated root coordinator: the unchanged process live-state guard already
+accepts `T` and `t`. No stopped-state exception was added.
+
+Only after the original READY response write, accepted connection release, owner checks and
+`CompleteWrite(true)` does `ReadyCommittedAsync(originalRequestToken)` send
+`N04 READY_COMMITTED <owner.RunId:N>\n`. The reply-order semaphore stays held throughout;
+ordinary STOP/WAIT is never used for this pre-ACK rendezvous. The coordinator must wait for
+this commit notification before intentionally replacing the production socket name. Next
+accept remains blocked through the genuine client's fresh peer check. Original accepted-peer,
+process, socket name, owner and cgroup guards remain mandatory; intentional substitution must
+eventually fail and preserve quarantine/accounts. Notifications are data, not readiness
+capabilities, worker exit proofs or acceptance receipts.
+
+Each exchange is created behind an asynchronous dispatch gate, retained before that gate
+opens, and awaited as the original actual task. The original request token and independent
+root/owner deadline bound every native read/write; no new timer or allowance exists.
+`CloseAndJoinAsync()` shares one registered close, cancels and independently closes both
+actual sockets, joins every original exchange even after another close fails, then closes
+all retained descriptors. It rejects same-exchange reentry and runs in the outer server drain
+before handler joins; no handler joins itself. The outer run also repeats the shared close
+for failures before the accept loop. No cleanup deletes or adopts a substituted path.
+
+## Data controls and pending native prerequisites
+
+[`LinuxN04CheckpointOrderTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN04CheckpointOrderTests.cs)
+contains eleven defined, unexecuted portable controls for reservation, replay, commitment,
+original-token cancellation, fault stickiness and real original-task barriers/joins. The
+detached `LinuxN04CheckpointOrder` owns no filesystem, process, listener or admission.
+These controls cannot establish N04 or physical native settlement.
+
+The independently prepared root helper/fixture still must authenticate its interpreter/image,
+actual original root/worker PID, starttime, UID4/GID4, image/argv and generated unit/cgroup;
+retain pidfds across STOP/CONT; recheck the same identities; and bind the intentional root
+replacement while leaving every production guard intact. The replacement must capture the
+same actual worker's SO_PEERCRED PID/UID/GID and zero request bytes/EOF, with genuine client
+PID-mismatch evidence before serialization. No pre-sent data frame or UID0 peer alone supplies
+those facts. It must use the unchanged request/root and external fixture bounds, join its
+original operations and the original worker/group/pumps, retain exact private results, and
+preserve unknown replacement state/accounts. A stalled/fast-exited helper, missing peer
+observation, expired budget, failed close or absent join is failure/inconclusive, never an
+N04 pass. Full image capture, compiler/formatter/tests, peer review, helper implementation,
+fixture composition and actual native validation remain pending.
+
+## Fixed private N04 genuine-peer probe image
+
+This subsequent source-only image is based on checkpoint commit
+`6a766e3471b8a6ea56a15e3e972bf8840289049b`. Its fixed changes live in the
+[string-control CLI wrapper](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs),
+[protected worker requests](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxWorkerSupervisor.cs),
+and [root composition](LinuxEmptyObservationExecution.cs). There is no public, request,
+environment or callback case selector. The explicit-request CLI overload and ordinary
+execution body are unchanged. This image is solely a negative peer probe; it cannot run a
+successful Observation or enroll a producer, prove eligibility or issue an admission.
+
+After the original authenticated Connect/READY, the string-role wrapper calls the real
+`WaitForOwnedExitAsync` with its original caller token before creating `EvidenceWorkerExecution`,
+admission or output. The genuine request reconnects and compares the actual SO_PEERCRED PID
+with the original READY broker PID. Only that mismatch branch additionally requires positive
+peer PID and actual UID0/GID0, then receives exactly one byte under the same request token.
+Only zero-byte EOF completes the hold; an application byte rejects immediately. EOF still
+throws the unchanged ASEVD402 and never reaches `ExchangeAsync`, request serialization or
+sending. An unexpected accepted wait reply instead throws fixed ASEVD410. This lets the
+existing ordinary worker error boundary report the actual peer-pin rejection before the
+ordinary lifecycle's FailFast path is created; it is not a production cleanup change.
+
+`RequestAsync` creates no new deadline. The supplied original I/O token and the original
+external/root-owner containment bound this hold; the completed Connect handshake timer is
+not a subsequent request timer. The separately reviewed fixed root coordinator must sample
+the same live worker after accepting it, recheck PID/starttime/UID4/GID4/image/cgroup and
+SO_PEERCRED, then call `Shutdown(Send)` before awaiting worker EOF. It sends zero application
+bytes. Missing shutdown, cancellation, expiry, nonroot peer or any mismatched identity remains
+failure. The coordinator and fixture are separate pending integrations and are not modified
+or qualified by this image.
+
+Only on an already failed root run, after the original server task and `StopAndJoinAsync`
+have joined, root calls the existing
+[`CaptureNegativeObservation`](LinuxWorkerProcess.cs) before custody/account close. The
+original reference-equality, server I/O/ledger/local-owner joins, natural terminal task,
+committed authentic READY, two complete pumps, undiscarded full output and fresh selected
+empty-group guards remain mandatory. [`LinuxNegativeKernelObservation`](LinuxNegativeKernelObservation.cs)
+returns at most4096 JSON bytes; this image writes those exact bytes plus one LF to actual
+root stderr using the original cleanup token. Publication is diagnostic only; capture or
+write failure preserves the failed outcome and all later cleanup attempts still run. There
+is no fabricated fallback when a guard fails and no raw worker text in this frame.
+
+The later original custody/name checks must still reject the intentional replacement and
+preserve quarantined paths/accounts; the frame is neither positive custody nor N04 acceptance.
+An external verifier still needs exact image/descriptor bindings, the coordinator's live
+original-worker and zero-send facts, actual terminal code/status, original natural monitor,
+pump hashes/EOFs and fresh group facts under original clocks. No compiler, formatter, tests,
+helper execution or native validation was performed for this source packet. Previous
+checkpoint validation records describe their earlier frozen image only.
+
+## Fixed N04 preparation before admission
+
+The private N04 image uses [LinuxN04CheckpointOwner](LinuxN04CheckpointOwner.cs) to finish the actual root helper's image and process audit before the worker's READY admission clock starts. The original authenticated READY request first receives a closed `pre-admission` frame containing the root's positive remaining job milliseconds (maximum one hour). The root then waits for its separately authenticated root helper under the original job token. The helper captures the already connected managed worker and broker, releases preparation, and still stops that worker only after actual READY data preparation.
+
+The same retained connection sends `admission-start` and then the existing descriptor response under the unchanged admission allowance. [SupervisionControlLineFraming](LinuxControlConnection.cs) allows exactly one fixed preparation/start pair after a READY request and one final response. Each native write repeats kernel peer checks; phase cancellation closes the stream and joins the actual write. Preparation is registered before dispatch, retained alongside both original READY exchanges, and joined before any checkpoint descriptor closes. A phase notification provides no admission, native acceptance or ownership authority.
+
+Preparation consumes the original job deadline. It does not extend the job, reset cleanup, alter the peer or workspace guards, or reopen next-accept. Replays, wrong order, expiry and premature close fail closed. The portable order/framing controls verify data and actual task joining; actual root/worker/helper execution remains a separate required Linux control.
+
+
+
+## Fixed private N08/N09 original cancellation images
+
+Source preparation only: this image has no native qualification or case credit. The [original lifecycle contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) owns callback/STOP/WAIT settlement; the [private CLI callback](../ForgeTrust.AppSurface.Evidence.Cli/README.md) retains output roots until OwnWorkStopped. No proof/admission registry, sandbox, account, syscall guard or public role selector changes.
+
+`EvidenceOriginalCancellationCheckpoint.SelectedPhase` is the sole compilation input: N08 BeforeAllocation or N09 BeforeActivation. The N09 `.cs.in` preparation input replaces exactly that one literal in a separately captured image; it is never read at runtime. The authenticated string-control worker constructs the checkpoint; the explicit request-mode overload remains unchanged and supplies none. Both actual original token checks and the N09 original root assignment retain their order. Checkpoint writes use the original linked stage token inside the original callback; a nonthrowing cancellation registration releases a TCS only. Missing/failed transfer cannot cause root signalling or create a capability. The actual original CallerTokenCancelled and lifecycle first-cause CallerCancelled are separate observations. ReportJoined requires actual OwnWorkStopped. Private stderr disposal additionally requires that same actual original settlement; root FD disposal retains its original guard.
+
+The root server retains one original signal task before dispatch and does not block next accept. Actual READY notification follows original response write, Release, owner check and CompleteWrite(true). Phase bytes are observed by the existing retained stderr pump after its original received-byte charge; no second pipe reader, fabricated READY, background task, runtime selector or timer exists. Exact first-line data is bounded to 1024 bytes. A malformed/missing phase fails observation rather than signalling. The root task verifies the actual reference-equal worker under unchanged native-owner guards, rechecks PID/starttime/UID4/GID4/cgroup/proc bindings around pidfd_open, then sends exactly one SIGINT through its retained pidfd. It never signals a caller PID or broadcasts/retries. The successful signal-task projection states syscall success, not signal delivery/cancellation. Error wakeup is retained in the accept wait; original root cancellation cancels and joins the task before server I/O settlement. All original accept/peer/name/stop/wait/custody/account checks remain.
+
+The root failure-only emitter uses the existing genuine CaptureNegativeObservation after original server/worker/monitor/pump joins, before unchanged custody/account cleanup. That holder guard still requires original natural terminal, full output, fresh empty selected group, reference-equal owners and genuine committed descriptor. Failure to capture is not replaced by detached expected metadata. No normal exit1, account absence, custody success or quarantine is invented. Actual selected runtime/caps/pidfd policy, full source/image/inventories, first SIGINT delivery, actual original-token true and CallerCancelled, no activation, N08 no allocation call and N09 actual retained-root/FD-close order still need native evidence.
+
+Ten new Facts are defined, zero executed: original caller versus stage-only release; nonselected location; duplicate claim; ignored write cancellation retaining the original callback and borrowed stream; closed projection/bounds/canary; and four original-pump framing controls. These use only detached stream/task/token data, never fake leases or live owners. The ignored writer control is not physical FD proof. Existing lifecycle callback-join/fatal/FD-close controls remain byte-identical; compiler/formatter/test validation and independent review are pending. Do not authorize execution from this preparation packet alone.
+
+### Joined original stream export for the private cancellation image
+
+The failure-only root emitter now calls
+[`LinuxWorkerProcess.CaptureCancellationJoinedObservation`](LinuxWorkerProcess.cs),
+which first runs the unchanged `CaptureNegativeObservation` guard. The original
+reference-equal input/owner/accounts/workspace/server, successful natural monitor,
+committed READY, original startup/stop/server/pump joins and fresh selected-group
+emptiness remain mandatory. The only bytes used are the immutable prefixes stored
+by the original joined collector. No new reader, stream, task, callback, path,
+caller-supplied receipt or identity factory is involved. The ordinary successful
+root path emits no joined-stream record.
+
+[`LinuxNegativeKernelObservation.EncodeJoinedStreamsDetached`](LinuxNegativeKernelObservation.cs)
+requires both actual EOFs, no per-stream or shared failure, no failed stop signal,
+no discarded bytes, exact shared received-byte accounting and the original
+protected limit. Complete stdout plus stderr must total at most 64 KiB. This is
+an additional export bound; the existing pump quotas and retained-prefix limits
+remain unchanged. Nothing is truncated, padded, reconstructed or replaced by a
+guessed expected hash. Missing, incomplete or oversized data rejects with the
+existing fixed ASEVD410, and original cancellation propagates unchanged.
+
+The exported `issue779-cancellation-joined-streams-v1` JSON object has exactly
+nine top-level fields: `schema`, `generation`, `stdout`, `stderr`, `received_bytes`,
+`received_byte_limit`, `observation_only`, `native_authority`, `native_acceptance`.
+Each stream has exactly seven fields: `received_bytes`, `retained_bytes`,
+`discarded_bytes`, `eof`, `failure`, `sha256`, `base64`. Base64 encodes the complete
+original bytes, including LF and non-text bytes; SHA256 hashes those same original
+bytes. The line including its one LF is at most 96 KiB. Relaxed JSON escaping is
+restricted here to fixed field strings and base64/hex alphabets so the maximum
+pair fits that bound. This record is neither HTML-safe presentation nor a public
+diagnostic; retain it only in the fixed root-private stderr/canonical artifact.
+
+The root prepares all projections before publication, then writes signal, kernel
+and joined-stream lines in that order before original custody/account cleanup.
+The added write is awaited by the original root execution task with the original
+cleanup token and checks that token afterward. Existing independent unit/job
+containment remains responsible for a writer that ignores cancellation; no new
+timeout, allowance or task is introduced. A late write/cancellation failure stays
+in the existing first-failure/cleanup path even if earlier data lines were written.
+Record presence is never command success or native qualification, and the export
+itself authorizes no account release. Original account/custody/quarantine handling
+is unchanged.
+
+The canonical data adapter must strictly decode base64 and match original full
+byte counts and SHA256 against the kernel record. It must validate the exact phase
+frame, joined caller-token/lifecycle cancellation record and terminal message
+inside the decoded stderr; the root signal projection alone does not prove token
+delivery. Source/image binding, actual Linux pidfd permissions/syscalls, original
+kernel provenance, N08 slot absence/N09 retained allocation without activation,
+retained-root FD disposal and physical filesystem/NSS disposition remain separate
+native prerequisites. No manifest, artifact admission, Trusted or acceptance is
+created by matching data.
+
+[`LinuxCancellationJoinedStreamsTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCancellationJoinedStreamsTests.cs)
+defined 20 pure cases in 13 methods, zero executed at the initial source handoff. They cover
+binary/base64/hash round trips and schema, the exact maximum, zero bytes, both EOFs
+and pump errors, shared errors/quota/stop signal, discarded bytes, wrong accounting
+or limits, oversize, missing output, original cancellation and returned-copy
+independence. They construct detached receipts only; no live native owner or
+signal is fabricated. N09 uses the same changes on its separately captured image,
+preserving its one compile-selected BeforeActivation literal. The later scoped validation ran all 20 codec cases successfully, formatted the
+owned files, and built the CLI product with zero compiler diagnostics. The
+independent source review found no remaining issue in this scope. These local
+macOS results cover the data codec and compilation. Fresh image capture and
+actual Linux cancellation, original kernel ownership, filesystem and account
+disposition controls remain pending.
+
+### Final cancellation cleanup observation
+
+The fixed private cancellation image carries an optional `issue779-cancellation-root-cleanup-v1`
+record through the [negative-only exception](EvidenceNativeObservationFailure.cs). Its nine fields are
+`schema`, `generation`, `results_gid`, `accounts_closed`, `root_custody_closed`,
+`original_owners_closed`, `observation_only`, `native_authority`, and `native_acceptance`.
+The [original root composition](LinuxEmptyObservationExecution.cs) attaches it only after joined
+root custody, strict account deletion, every local owner close and the original final deadline check.
+A later cleanup failure suppresses the record even when an earlier execution fault remains first.
+The reserved [process entry](../../Cli/ForgeTrust.AppSurface.Cli/EvidenceProcessEntryPoint.cs) writes
+it after the original failure packet and before the unchanged fixed negative terminal message.
+
+This diagnostic cannot authorize execution or turn cancellation into successful Evidence. Detached
+encoding controls establish shape only. Native validation must bind the exact original root process
+and image, require all account-associated nodes to have their terminal root:root policy, compare
+retained output device/inode with the original descriptor, and check every generated account name
+and numeric UID/GID absent in both NSS lookup directions. The original descriptor bytes retain the
+pre-transfer identities; comparing their old UID/GID to root-owned terminal nodes would reject valid
+cleanup. Missing cleanup data, mutable terminal nodes, present accounts or expired checks reject.
+
+### Private N10 pending-start race observation
+
+The N10 image is selected only by `EvidencePrivateQualification=N10`; ordinary `None` creates no checkpoint or wait. Inside the already reserved original worker startup, the normal backend first validates the actual `StartTransientUnit` reply and job object path. Only then does the typed [LinuxN10PendingStartCheckpoint](LinuxN10PendingStartCheckpoint.cs) emit the fixed `N10` / `start-transient-unit-reply` frame and await cancellation using that same startup token. The private runner may use that frame to cancel the original supervisor process. No callback, request field, environment value, caller path or public CLI option selects the behavior, and no deadline is reset.
+
+Cancellation enters the existing [pending-start coordinator](SupervisionPendingStart.cs): it closes further start admission, performs the original first stop, joins the actual reserved start task, performs the second stop, and then lets the worker lifetime finish its original finalization and paired-pump joins. The N10 joined record is emitted only after that original stop/finalization task returns. It carries the actual pending/lifetime snapshots, the exact original stop-delegate call count, final selected-unit predicate, final cgroup sample after pumps, pump counters, and the worker's existing `PhysicallySettled` value verbatim. The sticky cancellation remains failed; `PhysicallySettled` can therefore remain false even when the separate unit/group samples look settled. The record explicitly precedes root custody and grants no custody, admission, success or native acceptance.
+
+The reply frame proves only that systemd returned a validated job path. It does not prove the unit began later than the first stop, that a worker process or cgroup was created, or that a group escaped. The native fixture must independently establish actual OS start/identity/cgroup facts, original two-stop ordering, joined output/accounts, and no escaped group. Missing fields or failed original joins suppress the joined record; none of these source/data controls counts as native case credit.
+
+### Private N11 failed-settlement observation
+
+The internal [LinuxFailedSettlementObservation](LinuxFailedSettlementObservation.cs) is detached, bounded
+failure data, not a completion receipt. Its JSON is capped at 64 KiB and exact combined raw stdout/stderr
+export at 32 KiB. Raw bytes and hashes are present only when both original pumps joined with EOF, exact
+received/retained counts, no discard and no stream/output failure; otherwise raw/hash fields are null and
+the recorded counts and closed failure categories remain. The actual lifetime failure and
+`PhysicallySettled` values are copied without being cleared, and emission cannot change quarantine, custody,
+account closure or a failed result.
+
+The compile-selected N11 emitter and N08/N09 failure fallback are skipped by ordinary `None`. They run after the original server and
+worker join attempts and before filesystem custody/account closure, using only the original teardown token.
+Terminal and cgroup values come from the existing post-pump finalization reads; no additional process or
+cgroup sampling, timer, stop, or deadline reset is performed. Capture also requires the original
+reference-equal holders, committed READY and closed server I/O. The descriptor accessor calls the
+[server owner guard](LinuxEmptyObservationControlServer.cs), which checks completed I/O and handler
+joins, closed workload/control admission and the original owner references. It does not call the worker
+physical-custody guard. Failed settlement may therefore be retained as data when those original joins
+finished; `PhysicallySettled` may remain false. A missing join, READY event or authenticated owner rejects
+capture. Neither this descriptor data nor the observation releases custody or accounts.
+
+`CreateDetached(..., token, scenario)` accepts the internal closed `LinuxFailedSettlementScenario` values
+`WorkerStall` (the default), `OriginalCancellation` and `ParentReplacement`. The first preserves
+`issue779-n11-original-failed-settlement-v1`; the second uses
+`issue779-cancellation-original-failed-settlement-v1` with identical members and bounds. The third uses
+`issue779-n07-original-failed-settlement-v1`, as described below. An unknown enum
+rejects with the fixed ASEVD410 data error. Native callers select the family from compile-owned image
+metadata; neither the argument nor a detached call selects a runtime operation or grants ownership.
+
+`CreateDetached(..., stopTiming = null, accountIds = null)` can additionally copy
+the original `LinuxRunAccountSnapshot` into an exact five-number `account_ids`
+object for `WorkerStall` only: `worker_uid`, `worker_gid`, `subject_uid`,
+`subject_gid`, and `results_gid`. Every value must be a nonroot ID below
+`uint.MaxValue`; the worker values must match the sampled process, user IDs must
+be distinct, and the three groups must be distinct. UID and GID namespaces can
+legitimately use the same number. Other families reject a supplied snapshot;
+omission preserves their serialized bytes. Only the private N11 callsite passes
+the actual account holder's control-validated snapshot before custody begins.
+
+Those IDs describe original ownership, not successful account deletion. After
+root exit, the [N11 observer](../../.github/issue779-checkpoint1/procedures/n11/README.md#post-custody-observation)
+separately requires the complete sealed root layout, unchanged descriptor and
+output object identity, empty results, absent processes/groups, and absence of
+both generated names and original numeric IDs. A pre-custody frame cannot stand
+in for those later physical checks or authorize account release.
+
+Focused local checks passed 87 executions: 59 codec/lifetime/pending-start controls, one N11 build-selection
+control and 27 ordinary qualification/protected CLI controls. These checks establish local data and
+procedure behavior; the deliberate stall and actual Linux stop/group/pump/custody evidence remain unverified.
+
+#### Private N07 rejected-frame transfer
+
+The compile-selected N07 [root composition](LinuxEmptyObservationExecution.cs) separately attempts
+`LinuxWorkerProcess.CaptureN07RejectedFrameObservation` after the original server and worker join
+attempts, including when an earlier stop or monitor failure already set `cleanupFailed`. It uses only
+the reference-equal retained input, owner, accounts, workspace and server, the original root teardown
+token, completed startup/stop/pending-start/original monitor tasks and the assigned original pump receipt.
+The [server's failed-READY guard](LinuxEmptyObservationControlServer.cs) additionally requires committed
+READY, completed original checkpoint/I/O joins and no active controls. It supports the intentionally
+substituted workspace without granting successful filesystem custody. Missing original prerequisites
+reject capture; this API dispatches no timer, reader, stop, native sampler or replacement owner.
+
+Use this failure-only transfer when a rejected first stderr frame prevents the existing
+[strict N07 settlement](LinuxN07FailureSettlement.cs) from forming. The strict observer, valid-prefix
+requirement, `CaptureFailureSettlement`, settlement state and acceptance predicates are unchanged.
+The new schema copies actual lifetime failure, physical settlement, pending-start, closed monitor,
+final unit/group and output facts; null final samples remain null. It does not infer the rejecting
+frame's cause or supply any missing join, READY, root custody or account-release fact.
+
+The [shared encoder](LinuxFailedSettlementObservation.cs) retains its 64 KiB JSON and 32 KiB combined
+raw bounds. Both raw streams and hashes are present only for successful, exact, undiscarded paired
+EOF receipts. Otherwise all raw/hash values are null and recorded closed errors/counts remain.
+Base64 is reversible **private evidence**, not redaction: never echo it in public logs. The root awaits
+the token-bound `Console.Error` line and flush before account-close attempts. Any strict write attempt
+suppresses the fallback, including a partial write; fallback errors cannot replace the first failure,
+clear sticky cleanup failure or release quarantined accounts. WorkerStall and cancellation serialized
+members/labels retain their previous shape and behavior; N11-only stop timing is rejected for N07.
+
+The currently installed N07 retainer and fixture cap root `logs/n01.stderr` at 114,688 bytes. A single
+fallback of at most 65,536 JSON bytes plus LF and the existing bounded ordinary failure line fits that
+cap. The write-attempt latch forbids adding it after the strict raw/settlement pair; no cap is raised.
+The new [detached data controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs)
+cover schema-only family selection, exact rejected bytes/digests, defensive copies, all lifetime flag
+combinations, incomplete/oversized null exports, unavailable joins/samples, cancellation and foreign
+timing. They are defined and unexecuted at source preparation. They provide no Linux provenance,
+N07 pass, lifetime repair, cleanup permission or native acceptance.
+
+
+### Private pre-READY worker failure diagnostics
+
+The fixed N08/N09 cancellation images first attempt the [failed-settlement observation](#private-n11-failed-settlement-observation) when their existing kernel/custody projection fails before writing. This exposes the original monitor/lifetime/pending-start state and post-pump finalization samples even when successful physical settlement is unavailable. It preserves the failure and existing success/custody guards. If its original READY or join prerequisites are unavailable, they use [LinuxJoinedWorkerOutputDiagnostic](LinuxJoinedWorkerOutputDiagnostic.cs). A worker can terminate before READY, while the original collector has already retained its error. `LinuxWorkerProcess.CaptureJoinedOutputDiagnostic` reads only the immutable receipt assigned after the original paired pumps join in `FinalizeAsync`; a missing receipt remains `unavailable`. Its diagnostic accessor deliberately supplies no physical settlement, READY, filesystem custody, account cleanup or admission fact. The ordinary build never invokes either fallback.
+
+The internal data-only `EncodeDetached(Guid, SupervisionOutputReceipt?)` API emits the closed `issue779-joined-worker-output-diagnostic-v1` schema. It records actual received counts, per-stream EOF and closed failures, bounded prefix hashes, and at most 65,536 stderr bytes in base64; the whole JSON is at most 98,304 bytes. Stdout is represented by counts and a hash, without raw bytes. `physical_settlement_unknown` is always true; `native_authority` and `native_acceptance` are always false. Detached encoder tests establish serialization only.
+
+The native composition writes at most one fallback line only after the original stop procedure has returned, solely when the existing private cancellation projection rejected before any of its output writes were attempted. Once any original projection or fallback write is attempted, a partial write may already exist, so another large record is suppressed to preserve the fixed aggregate root-log bound. It reuses the original cleanup token and authenticated owner checks, preserving the first failure. The fixed native fixture redirects this private image's root stderr into a root-owned 0600 log in its protected directory, and its existing 114,688-byte retention cap bounds the diagnostic. Base64 is a reversible private encoding: do not echo it in public logs or treat it as sanitization. Read/decode it only through the verified bounded private artifact path. Diagnostic absence or write failure never permits retry, successful cleanup, account release, a native control pass or Trusted enablement.
+
+### Cancellation projection failure checkpoints
+
+The private N08/N09 [root composition](LinuxEmptyObservationExecution.cs) may fail to encode a negative observation even after the worker physically settles. The separate [projection diagnostic](LinuxCancellationProjectionFailure.cs) records the operation that was about to run: original custody/input recheck, monitor metadata, committed READY descriptor, kernel encoding, full joined-stream encoding, owner identity, signal provenance, individual output writes, or final token check. The original [first execution fault](EvidenceNativeObservationFailure.cs) remains unchanged.
+
+### N09 retained allocation-slot observation
+
+The compile-selected N09 root server opens a second root-held descriptor for the actual `output/evidence` allocation relative to the workspace's retained output-parent descriptor. It performs this only after the original authenticated READY and `BeforeActivation` phase have been observed and after the existing owner/worker identity checks, immediately before the original pidfd SIGINT. The fixed policy requires the same device/inode, expected worker UID/GID, exact `0700` directory mode, a parent inventory containing only `evidence`, and an empty slot inventory. No public request, option, callback or runtime selector is added.
+
+After the original server and worker tasks join, the N09 cleanup path rechecks the retained and named directory identities and both inventories, closes the slot and parent descriptors, then writes the bounded `issue779-n09-allocation-slot-observation-v1` data record before root custody/account release. The record contains before-signal and after-join parent/slot device, inode, owner, group and mode samples. A failed check or close suppresses that record and remains a cleanup failure. The existing `issue779-cancellation-root-cleanup-v1` line remains consistency data only; neither it nor the new slot record replaces independent kernel, NSS, output-quarantine or final cleanup evidence. Detached encoding controls in [LinuxN09AllocationObservationTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN09AllocationObservationTests.cs) validate bounds and schema failure cases only; they create no workspace, file descriptor, lease or native proof.
+
+**Pitfall:** this capture must remain between the actual phase observation and original SIGINT, and descriptor closure must precede custody/account deletion. Moving capture after the signal or trusting the separate `issue779-cancellation-root-cleanup-v1` record loses the required lifetime evidence. Ordinary `None` and N08 do not call this helper.
+
+`LinuxCancellationProjectionFailure.EncodeDetached(Guid, LinuxCancellationProjectionStage, Exception)` produces eight fixed JSON fields under `issue779-cancellation-projection-failure-v1`. It permits at most 1 KiB plus one LF, contains a closed stage/error family and a filtered diagnostic code, and excludes exception text, inner errors, paths and raw streams. Missing generation/error or unknown enum values reject. Detached tests verify data encoding only. The composition emits it only from the existing compile-selected cancellation failure catch using the original cleanup token and owner checks. It adds no OS read, stop, task, allowance, custody capability or positive result.
+
+The checkpoint is assigned before each original operation. It identifies the failed operation, not an inner syscall or the earliest concurrent failure. Failed diagnostic output cannot replace the original failure. The existing large-record attempt flag remains authoritative after any partial large write; this small additional record cannot authorize a second large export. Successful cancellation projections emit no new record. The fixed fixture still requires original kernel, signal, stream, custody and account cleanup evidence before a negative control qualifies.
+
+### N16 client progress in the terminal failure diagnostic
+
+The private N16 client emits seven fixed `ASEVDN16C:01` through `ASEVDN16C:07` tokens around the original accepted-work, STOP/WAIT, response-validation, and EXIT sequence. The same original EXIT `RequestAsync` call emits `ASEVDN16X:01` through `ASEVDN16X:05` immediately before connect, after root-peer verification, after the request line is written, immediately before response reading, and after the response is validated. If that call throws, one fixed `ASEVDN16E:SS:FF:CC` token records its failing operation stage, a closed failure class, and an optional closed diagnostic-code family. No exception text, command, path, or token is emitted. The original output pump remains the sole reader. After the worker stop and paired pumps join, `LinuxWorkerProcess` parses only the retained stderr prefix when the complete paired receipt is successful; missing EOF, pump failure, truncation, unknown marker, duplicate, or reordered marker yields `Unknown` and cannot be interpreted as a completed request. Unrelated stderr bytes are not copied into this diagnostic. The failure-only JSON schema advances to `issue779-n16-progress-diagnostic-v2` for the new closed client fields and remains bounded by its existing 1 KiB encoder. It does not change the original request, cancellation token, failure, cleanup sequence, deadlines, server milestones, or native evidence requirements. These markers localize a client await boundary; they do not establish peer behavior, process settlement, custody, EXIT acceptance, or native success. The pure data controls exercise success, stage/failure ordering, malformed tokens, canary exclusion, and incomplete joined receipts without a fake peer or process.
+
+
+## N07 parent replacement observation (private source integration)
+
+The fixed private N07 build selection is `ParentReplacementEnabled`. When selected, the control server
+attaches its checkpoint to the original authenticated admission sequence, and the stderr observer shares
+the existing paired output collector. It creates no additional reader or worker. Allocation-fault reporting
+remains inside the original tracked admission callback and preserves the original allocation exception.
+
+The server closes and joins the checkpoint with its existing admission handlers. Failure settlement is
+constructed only from the original final unit/group reads and joined monitor/output tasks; emission does not
+clear failure or establish successful custody. With ordinary `None`, the N07 checkpoint is not created,
+its pump observer is absent, and the allocation-fault writer is not used. The shared N07 selector and its
+complete compile/test/native qualification remain pending integration review; this source merge is not
+a native acceptance claim.
+
+### N07 parent identity failure family
+
+The [original stderr observer](SupervisionN07PrecleanupObservation.cs) accepts exactly the fixed
+`Allocation` / `CheckParentIdentity` / `Io` / `AllocateCatchBeforeCallbackRethrow` frame, with no
+terminal, authority or acceptance claim. The [artifact root identity check](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxArtifactRoot.cs)
+throws `IOException` when its retained parent identity or policy fails; the [existing CLI classifier](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs)
+and [precleanup encoder](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceN07PrecleanupFault.cs) preserve that `Io` family.
+`Admission`, another operation, malformed or duplicate fields, an incomplete line and later pump failure
+remain rejected. This fixed diagnostic family does not change allocation, identity, custody or admission policy.
+
+The observer should be used only for the existing private N07 original-pump checkpoint. Its frame is
+detached data and cannot substitute for authenticated READY, original process/task ownership, two EOFs,
+post-pump group sampling, or the [strict failed settlement](LinuxN07FailureSettlement.cs). The
+[rejected-frame transfer](#private-n07-rejected-frame-transfer) remains available when framing fails;
+neither path clears lifetime failure or grants physical settlement, account release or native acceptance.
+A synthetic `Admission` frame previously hid the producer/consumer mismatch, so the [CLI producer control](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceN07PrecleanupFaultTests.cs)
+now binds the actual `IOException` classifier and encoder to exact bytes consumed by the [observer controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionN07OwnedCheckpointTests.cs).
+The existing friend graph is preserved; these are split portable controls, not one cross-assembly call or Linux execution proof.
+
+### N07 rejected allocation with successful worker containment
+
+The [native attempt on source914046e](https://github.com/forge-trust/AppSurface/actions/runs/38683569790)
+retained the exact `CheckParentIdentity / Io` allocation rejection and a normally exited worker with
+status one, two complete error-free pumps, and an empty final group. Its holder recorded successful
+physical containment, while the original server failed because the worker did not complete the protocol.
+The earlier snapshot gate required the worker holder itself to fail; it therefore omitted the strict
+negative receipt on this valid containment path. The separate fallback retained the failure for diagnosis.
+
+[The original worker holder](LinuxWorkerProcess.cs) now retains the selected N07 snapshot whenever its
+existing original monitor, unit, group and pump prerequisites permit encoding. It does not require a
+cleanup error as evidence of an allocation rejection. `CaptureFailureSettlement` still requires the
+reference-equal original owners, joined stop, accepted first stderr frame, committed READY and completed
+checkpoint/server handlers. Its [internal data guard](LinuxN07FailureSettlement.cs),
+`RequireFailedServerCapture(TaskStatus, LinuxN07FailureSettlement?)`, additionally requires the actual
+original server task to be faulted or cancelled and the immutable joined snapshot to exist. A successful,
+pending or unknown server status and a missing snapshot reject. The same snapshot is returned; no timer,
+native operation, owner, successful execution, custody or account-release permission is created.
+
+The [detached regression controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs)
+exercise a normally completed nonzero worker monitor with a failed server and reject the unavailable
+server/snapshot cases. They issue no protected capability. Native acceptance still requires a fresh
+image and the unchanged four-line strict fixture validation; a fallback alone cannot pass that control.
+
+### Accepted socket cancellation boundary
+
+[LinuxControlListener](LinuxControlListener.cs) uses its accept token solely to interrupt
+the original network wait and close the listener. Before dispatch and after a socket is
+returned, workspace, retained-name, owner, worker and peer validation use the actual
+owner's original deadline independently of that network token. Cancellation arriving
+between accept completion and a workspace check cannot suppress those checks or turn
+orderly admission closure into a workspace cancellation failure. A failed identity or
+expired owner still rejects and remains sticky.
+
+The internal [SupervisionAcceptedResource](SupervisionAcceptedResource.cs) procedure
+joins the original accept, supplies CancellationToken.None to synchronous validation,
+and closes an untransferred resource on rejection. It creates no native identity or
+admission. [Barrier controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptedResourceTests.cs)
+exercise cancellation during validation, failure propagation, late-result close and
+EXIT admission-drain ordering. Full listener/handler joins and the sixteen required
+Linux controls remain necessary; portable procedure results grant no native proof.
+
+Endpoint inspection and irreversible socket disposal share the listener gate through
+`SupervisionAcceptedResource.CloseUnderGate`. A close callback therefore cannot dispose
+the socket between its open-state sample and endpoint read. Close attempts stay latched
+even when disposal throws. The close dispatch occurs outside the accept-ownership gate;
+the original accept and handler tasks still require their separate joins.
+
+## Occupied and linked allocation-slot qualification
+
+The compile-owned `EvidencePrivateQualification=N05` or `N06` image exercises the
+real worker's [exclusive allocator](../ForgeTrust.AppSurface.Evidence.Contracts/README.md)
+in the actual generated output parent. Arguments, environment and descriptor JSON
+cannot select either fixture. The ordinary image defaults to `None`; private images
+cannot be packed. Each selector must build the complete same-source dependency graph.
+
+`LinuxRunWorkspace.PrepareSlotNegativeFixture(owner, accounts, token)` is internal
+and requires the original native owner/accounts before listener or worker startup.
+N05 exclusively creates the fixed `evidence` directory with worker ownership and
+0700 permissions, then writes a fixed 0600 `allocation-sentinel`. N06 exclusively
+creates the `evidence` symlink to the existing `../raw-results` sibling and writes
+its fixed root-owned 0600 sentinel through the retained sibling handle. It never
+adopts, follows, deletes or changes a preexisting collision. No supplied path or
+callback selects fixture content, and the allocator's original rejection is preserved.
+
+`CloseAndCaptureSlotNegativeFixture(token)` runs only after the original worker
+holder verifies server, process, output and selected cgroup joins. It rechecks
+retained and named identities, exact policies and sentinel bytes, closes inspection
+handles, and returns bounded diagnostic data. The same handles are also retained
+for workspace teardown if setup or capture fails. Unknown occupied/link nodes still
+fail ordinary root custody and quarantine; this control does not grant account
+reuse or successful Observation completion.
+
+`LinuxSlotNegativeObservation` encodes the fixed setup/post-join schemas and strictly
+parses the original complete two-line allocation failure. Output must have zero
+stdout, at most 2048 stderr bytes, both actual EOFs, no errors/discards, exact charged
+bytes, and the existing allocation-stage `ASEVD409`. Its detached tests check only
+metadata/codec behavior. Neither matching JSON nor successful local compilation
+proves Linux ownership, syscall rejection, containment or any Trusted eligibility.
+See the [sixteen-case migration gate](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker)
+for the required fresh native evidence.
+
+## Declared coverage execution
+
+The internal [coverage execution reference](coverage-execution.md) describes the closed producer command, audited SDK/package inputs, shared stream accounting, retained report transport and final root custody. These components are checkpoint-two work; source validation alone does not establish genuine Linux coverage, accepted consumer proof or Trusted eligibility.
+
+## Native coverage measurement
+
+The [native measurement integration](../ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md)
+records actual guarded root execution from the same-source Linux application controls and imports
+those hits through the ordinary collector's supported merge. It supplies no runtime authority, private
+transport or production registration. The [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md#measuring-the-native-c-owner)
+describes the source/digest checks, isolated-process limits and unchanged complete coverage gate.
+
+## Native qualification image boundary
+
+The separate [account mechanism controls](../../.github/issue779-checkpoint4/measurement/accounts-README.md)
+use the private `C4Accounts` and `C4AccountRollback` build values. They authenticate the original root
+supervisor and exercise actual account utilities/NSS without starting a worker or creating a manifest.
+Only the rollback image seeds its own already-reserved group before the unchanged duplicate dispatch;
+the original failure and cleanup must remain observable. Both values remain unpackageable and compile
+their fixture types and calls out of ordinary `None` images. Local compilation alone is not a native
+result; the complete protected Linux controls and source-bound measurement must still be verified.
+
+The linked C4 measurement delegates its successful-create and joined-close state predicates to the
+ordinary-build [data-only account state policy](LinuxAccountMeasurementPolicy.cs). The policy accepts
+an immutable copy of eight primitive state fields and returns a decision; it has no account-holder type,
+native operation, ownership check, or admission capability. The private measurement copies fields only
+after its original owner and NSS checks, and keeps its close-task join, ordering, and fixed rejection.
+The detached one-field-neighbor tests therefore run in ordinary builds without constructing an
+account holder. They do not establish account creation, cleanup, native custody, or acceptance.
+
+The N04 and N07 rendezvous implementations in
+[`LinuxN04CheckpointOwner`](LinuxN04CheckpointOwner.cs) and
+[`LinuxN07CheckpointOwner`](LinuxN07CheckpointOwner.cs) are compiled only into
+images selected with their matching [private qualification build symbol](../../Directory.Build.props).
+Ordinary `None`, C2 and C3 images contain neither native owner type nor its server
+and worker callsites. A false runtime selector alone was insufficient to remove
+these unused native implementations from shipped binaries. Private ordering and
+diagnostic data implementations now follow their matching private image too.
+Their existing procedure controls compile the same physical source in the test
+assembly only when the runtime omits it; they grant no native capability. The ordinary authentication, admission, control drain, physical
+settlement and custody paths remain compiled and required.
+
+The [image metadata tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+read the finished PE type table without loading private owners. They check actual
+type absence in ordinary images and type presence only in the selected N04/N07
+build. Source-built variant tests verify compilation and data behavior; genuine
+Linux qualification still requires the matching source-bound native controls.
+This boundary is a product packaging constraint, not a coverage filter or an
+accepted proof registration.
+
+The same binary boundary applies to the native slot-mutation fixture in
+[`LinuxRunWorkspace.SlotNegative`](LinuxRunWorkspace.SlotNegative.cs) and the retained
+allocation fixture in [`LinuxRunWorkspace.N09`](LinuxRunWorkspace.N09.cs). N05/N06
+compile only their slot helper and its original-handle fallback; N09 compiles only
+its retained allocation holder and fallback. The shared descriptor-relative name
+reader is compiled for those three variants. The detached slot encoder follows
+N05/N06, while its unchanged data controls link the same implementation when the
+ordinary runtime omits it. The N09 allocation codec retains its existing shared
+placement. Neither grants native ownership. Actual artifact allocation, root custody and ordinary handle
+closure remain required in every image.
+
+The same boundary now covers the N10 and N12 native implementation paths. The
+[N10 pending-start checkpoint](LinuxN10PendingStartCheckpoint.cs), its worker
+observation field and capture method, stop-call counter, and failure-only emit
+block compile only with `EVIDENCE_PRIVATE_N10`. The existing tests are likewise
+private to N10. The matching selected image retains the original validated start
+reply trigger and original pending-start, stop, final-sample and output joins;
+ordinary images contain no N10 checkpoint type or worker capture member.
+
+The [N12 same-image descendant launch and hold procedures](LinuxN12Descendant.cs)
+and the [worker's native child observation and joined capture](LinuxWorkerProcess.cs)
+compile only with `EVIDENCE_PRIVATE_N12`. The CLI's holder dispatch and post-worker
+launch calls, and the supervisor's pre-stop sample and post-join receipt calls,
+share that exact symbol. N12's `ParsePid`, `CreateStartInfo`, `ReadReadyAsync`, and
+`SupervisionDescendantObservation` data helpers remain available in ordinary
+images for portable tests. The PE metadata boundary test checks the actual N10
+type and N10/N12 method definitions in ordinary and matching private images;
+runtime qualification still requires the native containment checks and original
+cleanup joins described above.
+
+The private N08/N09 pidfd signal procedure and joined cancellation capture are
+also absent from ordinary images. Their implementations and failure-only root
+emitters compile only in those two images. N11 alone compiles its stop-timing
+observer and root failed-settlement emitter; the failed-settlement capture is
+shared only with N08/N09. Shared negative-kernel capture exists only for the
+selected negative images that consume it. The detached encoders and
+[`LinuxWorkerStopTiming`](LinuxWorkerStopTiming.cs) data procedures follow the
+matching runtime selections in the [source-placement table](#private-diagnostic-data-source-placement);
+portable tests link the same physical implementations when the runtime omits them. These compile boundaries change no ordinary
+stop, native monitor, cgroup, output drain, custody or account-close requirement.
+The [finished-image metadata tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+check actual implementation absence as well as matching private-image presence.
+
+## Shared asynchronous compiler identities
+
+The common asynchronous operations in [`LinuxWorkerProcess`](LinuxWorkerProcess.cs) and
+[`LinuxEmptyObservationControlServer`](LinuxEmptyObservationControlServer.cs) intentionally precede
+the retained state and selector-only members in each class. The C# compiler includes preceding
+member declarations when assigning generated state-machine names. A conditional field can therefore
+give identical shared source methods different generated identities in two qualification images.
+Stable common identities let the standard coverage tools combine those observations consistently.
+
+This ordering changes no method body, constructor body, field initializer order, authentication check
+or runtime allowance. Keep always-present async operations in the first region, and keep conditional
+operations outside it. Do not insert placeholder members or reorder initializers to adjust compiler
+names. The [image boundary controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+read emitted PE metadata and verify the common method-to-state-machine mapping for the selected
+image; they invoke no private owner. Compiler identity consistency supplies no native authority or
+coverage by itself. Every selected image still requires its original execution and retained evidence.
+
+[`SupervisionControlLineFraming`](LinuxControlConnection.cs) follows the same ordering rule. Its always-present
+async members are declared first, in this order: `ReadRequestAsync`, `WritePhaseAsync`, `WriteResponseAsync`, and
+`DisposeAsync`. The private `WriteAcceptedBlockedWorkAsync` member follows that common region only when
+`EVIDENCE_PRIVATE_ACCEPTED_WORK` is selected; it is the fifth generated async identity in those images and is absent
+from ordinary images. The framing metadata control checks these exact identities without invoking the stream, a native
+owner, admission, or accepted work. Moving declarations changes no body, field initializer order, framing bound,
+request/write CAS, cancellation close/join, or accepted-work runtime guard.
+
+### Stable shared orchestration and private fixture hooks
+
+The common asynchronous bodies in [the control server](LinuxEmptyObservationControlServer.cs)
+and [the root execution coordinator](LinuxEmptyObservationExecution.cs) call closed private
+qualification hooks at the same points in every build. Ordinary hooks complete without fixture
+work. A selected hook retains the existing native implementation and receives only the original
+owner, accounts, workspace, task and tokens. There is no runtime hook registry, caller-supplied
+implementation, public factory, new owner or renewed timeout.
+
+[QualifiedObservation](LinuxEmptyObservationExecution.Qualification.cs) is constructed privately
+by the execution coordinator. It retains failure-only diagnostic flags for the same run, including
+partial-write latches and the account-close event. Its record callback is the coordinator's private
+first-fault projection; it cannot issue admission or start work. Failure projections remain after
+server/worker/output joins and before custody; final cleanup projections remain after custody,
+account and handle closure and the final captured monotonic check. No diagnostic can clear failure.
+
+The server's hook calls preserve accept reservation, READY phases, original cancellation signal,
+accepted-body registration, STOP/WAIT joining and reply commit order. Unknown ordinary operations
+still reject through the original closed codec/response path. The stage callback updates only the
+current handler's closed diagnostic stage at the former assignment. It is never supplied by a
+worker. The ordinary image omits native fixture bodies and accepted-work request implementations.
+
+Keep selector-only operations out of shared state-machine bodies: inserting conditional statements
+changes generated offsets for later common branches even when their source is unchanged. Keep
+always-present async declarations first and matching private async families immediately after them,
+before conditional fields. [Image metadata controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+check the execution, worker, server and framing identities in each selected image. These checks are
+compiler-shape evidence only; every native control and the unchanged coverage gates remain required.
+No report partition, condition identity, hit counter, coverage exclusion or threshold is changed by
+this source organization.
+
+## Validation-only worker measurement
+
+The [C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) is compiled into private C3/C3Sdk validation images only. Its three worker-holder call sites retain an already authenticated worker's private temporary directory before descriptor publication, capture genuine pinned tracker bytes after the original normal exit, and close the extra handles after the original monitor joins. The ordinary executable contains neither those call sites nor the fixture type, verified through PE metadata. It grants no admission, process owner, artifact custody, proof or production registration. Product environment, isolation, permissions, budgets and cleanup order are unchanged. The fixture reference documents the pinned format dependency, actual helper proof, first-worker-only scope and current native integration requirement.
+
+### Private diagnostic data source placement
+
+The [supervision test project](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj) defines `EVIDENCE_QUALIFICATION_DATA_TESTS` locally and conditionally links each single physical fixture source only when its runtime image omits that source. This test-only symbol is not propagated to production project references. Existing inner native-owner guards still require their original private image; linking data/order source does not compile a native owner into an unselected test assembly. No new friend assembly, public API or coverage exclusion is added.
+
+| Fixture family | Runtime selection |
+| --- | --- |
+| Negative kernel observation | N04, N05, N06, N08, N09, N13, N14, N16 |
+| Failed settlement and worker-stop timing data | N07, N08, N09, N11 |
+| N07 order, failure settlement and emitter | N07 |
+| N04 order | N04 |
+| Joined worker diagnostic | N08, N09 |
+| Slot-negative observation | N05, N06 |
+
+The same implementation remains exercised by its existing data/procedure tests in every supported test selection; actual PE checks assert runtime absence/presence independently. Authentication, systemd ownership, process identity, work admission, original task/pump joins, filesystem custody and account release remain in the ordinary runtime. The shared output collector exposes its existing Contracts-defined received-byte and retained-prefix constants as internal data aliases used by its own constructor and guard. Limits stay 16 MiB received/1 MiB retained per stream. Private N04/N07 order and joined-diagnostic rejections use the existing fixed `ASEVD410` backend error; their diagnostic-only problem wording is standardized, with no supplied text or inner exception.
+
+### Producer failure-state encoding
+
+[`LinuxProducerFailureState.Encode`](LinuxProducerFailureState.cs) is the data-only encoder used by [`LinuxProducerFailureOutput.Retain`](LinuxProducerFailureOutput.cs). Use the encoder to check the closed diagnostic schema without opening root files or constructing an owner. Persisting bytes still requires the original native retainer's platform, reference-bound owner, cleanup token, prefix checks, and exclusive descriptor-relative root-only files. Encoding cannot establish the observations it describes.
+
+The API takes joined output data, one fixed stage, optional normal/stopped/last-stop samples, the pending-start snapshot, four settlement/failure flags, and an optional captured PID. It returns canonical UTF-8 JSON with the existing 22 members. Stages are `binding`, `results`, `pipes`, `backend`, `start`, `running`, `identity`, `normal-exit`, and `settlement`; other values reject fixed `ASEVD402`. Optional absent facts remain null. Active/substate text is reduced to `active`, `inactive`, `deactivating`, `failed`, `running`, `exited`, `dead`, `stop`, `stop-sigterm`, `stop-sigkill`, `stop-post`, `final-sigterm`, `final-sigkill`, or `unknown`.
+
+The members are `schema`, `stage`, `normal_code`, `normal_status`, `stopped_code`, `stopped_status`, `start_reserved`, `start_joined`, `stop_joined`, `pending_failure`, `physically_settled`, `cleanup_failed`, `group_empty_twice`, `pump_joined`, `captured_pid`, `last_main_pid`, `last_exec_pid`, `last_code`, `last_status`, `last_active`, `last_substate`, and `output_drained`. Raw stream prefixes, unit names, paths and exception text are absent. Numeric failure facts are preserved rather than converted to success; a drained stream pair is not physical-exit or custody proof. The extraction preserves the native caller's owner-before-encoding order and all filesystem checks.
+
+### Detached workspace metadata policy
+
+[`LinuxWorkspaceMetadata`](LinuxWorkspaceMetadata.cs) centralizes comparisons already used by the [application](LinuxApplicationWorkspace.cs) and [producer](LinuxProducerWorkspace.cs) native workspace holders. It takes only sampled `LinuxProtectedMetadata`, scalar expected IDs/modes/lengths, and prior metadata. Its five `Matches*` predicates return data comparisons; they accept no handle, node, owner, account, callback, token or custody object. A true result cannot establish that a sample came from the kernel or authorize any filesystem operation. Use these APIs for policy tests and within the existing native wrappers; actual `OpenAt2`, `statx`, identity/name/hash checks, reference binding, deadline checks and custody transitions remain at those wrappers' original callsites.
+
+- `MatchesDirectory` requires a nonzero inode, directory type and exact selected UID/GID/mode. Directory size and link count are not file constraints.
+- `MatchesApplicationFile` requires root UID/GID, a nonzero inode, regular type, one link, and the exact already-validated declared length/mode. It does not audit declarations, paths or hashes.
+- `MatchesMutableProducer` preserves the directory/file × sealed/unsealed policies. All require exact selected IDs, a nonzero inode, correct type, no set-ID/sticky bits and no group/other write permission. Sealed trees additionally require `0700` directories / `0600` files; files require one link and at most the existing 256 MiB limit. Mutable files may be empty. Unsealed modes may otherwise vary. The producer wrapper still emits its original closed `node-metadata` diagnostic and throws the same `ASEVD402` on rejection.
+- `MatchesCopiedProducerFile` requires some nonzero UID/GID, a regular single-link `0600` file, nonzero inode, and positive length through 256 MiB. Native callers separately bind the exact account and copied length.
+- `MatchesProducerSeal` compares terminal device/inode with a previously validated original sample, then requires root ownership and the exact selected seal mode. Files additionally retain one link and original length; directory size/link count and timestamps are intentionally not compared here.
+
+`RequireApplicationAncestor` keeps the original two-stage exception order: non-root ownership rejects with application `ASEVD410`; otherwise the existing protected-ancestor policy checks type, inode and search permissions and rejects unsafe data with `ASEVD402`. Search-only and sticky ancestors remain permitted by that existing policy. Application wrappers retain their existing exception factories and messages. Declared lengths/modes and original samples must already be validated; these comparison APIs do not turn arbitrary declarations or expected metadata into authority. The [data controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkspaceMetadataTests.cs) pair valid adjacent values with individual ID, mode, type, link, length and device mutations, and explicitly preserve fields that policy leaves unconstrained. They are portable metadata tests, not root or native acceptance evidence.
+
+### Detached DCP ancestry comparisons
+
+[`LinuxApplicationDcpIdentity`](LinuxApplicationDcpIdentity.cs) exposes comparison APIs for parent facts sampled by its native holder. `RequireParentChain` requires a complete same-unit path of at most sixteen links from the resource to the selected DCP; `FindNearestDcpAncestor` selects from at most 128 already-audited candidate samples. `RequireSameParentWalk` compares two complete walks' PID, parent, start time and credentials. These APIs receive data and cannot construct a live identity, retain a pidfd, authenticate a resource or issue admission. Native capture must still independently bind each executable, process sample and cgroup before and after the walk.
+
+The [native identity controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxDcpIdentityNativeTests.cs) separately exercise those retained operations against root-owned copies of ordinary executables and nonroot systemd helpers. A fixed test-only shell/sleep tree verifies actual same-unit parent selection, both repeated kernel walks and the selected child executable. Other controls reject unsafe audited files, changed runtime selection and sleep's non-resource argv, preserve cancellation without latching it as integrity failure, and require genuine unit stop before filesystem cleanup. The fixture helper accepts only its fresh fixed-name `/run/issue779-dcp-tree-native-<32hex>/{dcp,runtime}` files; its original task, memory, restart and teardown policy stays fixed. These are executable/proc/cgroup mechanism tests: a real ancestry match does not establish Aspire DCP qualification, HTTP health, application admission or an accepted proof. They explicitly skip outside booted root Linux x64.
+
+The [parent-policy controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxDcpParentPolicyTests.cs) check adjacent valid graphs before rejecting missing, discontinuous, overlong, self-referential, stale or foreign links and candidates with fixed `ASEVD410`. They also check canonical expected resource paths, bounded process-list numeric grammar, and every runtime-file write/special permission. Equal detached metadata does not prove that a process exists or remains live. Use the genuine Linux application controls to verify native selection and shutdown; these portable comparisons cannot replace them.
+
+### Cleanup callback failures
+
+The [application lifetime coordinator](SupervisionApplicationLifetime.cs) retains the original start, readiness, stop and ordered disposer tasks. A throwing cancellation registration is a cleanup failure; it does not skip the stop procedure, the original startup join, a required second stop after late startup, or later disposers. Cleanup remains pending until every accepted procedure returns. The shared cleanup task replays its sanitized failure without reinvoking procedures. [Barrier-controlled tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionApplicationLifetimeTests.cs) exercise these ordering obligations without native process authority.
+
+The [run output ledger](SupervisionRunOutputBudget.cs) separately retains cancellation signalling failure. In quota-drain mode, actual pipe EOFs and exact byte accounting remain required, but cannot make `Drained` true when the execution-stop signal threw. The [pipe controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionQuotaDrainTests.cs) cover this with actual streams. A joined stream receipt alone never establishes process exit, cgroup emptiness, account cleanup or artifact custody.
+
+### Retained producer file copying
+
+[LinuxProducerFileTree.Copy](LinuxProducerFileTree.cs) performs only native copying from an actual [retained protected deployment](LinuxProtectedDeployment.cs) into a borrowed, already authenticated destination directory. The [workspace owner](LinuxProducerWorkspace.cs) still reserves account custody before mutation, binds the destination path and accounts, rechecks the complete workspace, and quarantines every failed preparation. A directory descriptor and numeric UID/GID cannot create a workspace or admission. No decoded file inventory or supplied metadata can replace the retained source.
+
+The caller serializes both subject and NuGet copies with the same original node/byte budget and input deadline. The root destination, each directory before mkdir and each original file length before exclusive open are irreversibly reserved. Existing files/directories are never adopted. The utility checks actual copied ownership, mode and length; only the child handles it acquires are closed. The borrowed source and destination remain caller-owned. Failure preserves partial files and consumed reservations, so retrying into that tree is not a recovery strategy. Native open failures remain I/O exceptions until the workspace factory's existing fixed ASEVD402 translation.
+
+The [real root filesystem controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProtectedNodeNativeTests.cs) cover nested copies and shared accounting, a later-file collision preserving the earlier copy, an existing symlink directory refusing adoption, retained-source name replacement, and cancellation before reservations. Their arbitrary nonzero fixture node IDs are actual filesystem ownership only; no run accounts, supervisor, artifact custody or accepted proof are fabricated. Source ancestors remain root-owned and traversable; destination nodes are beneath a separate root-only branch. These controls require actual Linux x64 root execution and explicitly skip elsewhere. A separate retained-source I/O control writes through an actual `/dev/full` descriptor, requires kernel I/O rejection and verifies that the borrowed audited source remains usable for a fresh independent destination. It establishes neither a regular-file disk-quota cause nor permission to retry a failed producer workspace.
+
+### Application bundle projection validation
+
+[LinuxApplicationWorkspaceLayout](LinuxApplicationWorkspace.cs) validates detached application definition data before the native holder uses it. `Create` requires a nonempty generation, nonzero/non-sentinel application IDs, the exact lowercase entry digest, one declared input and a ToolRoot disjoint from the generated workspace. Inclusive unit limits are 1 byte–1 GiB scratch and memory, 1–128 tasks, 1 byte–1 MiB output, 1–120 seconds startup and 1–30 seconds stopping. It copies the selected rows and limits; it creates no directory, account, process, timer or admission.
+
+`ValidateFiles` requires 6–256 unique case-insensitive relative names, the mandatory role cardinalities, exact role suffixes and modes, positive file lengths through 128 MiB, at most 512 MiB total, and at most 32 implicit directory levels. Null rows and null paths are rejected before any cross-row prefix comparison. Other malformed values likewise produce fixed `ASEVD410` without retaining rejected data. A valid later row must never be assumed merely because an earlier row passed its own checks. `RequireExactInventory` compares the complete selected file/directory set with supplied detached observations, including root ownership, immutable modes, single-link file lengths and hashes.
+
+The [projection tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxApplicationWorkspaceTests.cs) exercise individual missing values, exact limit neighbors, role/path errors, aggregate lengths and incomplete observations without allocating the declared file sizes. These tests establish data policy only. Actual retained descriptors, byte hashes, root ownership, tmpfs and application lifecycle remain the responsibility of the native holder and [genuine Linux consumer controls](../../.github/issue779-checkpoint3/README.md).
+
+### Collection rejection and actual pipe endpoint ownership
+
+The [portable pipe ownership controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOutputPipesTests.cs) pass an already completed real run-output ledger to the existing ownership primitive. Rejected registration dispatches neither read. Collection-task failure remains fixed `CollectionFailed`; an earlier write-close failure takes precedence as `CloseFailed`, while a later read-close failure cannot replace the original collection failure. Both writer and reader close attempts still occur once, and repeated disposal returns the same task. These tests model stream ownership, not native identity or successful output drainage.
+
+The [root Linux factory control](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProtectedNodeNativeTests.cs) separately uses actual `pipe2` endpoints from `LinuxOutputPipes.Create`, kernel descriptor duplication with `FD_CLOEXEC`, known byte writes and genuine EOFs. It retains one duplicated writer after the owner's local write copies close, requiring both original collection and disposal to stay pending until that final endpoint closes. The test never owns a borrowed factory handle, creates a unit or grants account/admission authority. It explicitly skips outside root Linux x64; local compilation is not a native result.
+# Worker orchestration qualification boundary
+
+`LinuxWorkerProcess` keeps `JoinPhysicalCleanupAsync`, `StartCoreAsync`,
+`MonitorExitAsync`, `ContainAsync`, `StopSelectedUnitAsync`, `FinalizeAsync`,
+`DisposeCoreAsync`, and `JoinOriginalExitMonitorAsync` as one common declaration
+region. Selector-only measurement and negative-image plumbing is held by its
+private `Qualification` object. The holder is constructed by the private worker
+constructor and cannot be supplied by a caller. Its hooks preserve the original
+native dispatch, retained start task, identity checks, EOF and pump joins,
+cleanup deadlines, first-failure behavior, and settlement publication order.
+
+The holder is a source-shape boundary, not an authority boundary. It does not
+admit a process, create an owner, add a timeout, change account or root custody,
+or publish a completion result. `QualificationImageBoundaryTests` checks the
+emitted common async identities and selected private method presence from the
+built image; it does not invoke private members or fabricate native capability.
+
+### Final settlement and local owner closure
+
+The [local close sequence](local-close-sequence.md) attempts every original producer owner even when an earlier close fails, and immediately retains the original failure latch. The [worker settlement policy](worker-settlement.md) checks original custody and output predicates before native observations. The [application terminal policy](application-terminal-policy.md) compares the two actual terminal samples before the final cgroup check. These internal procedures retain the existing deadlines and native checks; their portable controls cannot establish process exit, custody, or admission.
+
+The [application workspace state policy](application-workspace-state.md) preserves the native holder’s operation-specific quarantine, seal and release checks. [NSS buffer decoding](account-nss-buffer-data.md) bounds caller-owned pointer data without performing a lookup. The [selected report byte transfer](report-chunk-transfer.md) retains the native holder’s original read and work checks while joining bounded pieces. These APIs create no native ownership or accepted proof.
+
+[DCP cgroup metadata comparisons](dcp-cgroup-metadata.md) validate the original detached stat fields after each real filesystem and descriptor check. They do not select a cgroup or authenticate an application process.
+
+The [account cleanup procedure](account-cleanup-procedure.md) preserves reverse deletion, first-failure capture and physical settlement between native utility attempts.
+
+The [report custody metadata comparisons](report-custody-metadata.md) verify selected-root modes, stable file samples and exact repeated inventories without granting filesystem custody.
+
+The [control server state guards](control-server-state.md) and [producer workspace state guards](producer-workspace-state.md) verify the existing joined, sealed and one-attempt transitions. Their detached flags do not establish native ownership.
+
+The [exception policy](exception-policy.md) records the existing broad fatal exclusions and the two narrower workspace exception families. Catch bodies, failure latches and native cleanup stay with their original owners.
+
+The existing [root custody supplement](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCustodySupplementNativeTests.cs) also exercises cancellation before opening a selected tree and rejects zero/oversized chunk bounds and a nonzero initial offset through genuine retained report sets. Each failed read poisons only its own set. These Linux root checks retain the original nine test rows and require fresh native execution; local compilation on other platforms is not native evidence.
+
+## Declared-length file IO
+
+[`SupervisionDeclaredFileRead.Read`](SupervisionDeclaredFileRead.cs) is an internal synchronous IO
+primitive. Its arguments are the original open `SafeFileHandle`, retained `ulong` length, caller-owned
+nonempty byte buffer, per-read check, synchronous chunk consumer, pre-EOF check and fixed rejection
+factory. It returns no receipt or capability. It selects no path and cannot open a deployment, establish
+root ownership, transfer custody or authorize account release.
+
+The length must fit a signed file offset. Native callers still enforce their existing smaller file-size
+bounds before reading. The helper reads from offset zero in buffer-sized chunks without changing a
+stream's shared position. It calls the original per-read check before every data read, delivers only the
+bytes actually read, and rejects an early zero-byte read. At the declared end it invokes the original
+pre-EOF check once and requires a one-byte positional probe to return EOF. An empty declaration still
+performs this end probe. There is no retry, timer, new cancellation token or alternate file selection.
+
+The chunk memory borrows the caller's buffer and is valid only during the consumer callback. Copy or
+hash it synchronously; retaining it would observe later buffer reuse. IO and callback exceptions propagate
+unchanged. Only truncation and excess data invoke the caller's original fixed rejection factory. Missing
+required arguments, an empty buffer or a length beyond `Int64.MaxValue` reject before file IO.
+
+The [deployment reader](LinuxProtectedDeployment.cs) keeps its initial/final checks and name/identity
+rechecks, original pooled buffer, and clearing return in `finally`. The
+[application bundle reader](LinuxApplicationWorkspace.cs) keeps its 64 KiB buffer and original deadline
+cadence. The [workspace descriptor reader](LinuxRunWorkspace.cs) and
+[terminal custody reader](LinuxRunWorkspace.Custody.cs) retain their 4 KiB buffers, metadata checks,
+diagnostic checkpoints and final digest/name checks. The helper's callbacks are fixed private bindings
+at those existing call sites; no public factory or native owner accepts an injected reader.
+
+Sharing this loop makes EOF, growth and callback failure behavior directly verifiable without exposing
+native ownership. [`SupervisionDeclaredFileReadTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionDeclaredFileReadTests.cs)
+use real ordinary file descriptors and deterministic local mutations. They do not replace the
+[genuine Linux retained-file controls](../ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md).
+Returning bytes from this primitive alone establishes neither stable metadata nor custody; accepting a
+digest still requires every original native caller check.
+
+### Original cleanup attempts
+
+[SupervisionCleanupAttempt](SupervisionCleanupAttempt.cs) shares the root owner's existing
+recoverable-exception handling for individual close and join operations. The caller supplies its
+original operation and failure recorder; it keeps operation order, captured resources, deadlines,
+phase updates and sticky failure state. Synchronous throws and task faults reach that recorder by
+identity. Fatal runtime exceptions and recorder failures propagate. No cancellation proxy, retry,
+background task or replacement time allowance is introduced.
+
+[Cleanup-attempt controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionCleanupAttemptTests.cs)
+use actual tasks and explicit barriers to verify joining, ordering and failure propagation. These
+procedure tests establish no native owner, account deletion, physical exit or accepted-proof authority;
+the caller's existing kernel observations and final custody checks remain independently required.
+
+### Worker terminal and output comparison
+
+`LinuxWorkerSettlementPolicy.HasSuccessfulTerminalAndOutput` checks only the original natural terminal's
+exit code/status and the joined output receipt's success bit. `LinuxWorkerProcess.RequireSuccessfulCompletion`
+continues to require its retained worker lifecycle, physical settlement and sticky-failure state before this
+data comparison, then performs the original owner cleanup check. The detached
+[`LinuxWorkerCompletionFacts`](LinuxWorkerSettlementPolicy.cs) value and its
+[focused policy controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerSettlementPolicyTests.cs)
+cannot establish task joins, process exit, custody or authorization on their own.
+
+The N07 rejected-frame capture and the later failure-only capture share
+`LinuxWorkerSettlementPolicy.RequireFailedCaptureReadiness` for their copied lifetime, pending-start,
+and completed-exit-task prerequisites. Each native caller keeps its explicit null checks for the actual
+exit task, output receipt and worker, performs its own cancellation/reference checks and acquires its own
+descriptor before this comparison, then retains
+the original control-identity checks and capture order. The policy tests check only the boolean decision;
+they do not construct the holder, prove any join, or establish native custody or acceptance.
+
+
+### Application cleanup procedure
+
+[SupervisionApplicationCleanup](SupervisionApplicationCleanup.cs) preserves the private application's
+monitor cancellation, original lifetime join, current monitor join and final work-registration order.
+The monitor is sampled **after** lifetime join: startup may publish it while stop is waiting. The
+[procedure controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/README.md) use explicit task
+barriers and operation failures; they provide no native owner or physical-exit authority. The private
+[application holder](LinuxApplicationProcess.cs) keeps terminal and cgroup observations, pump joins,
+resource disposal, original deadlines and settlement publication.
+
+
+### Actual named-entry comparisons
+
+[`LinuxNamedEntry.Matches`](LinuxNamedEntry.cs) shares the existing openat2/statx procedure used by the [worker workspace](LinuxRunWorkspace.cs), [producer workspace](LinuxProducerWorkspace.cs) and [application workspace](LinuxApplicationWorkspace.cs). Each caller borrows its retained parent descriptor, supplies the same selected name and resolution flags, and retains its own fixed rejection when the comparison fails. The helper opens O_PATH|O_CLOEXEC, reads actual metadata and closes only that temporary handle. Native and unsupported-openat2 exceptions propagate unchanged; there is no fallback, new deadline or owner construction.
+
+The [metadata comparison](LinuxNamedMetadataComparison.cs) allows unrelated directory child-list churn while preserving device, inode, UID, GID and mode. Files require the complete original sampled metadata. Constructed metadata alone cannot establish custody. The [Linux named-entry tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNamedEntryNativeTests.cs) exercise real names, retained parent handles, file/directory replacement, access-policy change, symlink and parent escape rejection and the original caller resolution modes without creating a protected worker or admission. They require actual Linux x64 openat2/statx; a skip on another platform is not native evidence.
+
+
+The [root custody transfer](LinuxRunWorkspace.Custody.cs) also uses [SupervisionCleanupAttempt](SupervisionCleanupAttempt.cs) for its two existing local-owner closes. Worker disposal is awaited first; a recoverable failure is captured as LocalCloseFailed before the original workspace close is attempted. Either failure prevents transfer success. Fatal errors and failure-recorder exceptions retain their original propagation. Operation labels, final native recheck, retained handles, account-release prerequisites and the original cleanup clock remain with the actual custody owner. The existing [cleanup-attempt controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionCleanupAttemptTests.cs) verify only this callback/catch procedure and do not construct custody authority.
+
+
+The same [cleanup-attempt procedure](SupervisionCleanupAttempt.cs) is reused by the [control server](LinuxEmptyObservationControlServer.cs) for its existing optional coverage/checkpoint closes and reply-gate disposal, by the [listener](LinuxControlListener.cs) for its ordered admission-drain and local handle closes, and by the [run workspace](LinuxRunWorkspace.cs) for its original reverse handle cleanup. Each call retains its original null condition, stage label, failure recorder and final settlement check. These shared catches exclude the same three fatal exception classes; they do not broaden the narrower workspace translation policies, suppress recorder failures, add waits or grant completion authority.
+
+### Bounded directory scans
+
+[`SupervisionDirectoryRead`](SupervisionDirectoryRead.cs) shares the original block-reading and unique-name
+collection used by [report discovery](LinuxProducerArtifactCustody.cs) and the
+[retained report inventory](LinuxRetainedReportSet.cs). Each caller still opens its own fresh directory
+description, checks its actual metadata, and performs its original final identity and name rechecks.
+The internal `ReadActual` entry borrows that descriptor and its existing buffer. It neither opens nor
+closes a handle, and it advances the supplied description's directory position; reuse a separately
+opened description for a new complete scan.
+
+The shared procedure invokes the original pre-read check, consumes one read-attempt reservation,
+performs the actual getdents read, then invokes the original post-read check before interpreting EOF
+or decoding names with the strict [directory-block grammar](LinuxProtectedDeployment.cs). Both
+discovery and retention preserve their existing read-attempt limit, including the EOF attempt.
+Unique-name bounds apply across all blocks. Retention also supplies its original exact-inventory
+predicate, checked immediately after each unique name is reserved. Unknown or duplicate names reject
+before any next read. Empty expected inventories still require actual EOF.
+
+The callback-based `Read` overload exposes this synchronous procedure for focused tests and fixed
+native bindings only. It selects no path and grants no workspace, report custody, runtime admission or
+authority. Read, check, and parser exceptions propagate unchanged; only the original name/budget
+violations use the caller's fixed exception factory. No partial inventory is returned, and no retry,
+new token, cancellation proxy or timer is introduced. The
+[procedure controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionDirectoryReadTests.cs)
+use detached blocks to verify cross-block duplication, exact membership, callback ordering, EOF and
+failure preservation. The separate [native controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionDirectoryReadNativeTests.cs)
+use actual unprivileged Linux descriptors, including an ordinary-file ENOTDIR rejection; they establish
+filesystem behavior only and do not replace the genuine protected consumer controls.
+
+### Producer report discovery
+
+[`LinuxProducerReportDiscovery`](LinuxProducerReportDiscovery.cs) is the bounded descriptor-relative walk used by
+[`LinuxProducerArtifactCustody`](LinuxProducerArtifactCustody.cs) only after its real producer readiness, owner,
+accounts and selected-results checks. It borrows that selected root descriptor, expected UID/GID, original deadline
+and cancellation token, and returns sorted relative report paths as data. It opens no root from a caller path, retains
+no descriptor after returning, and grants no report custody or acceptance authority.
+
+The walk keeps mandatory `openat2` resolution with no fallback, metadata and named-entry rechecks, the 4,096-node
+and 32-component limits, canonical `coverage.cobertura.xml` names, 64-report and 1 MiB per-file limits, and the
+original aggregate-byte and cancellation checks. Reports must be actual regular files; links, special files,
+unexpected names and empty nested directories reject. The [root-native discovery controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerReportDiscoveryNativeTests.cs)
+use an exclusive `/run` fixture with actual descriptors and subject-owned entries. They test filesystem discovery
+only; skipped non-Linux runs are not native evidence and do not stand in for an authentic producer run.
+
+### Bounded descriptor reads
+
+[`SupervisionBoundedFileRead`](SupervisionBoundedFileRead.cs) shares the identical byte-reading loop from
+[process sampling](LinuxProcessIdentity.cs) and [audited DCP inspection](LinuxApplicationDcpIdentity.cs).
+Each native owner still opens and authenticates its own procfs/cgroup descriptor and performs the same
+before/after identity and metadata checks. The internal procedure borrows an already-open descriptor,
+reads positionally from offset zero in at most 4096-byte chunks, and returns only after actual EOF. It
+allocates the original maximum plus one byte so a file exactly at the ceiling succeeds only after the
+extra-byte probe returns EOF; one excess byte uses the caller's original fixed exception. An empty file
+still requires a checked read. No pathname is chosen, descriptor acquired or closed, stream position
+changed, retry added, or process identity established by the returned data.
+
+The original cancellation token is checked immediately before and after every read, including EOF;
+native I/O and cancellation exceptions retain their types. Missing arguments and an invalid maximum
+reject before I/O. Callers keep their existing fixed maximums and rejection factories. The
+[owned-file procedure controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionBoundedFileReadTests.cs)
+verify exact boundaries across read blocks, binary bytes, repeatable positional reads, excess-byte
+rejection, cancellation before I/O and handle ownership. Those file tests grant no protected runtime or
+root admission and do not replace the [genuine consumer controls](../../tests/evidencehost-consumer/README.md).
+
+### Ordered diagnostic record writes
+
+[`SupervisionRecordWrite`](SupervisionRecordWrite.cs) shares the literal record/LF/flush sequence used by
+the private N04, N09, N11 and N16 failure projections and three N08/N09 cancellation fallback
+diagnostic writes in
+[the qualified observation owner](LinuxEmptyObservationExecution.Qualification.cs). The owner still
+constructs and bounds the records, opens and closes its original stderr stream, and runs every original
+identity, cancellation and deadline check at the same position around the I/O. Attempt flags, exception
+filters and failure recording stay in the owner. The procedure accepts a borrowed stream and already
+bounded byte memories, writes each record followed by one LF, then flushes once. The original token is
+passed unchanged to every operation; no additional cancellation check or successful-evidence claim is
+introduced. In particular, a stream that ignores cancellation stays owned until its actual write joins.
+The stream remains open for its caller, and an I/O failure stops all later writes and flushes.
+
+[Procedure tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionRecordWriteTests.cs)
+use an actual temporary file and controlled streams to verify binary framing, ordering, token identity,
+all write/flush failure positions and ignored-cancellation joins. These are stream procedure controls;
+they neither issue native identities nor qualify any diagnostic bytes as protected evidence. The
+[original worker controls](../../.github/issue779-checkpoint1/README.md) still require their genuine
+Linux execution, retained artifacts and unchanged source-owned validators.
+
+The application workspace uses the same [bounded directory read procedure](SupervisionDirectoryRead.cs)
+when checking its sealed bundle inventory. It still opens and authenticates its own fresh directory
+descriptor, retains the original node ceiling and cancellation checks, and compares the returned names
+with the compiled inventory. The procedure only reads the borrowed descriptor; it cannot establish
+application ownership, bundle custody or readiness.
+
+The cgroup event reader also uses the [bounded descriptor reader](SupervisionBoundedFileRead.cs).
+Its original 1 KiB event ceiling leaves a 1,025-byte buffer, so the shared reader's 4 KiB per-read
+ceiling does not alter its native read sizes. The same original token is checked before and after
+every read, including EOF. Retained cgroup filesystem, inode/name and event-schema checks remain
+with the caller; returned bytes cannot establish an empty group or process settlement.
+
+### Private native owner reference-denial checks
+
+The [C3 owner guard fixture](../../.github/issue779-checkpoint4/measurement/README.md#genuine-owner-reference-denial-controls)
+uses the genuine live run holders after worker startup to reject 26 fixed missing-reference calls.
+Each selected method rejects before mutable state or native work. The normal consumer then continues
+through its unchanged server, process, artifact and cleanup checks. This provides an adjacent valid
+path without manufacturing a native capability. The closed diagnostic event is mandatory for the
+current source's native measurement; portable parser checks and compile-boundary tests cannot stand
+in for that Linux execution. No listener failure latch, custody claim, production budget, registration
+or accepted proof is changed. The private implementation is absent from ordinary images.
+
+The [protected deployment node](LinuxProtectedDeployment.cs) also borrows the same directory read
+procedure for its fresh getdents descriptor. The original directory/type guard, initial and final
+metadata/name rechecks, 32 KiB buffer, total node ceiling and ordinal read-only inventory remain with
+the owner. It checks the original input token and deadline before every native read, including EOF,
+and again before the final recheck. This caller has no post-read callback or read-attempt ceiling;
+using the shared procedure adds neither. No descriptor is acquired, released or authenticated by
+the procedure, and returned names cannot establish deployment custody.
+
+The [root node controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProtectedNodeNativeTests.cs)
+exercise type-sensitive operations through actual retained native file and directory nodes: a file
+cannot enumerate names, a directory cannot supply payload bytes or copy into a caller-owned
+file, and invalid counted-read limits reject while the retained file remains readable and unchanged.
+The failed directory copy leaves the actual destination empty and open for its caller. These tests
+require Linux x64 root; other-platform skips establish no native filesystem or consumer acceptance.
+
+The [worker holder](LinuxWorkerProcess.cs) and [control server](LinuxEmptyObservationControlServer.cs)
+use private `MatchesOriginalReferences` predicates for their repeated retained-reference comparisons.
+Each predicate performs the same ordered reference-equality checks, with no native work, ownership
+construction, exception translation or mutable state. Callers keep their original qualification, token,
+state and live identity gates before and after that comparison. The existing
+[genuine owner reference-denial controls](#private-native-owner-reference-denial-checks) reject missing
+references through these same native holders; detached matching data cannot adopt another holder or
+establish readiness, custody or successful cleanup.
+
+The [DCP identity holder](LinuxApplicationDcpIdentity.cs) shares one bounded native parent-walk loop
+between initial nearest-ancestor selection and repeated validation against its retained selected DCP.
+Validation keeps the original empty walk when the peer is that same DCP process; otherwise its target
+set contains only the retained DCP PID. Both callers preserve the 16-link ceiling, original token,
+procfs identity and executable checks, cycle rejection, and immediate retention of each acquired proc
+candidate and parent identity. Their existing final sampling and reverse cleanup stay with the caller.
+An observed parent PID or a returned walk cannot construct a process identity or establish readiness.
+
+The [NSS buffer procedure](LinuxNssBufferProcedure.cs) owns only the fixed 1 KiB through 64 KiB
+doubling sequence for one synchronous lookup. Its callback still performs the actual libc call and
+parses only a successful non-null result while the exact buffer is pinned. Only Linux `ERANGE`
+(`34`) retries; other codes retain the existing fixed NSS failure, and code-zero/null remains absence.
+The user/group callers retain generated-name encoding, native user/group selection, member checks,
+and original parse order. This helper owns no account, platform check, cancellation token or authority;
+its tests use ordinary byte arrays and cannot establish an NSS lookup or account identity.
+
+### Root-custody directory inventory
+
+The privately issued `LinuxRunWorkspace.RootCustody` holder reuses
+[`SupervisionDirectoryRead`](SupervisionDirectoryRead.cs) for its bounded native
+inventory procedure. The holder still opens a fresh file description for every
+pass and retains the original metadata, name, owner and cancellation checks.
+Its original 4 KiB buffer and four-name ceiling remain fixed. Inventory-read
+classification runs before every syscall, including EOF; inventory-decode
+classification runs only after a nonempty native block. Strict decoding,
+cross-block duplicate rejection and ordinal ordering are shared with the other
+retained-directory readers. The procedure creates no directory or custody
+holder and supplies no account-release or admission authority. Do not move the
+holder's final metadata/name checks into a detached data callback.
+
+### N04/N07 checkpoint metadata predicates
+
+[`LinuxCheckpointMetadataPolicy`](LinuxCheckpointMetadataPolicy.cs) centralizes only the detached
+root-owned directory/socket metadata predicate and copied peer-credential comparisons used by the
+fixed [N04](LinuxN04CheckpointOwner.cs) and [N07](LinuxN07CheckpointOwner.cs) owners. The callers
+still perform `getsockopt` first, retain the original peer PID pin, and throw their own fixed
+checkpoint rejection. Native descriptor operations, ordering, locks and lifecycle remain in each
+owner. Directory length and link count are intentionally ignored; socket metadata keeps the original
+single-link, empty-object, exact sealed mode or unsealed forbidden-bit mask. The
+[policy tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCheckpointMetadataPolicyTests.cs)
+use detached values only; passing them does not prove a native peer, filesystem object, or owner.
+
+Root-custody canonical-file reads also use
+[`SupervisionDeclaredFileRead`](SupervisionDeclaredFileRead.cs). The holder
+retains its original length bound, 4 KiB reads, per-read owner/cancellation
+checks, declared-end byte probe, whole-byte SHA256 comparison and final tree
+recheck. A 4 KiB scratch buffer copies each actual segment into the bounded
+result array; partial data never escapes if reading, hashing or rechecking
+fails. This procedure borrows the original descriptor and cannot acquire or
+release custody.
+
+### Producer seal-tree limits
+
+[`LinuxProducerSealLimits`](LinuxProducerSealLimits.cs) is a data-only decision policy for the existing seal traversal. It keeps the pre-add
+node-count check distinct from the completed-collection count check, accepts depth 32 but rejects 33, sums only
+regular-file lengths, accepts an aggregate exactly at `MaximumTreeBytes`, and rejects the next byte before any
+narrowing cast. `CollectMutableTrees` and `CollectChildren` must continue to obtain names, metadata, and lengths
+from their real retained descriptors and emit the same closed `node-count`, `depth`, or `aggregate-bytes`
+diagnostic before the existing invalid-workspace exception. The policy does not create or verify a workspace and
+its [tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerSealLimitsTests.cs) are decision-only; native ownership, descriptor-relative traversal, type/metadata checks, cancellation,
+entry sealing, and quarantine stay in the production caller. Keep this separate from `LinuxProducerCopyBudget`:
+copy-time source reservations and seal-time observations protect different phases of the same lifecycle.
+
+### Application bundle source audit
+
+[`LinuxApplicationBundleAudit`](LinuxApplicationBundleAudit.cs) groups the descriptor-based source inventory
+and its initial exact comparison against the selected application file rows. The application workspace
+continues to authenticate the actual owner, accounts and compiled definition, open the protected tool probe
+and source root, and retain every acquired child in its own quarantine list. The utility borrows that root,
+existing inventory maps, retained-node list, original deadline and token. It never closes those descriptors or
+issues workspace, admission or account-release authority. A child is retained before name, depth, selection,
+metadata and hash checks, so a failed walk cannot lose the original descriptor.
+
+`Inventory` preserves the existing depth, node-count, path, owner, mode, link, length and hash checks.
+`BuildRows` is shared by the initial audit and later workspace rechecks; it reads original retained metadata
+and actual file hashes. The [root-native controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxApplicationBundleAuditNativeTests.cs)
+use real root-owned Linux files to test selected bytes, changed bytes, unexpected or unsafe entries,
+cancellation and depth boundaries. They exercise this inventory utility without constructing an application
+owner or proving application/Trusted acceptance. A skipped non-Linux run provides no native proof. The separate C3 collector pass preserves the original
+43-row root and 44-row supplementary TRXs, requires all six fixed bundle-test names with zero skipped or
+failed rows, and lets the pinned standard collector merge its real report. The same fixed collector pass
+also requires all eleven [report-discovery cases](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerReportDiscoveryNativeTests.cs),
+including exact parameterized names, for seventeen rows total. A six-row-only predecessor cannot satisfy
+this measurement. Its exact TRX hash and counts
+travel in `application_bundle_tests`; the downstream native-measurement test revalidates those bytes.
+Only three bounded private retention leaves are added; product byte quotas and the 96 MiB retention total
+remain unchanged.

@@ -2,7 +2,7 @@
 
 `ForgeTrust.AppSurface.Evidence.Aspire` provides the separate, consumer-owned `EvidenceHostBootstrap` lifecycle for resource-backed and browser E2E evidence. It keeps test/evidence code out of the normal application `AppHost`: no application host discovers or invokes it automatically.
 
-Read the [EvidenceHost guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/evidencehost.md) first. `EvidenceAspireApplication.StartAsync(...)` can build and start an explicitly consumer-composed `DistributedApplication` and bind a named Aspire health condition to a declared evidence resource. The package never discovers an application, provisions cloud resources, creates a Docker sandbox, attests an artifact, or operates a dashboard.
+Read the [EvidenceHost guide](../../start-here/evidencehost.md) first. The package never discovers an application, provisions cloud resources, creates a Docker sandbox, attests an artifact, or operates a dashboard. Aspire execution uses the protected Linux worker and shared admission/lifecycle path. Its support limits and migration order are described below.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
@@ -13,34 +13,112 @@ check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/
 compatibility guidance, and readiness.
 <!-- appsurface-release-guidance: end -->
 
-## Explicit bootstrap
+## Explicit supervised bootstrap
+
+The factory registration below describes the API shape for a future accepted resource lane. It currently
+fails with `ASEVD407` before factory invocation: no restricted Aspire child or resource capability map has
+been enrolled in the production catalogue. Private compiled application controls are recorded in the [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md). A public resource-bearing profile also fails Observation admission with `ASEVD406`. The internal [compiled root-owned application path](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#observation-with-a-compiled-root-owned-application) additionally requires the actual authenticated v2 supervisor; public metadata and an armed-interface implementation cannot enable it. See the
+[EvidenceHost execution guide](../../start-here/evidencehost.md) for the dependency-free Observation candidate
+and the [migration guide](../../docs/evidence/evidencehost-migration.md) for rejected legacy calls. This example
+is not an executable quickstart for resource-backed work.
 
 ```csharp
 using ForgeTrust.AppSurface.Evidence.Aspire;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 
 await using var host = EvidenceHostBootstrap.Create(plan, registration =>
 {
-    registration.AddResource(evidenceApplication.CreateHealthReadiness("postgres", "postgres"));
-    registration.AddProducer(browserE2eProducer);
-    registration.SetEnvelopeVerifier(githubActionsEnvelopeVerifier);
+    registration.AddAspireHealthResource(resourceDeclaration, "postgres");
+    registration.AddProducer(producerDeclaration, browserE2eProducer);
+    registration.SetApplicationFactory(CreateConsumerBuilder);
 });
 
-var manifest = await host.RunAsync();
+var manifest = await host.RunAsync(
+    new EvidenceExecutionRequest(EvidenceExecutionMode.Observation, protectedControlSocket),
+    cancellationToken);
 ```
 
-The plan decides which registrations are required. `EvidenceHostBootstrap` rejects missing resources/producers, waits for declared readiness in dependency order, applies resource and producer deadlines, catches producer failures, closes the manifest, and cleans owned disposable registrations in reverse registration order. It executes exactly once.
+The protected launcher authenticates the worker before the host invokes registration or verifier callbacks. Every resource and producer is paired with its complete protected declaration; extra, missing, or changed declarations fail admission. Configuration runs through the shared bounded lifecycle. Builder creation, build, and start require the separately restricted Aspire child; the current production path rejects them before invocation. The internal test lane verifies resource readiness in dependency order, producer deadlines, joined asynchronous work, artifact checks after cleanup and bounded manifest collection. Each host permits one execution attempt, claimed before authentication. Authentication or admission failure consumes the attempt even if `State` remains `Created`; create a new host for another run. A null request and cancellation before acquiring execution ownership leave the attempt available.
 
-After execution cancellation or deadline expiry, `EvidenceHostOptions.ProducerCleanupTimeout` gives producers a separate ten-second grace period to stop their children before registrations are disposed. Set a positive value up to one minute when a producer needs a different cleanup bound. This grace never extends successful execution or changes a timed-out result. If any producer remains active after the grace period, cleanup fails and the host preserves registrations rather than deleting a workspace still in use. The consumer then owns recovery of those resources after the producer has actually stopped.
-
-Use a separate, explicit app lease when resources must be started for this evidence run:
+The old `RunAsync(bool observationOnly = false)` overload remains for source compatibility but always fails before configuration: omitted/false returns `ASEVD401`; true returns `ASEVD402` because it has no authenticated supervisor. `EvidenceAspireApplication.StartAsync(IDistributedApplicationBuilder)` returns `ASEVD400` before building a preconfigured builder. A deferred factory can be registered with the host, but the current production lane rejects its execution:
 
 ```csharp
-var builder = DistributedApplication.CreateBuilder(args);
-// Consumer-owned AddPostgres, projects, fixtures, and resource configuration go here.
-await using var evidenceApplication = await EvidenceAspireApplication.StartAsync(builder, cancellationToken);
+using Aspire.Hosting;
+
+static IDistributedApplicationBuilder CreateConsumerBuilder()
+{
+    var builder = DistributedApplication.CreateBuilder(args: []);
+    // Add consumer-owned resources and configuration here.
+    return builder;
+}
 ```
 
-Register a readiness adapter with the EvidenceHost. `CreateHealthReadiness(...)` waits for native Aspire health alone. When that condition is insufficient and a declared HTTP status must also pass, use [`CreateHttpReadiness(...)`](#http-readiness-adapter). The adapter owns the probe clients it creates; the existing `EvidenceAspireApplication` remains the sole owner of the `DistributedApplication`, and the normal development AppHost remains unaware of the evidence run.
+The restricted resource path selects an immutable definition from the [closed application catalogue](../ForgeTrust.AppSurface.Evidence.Planner/README.md#internal-closed-application-catalogue-prerequisite). It retains a pending local application lease before application-start I/O, checks complete registrations, then asks the authenticated root broker to start the exact application ID and entry digest. It never executes a public builder factory. The production catalogue and acceptance registry remain empty, so matching metadata cannot enable this path.
+
+`AddAspireHealthResource` supplies declaration and resource-name metadata for that selected definition. Root readiness adapters are captured before start and execute only inside their actual bounded Resource stage. Each resource has one attempt; the adapter links cancellation to that stage and tracks the entire root request even if its returned task is ignored. A public call without the internal stage binding is rejected. Readiness requires the typed root receipt for the prior application lease, resource, UID and cgroup; a caller notification or arbitrary health callback supplies no authority. Direct `AddResource(declaration, probe)` remains available for metadata and the synthetic lifecycle tests but cannot substitute for a closed restricted adapter.
+
+Restricted producers use [the shared coverage factory](../ForgeTrust.AppSurface.Evidence.Coverage/README.md#fixed-restricted-coverage-registration):
+
+```csharp
+using ForgeTrust.AppSurface.Evidence.Coverage;
+
+registration.AddProducer(producerDeclaration,
+    EvidenceRestrictedCoverageProducerFactory.Create(producerDeclaration));
+```
+
+The factory returns inspectable sealed metadata. The host captures and validates those exact references against complete selected declarations before startup. Public resource and producer maps are read-only views; later registrations cannot replace a captured adapter. Public same-declaration producer substitutes and legacy id-only registrations fail the restricted audit. Every actual Producer callback binds the same protected writer, admitted plan, captured diff bytes, shared process-output quota and lifecycle to the factory's one-attempt internal lease. Neither matching metadata nor a local artifact writer can issue it.
+
+Root stop/wait must establish physical exit of application and producer groups and completion of output pumps before local disposal or artifact collection. Local application disposal checks the lifecycle's joined pre-disposal phase; it adds no independent grace or timer. `OwnWorkStopped` is a final predicate that includes registered disposer tasks and must not be checked from inside one of those same tasks. Premature local disposal stays failed on retry. The [shared lifecycle contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) describes stopping, cleanup and collection reserves. Startup failure follows that same stop/join path before disposal.
+
+Observation accepts only a protected dependency-free targeted profile and issues informational evidence. The registered verifier API and envelope-shaped values cannot enable Trusted runtime admission until a full protected consumer acceptance proof exists; current production context deliberately rejects Trusted with `ASEVD407`. The control-channel request alone grants no authority. The protected [C# supervisor](../ForgeTrust.AppSurface.Evidence.Supervision/README.md) now owns the runtime. CLI and SDK application checkpoints passed their recorded Linux revision; final [cutover and packaged-consumer acceptance](../../docs/evidence/issue779-csharp-runtime-cutover.md) remain separately tracked. macOS, Windows, direct in-process execution, and unrelated long-lived host processes are unsupported.
+
+## Public extension points
+
+| Type | Consumer responsibility |
+| --- | --- |
+| `IEvidenceResourceReadiness` | Bind a declared resource id to an Aspire health/readiness condition. Never report ready merely because a container was created. |
+| `IEvidenceProducer` | Perform one typed coverage, API, or browser E2E assertion and return only its declared assertion ids. |
+| `IEvidenceExecutionEnvelopeVerifier` | Legacy structural callback shape; it does not independently admit Trusted execution. Protected admission owns verifier invocation. |
+| `EvidenceHostRegistration` | Register each complete resource/producer declaration, optional deferred application factory, and verifier directly in code. Duplicate and ambient registration are rejected. |
+| `EvidenceHostOptions` | Retained for source compatibility; it cannot grant execution admission or change protected budgets. |
+
+For release scope, an accepted v1 envelope is represented as `ValidatedNotAttested`; that is intentionally weaker than independent artifact attestation and must be described honestly downstream. Runtime support requires the independently armed protected Linux C# supervisor; package restore alone supplies no authority.
+
+## Pitfalls
+
+- Do not add the EvidenceHost to a normal AppHost or production startup path.
+- Do not use a started process as readiness. Wait for the resource condition the producer actually needs.
+- Do not swallow cleanup errors. They invalidate the collected evidence rather than leaving a passing claim behind.
+- Do not use reflection or assembly scanning to find producers; explicit registration is the trust boundary.
+
+Read next: [contracts](../ForgeTrust.AppSurface.Evidence.Contracts/README.md), [planner](../ForgeTrust.AppSurface.Evidence.Planner/README.md), and the [E2E recipe](../../guides/evidencehost-cookbook.md#resource-backed-browser-e2e).
+
+## Shared C# application owner
+
+The protected SDK entry uses the same [C# application owner](../ForgeTrust.AppSurface.Evidence.Supervision/application-execution.md)
+and control protocol as the CLI adapter. Consumer configuration supplies complete registration metadata;
+only a matching compiled catalogue entry can select AppHost/DCP/resource execution. Calling the public
+application factory API still cannot enroll an application or grant a protected process capability.
+
+The same deployed CLI image can host the SDK adapter in the private checkpoint-three parity image.
+Its worker invokes the public `EvidenceHostBootstrap.RunAsync(EvidenceExecutionRequest, CancellationToken)`
+path, including tracked start/readiness stages, the shared coverage registration, joined local disposal
+and protected artifact verification. Root containment and account/storage closure remain in
+`Evidence.Supervision`; that core has no dependency on Aspire.
+
+Aspire 13.4.4 remains pinned. The central MessagePack pin uses the compatible 2.5.303 patch for
+[GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h), with matching content-hash
+locks and normal NuGet auditing. This dependency update does not change application capabilities,
+registration policy or admission.
+
+Compiled v2 application collection uses the [shared protected terminal layout](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#shared-protected-terminal-file-layout)
+for the canonical plan, manifest and summary before original root handles close and worker completion is
+requested. V1 SDK empty-Observation collection preserves its existing `manifest.json` filename. Neither layout
+turns informational Observation into a protected gate claim.
+
+## Producer cleanup grace
+
+`EvidenceHostOptions.ProducerCleanupTimeout` defaults to ten seconds and accepts positive values up to one minute. After the original caller or producer deadline cancels work, the host waits this additional bounded grace for producer callbacks to settle before disposing their owned registrations. If a producer ignores cancellation past the grace, cleanup is incomplete and the active producer, resources, and application lease remain undisposed; callers should arrange cooperative cancellation and retry disposal after the work settles. This grace never replaces or extends the original run deadline.
 
 ## HTTP Readiness Adapter
 
@@ -65,67 +143,3 @@ The adapter starts one monotonic deadline for the wait, resolves the named endpo
 The adapter's disposal closes admission, cancels and drains already admitted waits including their per-wait client cleanup, then releases its registration with the existing application lease. Each health or HTTP adapter retains a separate registration; only the last adapter release stops and disposes the application. Disposing one adapter therefore leaves another adapter's admitted waits and probe clients intact. Dispose every adapter you create, including adapters that were never waited on. Repeated disposal of the final adapter and direct application disposal join the same application cleanup result, including failure. Do not dispose `EvidenceAspireApplication` directly while a readiness wait is active. The deadline remains cooperative: a transport that ignores cancellation and awaited cleanup may remain pending beyond the wait budget. This contract does not claim whole-host timeout terminalization or fold the separate [#859 cleanup coordination](https://github.com/forge-trust/AppSurface/issues/859) into this adapter.
 
 The canonical [EvidenceHost guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/evidencehost.md#aspire-http-readiness), [readiness cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#http-readiness-in-an-ordinary-aspire-test), [neutral probe reference](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md), and the existing lease's preparation record for [issue #778](https://github.com/forge-trust/AppSurface/issues/778) explain which layer owns startup, transport, and evidence policy.
-
-## Public extension points
-
-| Type | Consumer responsibility |
-| --- | --- |
-| `IEvidenceResourceReadiness` | Bind a declared resource id to an Aspire health/readiness condition. Never report ready merely because a container was created. |
-| `IEvidenceProducer` | Perform one typed coverage, API, or browser E2E assertion and return only its declared assertion ids. |
-| `IEvidenceExecutionEnvelopeVerifier` | Validate protected CI inputs without putting secret values into a plan or manifest. |
-| `EvidenceHostRegistration` | Register each resource, producer, and verifier directly in code. Duplicate and ambient registration are rejected. |
-| `EvidenceHostOptions` | Require an envelope for a targeted run when the consumer's policy needs it. |
-
-For release scope, an accepted v1 envelope is represented as `ValidatedNotAttested`; that is intentionally weaker than independent artifact attestation and must be described honestly downstream.
-
-## Pitfalls
-
-- Do not add the EvidenceHost to a normal AppHost or production startup path.
-- Do not use a started process as readiness. Wait for the resource condition the producer actually needs.
-- Do not swallow cleanup errors. They invalidate the collected evidence rather than leaving a passing claim behind.
-- Do not use reflection or assembly scanning to find producers; explicit registration is the trust boundary.
-
-## Owned workspaces and command budgets
-
-Use `EvidenceWorkspace.Create(existingParent, options)` for temporary fixtures and installed tools. It allocates a fresh random child and removes only that child on `DisposeAsync`. Keep durable Evidence artifacts outside scratch. The default `EvidenceWorkspaceOptions` allow 512 MiB of logical files, require 256 MiB of free volume space, and bound inspection to 100,000 entries and depth 64. `CheckBudget()` throws `EvidenceWorkspaceBudgetException` on exhausted byte limits and rejects unsupported links or inventory traversal. The exception exposes observed/allowed bytes; it does not grant permission to clean caller-owned files.
-
-Cleanup clears a file's read-only attribute only after verifying the owned root and rejecting links in its bounded inventory. This supports Git objects and installed packages on Windows. Caller-owned files outside that fresh child retain their bytes and attributes; a read-only caller file never grants cleanup authority.
-
-`EvidenceCommandRunner.RunAsync` launches explicit argv with an absolute working directory, optional environment overrides and a positive timeout of at most 4,294,967,294 milliseconds (the cancellation timer limit). Unsupported bounds are rejected before starting a process. Combined stdout/stderr capture defaults to 1 MiB (maximum 256 MiB). `EvidenceCommandResult.OutputTruncated` must prevent assertions that require complete output. Timeout and cancellation use the operating system's process-tree termination through .NET; stable `EvidenceCommandException.Code` values identify start, timeout, budget, capture, drain or cleanup failure without echoing argv, output or environment values. Commands must run in the foreground and keep their children within that lifetime. Deliberately detached daemons are unsupported: once a parent has exited, portable process-tree termination cannot guarantee recovery of escaped descendants. Inherited pipes that remain open fail the bounded drain and cannot produce a complete claim.
-
-Bind a workspace check to the request to enforce capacity while work runs:
-
-```csharp
-await using var workspace = EvidenceWorkspace.Create(scratchParent);
-var request = new EvidenceCommandRequest(dotnetPath, ["--version"], workspace.RootPath, TimeSpan.FromSeconds(30))
-{
-    CheckBudget = _ => { workspace.CheckBudget(); return ValueTask.CompletedTask; },
-};
-var result = await new EvidenceCommandRunner().RunAsync(request, cancellationToken);
-```
-
-The runner checks before launch and samples while the process runs with a 250 ms delay between completed checks. Traversal itself takes time; sampling is not a kernel disk quota. A producer must own its workspace until all children stop, implement `IAsyncDisposable`, and let EvidenceHost observe cleanup failure. `GetPath` permits only workspace-relative destinations and rejects existing linked ancestors. Ownership markers and retained metadata detect basic replacement. Linux x64 and ARM64 retain a directory descriptor and compare device/inode identities because its reported creation timestamp can change when children change. Windows retains a no-follow directory handle and compares the volume serial number and all 128 file-ID bits using [FileIdInfo](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_info); timestamps and copied marker bytes cannot authorize a different directory object. The internal `EvidenceWorkspaceWindowsIdentity` helper opens existing directories with metadata access, read/write/delete sharing and extended drive/UNC paths; it rejects reparse points, nondirectories and unavailable identity instead of falling back to timestamps. Other platforms retain creation timestamps. Native handles close after successful owned cleanup or failed admission. A rejected cleanup retains its handle so the original can be restored and retried; callers must retain the lease while resolving that failure. Windows can keep an externally deleted directory pending until its handle closes, so replacement tests rename the original before recreating its path. These helpers require trusted workspace writers and are not an adversarial filesystem sandbox. Do not concurrently rename or replace their roots.
-
-Budget inventory can overlap a child deleting workspace descendants. On Windows, the internal `EvidenceWorkspace.MeasureWithRetry` repeats a complete measurement at most three times, with 10 ms between attempts, only for exact access-denied (`0x80070005`), sharing-violation (`0x80070020`) and delete-pending (`0x8007012F`) HRESULTs from filesystem access. Each attempt validates the owned root first and validates it again after a successful measurement. Partial results are discarded; a persistent failure still fails the check. Ownership validation, inventory bounds, byte limits and free-space checks are never retried or waived. Friend assemblies exercise this boundary with explicit measurement and validation delegates; production supplies the actual bounded inventory and operating system. Generic command budget failures retain the stable `budget_check_failed` code and report only a fixed callback phase (`before_start`, `during_execution` or `after_execution`) and numeric HRESULT. Original exception text, custom type names and inner exceptions are not retained. The [packed storage journey](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) includes that safe message in its failure diagnostic.
-
-`EvidenceCommandProducer` adapts a successful command to an explicitly registered assertion evaluator. Nonzero exit, truncated output, undeclared/empty assertions, timeout and budget failure cannot produce successful assertions. Domain checks remain the evaluator's responsibility: exit zero alone does not prove test execution or coverage. Diagnostics stay bounded and secret-safe, but captured output may contain secrets; review/redact it before writing declared artifacts. See the [native validation recipe](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) for independent package, file and report assertions.
-
-## Verified coverage fan-in
-
-`EvidenceCoverageFanIn.VerifyAsync(request, cancellationToken)` consumes the explicit capture, report and gate artifacts from the [coverage fan-in workflow](../../guides/coverage-fan-in.md). `EvidenceCoverageFanInRequest` requires trusted expected commit, tree, SDK, configuration, workflow run/attempt, solution test-project inventory, primary capture, three native capture directories, composed reports, both gate reports and expected diff base. Inputs must come from a trusted CI channel; supplying a matching self-authored request is not authentication.
-
-The verifier validates bounded manifest/XML inventories and checksums, rejects duplicate JSON object properties, verifies original collector normalization and full solution execution, and recomputes class/method coverage observations. Primary aggregate and composed patch gates keep their existing 95/85 thresholds, 0.5 tolerance and Codecov patch mode; measurable patch denominators must remain nonempty and cannot decrease. Gate results retain their independent primary measurement. `EvidenceCoverageFanInResult` exposes verified counters and manifest hashes; invalid evidence raises `InvalidDataException` and cannot close an obligation. The native [acceptance tool](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#verified-native-coverage-fan-in) registers this check as an explicit producer.
-
-Read next: [Evidence contracts](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), [planner](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md), and the [E2E recipe](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#resource-backed-browser-e2e).
-
-If a readiness wait fails and disposing its owned probe client also fails nonfatally, the original readiness exception stays primary. Only the fixed `Data["AppSurface.Readiness.CleanupFailure"] = ReadinessFailureCategory.CleanupFailure` marker is added on a best-effort basis; no raw secondary exception is retained. A nonfatal client cleanup failure after an otherwise successful condition produces a safe `Cleanup` / `CleanupFailure` diagnostic. Fatal client cleanup or diagnostic-storage failures (`OutOfMemoryException`, `StackOverflowException`, `AccessViolationException`, or `AppDomainUnloadedException`) propagate unchanged after per-wait bookkeeping is restored, following the host's existing fatal-exception policy. Explicit adapter disposal still joins and reports the existing lease's original cleanup failure. See the [diagnostic contract](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md#readinessexception).
-
-During explicit HTTP adapter disposal, admitted waits and clients drain before application-registration release. If cancellation callbacks or registration cleanup contain a process-fatal failure, including inside a nested `AggregateException`, every disposal caller observes the same original fatal exception. Multiple nonfatal cleanup failures retain their aggregate result. This is adapter-local failure handling; it does not change the host-wide cleanup contract.
-
-The same nested-aggregate classification applies when a per-wait client is disposed or secondary diagnostic storage throws: an original fatal leaf takes precedence over ordinary readiness failures and safe cleanup summaries. The shared [neutral readiness diagnostic contract](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md#readinessexception) retains the adapter's existing fatal-type policy.
-
-The internal `EvidenceBoundedReadStream` shares cumulative read-size and cancellation enforcement between fan-in JSON and XML readers. It owns and disposes its input, supports synchronous and asynchronous reads, and rejects seeking or writing. File-size preflight alone is insufficient because a file may grow after inspection; each read rechecks the same limit. This helper is an internal verification seam, not an additional public API.
-
-Workspace admission tests use the internal `EvidenceWorkspace.CreateWithAdmissionHooksForTests` factory to inject a failure after fresh-root allocation or after retaining its identity, before marker creation. It executes the same creation and rollback path as `Create`; its callbacks never replace filesystem observations or cleanup decisions. Use this seam only in friend-assembly tests that verify the original exception, owned-empty-root cleanup, and preservation of unknown entries or partial markers. Application code uses `Create` and supplies no hooks.
-
-Fan-in JSON rejects duplicate property names at every object depth, including objects nested in arrays. Ambiguous policy, identity, receipt or gate fields cannot be accepted by choosing one occurrence. This applies to all untrusted JSON evidence parsed by the verifier.

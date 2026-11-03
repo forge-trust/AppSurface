@@ -105,7 +105,15 @@ public sealed class CoverageSolutionScriptTests
         var build = (YamlMappingNode)jobs.Children[new YamlScalarNode("build")];
         var dependencies = (YamlSequenceNode)build.Children[new YamlScalarNode("needs")];
         Assert.Equal(
-            new[] { "coverage-security-platform", "packed-durable-consumers" },
+            new[]
+            {
+                "worker-controls", "evidence-native-measurement", "account-creation", "account-rollback",
+                "packaged-producer", "worker-measurement-none", "worker-measurement-n04", "worker-measurement-n05",
+                "worker-measurement-n06", "worker-measurement-n07", "worker-measurement-n08", "worker-measurement-n09",
+                "worker-measurement-n10", "worker-measurement-n11", "worker-measurement-n12", "worker-measurement-n13",
+                "worker-measurement-n14", "worker-measurement-n15", "worker-measurement-n16",
+                "coverage-security-platform", "durable-postgresql-compatibility", "packed-durable-consumers"
+            },
             dependencies.Children.Cast<YamlScalarNode>().Select(node => node.Value));
         Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
         Assert.False(build.Children.ContainsKey(new YamlScalarNode("if")));
@@ -150,7 +158,13 @@ public sealed class CoverageSolutionScriptTests
         var coverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Run solution coverage and gate");
         Assert.Equal("solution-coverage", ((YamlScalarNode)coverage.Children[new YamlScalarNode("id")]).Value);
-        Assert.Equal("./scripts/coverage-solution.sh", ((YamlScalarNode)coverage.Children[new YamlScalarNode("run")]).Value!.Trim());
+        var command = ((YamlScalarNode)coverage.Children[new YamlScalarNode("run")]).Value!.Trim();
+        Assert.StartsWith("set -euo pipefail", command, StringComparison.Ordinal);
+        Assert.Contains("tests/evidencehost-consumer/test_execution_broker.py", command, StringComparison.Ordinal);
+        Assert.Contains("--command-timeout-seconds 4200 --", command, StringComparison.Ordinal);
+        Assert.Contains("EVIDENCEHOST_NATIVE_MEASUREMENT=1", command, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_FANIN_NATIVE=\"$COVERAGE_FANIN_NATIVE\"", command, StringComparison.Ordinal);
+        Assert.EndsWith("/usr/bin/bash ./scripts/coverage-solution.sh", command, StringComparison.Ordinal);
         Assert.False(coverage.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
         var environment = (YamlMappingNode)coverage.Children[new YamlScalarNode("env")];
         Assert.Equal("${{ runner.temp }}/coverage-native-inputs", ((YamlScalarNode)environment.Children[new YamlScalarNode("COVERAGE_FANIN_NATIVE")]).Value);

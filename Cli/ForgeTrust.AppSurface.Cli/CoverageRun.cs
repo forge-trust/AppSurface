@@ -17,6 +17,7 @@ using CliFx.Infrastructure;
 using CliWrap;
 using CliWrap.Exceptions;
 using CliCommand = CliWrap.Cli;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 #if EVIDENCE_COVERAGE_CORE
@@ -511,6 +512,7 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <param name="CoverageDriver">VSTest coverage integration selected once for the complete run.</param>
 /// <param name="RequireNonSandbox">Whether an enabled known sandbox environment marker fails the run before side effects.</param>
 /// <param name="ProducerDeadline">Optional monotonic first-party Evidence deadline; the caller's linked cancellation remains authoritative.</param>
+/// <param name="ProcessOutputQuota">Optional Evidence run-wide aggregate quota shared by all child processes, including discovery and merge.</param>
 internal sealed record CoverageRunRequest(
     string? SolutionPath,
     IReadOnlyList<string> TestProjects,
@@ -540,7 +542,8 @@ internal sealed record CoverageRunRequest(
     CoverageRunWatchdogMode WatchdogMode,
     CoverageRunDriver CoverageDriver,
     bool RequireNonSandbox,
-    CoverageProducerDeadline? ProducerDeadline = null)
+    CoverageProducerDeadline? ProducerDeadline = null,
+    EvidenceRunByteQuota? ProcessOutputQuota = null)
 {
     /// <summary>Gets current-invocation duplicate retention; no-clean preservation takes precedence.</summary>
     internal string ArtifactRetention { get; init; } = "managed";
@@ -878,8 +881,15 @@ internal sealed class CoverageRunWorkflow
                 .ToArray();
             CoverageRunOutputGuard.Validate(outputDirectory, resolution.SolutionDirectory, resolution.Projects);
             var collectorObservations = new List<CoverageArtifactSettingsResult>();
-            await CoverageRunDriverPreflight.ValidateAsync(request.CoverageDriver, request.Configuration, resolution, _processRunner, supervisor, supervisedCancellationToken,
-                request.TestArguments, (project, framework, json) => collectorObservations.Add(
+            await CoverageRunDriverPreflight.ValidateAsync(
+                request.CoverageDriver,
+                request.Configuration,
+                resolution,
+                _processRunner,
+                supervisor,
+                supervisedCancellationToken,
+                request.ProcessOutputQuota,
+                (project, framework, json) => collectorObservations.Add(
                     CoverageArtifactSettings.Observe(project, framework, json, request.Configuration, request.TestArguments)));
             await PrintDiscoveryAsync(runConsole, request, resolution, outputDirectory, schedulePlan);
             if (request.DryRun)
@@ -1028,7 +1038,8 @@ internal sealed class CoverageRunWorkflow
                             mergeDirectory,
                             operation.ReserveProcess(),
                             operation.ObserveBytes,
-                            supervisedCancellationToken);
+                            supervisedCancellationToken,
+                            request.ProcessOutputQuota);
                     }
                     catch (OperationCanceledException)
                     {
@@ -1289,7 +1300,7 @@ internal sealed class CoverageRunWorkflow
             try
             {
                 list = await _processRunner.RunAsync(
-                    new CoverageRunProcessRequest("dotnet", ["sln", solutionPath, "list"], solutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
+                    new CoverageRunProcessRequest("dotnet", ["sln", solutionPath, "list"], solutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess(), request.ProcessOutputQuota),
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -1869,7 +1880,7 @@ internal sealed class CoverageRunWorkflow
             try
             {
                 result = await _processRunner.RunAsync(
-                    new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
+                    new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess(), request.ProcessOutputQuota),
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -1915,7 +1926,7 @@ internal sealed class CoverageRunWorkflow
                 try
                 {
                     result = await _processRunner.RunAsync(
-                        new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
+                        new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess(), request.ProcessOutputQuota),
                         cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -2117,7 +2128,7 @@ internal sealed class CoverageRunWorkflow
                 state.OwnedResultsDirectory = driverInvocation.RawResultsDirectory;
                 state.HangPlan = hangPlan;
                 processResult = await _processRunner.RunAsync(
-                    new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, logFile, operation.ObserveBytes, operation.ReserveProcess()),
+                    new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, logFile, operation.ObserveBytes, operation.ReserveProcess(), request.ProcessOutputQuota),
                     cancellationToken);
                 InspectHangDiagnostics(state, outputDirectory);
                 operation.Transition("finalizing");
@@ -3541,13 +3552,21 @@ internal interface ICoverageRunProcessRunner
 /// <param name="OutputFile">Optional streamed log destination.</param>
 /// <param name="OutputObserver">Non-blocking positive-byte progress observer.</param>
 /// <param name="Lease">Supervisor-owned root-process lease.</param>
+/// <param name="ProcessOutputQuota">Optional Evidence run-wide quota shared by every child command in that invocation.</param>
+/// <param name="RawOutputMirror">Optional caller-owned stream that receives and flushes every actual stdout/stderr read before quota admission or retention.</param>
+/// <remarks>
+/// The mirror combines stdout and stderr in the order their pumps acquire the shared write gate; it has no channel framing.
+/// The process runner never closes the mirror. Supply it only when its destination is already protected for raw process output.
+/// </remarks>
 internal sealed record CoverageRunProcessRequest(
     string FileName,
     IReadOnlyList<string> Arguments,
     string WorkingDirectory,
     string? OutputFile,
     Action<int>? OutputObserver,
-    CoverageRunProcessLease Lease);
+    CoverageRunProcessLease Lease,
+    EvidenceRunByteQuota? ProcessOutputQuota = null,
+    Stream? RawOutputMirror = null);
 
 /// <summary>
 /// Result of running a coverage workflow process.
@@ -3581,17 +3600,38 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CancellationToken cancellationToken)
     {
         var processExited = false;
+        var quota = request.ProcessOutputQuota;
+        using var processCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
         {
+            if (quota?.IsFailed == true)
+            {
+                throw CreateOutputQuotaException();
+            }
+
             var result = request.OutputFile is null
-                ? await RunBufferedAsync(request, cancellationToken)
-                : await RunStreamingAsync(request, cancellationToken);
+                ? await RunBufferedAsync(request, quota, processCancellation, processCancellation.Token, cancellationToken)
+                : await RunStreamingAsync(request, quota, processCancellation, processCancellation.Token, cancellationToken);
+            if (quota?.IsFailed == true)
+            {
+                throw CreateOutputQuotaException();
+            }
+
             processExited = true;
             return result;
         }
         catch (OperationCanceledException)
         {
+            if (quota?.IsFailed == true)
+            {
+                throw CreateOutputQuotaException();
+            }
+
             throw;
+        }
+        catch (Exception) when (quota?.IsFailed == true)
+        {
+            throw CreateOutputQuotaException();
         }
         catch (Exception ex) when (IsCommandLaunchFailure(ex))
         {
@@ -3618,16 +3658,24 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
 
     private static async Task<CoverageRunProcessResult> RunBufferedAsync(
         CoverageRunProcessRequest request,
-        CancellationToken cancellationToken)
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation,
+        CancellationToken cancellationToken,
+        CancellationToken mirrorCancellationToken)
     {
         using var standardOutput = new MemoryStream();
         using var standardError = new MemoryStream();
+        using var rawOutputMirrorWriteGate = request.RawOutputMirror is null ? null : new SemaphoreSlim(1, 1);
         var result = await CliCommand.Wrap(request.FileName)
             .WithArguments(request.Arguments)
             .WithWorkingDirectory(request.WorkingDirectory)
             .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardOutput, token, request.OutputObserver)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardError, token, request.OutputObserver)))
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(
+                source, standardOutput, token, request.OutputObserver, quota, processCancellation,
+                request.RawOutputMirror, rawOutputMirrorWriteGate, mirrorCancellationToken)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(
+                source, standardError, token, request.OutputObserver, quota, processCancellation,
+                request.RawOutputMirror, rawOutputMirrorWriteGate, mirrorCancellationToken)))
             .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
         var outputTruncated = standardOutput.Length > MaximumBufferedBytesPerStream
             || standardError.Length > MaximumBufferedBytesPerStream;
@@ -3639,7 +3687,10 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
 
     private static async Task<CoverageRunProcessResult> RunStreamingAsync(
         CoverageRunProcessRequest request,
-        CancellationToken cancellationToken)
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation,
+        CancellationToken cancellationToken,
+        CancellationToken mirrorCancellationToken)
     {
         var directory = Path.GetDirectoryName(request.OutputFile!);
         if (!string.IsNullOrEmpty(directory))
@@ -3660,18 +3711,44 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             .WithArguments(request.Arguments)
             .WithWorkingDirectory(request.WorkingDirectory)
             .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver)))
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(
+                source, stream, writeGate, token, request.OutputObserver, quota, processCancellation,
+                request.RawOutputMirror, mirrorCancellationToken)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(
+                source, stream, writeGate, token, request.OutputObserver, quota, processCancellation,
+                request.RawOutputMirror, mirrorCancellationToken)))
             .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
 
         return new CoverageRunProcessResult(result.ExitCode, string.Empty);
     }
 
-    private static async Task CopyPipeToBufferAsync(
+    /// <summary>
+    /// Drains one process pipe into its bounded buffer and optional caller-owned raw output mirror.
+    /// </summary>
+    /// <param name="source">The process pipe being drained.</param>
+    /// <param name="target">The bounded in-memory capture for this stream.</param>
+    /// <param name="cancellationToken">The process-pump token used for reads and retained-buffer writes.</param>
+    /// <param name="outputObserver">Optional diagnostic byte observer.</param>
+    /// <param name="quota">Optional received-byte quota.</param>
+    /// <param name="processCancellation">Process cancellation source used on quota or mirror failure.</param>
+    /// <param name="rawOutputMirror">Optional caller-owned raw-byte mirror.</param>
+    /// <param name="rawOutputMirrorWriteGate">Shared gate used to serialize both process output streams.</param>
+    /// <param name="mirrorCancellationToken">The caller's original cancellation token for mirror writes and flushes.</param>
+    /// <remarks>
+/// Each complete source read is charged exactly once, including when mirroring fails. A successful mirror is flushed
+/// before quota admission and before any excess buffered bytes are discarded.
+    /// The caller owns the mirror and gate. A mirror failure cancels the child process and propagates through the joined pipe task.
+    /// </remarks>
+    internal static async Task CopyPipeToBufferAsync(
         Stream source,
         MemoryStream target,
         CancellationToken cancellationToken,
-        Action<int>? outputObserver)
+        Action<int>? outputObserver,
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation,
+        Stream? rawOutputMirror,
+        SemaphoreSlim? rawOutputMirrorWriteGate,
+        CancellationToken mirrorCancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
@@ -3684,6 +3761,13 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     return;
                 }
 
+                await RelayAndChargeOutputAsync(
+                    rawOutputMirror,
+                    rawOutputMirrorWriteGate,
+                    buffer.AsMemory(0, read),
+                    quota,
+                    processCancellation,
+                    mirrorCancellationToken);
                 ObserveOutput(outputObserver, read);
                 var remaining = MaximumBufferedBytesPerStream + 1 - target.Length;
                 if (remaining > 0)
@@ -3708,12 +3792,27 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             : text;
     }
 
-    private static async Task CopyPipeToFileAsync(
+    /// <summary>Drains one process pipe to its retained log and optional caller-owned raw output mirror.</summary>
+    /// <param name="source">The process pipe being drained.</param>
+    /// <param name="target">The streamed process log.</param>
+    /// <param name="writeGate">Shared gate for the log and raw mirror writes.</param>
+    /// <param name="cancellationToken">The process-pump token used for reads and log writes.</param>
+    /// <param name="outputObserver">Optional diagnostic byte observer.</param>
+    /// <param name="quota">Optional received-byte quota.</param>
+    /// <param name="processCancellation">Process cancellation source used on quota or mirror failure.</param>
+    /// <param name="rawOutputMirror">Optional caller-owned raw-byte mirror.</param>
+    /// <param name="mirrorCancellationToken">The caller's original cancellation token for mirror writes and flushes.</param>
+    /// <remarks>Every actual read is charged once; successful mirroring completes before log retention. The mirror is never closed.</remarks>
+    internal static async Task CopyPipeToFileAsync(
         Stream source,
         Stream target,
         SemaphoreSlim writeGate,
         CancellationToken cancellationToken,
-        Action<int>? outputObserver)
+        Action<int>? outputObserver,
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation,
+        Stream? rawOutputMirror,
+        CancellationToken mirrorCancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
@@ -3726,6 +3825,13 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     return;
                 }
 
+                await RelayAndChargeOutputAsync(
+                    rawOutputMirror,
+                    writeGate,
+                    buffer.AsMemory(0, read),
+                    quota,
+                    processCancellation,
+                    mirrorCancellationToken);
                 ObserveOutput(outputObserver, read);
 
                 await writeGate.WaitAsync(cancellationToken);
@@ -3743,6 +3849,106 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
+    }
+
+    private static async Task RelayRawOutputAsync(
+        Stream? rawOutputMirror,
+        SemaphoreSlim? writeGate,
+        ReadOnlyMemory<byte> buffer,
+        CancellationTokenSource processCancellation,
+        CancellationToken cancellationToken)
+    {
+        if (rawOutputMirror is null)
+        {
+            return;
+        }
+
+        if (writeGate is null)
+        {
+            throw new ArgumentNullException(nameof(writeGate), "A raw output mirror requires a shared write gate.");
+        }
+
+        var gateAcquired = false;
+        try
+        {
+            await writeGate.WaitAsync(cancellationToken);
+            gateAcquired = true;
+            await rawOutputMirror.WriteAsync(buffer, cancellationToken);
+            await rawOutputMirror.FlushAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            processCancellation.Cancel();
+            throw;
+        }
+        catch (Exception exception)
+        {
+            processCancellation.Cancel();
+            if (IsFatalException(exception))
+            {
+                throw;
+            }
+
+            throw new RawOutputMirrorException(exception);
+        }
+        finally
+        {
+            if (gateAcquired)
+            {
+                writeGate.Release();
+            }
+        }
+    }
+
+    private static async Task RelayAndChargeOutputAsync(
+        Stream? rawOutputMirror,
+        SemaphoreSlim? writeGate,
+        ReadOnlyMemory<byte> buffer,
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RelayRawOutputAsync(rawOutputMirror, writeGate, buffer, processCancellation, cancellationToken);
+        }
+        catch
+        {
+            // A failed mirror still follows an actual read, so charge that read before the pump fails.
+            ChargeOutput(quota, buffer.Length, processCancellation);
+            throw;
+        }
+
+        ChargeOutput(quota, buffer.Length, processCancellation);
+    }
+
+    private sealed class RawOutputMirrorException(Exception innerException)
+        : Exception("The caller-owned raw process output mirror could not be written and flushed.", innerException);
+
+    private static void ChargeOutput(
+        EvidenceRunByteQuota? quota,
+        int receivedBytes,
+        CancellationTokenSource processCancellation)
+    {
+        if (quota is not null && !quota.TryChargeReceived(receivedBytes))
+        {
+            processCancellation.Cancel();
+            throw CreateOutputQuotaException();
+        }
+    }
+
+    private static Exception CreateOutputQuotaException()
+    {
+#if EVIDENCE_COVERAGE_CORE
+        return new CoverageExecutionException("ASCOV420 Evidence process output exceeded its aggregate received-byte quota.");
+#else
+        return CoverageRunDiagnostics.Create(
+            "ASCOV420",
+            "Evidence process output exceeded its aggregate received-byte quota.",
+            "The Evidence run received more child-process output than its registered limit.",
+            "Reduce process output or lower the selected test scope.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+#endif
     }
 
     private static void ObserveOutput(Action<int>? observer, int count)
@@ -3767,12 +3973,29 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
 
     private static bool IsCommandLaunchFailure(Exception exception)
     {
+        if (ContainsRawOutputMirrorFailure(exception))
+        {
+            return false;
+        }
+
         return exception is CliWrapException
             or Win32Exception
             or UnauthorizedAccessException
             or DirectoryNotFoundException
             or IOException
             or InvalidOperationException;
+    }
+
+    private static bool ContainsRawOutputMirrorFailure(Exception exception)
+    {
+        if (exception is RawOutputMirrorException)
+        {
+            return true;
+        }
+
+        return exception is AggregateException aggregate
+            ? aggregate.InnerExceptions.Any(ContainsRawOutputMirrorFailure)
+            : exception.InnerException is not null && ContainsRawOutputMirrorFailure(exception.InnerException);
     }
 
     private static async Task TryAppendFailureLogAsync(
@@ -3827,7 +4050,8 @@ internal interface ICoverageRunReportGenerator
         string outputDirectory,
         CoverageRunProcessLease lease,
         Action<int> outputObserver,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EvidenceRunByteQuota? processOutputQuota = null)
         => MergeAsync(coverageFiles, outputDirectory, cancellationToken);
 }
 
@@ -3868,7 +4092,8 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
             outputDirectory,
             CoverageRunProcessLease.Detached(),
             _ => { },
-            cancellationToken);
+            cancellationToken,
+            processOutputQuota: null);
 
     /// <inheritdoc />
     public async Task<CoverageRunMergeResult> MergeSupervisedAsync(
@@ -3876,10 +4101,13 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
         string outputDirectory,
         CoverageRunProcessLease lease,
         Action<int> outputObserver,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EvidenceRunByteQuota? processOutputQuota = null)
     {
         var reportGeneratorDll = _locator.ResolveReportGeneratorDll();
-        var reports = string.Join(';', coverageFiles);
+        var reportInputs = await CoverageCompilerMapInputs.PrepareAsync(coverageFiles, outputDirectory,
+            cancellationToken).ConfigureAwait(false);
+        var reports = string.Join(';', reportInputs);
         var result = await _processRunner.RunAsync(
             new CoverageRunProcessRequest(
                 "dotnet",
@@ -3887,7 +4115,8 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
                 Directory.GetCurrentDirectory(),
                 null,
                 outputObserver,
-                lease),
+                lease,
+                processOutputQuota),
             cancellationToken);
 
         return new CoverageRunMergeResult(

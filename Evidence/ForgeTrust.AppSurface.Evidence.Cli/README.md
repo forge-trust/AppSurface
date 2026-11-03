@@ -2,7 +2,7 @@
 
 `ForgeTrust.AppSurface.Evidence.Cli` supplies the internal workflow used by the public `appsurface evidence` commands. Most adopters install the [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md), not this package directly.
 
-Start with the [EvidenceHost guide](../../start-here/evidencehost.md). The workflow reads only explicit policy and diff inputs; it does not scan consumer assemblies, discover tests, provision third-party services, or report outbound usage telemetry.
+Start with the [EvidenceHost guide](../../start-here/evidencehost.md) and its [migration and support reference](../../docs/evidence/evidencehost-migration.md). The workflow reads only explicit policy and diff inputs; it does not scan consumer assemblies, discover tests, provision third-party services, or report outbound usage telemetry.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
@@ -14,27 +14,97 @@ for current release risk, migration guidance, and readiness.
 
 ## Command workflow
 
+The internal [N11 synchronous input-factory fixture](EvidenceFixedSynchronousInputFactory.cs) is created only when the shared compile-owned selector selects N11. Before the existing tracked Admission callback, the helper registers one marker-only disposer with the actual `EvidenceWorkerExecution`; it writes `FIXTURE_N11_DISPOSER_ARMED` only after registration succeeds. The existing callback then writes `FIXTURE_N11_INPUT_FACTORY_ENTERED` before its deliberate synchronous stall. If the real lifecycle later invokes the registered disposer, it writes `FIXTURE_N11_DISPOSER_INVOKED` at most once as the callback's first action. These fixed stderr markers describe registration and callback invocation only; they create no cleanup or settlement claim, success record, runtime selector or authority. A metadata-only test verifies registration ordering and closed-admission rejection without entering the stall or creating a root or lease. `None` continues through the normal protected input resolver. See the [Contracts qualification reference](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#ordinary-execution-and-private-qualification-images) for selection and artifact constraints.
+
 ```bash
 appsurface evidence init --sample
 appsurface evidence doctor --path src/Orders/SubmitOrder.cs
 appsurface evidence explain --path src/Orders/SubmitOrder.cs
-appsurface evidence run --diff-file artifacts/changed.patch --solution App.slnx
-appsurface evidence verify TestResults/evidence/evidence-manifest.json
 ```
 
 | Command | Behavior |
 | --- | --- |
 | `init --sample` | Creates a marked, non-overwriting policy, host skeleton, and local README. `--force` may replace only previously marked starter files. |
-| `doctor` | Resolves policy and reports policy, diff, Docker, browser, and release-envelope prerequisites without starting anything. |
-| `explain` | Writes the resolved plan and a human-readable summary without running producers. |
-| `run` | Runs selected built-in coverage evidence, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
-| `verify` | Recomputes binding and digest verification without running any producer. |
+| `doctor` | Resolves policy and reports structural policy/diff and Docker/browser prerequisites without starting anything. Protected execution-envelope facts remain `unverified` for every profile; `GITHUB_ACTIONS=true` grants no admission. |
+| `explain` | Writes the resolved plan and a human-readable planning summary without running producers. |
+| `run` | Requires explicit `--mode trusted` or `--mode observation` and a `--control` socket from the independently armed Linux launcher. It runs only after protected admission. Trusted gate admission remains closed pending full consumer and production-broker CI proof. |
+| `verify` | Recomputes plan/manifest structural binding and digests without running any producer or authenticating provenance. |
+
+The quickstart above covers planning and structural verification. The `run` command requires a supported protected worker. Observation still requires an independent protected worker and a declared dependency-free profile. See the [canonical migration reference](../../docs/evidence/evidencehost-migration.md#api-migration) before changing an invocation.
+
+Policy, plan and manifest JSON use the shared [bounded JSON reader](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input): at most 20 MiB of UTF-8 input per file, counted as bytes arrive before parsing. A file length check does not establish this bound. Duplicate or case-colliding properties, unknown or numeric enum values and unsupported plan/manifest versions are rejected; safe additive properties remain compatible. Unreadable, oversized or invalid policy input returns `ASEVD205`; equivalent generated input failures return `ASEVD209`. Diagnostics contain no JSON content or raw reader exception. Structural verification checks consistency and does not authenticate origin.
 
 ## Incomplete profiles are not complete evidence
 
-An intentionally selected `no-evidence` profile may close a gate. A skipped test project, filtered test suite, unavailable browser, missing Docker runtime, or unsupported producer cannot. `run` returns a failing command and a manifest with `ClaimKind.None` for those cases, preserving the diagnostic and next action in `evidence-summary.json`.
+An intentionally selected `no-evidence` profile may produce the structural `NoEvidenceRequired` claim. No Trusted claim is currently admitted for a protected PR or release gate on any provider or platform; see the [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md). A skipped test project, filtered test suite, unavailable browser, missing Docker runtime, or unsupported producer cannot produce complete evidence. A normal producer failure can yield an incomplete manifest; a fatal stop without confirmed owned-process exit yields no final manifest or summary and must be quarantined.
 
-The built-in coverage producer is an in-process adapter over the private [`ForgeTrust.AppSurface.Evidence.Coverage`](../ForgeTrust.AppSurface.Evidence.Coverage/README.md) engine shared with `appsurface coverage run` and `appsurface coverage gate`. Its policy declaration carries the exact overall and optional patch thresholds, tolerance, and patch-line mode; the resolved plan binds those values before collection begins. When a patch gate is selected, `evidence run` captures the bounded `--diff-file` bytes during planning and reuses that immutable snapshot for gate evaluation, so replacing the file mid-run cannot change the measured input. It does not silently convert a partial test selection into a full-profile claim.
+## Restricted coverage adapter and support boundary
+
+The protected CLI binds the [fixed restricted coverage registration](../ForgeTrust.AppSurface.Evidence.Coverage/README.md#fixed-restricted-coverage-registration) implemented once in `ForgeTrust.AppSurface.Evidence.Coverage`. It launches the fixed `dotnet test` command through the independent restricted broker, collects bounded broker-retained Cobertura reports only after the subject child and output pumps exit, validates them, merges them through the shared coverage workflow, and evaluates the exact thresholds and optional patch rules from the resolved plan. It emits its declared coverage assertion only when the restricted procedure and numeric gate both pass; a successful test exit or log text alone is not evidence.
+
+Each producer callback binds its activated protected writer to the actual supervisor, full plan/declaration, copied protected diff, shared process-output quota and current stage token. The [internal callback lease](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#restricted-producer-callback-binding) permits one attempt and closes in the callback's finally block. The factory registers the whole asynchronous procedure as lifecycle-owned work before returning; an ignored task cannot escape stop/join. No new consumer friend, public transport or execution authority is introduced by this shared registration.
+
+### Restricted application stages
+
+For a v2 descriptor, the internal CLI entry resolves the complete application through the
+[compiled application catalogue](../ForgeTrust.AppSurface.Evidence.Planner/README.md#internal-closed-application-catalogue-prerequisite)
+before admission or startup. It admits both admission stages, the smaller of the descriptor
+and application startup limits, every declared resource deadline, and every producer
+deadline together with the existing collection and cleanup reserves. The internal
+`CreateDeclaredStages(profile, admissionSeconds, applicationStartSeconds)` helper returns
+copied read-only budget metadata; a null startup limit preserves the producer-only v1
+schedule. It grants no registration, lease or execution capability.
+
+After fresh output allocation and activation, the CLI invokes the authenticated
+[`application-start` and `resource-wait` protocol](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#internal-restricted-application-protocol-v2-prerequisite)
+under the actual tracked Start and Resource stage tokens. Only typed root receipts for
+the selected entry, prior lease and exact resource let producers run. The supervisor
+records the pending single-use start before I/O and the existing stop/wait path owns
+physical application exit, including failed or cancelled startup; no extra stop timer
+or public health callback is introduced. Artifact transfer during production requires
+stopped producer work; final completion also requires application teardown.
+
+The internal `RunApplicationStagesAsync` returns a defensive read-only list of
+[`EvidenceResourceResult`](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) metadata.
+It appends `Ready` only after the tracked Resource stage passes, the supervisor has
+validated a nonnull root ACK for the exact resource, and admission is rechecked for
+the captured plan. A failed or cancelled stage cannot contribute a Ready result.
+Each wait uses the lifecycle's monotonic clock from immediately before the stage;
+whole elapsed milliseconds exclude application startup. Final collection passes
+this list to the manifest builder and sums its elapsed values into
+`Metrics.ResourceReadinessMilliseconds`. The producer-only v1 path retains an
+empty list and a zero readiness metric.
+
+`AppendResourceReadinessResult(completed, resourceId, outcome, receipt, clock,
+startedTimestamp)` is an intentionally internal data projection used by this path.
+It copies prior results, rejects unsuccessful stages, null receipts and mismatched
+resource identifiers with `ASEVD410`, and returns read-only storage. It authenticates
+no root peer, application, HTTP response or admission. Its metadata-only controls
+cannot establish end-to-end health; the real protected root qualification must
+exercise ACK validation and final manifest propagation. Omitting readiness results
+from the manifest leaves a resource-bearing profile incomplete even when its
+producer and numeric coverage gate pass. A successful startup receipt alone also
+contains no readiness result. See the
+[manifest and resource contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md)
+and [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md).
+
+The production catalogue is empty, and Trusted consumer proof is still unregistered.
+The stage preparation therefore establishes no supported application run. A dependency
+profile cannot use Observation to bypass its admission rule, and parsed v2 metadata
+cannot substitute for a compiled registration. See the
+[consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md) for native prerequisites.
+
+The protected merger loads `ReportGenerator.dll` from `reportgenerator/net10.0/` under the authenticated tool root, with no package-cache fallback. The AppSurface CLI tool-pack path includes the ReportGenerator payload; a plain `dotnet publish` output does not include it by default. If the protected tool root lacks the payload, the run fails with `ASEVD404`. Subject and reporter output share the run-wide process-output quota, while reports and emitted artifacts remain bounded by the artifact quota. See the [migration reference](../../docs/evidence/evidencehost-migration.md#restricted-coverage-path-and-packaging) for limits and recovery.
+
+Implementation is not equivalent to an admitted supported gate. Linux x86_64 systemd/cgroup mechanism behavior was observed in CI on October 2, 2026, but the updated production broker and complete consumer integration have not been validated in CI. Windows and macOS have no accepted mechanism. Keep Trusted gate proof closed until the complete protected consumer and platform proof is accepted.
+
+For supported numeric coverage enforcement today, use the separate [`appsurface coverage run` and `coverage gate`](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) workflow; it does not depend on EvidenceHost admission. The [#815 migration guide](../../releases/issue-815-vstest-hang.md#migration-choices) explains timing limits in that workflow.
+
+## Private worker allocation diagnostic
+
+The internal `EvidenceProtectedCliExecution.RunAsync` overloads accept an optional `Action<EvidenceAllocationFailureDiagnostic>` sink, defaulting to `null`. Only a failed allocation/activation stage with acknowledged owned-work exit invokes it. The record's fixed schema is `evidence-allocation-failure-v1`; fields are closed `phase`, allocation `operation`, `stageOutcome`, `terminalCode`, `errorClass`, and optional `nativeErrno`. Phases distinguish pre-allocation cancellation, allocation, pre-activation cancellation, activation and completed callbacks. Error classes include out-of-memory, I/O, access denial, unsupported operation, argument, cancellation, timeout, admission, invalid operation and unknown; no messages, runtime type names, paths, stacks or custom exception data are retained. An errno is retained from a direct `Win32Exception` inner exception of an allocation `IOException`, bounded to 1–4095. An allocation `PlatformNotSupportedException` retains only the direct known values 1, 22, 38 or 95, and only for `OpenFilesystemRoot`, `OpenParent`, `CheckParentName`, `OpenSlot`, `CheckSlotName` or `RecheckParentName`. Missing, nested, unexpected or unrelated unsupported errors have no errno; exception class, fixed diagnostic and mandatory `openat2` behavior remain the same.
+
+Only `EvidenceWorkerCommand` serializes this typed record to one UTF-8 line of at most 1 KiB on its systemd worker error stream. The launcher retains that stream through its existing bounded private journal channel; this diagnostic is not a manifest, a public launcher response or evidence authority. The primary ASEVD409 diagnostic and rejection behavior remain unchanged. A missing sink or any sink failure preserves the original execution failure. Use the closed operation together with the outcome and terminal code to distinguish a filesystem failure from cancellation or activation; never infer a specific syscall failure solely from ASEVD409. See the [allocation contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#private-allocation-diagnostics) for the unchanged filesystem guards.
 
 Coverage declarations may also set `coverageExecution` with a simple `configuration` identifier, `parallelism` from 1 through 32, and `testResults` of `none` or `junit`. The defaults preserve the legacy Debug, serial, no-managed-results run. These options select the build and test envelope only; the built-in producer keeps its collector, AppSurface test exclusions, coverage gates, and source scope unchanged. See the [`EvidenceCoverageExecutionOptions` contract](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceCoverageExecutionOptions.cs) for the public shape and validation limits.
 
@@ -43,8 +113,35 @@ Coverage execution uses the same fail-mode [watchdog and no-dump VSTest hang pol
 ## Pitfalls
 
 - Do not run a repository-wide gate after intentionally filtering out required tests and expect a complete claim.
-- Do not treat `doctor`'s `ready_with_external_prerequisites` status as a pass; it describes what the consumer CI image must provide.
+- Do not treat `doctor`'s `ready_with_external_prerequisites` status as a pass; it describes planning prerequisites and grants no admission. The `trusted-envelope` check is `unverified`; `doctor` does not invoke the protected verifier. Consult the [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md); setting a CI environment flag cannot substitute for that proof.
 - Do not set `--observation-only` on a job that must satisfy a PR or release gate.
 - Do not hand-edit generated artifacts; use `verify`.
 
 Read next: the [CLI command reference](../../Cli/ForgeTrust.AppSurface.Cli/README.md), [contracts](../ForgeTrust.AppSurface.Evidence.Contracts/README.md), and the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md).
+
+Input reader error categories are determined when opening the file: a missing file or directory reports `ASEVD204` for policy and `ASEVD208` for plan/manifest. Empty paths that reach the reader and paths rejected by the file API also report those codes with a generic message that omits the invalid path. Command-level argument validation runs first; for example, an empty `evidence verify` manifest argument reports `ASEVD212`. Access denial and other read failures report `ASEVD205` and `ASEVD209`, respectively; path existence metadata does not override the actual open result. See the [CLI command reference](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) and [bounded input contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input).
+
+
+## Fixed private N08/N09 original cancellation images
+
+Source preparation only: this image has no native qualification or case credit. The [original lifecycle contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) owns callback/STOP/WAIT settlement; the [private CLI callback](../ForgeTrust.AppSurface.Evidence.Cli/README.md) retains output roots until OwnWorkStopped. No proof/admission registry, sandbox, account, syscall guard or public role selector changes.
+
+`EvidenceOriginalCancellationCheckpoint.SelectedPhase` is the sole compilation input: N08 BeforeAllocation or N09 BeforeActivation. The N09 `.cs.in` preparation input replaces exactly that one literal in a separately captured image; it is never read at runtime. The authenticated string-control worker constructs the checkpoint; the explicit request-mode overload remains unchanged and supplies none. Both actual original token checks and the N09 original root assignment retain their order. Checkpoint writes use the original linked stage token inside the original callback; a nonthrowing cancellation registration releases a TCS only. Missing/failed transfer cannot cause root signalling or create a capability. The actual original CallerTokenCancelled and lifecycle first-cause CallerCancelled are separate observations. ReportJoined requires actual OwnWorkStopped. Private stderr disposal additionally requires that same actual original settlement; root FD disposal retains its original guard.
+
+The root server retains one original signal task before dispatch and does not block next accept. Actual READY notification follows original response write, Release, owner check and CompleteWrite(true). Phase bytes are observed by the existing retained stderr pump after its original received-byte charge; no second pipe reader, fabricated READY, background task, runtime selector or timer exists. Exact first-line data is bounded to 1024 bytes. A malformed/missing phase fails observation rather than signalling. The root task verifies the actual reference-equal worker under unchanged native-owner guards, rechecks PID/starttime/UID4/GID4/cgroup/proc bindings around pidfd_open, then sends exactly one SIGINT through its retained pidfd. It never signals a caller PID or broadcasts/retries. The successful signal-task projection states syscall success, not signal delivery/cancellation. Error wakeup is retained in the accept wait; original root cancellation cancels and joins the task before server I/O settlement. All original accept/peer/name/stop/wait/custody/account checks remain.
+
+The root failure-only emitter uses the existing genuine CaptureNegativeObservation after original server/worker/monitor/pump joins, before unchanged custody/account cleanup. That holder guard still requires original natural terminal, full output, fresh empty selected group, reference-equal owners and genuine committed descriptor. Failure to capture is not replaced by detached expected metadata. No normal exit1, account absence, custody success or quarantine is invented. Actual selected runtime/caps/pidfd policy, full source/image/inventories, first SIGINT delivery, actual original-token true and CallerCancelled, no activation, N08 no allocation call and N09 actual retained-root/FD-close order still need native evidence.
+
+Ten new Facts are defined, zero executed: original caller versus stage-only release; nonselected location; duplicate claim; ignored write cancellation retaining the original callback and borrowed stream; closed projection/bounds/canary; and four original-pump framing controls. These use only detached stream/task/token data, never fake leases or live owners. The ignored writer control is not physical FD proof. Existing lifecycle callback-join/fatal/FD-close controls remain byte-identical; compiler/formatter/test validation and independent review are pending. Do not authorize execution from this preparation packet alone.
+
+Protected CLI collection and compiled v2 SDK applications share the [fixed terminal-file writer](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#shared-protected-terminal-file-layout).
+CLI `TotalMilliseconds` records elapsed monotonic worker execution through collection entry, including resource
+readiness when present; zero stage fields may remain unreported. These metrics do not reset budgets or prove
+physical exit. Root custody still verifies the original files and joined runtime before completion.
+
+The deliberate `StallBeforeReturningTask` body and its protected resolver call
+compile only with `EVIDENCE_PRIVATE_N11`. Ordinary images contain neither that
+blocking method nor an emitted call to it, and their factory returns null directly.
+The existing marker and disposer ordering APIs stay available for portable
+metadata controls. [Finished-image tests](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceNativeQualificationTests.cs)
+inspect that method boundary; this supplies no Linux execution or cleanup claim.

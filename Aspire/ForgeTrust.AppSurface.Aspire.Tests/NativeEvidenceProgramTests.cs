@@ -34,11 +34,11 @@ public sealed class NativeEvidenceProgramTests
                 "--fan-in-request", requestPath]);
 
             Assert.Equal(1, result.ExitCode);
-            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
-            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
-            Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
-            var producer = Assert.Single(manifest.ProducerResults, item => item.ProducerId == "native-fan-in");
+            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "procedure-plan.json")));
+            var report = await ReadReportAsync(output);
+            Assert.Equal(plan.PlanDigest, report.PlanDigest);
+            Assert.False(report.ProcedurePassed);
+            var producer = Assert.Single(report.ProducerResults, item => item.ProducerId == "native-fan-in");
             Assert.Equal(EvidenceProducerOutcome.Failed, producer.Outcome);
             Assert.Empty(producer.SatisfiedAssertionIds);
             using var artifact = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(output, "artifacts/native-fan-in/proof/result.json")));
@@ -46,8 +46,9 @@ public sealed class NativeEvidenceProgramTests
             var diagnostic = artifact.RootElement.GetProperty("diagnostic").GetString()!;
             Assert.Equal(longPath ? expected[..1024] : expected, diagnostic);
             Assert.DoesNotContain(fixture.Repository, diagnostic, StringComparison.Ordinal);
-            Assert.Equal("Native coverage fan-in verification failed: " + diagnostic, producer.Diagnostic);
-            Assert.True(manifest.Metrics.CleanupCompleted);
+            var resultDiagnostic = "Native coverage fan-in verification failed: " + diagnostic;
+            Assert.Equal(resultDiagnostic.Length > 1024 ? resultDiagnostic[..1024] : resultDiagnostic, producer.Diagnostic);
+            Assert.True(report.CleanupCompleted);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -68,7 +69,7 @@ public sealed class NativeEvidenceProgramTests
         var result = await InvokeAsync(["--help"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Native AppSurface EvidenceHost acceptance", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("Native AppSurface validation procedures", result.StandardOutput, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -102,7 +103,7 @@ public sealed class NativeEvidenceProgramTests
             Assert.Equal(1, result.ExitCode);
             Assert.Contains("ArgumentException", result.StandardError, StringComparison.Ordinal);
             Assert.Equal("preserve me", await File.ReadAllTextAsync(sentinel));
-            Assert.DoesNotContain("evidence-plan.json", Directory.EnumerateFiles(output).Select(Path.GetFileName));
+            Assert.DoesNotContain("procedure-plan.json", Directory.EnumerateFiles(output).Select(Path.GetFileName));
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -131,7 +132,7 @@ public sealed class NativeEvidenceProgramTests
     [Theory]
     [InlineData("storage")]
     [InlineData("consumer")]
-    public async Task MinimalCandidate_ProducesNativePlanAndManifestThroughOrchestration(string mode)
+    public async Task MinimalCandidate_ProducesFailedProcedureReportWithoutProtectedManifest(string mode)
     {
         var root = Directory.CreateTempSubdirectory("appsurface-native-program-plan-").FullName;
         try
@@ -144,8 +145,10 @@ public sealed class NativeEvidenceProgramTests
                 "--maximum-scratch-bytes", "1048576", "--minimum-free-bytes", "0"]);
 
             Assert.Equal(1, result.ExitCode);
-            Assert.True(File.Exists(Path.Join(output, "evidence-plan.json")));
-            Assert.True(File.Exists(Path.Join(output, "evidence-manifest.json")));
+            Assert.True(File.Exists(Path.Join(output, "procedure-plan.json")));
+            var report = await ReadReportAsync(output);
+            Assert.False(report.ProcedurePassed);
+            Assert.False(File.Exists(Path.Join(output, "evidence-manifest.json")));
             Assert.Contains(mode == "storage" ? "packed-storage" : "installed-consumer", result.StandardOutput, StringComparison.Ordinal);
         }
         finally { Directory.Delete(root, recursive: true); }
@@ -154,7 +157,7 @@ public sealed class NativeEvidenceProgramTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task FanInRequest_AddsRequiredNativeVerificationToTheManifest(bool tampered)
+    public async Task FanInRequest_AddsRequiredVerificationToTheProcedureReport(bool tampered)
     {
         using var fixture = new EvidenceCoverageFanInTests.FanInFixture();
         await fixture.WriteMinimalBundleAsync();
@@ -178,13 +181,13 @@ public sealed class NativeEvidenceProgramTests
                 "--fan-in-request", request]);
 
             Assert.Equal(1, result.ExitCode); // Invalid storage package must still prevent completion.
-            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
-            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
-            Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-            var native = Assert.Single(manifest.ProducerResults, producer => producer.ProducerId == "native-fan-in");
+            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "procedure-plan.json")));
+            var report = await ReadReportAsync(output);
+            Assert.Equal(plan.PlanDigest, report.PlanDigest);
+            var native = Assert.Single(report.ProducerResults, producer => producer.ProducerId == "native-fan-in");
             Assert.Equal(tampered ? EvidenceProducerOutcome.Failed : EvidenceProducerOutcome.Passed, native.Outcome);
             Assert.Equal(tampered ? [] : new[] { "coverage/verified-native-fan-in@1" }, native.SatisfiedAssertionIds);
-            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.False(report.ProcedurePassed);
             Assert.True(File.Exists(Path.Join(output, "artifacts/native-fan-in/proof/result.json")));
         }
         finally { Directory.Delete(root, recursive: true); }
@@ -223,7 +226,60 @@ public sealed class NativeEvidenceProgramTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    private static async Task<InvocationResult> InvokeAsync(string[] args, CancellationToken cancellationToken = default)
+    private static async Task<NativeValidationProcedureReport> ReadReportAsync(string output)
+    {
+        var bytes = await File.ReadAllBytesAsync(Path.Join(output, "native-validation-procedure.json"));
+        using var raw = JsonDocument.Parse(bytes);
+        foreach (var property in new[] { "protectedAdmission", "nativeAcceptance", "gateEligible" })
+            Assert.False(raw.RootElement.GetProperty(property).GetBoolean());
+        Assert.False(raw.RootElement.TryGetProperty("claimKind", out _));
+        Assert.False(raw.RootElement.TryGetProperty("eligibility", out _));
+        Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidenceManifest>(bytes));
+        var report = JsonSerializer.Deserialize<NativeValidationProcedureReport>(bytes, Program.JsonOptions)!;
+        Assert.Equal("appsurface-native-validation-procedure-v1", report.Schema);
+        Assert.False(report.ProtectedAdmission);
+        Assert.False(report.NativeAcceptance);
+        Assert.False(report.GateEligible);
+        Assert.False(File.Exists(Path.Join(output, "evidence-manifest.json")));
+        return report;
+    }
+
+    [Theory]
+    [InlineData(null, "ASEVD401")]
+    [InlineData("protected", "ASEVD404")]
+    public async Task MissingOrProtectedOperation_RejectsBeforeReadingInputsOrCreatingOutput(string? operation, string code)
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-admission-").FullName;
+        try
+        {
+            var output = Path.Join(root, "output");
+            var input = Path.Join(root, "missing-input-canary.json");
+            var arguments = new List<string> { "--output", output, "--consumer-profile", input };
+            if (operation is not null) arguments.AddRange(["--operation", operation]);
+            var result = await InvokeRawAsync(arguments.ToArray());
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains(code, result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain(input, result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(output));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("observation")]
+    [InlineData("trusted")]
+    public async Task AnOperationCannotBeAnAdmissionBooleanOrExecutionMode(string operation)
+    {
+        var result = await InvokeRawAsync(["--operation", operation]);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("ASEVD401", result.StandardError, StringComparison.Ordinal);
+    }
+
+    private static Task<InvocationResult> InvokeAsync(string[] args, CancellationToken cancellationToken = default) =>
+        InvokeRawAsync(args.Length == 0 || args.SequenceEqual(new[] { "--help" }) ? args : ["--operation", "procedure", .. args], cancellationToken);
+
+    private static async Task<InvocationResult> InvokeRawAsync(string[] args, CancellationToken cancellationToken = default)
     {
         var output = new StringWriter();
         var error = new StringWriter();

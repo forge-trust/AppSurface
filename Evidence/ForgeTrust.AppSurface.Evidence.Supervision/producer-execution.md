@@ -1,0 +1,86 @@
+# Native coverage producer process
+
+[`LinuxProducerProcess`](LinuxProducerProcess.cs) retains one fixed subject `dotnet test` execution. `Create(input, owner, accounts, workerWorkspace, producerWorkspace, ledger, outputBudget, token)` requires the original privately constructed native objects. It reserves the producer with its [workspace](producer-workspace.md) before process I/O; `RunAsync(resultsToken, token)` then claims one attempt and registers the original task in the workload ledger before pipes, systemd connection or unit dispatch.
+
+The [unit recipe](LinuxProducerUnit.cs) generates `appsurface-evidence-producer-<generation>.service`, using the actual subject UID and GID, no supplementary groups, no capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=yes`, private temporary storage, `RestrictSUIDSGID=yes`, 64 tasks and 1 GiB memory. A single-use guarded root owner remains its `BindsTo` dependency. Only the copied source, fresh selected results-token directory and private scratch are writable. Protected tooling, original subject, worker control, original raw results and worker output are inaccessible. The separate audited SDK is read-only. The working directory is the copied source; fixed `env -i` arguments select only that SDK and the existing Debug/XPlat/serial test command.
+
+## Original runtime reservation arithmetic
+
+[`SupervisionProducerRuntimeAllowance.Calculate(originalRemaining, stopping, cleanup, collection)`](SupervisionProducerRuntimeAllowance.cs)
+contains the arithmetic used by the actual producer immediately before pipe and native start acquisition.
+It subtracts the request's stopping and collection reserves and the owner's existing cleanup reserve
+from one sample of the owner's original job remainder. Positive available runtime is capped at the
+unchanged [producer maximum](LinuxProducerUnit.cs) of 1800 seconds. No positive remainder after those
+reservations rejects with fixed ASEVD410; zero cannot become a one-tick or minimum-runtime fallback.
+
+The caller still authenticates the owner, input and workspaces and supplies their validated reserves.
+This helper accepts time data only, creates no clock or cancellation source, and cannot authorize an
+execution. Passing a fresh full job duration would renew the budget incorrectly. The original native
+recipe, start token, cleanup and final owner checks remain mandatory. The [arithmetic controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionProducerRuntimeAllowanceTests.cs)
+check one tick around both zero runtime and the cap, separate reserve consumption, and the original
+one-hour request boundary. These tests are not native process or consumer acceptance evidence.
+
+## Process completion and report eligibility
+
+`LinuxProcessIdentity.CaptureProducer` captures actual proc descriptors and requires the producer role, nonroot complete UID/GID tuples, PID/start-time continuity and the exact generated cgroup. It cannot authenticate a root producer or select the worker role. Unit state metadata alone is insufficient. Normal completion compares the retained positive execution PID and actual normal exit code; a nonzero normal test exit remains failure data. Unit stop, two physical empty-group observations, original pending-start join and both output-pump joins precede any result or report-read permission.
+
+`RequireReportsReady(owner, accounts, workspace, token)` requires normal original task completion with healthy complete output. It does not imply zero test exit or accepted coverage. `RequirePhysicalSettlement` is a separate cleanup guard and supports unsuccessful operations only when real physical settlement is established. STOP closes further starts and joins the original task. An uncertain/cancelled start remains owned through the original before-and-after stop sequence. Cleanup borrows the original owner cancellation and a bounded local portion of its existing cleanup reserve; it never starts root teardown during a successful producer run, which would close subsequent report collection.
+
+The run response omits raw stdout/stderr while retaining exact charged-byte and actual truncation data; root-owned prefixes stay private. All actual pump reads use the shared [run output budget](SupervisionRunOutputBudget.cs). A successful pipe receipt is not physical exit. Any failed start, monitor, stop, group check, output/pump join or final binding remains unsuccessful. Failed cleanup quarantines the account-associated storage and identities; no boolean or detached JSON can release them.
+
+Producer work cancellation and output drainage have separate lifetimes. `LinuxOutputPipes.CreateDrainDeadline(owner.TeardownCancellation, input.Remaining)` binds the original drain to the retained owner's teardown source and original job remainder, just as the worker drain does. A cancelled request stops and joins the actual producer; it does not prematurely cancel the pumps or mark a healthy paired ledger as failed. The source is disposed only after the original collector and pipe closure have joined. Owner teardown expiry, actual read failure and shared quota overflow still reject; no deadline is renewed and no EOF is synthesized.
+
+The worker's natural-exit monitor also preserves original job cancellation as cancellation, rather than rewriting it as an identity fault. That specific path records failed work without prematurely quarantining storage; any failed native finalization still quarantines it. `JoinOriginalExitMonitorAsync(originalTask, originalJobToken)` waits for that exact task without a cancellable proxy. A completed cancelled task is expected only when the original job token is cancelled; faulted tasks, including a faulted cancellation exception, remain rejection paths. This join result supplies no native settlement. Final cleanup independently requires the retained execution PID in authenticated stopped-unit facts, two empty-group checks, healthy original output EOFs, pending start/stop joins, local closes and final owner checks before accounts can be released. The original cancelled run remains unsuccessful.
+
+`SupervisionWorkerLifetime.JoinCleanupAsync()` likewise joins the original reserved stop task and permits caller cancellation alone to coexist with completed cleanup procedures. It rejects before stop, during incomplete work, or after any startup, cancellation-callback, containment, finalization or cancellation-source close fault. It never clears `Failed`, reruns a callback or establishes physical exit. The native worker's cleanup path additionally requires its final `PhysicallySettled` guard; successful-execution checks still reject the cancelled lifetime. This distinction lets the root seal storage and release identities after a genuinely contained failed run without calling that run successful.
+
+After physical settlement, a transport failure or a normal nonzero test exit may retain the original joined producer prefixes through [the private diagnostic writer](LinuxProducerFailureOutput.cs). Both paths require the same original owner, teardown allowance and bounded stream receipts; neither opens another pipe reader. Diagnostic failure preserves the original outcome. A nonzero normal exit still returns its actual code to the restricted producer, while a failed process/transport guard still rejects with ASEVD410. The private state file distinguishes those paths without publishing raw subject output.
+
+This internal native path is described with the [coverage execution and custody ordering](coverage-execution.md). Source tests of recipe and parser data are not native controls or consumer proof. Genuine Linux coverage, cancellation, quota and artifact-failure controls remain the checkpoint exit requirements; Trusted enrollment remains closed.
+
+## Bounded runtime concurrency and exit transitions
+
+The fixed producer environment supplies `DOTNET_PROCESSOR_COUNT=1` before .NET starts, alongside the existing single-node MSBuild command. The real Linux control previously reached its unchanged64-task cgroup ceiling (three `pids.events.max` events) while memory stayed below192MiB with zero OOM events; VSTest reported testhost OOM. The runtime hint reduces CPU-derived thread creation, without raising TasksMax64, MemoryMax1GiB, capabilities, write grants or deadlines. See [Microsoft's documented runtime processor override](https://learn.microsoft.com/dotnet/core/compatibility/core-libraries/6.0/environment-processorcount-on-windows#recommended-action). This hint is not a guarantee that arbitrary tests fit the cap; actual limit failures remain unsuccessful.
+
+`IsNormalExitTransition(value, capturedPid)` permits only validated same-unit/same-execution transitional samples to remain pending within the original monitor token. It grants no normal-exit or stopped fact. Foreign PIDs/policy and signalled exits remain rejection paths; a positive result still requires the exact normal terminal record, final input rehash, both physical group checks, original pump joins and root custody. The monitor previously rejected during normal-exit observation before the manager's later code1/status1 record; native validation remains required after this bounded polling correction.
+
+## Failed worker diagnostics during coverage setup
+
+The actual worker can fail before any producer exists. Its `IdentityFailure` forwards the retained process reader's existing first closed failure only when the control server fails at initial peer rechecking; no identity guard or error result changes. `RetainJoinedFailureOutput(token)` uses the original bound owner/input and collector after the original stop task joins. It saves the same fixed bounded prefixes and a distinct closed worker state under root-only `appsurface-evidence-worker-diagnostics-<generation>`. This diagnostic does not require or establish physical settlement; unknown process/cgroup/custody facts remain unknown. The [native harness](../../.github/issue779-checkpoint2/README.md) copies only those fixed private files, preserves the failed result, and never prints raw prefixes.
+
+The fixed producer environment additionally sets `DOTNET_EnableDiagnostics_IPC=0` and `DOTNET_EnableDiagnostics_Debugger=0`. These [.NET runtime switches](https://learn.microsoft.com/dotnet/core/tools/dotnet-environment-variables#dotnet_enablediagnostics_ipc) disable unused diagnostic-port and debugger services before each SDK child starts; they do not disable the profiler or change the test command, coverage collector, kernel task/memory caps, or deadlines. The processor-count hint alone still hit the native64-task ceiling. This is a bounded runtime-footprint correction whose actual effect and coverage compatibility must be measured by the genuine Linux controls; the environment assertions alone prove neither.
+
+## Quota rejection and physical cleanup
+
+Native coverage selects the [run ledger's drain-on-quota policy](README.md#run-wide-accounting-primitive).
+Overflow still signals the original job stop and permanently rejects successful output, reports and
+run completion. Unlike a read or owner-deadline failure, quota alone leaves the original readers alive
+to charge and discard bytes through actual EOF after the owned units stop. Prefix retention stays
+bounded and stops at rejection. Physical worker finalization may accept its own completely drained
+quota pair; later root custody requires all registered pairs and exact aggregate accounting to have
+joined. Missing EOF, read/cancellation/signalling errors or a failed native stop/group/close check
+still quarantine storage and accounts. No limit, permission or cleanup allowance is raised.
+
+The failed-settlement diagnostic may retain the original joined producer output even when physical
+settlement is false. It requires the actual original collector task to have completed successfully;
+its state file records pending failure, cleanup/pump/group flags and the last already-read stop sample.
+Unknown states remain `unknown`; it performs no new unit lookup or output read. Diagnostic retention
+never changes the physical-settlement predicate, sealing, quarantine, account disposition or run result.
+
+## Worker failure versus unsafe cleanup
+
+The worker monitor recognizes the original captured execution's normal terminal or authenticated
+stopped signal-exit record through `LinuxWorkerUnit.HasExitedExecution(sample, capturedPid)`.
+Signal termination and normal nonzero status permanently mark work failed. They do not by themselves
+quarantine storage before native finalization can inspect it. Foreign PIDs, malformed status or policy,
+failed observations and other integrity faults still reject and quarantine. All successful-completion
+checks retain the exact normal code1/status0 requirement. The original stop and pending tasks, unit/PID,
+post-pump cgroup emptiness, both original EOFs, owner continuity and retained-tree sealing still govern
+filesystem custody and account removal after a failed worker. This distinction is needed when an
+artifact read correctly rejects mutation and the worker's fail-fast path terminates its own process.
+
+`IsExitTransition` permits only policy-validated same-execution stop states and mixed-interface
+running/zero-main observations to remain pending under the original monitor token. Unit and service
+properties are separate authenticated reads, so an exit between them can produce that mixed tuple.
+The transition grants no terminal or physical result; the monitor must still reach an exact finished
+or stopped record. Foreign PIDs/policy, invalid signals and unsupported states remain rejection paths.

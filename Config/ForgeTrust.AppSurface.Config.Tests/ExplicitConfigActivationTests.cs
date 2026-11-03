@@ -31,7 +31,8 @@ public sealed class ExplicitConfigActivationTests
         using var ready = new CountdownEvent(workerCount);
         using var attempted = new CountdownEvent(workerCount);
         using var start = new ManualResetEventSlim();
-        // These workers block on synchronous gates; dedicated threads avoid starving a small test-host pool.
+        // These synchronous workers intentionally block on two gates and DI's singleton lock.
+        // Dedicated workers keep the test's start barrier independent of ThreadPool injection timing.
         var firstTasks = Enumerable.Range(0, workerCount)
             .Select(_ => Task.Factory.StartNew(() =>
             {

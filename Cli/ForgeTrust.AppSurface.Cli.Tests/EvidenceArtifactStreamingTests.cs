@@ -27,9 +27,8 @@ public sealed class EvidenceArtifactStreamingTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task StreamWrite_CleanupFailurePreservesReplacementAndDoesNotMaskTheReadFailure(bool replaceParent)
+    public async Task StreamWrite_ReadFailureBeforePersistencePreservesCallerPathsAndOriginalException(bool replaceParent)
     {
-        if (OperatingSystem.IsWindows()) return;
         using var directory = TempDirectory.Create();
         var writer = CreateWriter(directory.Path, 128);
         var prefix = Path.Join(directory.Path, "coverage");
@@ -37,10 +36,11 @@ public sealed class EvidenceArtifactStreamingTests
         var failure = new IOException("original read failure");
         using var contents = new ActionReadStream(() =>
         {
-            File.Delete(destination);
+            Assert.False(File.Exists(destination));
+            Assert.False(Directory.Exists(prefix));
+            Assert.Empty(writer.WrittenArtifacts);
             if (replaceParent)
             {
-                Directory.Delete(prefix);
                 File.WriteAllText(prefix, "replacement bytes");
             }
             else
@@ -54,6 +54,7 @@ public sealed class EvidenceArtifactStreamingTests
         var observed = await Assert.ThrowsAsync<IOException>(() => writer.WriteAsync("report", "coverage/report.txt", contents).AsTask());
 
         Assert.Same(failure, observed);
+        Assert.True(contents.CanRead);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.Equal("replacement bytes", File.ReadAllText(replaceParent ? prefix : Path.Join(destination, "caller.txt")));
         if (replaceParent) File.Delete(prefix);

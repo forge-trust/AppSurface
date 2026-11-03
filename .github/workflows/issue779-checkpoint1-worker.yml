@@ -1,0 +1,281 @@
+name: Issue 779 current CSharp worker controls
+
+on:
+  workflow_call:
+    outputs:
+      artifact_name:
+        description: Current-source aggregate of the sixteen genuine worker controls
+        value: ${{ jobs.aggregate.outputs.artifact_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  worker-selector:
+    name: Current CSharp worker ${{ matrix.selector }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        selector: ["None", N04, N05, N06, N07, N08, N09, N10, N11, N12, N13, N14, N15, N16]
+    env:
+      C1_SELECTOR: ${{ matrix.selector }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      MSBUILDDISABLENODEREUSE: "1"
+      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select a fresh private build SDK installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          sdk_parent="$RUNNER_TEMP/checkpoint1-build-sdk"
+          mkdir -m 0700 "$sdk_parent"
+          # setup-dotnet reads this before selecting its installation/reuse root.
+          printf 'DOTNET_INSTALL_DIR=%s/installation\n' "$sdk_parent" >> "$GITHUB_ENV"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.401
+      - name: Bind the complete current source and fixed selector
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/checkpoint1-$C1_SELECTOR-evidence"
+          inputs="$RUNNER_TEMP/checkpoint1-$C1_SELECTOR-inputs"
+          mkdir -m 0700 "$evidence"
+          mkdir -m 0700 "$inputs"
+          printf 'C1_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          printf 'C1_INPUTS=%s\n' "$inputs" >> "$GITHUB_ENV"
+          printf 'C1_BUILD_SDK=%s\n' "$(dirname "$(readlink -f "$(command -v dotnet)")")" >> "$GITHUB_ENV"
+          printf 'C1_RUNTIME=%s\n' "$inputs/runtime" >> "$GITHUB_ENV"
+          printf 'NUGET_PACKAGES=%s/checkpoint1-packages\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          timeout --signal=KILL 60 python3 -B - <<'PY' > "$evidence/portable-tests.log" 2>&1
+          import importlib.util
+          from pathlib import Path
+          import sys
+          import unittest
+          root = Path('.github/issue779-checkpoint1').resolve()
+          sys.path.insert(0, str(root))
+          loader = unittest.TestLoader()
+          suite = loader.discover(str(root), pattern='test_*.py')
+          # N15's owner-scoped tests live beside the port, outside discovery's
+          # package recursion. Include that fixed module in the same 60s bound.
+          path = root / 'procedures/n15/test_data.py'
+          spec = importlib.util.spec_from_file_location('c1_n15_portable_data', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          suite.addTests(loader.loadTestsFromModule(module))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+      - name: Install the distribution-matched execution runtime prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          # The private 10.0.401 SDK remains the only compiler host. The
+          # distribution SDK supplies the complete OS-matched runtime image;
+          # none of its SDK/packs content is copied into the protected runtime.
+          # Retain the known Azure/EC2 runner mirror configuration, then select canonical HTTPS.
+          # Package signatures and distribution versions remain verified by APT.
+          cp /etc/apt/apt-mirrors.txt "$C1_EVIDENCE/runtime-mirrors-before.txt"
+          grep --extended-regexp --quiet \
+            '^http://(azure\.archive\.ubuntu\.com|us-east-2\.ec2\.archive\.ubuntu\.com)/ubuntu/?([[:space:]]|$)' \
+            /etc/apt/apt-mirrors.txt
+          sudo --non-interactive sed --in-place \
+            -e 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://us-east-2.ec2.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/apt-mirrors.txt
+          cp /etc/apt/apt-mirrors.txt "$C1_EVIDENCE/runtime-mirrors-after.txt"
+          grep --fixed-strings --quiet 'https://archive.ubuntu.com/ubuntu' /etc/apt/apt-mirrors.txt
+          if grep --ignore-case --fixed-strings --quiet 'http://' /etc/apt/apt-mirrors.txt; then
+            printf '%s\n' 'runtime-mirror-selection-rejected' >&2
+            exit 1
+          fi
+          # Bound stalled mirror connections inside the unchanged update/install deadlines.
+          # APT retries only dependency downloads; native procedures and tests are never retried here.
+          apt_acquire=(-o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
+                       -o Acquire::Retries=2 -o Acquire::http::Pipeline-Depth=0)
+          timeout --signal=KILL 180 sudo --non-interactive apt-get "${apt_acquire[@]}" update \
+            > "$C1_EVIDENCE/runtime-package-install.log" 2>&1
+          timeout --signal=KILL 10 apt-cache policy \
+            dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \
+            dotnet-runtime-10.0 aspnetcore-runtime-10.0 liblttng-ust1t64 \
+            > "$C1_EVIDENCE/runtime-package-policy.log"
+          # Network acquisition is CI setup, separate from the unchanged package-install and native limits.
+          timeout --signal=KILL 600 sudo --non-interactive apt-get "${apt_acquire[@]}" install \
+            --download-only --yes --no-install-recommends dotnet-sdk-10.0 \
+            >> "$C1_EVIDENCE/runtime-package-install.log" 2>&1
+          timeout --signal=KILL 240 sudo --non-interactive apt-get "${apt_acquire[@]}" install \
+            --no-download --yes --no-install-recommends dotnet-sdk-10.0 \
+            >> "$C1_EVIDENCE/runtime-package-install.log" 2>&1
+          dpkg-query --show --showformat='${Package}\t${Version}\t${Architecture}\t${db:Status-Status}\n' \
+            dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \
+            dotnet-runtime-10.0 aspnetcore-runtime-10.0 liblttng-ust1t64 \
+            > "$C1_EVIDENCE/runtime-packages.tsv"
+          test "$(readlink -f /usr/lib/dotnet)" = /usr/lib/dotnet
+          test "$(readlink -f /usr/lib/dotnet/dotnet)" = /usr/lib/dotnet/dotnet
+          test -d /usr/lib/dotnet/sdk
+          printf 'C1_EXECUTION_SDK=/usr/lib/dotnet\n' >> "$GITHUB_ENV"
+      - name: Copy the actual SDK-free framework-dependent runtime closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          # Observe only fixed execution-installation roles; these facts cannot
+          # qualify the image or replace the complete copy and native OS audit.
+          timeout --signal=KILL 6 python3 -B - <<'PY' > "$C1_EVIDENCE/runtime-input-metadata.json"
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+          import time
+          root = Path(os.environ['C1_EXECUTION_SDK'])
+          deadline = time.monotonic() + 5
+          roles = ('host', 'host/fxr', 'shared', 'shared/Microsoft.NETCore.App', 'shared/Microsoft.AspNetCore.App')
+          version = re.compile(r'10\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z')
+          rows = []
+          def facts(value):
+            return {'mode': format(stat.S_IMODE(value.st_mode), '04o'),
+                    'uid': value.st_uid, 'gid': value.st_gid,
+                    'links': value.st_nlink, 'directory': stat.S_ISDIR(value.st_mode)}
+          for role in roles:
+            row = {'role': role, 'facts': None, 'versions': [], 'errno': None, 'truncated': False}
+            try:
+              if time.monotonic() >= deadline:
+                row['truncated'] = True
+              else:
+                node = root / role
+                row['facts'] = facts(node.lstat())
+                if role in roles[1:2] + roles[3:]:
+                  with os.scandir(node) as entries:
+                    for index, entry in enumerate(entries):
+                      if index >= 128 or time.monotonic() >= deadline:
+                        row['truncated'] = True
+                        break
+                      if version.fullmatch(entry.name):
+                        row['versions'].append({'version': entry.name,
+                                                'facts': facts(entry.stat(follow_symlinks=False))})
+                  row['versions'].sort(key=lambda item: item['version'])
+            except OSError as error:
+              row['errno'] = error.errno if type(error.errno) is int and 1 <= error.errno <= 4095 else None
+            rows.append(row)
+          print(json.dumps({'schema': 'issue779-runtime-input-metadata-v1', 'roles': rows,
+                            'qualification': False}, sort_keys=True))
+          PY
+          timeout --signal=KILL 150 python3 -B .github/issue779-checkpoint1/prepare-runtime.py \
+            --sdk-root "$C1_EXECUTION_SDK" --output "$C1_RUNTIME" --receipt "$C1_EVIDENCE/runtime-preparation.json" \
+            > "$C1_EVIDENCE/runtime-preparation.log" 2>&1
+      - name: Publish the current selected CLI in Release and retain genuine build facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          timeout --signal=KILL 630 python3 -B .github/issue779-checkpoint1/publish.py \
+            --source-root "$GITHUB_WORKSPACE" --source-capture "$C1_EVIDENCE/source.json" \
+            --source "$GITHUB_SHA" --selector "$C1_SELECTOR" --runtime "$C1_RUNTIME" --build-sdk "$C1_BUILD_SDK" \
+            --tool "$C1_INPUTS/tool" --output "$C1_EVIDENCE/build.json" \
+            > "$C1_EVIDENCE/publisher.log" 2>&1
+      - name: Prepare a source-bound plan without granting native authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 150 python3 -B .github/issue779-checkpoint1/run-native.py prepare \
+            --source-capture "$C1_EVIDENCE/source.json" --source "$GITHUB_SHA" \
+            --selector "$C1_SELECTOR" --tool "$C1_INPUTS/tool" \
+            --runtime "$C1_RUNTIME" --build-receipt "$C1_EVIDENCE/build.json" \
+            --output "$C1_EVIDENCE/plan" > "$C1_EVIDENCE/preparation.log" 2>&1
+      - name: Execute the fixed genuine Linux procedure with its original clocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          timeout --signal=KILL 900 sudo --non-interactive /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            /usr/bin/python3 -B .github/issue779-checkpoint1/run-native.py run \
+            --plan "$C1_EVIDENCE/plan/plan.json" --output "$C1_EVIDENCE/native" \
+            --workflow-identity "github-actions-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            > "$C1_EVIDENCE/native-driver.log" 2>&1
+      - name: Recheck current source after builds and native work
+        if: always()
+        shell: bash
+        run: |
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$C1_EVIDENCE/source.json" --verify
+      - name: Validate bounded private artifacts
+        id: retention
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          # All procedure writers must already be joined. No sealed input tree is retained.
+          sudo --non-interactive chown -R --no-dereference "$(id -u):$(id -g)" "$C1_EVIDENCE"
+          timeout --signal=KILL 35 python3 -B .github/issue779-checkpoint1/check-retention.py "$C1_EVIDENCE"
+      - name: Retain current selector receipts and private diagnostics
+        if: always() && steps.retention.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-checkpoint1-selector-${{ matrix.selector }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.C1_EVIDENCE }}
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+
+  aggregate:
+    name: Reconcile all sixteen current worker controls
+    needs: worker-selector
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      artifact_name: issue779-checkpoint1-current-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: issue779-checkpoint1-selector-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint1-results
+      - name: Bind and reconcile the exact current selector set
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 -B - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          sys.path.insert(0, '.github/issue779-checkpoint1')
+          import binding
+          root = Path(os.environ['RUNNER_TEMP']) / 'checkpoint1-results'
+          suffix = '-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
+          selected = [root / ('issue779-checkpoint1-selector-' + selector + suffix) for selector in binding.SELECTORS]
+          assert {p.name for p in root.iterdir()} == {p.name for p in selected}
+          capture = selected[0] / 'source.json'
+          subprocess.run([sys.executable, '-B', '.github/issue779-checkpoint2/capture-source.py',
+              os.environ['GITHUB_SHA'], str(capture), '--verify'], check=True, timeout=60)
+          command = [sys.executable, '-B', '.github/issue779-checkpoint1/run-native.py', 'aggregate',
+              '--source-capture', str(capture), '--output', str(Path(os.environ['RUNNER_TEMP']) / 'checkpoint1-aggregate'),
+              '--receipts', *[str(p / 'native') for p in selected]]
+          subprocess.run(command, check=True, timeout=150)
+          PY
+      - name: Retain current sixteen-control aggregate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-checkpoint1-current-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint1-aggregate
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error

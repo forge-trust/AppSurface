@@ -15,8 +15,9 @@ public sealed partial class EvidenceHostBootstrapTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseResponse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requestCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var order = new List<string>();
-        var handler = new IgnoringReadinessHandler(entered, releaseResponse, () => order.Add("client"));
+        var handler = new IgnoringReadinessHandler(entered, releaseResponse, requestCancelled, () => order.Add("client"));
         var readiness = EvidenceAspireApplication.CreateHttpReadinessCore(
             "postgres", "/healthz", TimeSpan.FromSeconds(30), HttpReadinessSettings.Snapshot(new()),
             _ => Task.CompletedTask, _ => Task.FromResult<string?>("http://localhost/"),
@@ -28,18 +29,27 @@ public sealed partial class EvidenceHostBootstrapTests
             registration.AddProducer(producer);
         }, timeProvider: time);
 
-        var run = host.RunAsync();
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        time.Advance(TimeSpan.FromSeconds(1));
-        await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.False(run.IsCompleted);
-        Assert.Empty(order);
-        releaseResponse.SetResult();
-        var manifest = await run.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
-        Assert.Equal(0, producer.RunCount);
-        Assert.Equal(["client", "lease"], order);
-        Assert.Equal(EvidenceResourceOutcome.TimedOut, Assert.Single(manifest.ResourceResults).Outcome);
+        using var accepted = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, host.Plan);
+        var run = accepted.RunAsync(host);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            time.Advance(TimeSpan.FromSeconds(1));
+            await requestCancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(run.IsCompleted);
+            Assert.Empty(order);
+            releaseResponse.SetResult();
+            var manifest = await run.WaitAsync(TimeSpan.FromSeconds(10));
+            await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.Equal(0, producer.RunCount);
+            Assert.Equal(["client", "lease"], order);
+            Assert.Equal(EvidenceResourceOutcome.TimedOut, Assert.Single(manifest.ResourceResults).Outcome);
+        }
+        finally
+        {
+            releaseResponse.TrySetResult();
+        }
     }
 
     // Value: a fatal adapter cleanup failure cannot become a nonfatal host diagnostic or manifest claim.
@@ -60,7 +70,8 @@ public sealed partial class EvidenceHostBootstrapTests
             registration.AddProducer(producer);
         });
 
-        Assert.Same(fatal, await Record.ExceptionAsync(() => host.RunAsync()));
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, host.Plan);
+        Assert.Same(fatal, await Record.ExceptionAsync(() => run.RunAsync(host)));
         Assert.Equal(0, producer.RunCount);
     }
 
@@ -75,10 +86,11 @@ public sealed partial class EvidenceHostBootstrapTests
         }
     }
 
-    private sealed class IgnoringReadinessHandler(TaskCompletionSource entered, TaskCompletionSource response, Action disposed) : HttpMessageHandler
+    private sealed class IgnoringReadinessHandler(TaskCompletionSource entered, TaskCompletionSource response, TaskCompletionSource cancelled, Action disposed) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            using var registration = cancellationToken.Register(() => cancelled.TrySetResult());
             entered.TrySetResult();
             await response.Task;
             return new HttpResponseMessage(HttpStatusCode.OK);
