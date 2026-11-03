@@ -85,6 +85,15 @@ Similarly, v1 validates a registered release envelope but labels it `ValidatedNo
 
 For a complete native example that validates AppSurface's own packed CLI and installed consumer, use the [native EvidenceHost acceptance recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). It demonstrates bounded commands, owned storage, independent assertions and durable manifest output.
 
+AppSurface's own [native CI policy](../.github/evidence.policy.json) now selects those journeys from the
+real PR diff. The [local development command](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development)
+uses the same policy for committed, staged, unstaged and untracked changes, packing only when required.
+The [shared CI recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#shared-policy-and-ci)
+documents profile combination, conservative fallback, retained artifacts and manifest gates. The same
+policy now selects full solution coverage and package checks as well as native acceptance. Local `all`
+runs every selected producer; CI executes verified native, coverage and package projections without
+repeating unrelated producers on each platform.
+
 For the in-progress coverage artifact retention behavior, see the [coverage storage guide](../guides/coverage-storage.md). Evidence coverage producers default to managed retention, accept an additive `coverageArtifactRetention` value of `managed` or `full`, and keep the legacy declaration constructor shape. Retention changes raw duplicate preservation only; it does not change collection or gates. The CLI's `--no-clean` preservation boundary wins in either retention mode. The guide describes the source change under development; it does not assert installed-package proof or measured savings.
 
 - [EvidenceHost cookbook](../guides/evidencehost-cookbook.md)

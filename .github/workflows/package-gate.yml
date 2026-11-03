@@ -24,6 +24,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -31,12 +35,35 @@ jobs:
           dotnet-version: |
             10.0.x
 
+      - name: Build repository validation tool
+        run: |
+          dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
+          dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
+
+      - name: Collect and plan package checks
+        id: plan
+        shell: bash
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/package-plan-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          validation="$GITHUB_WORKSPACE/tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
+          dotnet "$validation" --operation collect --repository "$GITHUB_WORKSPACE" --event-file "$GITHUB_EVENT_PATH" --event-name "$GITHUB_EVENT_NAME" --workflow-sha "$GITHUB_SHA" --output "$root/changes"
+          dotnet "$validation" --operation plan --scope packages --policy .github/evidence.policy.json --changed-paths "$root/changes/changed-paths.json" --output "$root/plan"
+          selection="$root/plan/selection.json"
+          required="$(jq -r '.requiresPackageChecks | tostring' "$selection")"
+          echo "requires_package_checks=$required" >> "$GITHUB_OUTPUT"
+          echo "evidence_root=$root" >> "$GITHUB_OUTPUT"
+
       - name: Setup pnpm
+        if: ${{ steps.plan.outputs.requires_package_checks == 'true' }}
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.1.3
 
       - name: Setup Node.js
+        if: ${{ steps.plan.outputs.requires_package_checks == 'true' }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -44,69 +71,36 @@ jobs:
           cache-dependency-path: Web/pnpm-lock.yaml
 
       - name: Verify web assets
+        if: ${{ steps.plan.outputs.requires_package_checks == 'true' }}
         run: |
           pnpm --dir Web install --frozen-lockfile
           pnpm --dir Web run assets:typecheck
           pnpm --dir Web run assets:test
           pnpm --dir Web run assets:verify
 
-      - name: Restore with isolated NuGet cache
+      - name: Run and verify scoped package evidence
+        id: package-evidence
         env:
-          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
+          EVIDENCE_ROOT: ${{ steps.plan.outputs.evidence_root }}
         run: |
-          dotnet restore ForgeTrust.AppSurface.slnx --configfile NuGet.package-gate.config
-
-      - name: Build release packages
-        env:
-          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
-        run: |
-          dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore
-
-      - name: Validate package manifest gate
-        env:
-          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
-        run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-build -- gate
-
-      - name: Verify generated package documentation
-        env:
-          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
-        run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-build -- verify
-
-      - name: Verify package artifacts
-        env:
-          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
-          PACKAGE_VERSION: 0.0.0-ci.${{ github.run_number }}
-          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-gate-artifacts
-        run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
-            verify-packages \
-            --package-version "${PACKAGE_VERSION}" \
-            --artifacts-output "${PACKAGE_ARTIFACTS}" \
-            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
-            --report "${PACKAGE_ARTIFACTS}/package-validation-report.md"
+          set -euo pipefail
+          validation="tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
+          proof="$RUNNER_TEMP/package-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          dotnet "$validation" --operation run --scope packages --policy .github/evidence.policy.json --changed-paths "$EVIDENCE_ROOT/changes/changed-paths.json" --plan "$EVIDENCE_ROOT/plan/evidence-plan.json" --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --output "$proof"
+          dotnet "$validation" --operation verify --scope packages --policy .github/evidence.policy.json --changed-paths "$EVIDENCE_ROOT/changes/changed-paths.json" --plan "$EVIDENCE_ROOT/plan/evidence-plan.json" --manifest "$proof/evidence-manifest.json" --artifact-root "$proof/artifacts"
+          echo "proof=$proof" >> "$GITHUB_OUTPUT"
 
       - name: Upload package validation diagnostics
-        if: ${{ failure() }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: appsurface-package-gate-validation-diagnostics-${{ github.run_number }}
           path: |
-            ${{ runner.temp }}/package-gate-artifacts/package-validation-report.md
-            ${{ runner.temp }}/package-gate-artifacts/durable-template-consumer-proof.json
-            ${{ runner.temp }}/package-gate-artifacts/tailwind-package-consumer-proof.md
-            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof.md
-            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof.evidence.json
-            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/NuGet.tool.config
-            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/consumer/NuGet.config
-            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/consumer/.config/dotnet-tools.json
-            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/consumer/TestResults/**
-            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/logs/**
-            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof.md
-            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/consumer/NuGet.config
-            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/consumer/Docs.ConsumerProof.csproj
-            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/consumer/packages.lock.json
-            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/consumer/obj/project.assets.json
-            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/logs/**
+            ${{ runner.temp }}/package-evidence-*/evidence-summary.md
+            ${{ runner.temp }}/package-evidence-*/evidence-manifest.json
+            ${{ runner.temp }}/package-evidence-*/artifacts/**
+            ${{ runner.temp }}/package-evidence-*/package-checks/**
+            !${{ runner.temp }}/package-evidence-*/package-checks/nuget-packages/**
+            ${{ runner.temp }}/package-plan-*/changes/**
+            ${{ runner.temp }}/package-plan-*/plan/**
           if-no-files-found: warn

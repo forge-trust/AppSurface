@@ -18,21 +18,28 @@ jobs:
   native-evidence:
     name: Native evidence (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - name: Checkout
+      - name: Define runner-owned evidence output
+        shell: pwsh
+        run: |
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP "native-evidence-${env:GITHUB_RUN_ID}-${env:GITHUB_RUN_ATTEMPT}"
+          "EVIDENCE_ROOT=$evidenceRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
+      - name: Checkout event source commit and full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Select matching SDK
+      - name: Install exact .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.402
-      - name: Select exact SDK
+      - name: Select matching SDK
         shell: pwsh
         run: |
           $selection = @{ sdk = @{ version = '10.0.402'; rollForward = 'disable' } }
@@ -46,33 +53,145 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Pack candidate and execute native journeys
+      - name: Collect event-bound changed paths
+        id: diff
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          $changesPath = Join-Path $env:EVIDENCE_ROOT 'changes'
+          $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
+          dotnet $validation --operation collect --repository $env:GITHUB_WORKSPACE --event-file $env:GITHUB_EVENT_PATH --event-name $env:GITHUB_EVENT_NAME --workflow-sha $env:GITHUB_SHA --output $changesPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $sourceState = Get-Content -Raw (Join-Path $changesPath 'source-state.json') | ConvertFrom-Json
+          "source_commit=$($sourceState.headCommit)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+      - name: Plan changed-path evidence
+        id: plan
+        if: ${{ !cancelled() && steps.diff.outcome == 'success' && steps.build.outcome == 'success' }}
         shell: pwsh
         run: |
-          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
-          $feed = Join-Path $env:RUNNER_TEMP 'native-evidence-feed'
-          $proof = Join-Path $env:RUNNER_TEMP 'native-evidence-proof'
-          dotnet pack Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=${{ github.sha }}" "/p:SourceRevisionId=${{ github.sha }}"
+          $planPath = Join-Path $env:EVIDENCE_ROOT 'plan'
+          $changedPaths = Join-Path $env:EVIDENCE_ROOT 'changes/changed-paths.json'
+          $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
+          dotnet $validation --operation plan --scope native --policy .github/evidence.policy.json --changed-paths $changedPaths --output $planPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $selection = Get-Content -Raw (Join-Path $planPath 'selection.json') | ConvertFrom-Json
+          $requiresPackage = [bool]$selection.requiresPackage
+          $hasProducers = @($selection.producerIds).Count -gt 0
+          $requiresPackageText = if ($requiresPackage) { 'true' } else { 'false' }
+          $hasProducersText = if ($hasProducers) { 'true' } else { 'false' }
+          "requires_package=$requiresPackageText" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          "has_producers=$hasProducersText" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+      - name: Pack selected native producer input
+        id: pack
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && steps.plan.outputs.requires_package == 'true' }}
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ steps.diff.outputs.source_commit }}
+        run: |
+          $version = "0.0.0-native.${env:GITHUB_RUN_NUMBER}.${env:GITHUB_RUN_ATTEMPT}"
+          $feed = Join-Path $env:EVIDENCE_ROOT 'feed'
+          dotnet pack Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.$version.nupkg"
-          $hostPath = (Get-Command dotnet).Source
-          dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll --package $package --version $version --source-commit '${{ github.sha }}' --dotnet $hostPath --output $proof --scratch-parent $env:RUNNER_TEMP
+          "package=$package" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+      - name: Run selected evidence producers
+        id: run
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && (steps.plan.outputs.requires_package != 'true' || steps.pack.outcome == 'success') }}
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ steps.diff.outputs.source_commit }}
+          PACKAGE_PATH: ${{ steps.pack.outputs.package }}
+          PACKAGE_VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          $planPath = Join-Path $env:EVIDENCE_ROOT 'plan/evidence-plan.json'
+          $proofPath = Join-Path $env:EVIDENCE_ROOT 'proof'
+          $changedPaths = Join-Path $env:EVIDENCE_ROOT 'changes/changed-paths.json'
+          $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
+          $arguments = @($validation, '--operation', 'run', '--scope', 'native', '--policy', '.github/evidence.policy.json', '--changed-paths', $changedPaths, '--plan', $planPath, '--output', $proofPath)
+          if ('${{ steps.plan.outputs.requires_package }}' -eq 'true') {
+            $arguments += @('--package', $env:PACKAGE_PATH, '--version', $env:PACKAGE_VERSION, '--source-commit', $env:SOURCE_COMMIT, '--dotnet', (Get-Command dotnet).Source, '--scratch-parent', $env:RUNNER_TEMP)
+          }
+          dotnet @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      # Retain the native fixture's failure proof before negative tests can fail.
-      # Both acceptance layers remain required; a failed journey cannot skip tests.
-      - name: Test native lifecycle contracts
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      - name: Verify retained evidence manifest
+        id: verify
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.plan.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $planPath = Join-Path $env:EVIDENCE_ROOT 'plan/evidence-plan.json'
+          $changedPaths = Join-Path $env:EVIDENCE_ROOT 'changes/changed-paths.json'
+          $proofPath = Join-Path $env:EVIDENCE_ROOT 'proof'
+          $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
+          dotnet $validation --operation verify --scope native --policy .github/evidence.policy.json --changed-paths $changedPaths --plan $planPath --manifest (Join-Path $proofPath 'evidence-manifest.json') --artifact-root (Join-Path $proofPath 'artifacts')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test native lifecycle contracts for selected producers
+        id: lifecycle
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.plan.outcome == 'success' && steps.plan.outputs.has_producers == 'true' }}
         shell: pwsh
         run: |
           dotnet restore Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests'
+          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~EvidenceCoverageFanInCollectionTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests|FullyQualifiedName~RepositoryEvidenceWorkflowTests|FullyQualifiedName~RepositoryGitChangesTests|FullyQualifiedName~RepositoryEvidenceWorkflowContractTests|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~NativeEvidenceProgramTests|FullyQualifiedName~PackageChecksProducerTests|FullyQualifiedName~SolutionCoverageProducerTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Preserve native EvidenceHost artifacts
+      - name: Preserve evidence inputs, plan, proof, and artifacts
+        id: upload
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-evidence-${{ matrix.os }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/native-evidence-proof
+          path: ${{ runner.temp }}/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: warn
           retention-days: 7
+      - name: Write lane summary
+        if: ${{ always() }}
+        shell: pwsh
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          $summaryPath = Join-Path $env:EVIDENCE_ROOT 'plan/evidence-summary.md'
+          $proofSummaryPath = Join-Path $env:EVIDENCE_ROOT 'proof/evidence-summary.md'
+          $changedPathFile = Join-Path $env:EVIDENCE_ROOT 'changes/changed-paths.json'
+          $lines = [System.Collections.Generic.List[string]]::new()
+          $lines.Add('## Native EvidenceHost lane')
+          $lines.Add('')
+          $lines.Add("- OS: $env:RUNNER_OS")
+          $lines.Add("- Source commit: ${{ steps.diff.outputs.source_commit || 'unavailable' }}")
+          $lines.Add("- Diff collection: ${{ steps.diff.outcome || 'not run' }}")
+          $lines.Add("- Validation build: ${{ steps.build.outcome || 'not run' }}")
+          $lines.Add("- Plan: ${{ steps.plan.outcome || 'not run' }}")
+          $lines.Add("- Producer run: ${{ steps.run.outcome || 'not run' }}")
+          $lines.Add("- Manifest verification: ${{ steps.verify.outcome || 'not run' }}")
+          $lines.Add("- Native lifecycle tests: ${{ steps.lifecycle.outcome || 'not required' }}")
+          if (Test-Path $changedPathFile) {
+            $changed = Get-Content -Raw $changedPathFile | ConvertFrom-Json
+            $lines.Add("- Changed-path inventory: $(@($changed).Count) paths (retained in the run artifact)")
+          }
+          if (Test-Path $summaryPath) {
+            $selection = Get-Content -Raw (Join-Path $env:EVIDENCE_ROOT 'plan/selection.json') | ConvertFrom-Json
+            $lines.Add("- Selected profile: ``$($selection.profileId)``")
+            $lines.Add("- Required producers: $(@($selection.producerIds) -join ', ')")
+            $lines.Add('')
+            $lines.Add((Get-Content -Raw $summaryPath).Trim())
+          }
+          if (Test-Path $proofSummaryPath) {
+            $lines.Add('')
+            $lines.Add((Get-Content -Raw $proofSummaryPath).Trim())
+          }
+          if ($env:ARTIFACT_URL) { $lines.Add("- Retained run artifact: $env:ARTIFACT_URL") }
+          $lines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8NoBOM
+  evidence-manifest-gate:
+    name: Evidence manifest gate
+    if: ${{ always() }}
+    needs: [native-evidence]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless all three native lanes passed verification
+        if: ${{ needs.native-evidence.result != 'success' }}
+        run: exit 1
+      - name: Confirm all native lanes passed verification
+        if: ${{ needs.native-evidence.result == 'success' }}
+        run: echo 'All native evidence lanes passed manifest verification.'

@@ -87,30 +87,27 @@ Build and test the full solution before pushing substantive changes:
 ```bash
 dotnet build
 dotnet test --no-build
-./scripts/coverage-solution.sh
+dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local-plan
+dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local
 ```
 
-The default script runs both merged coverage and the repository thresholds. It compares local patch
-coverage with `origin/main`; set `COVERAGE_GATE_DIFF_BASE=` when only aggregate coverage is wanted.
-It deliberately accepts no project-selection, filter, output, or merge arguments. Use the public
-[`appsurface coverage` commands](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)
-when a contributor needs a focused run or a shard merge.
+The C# repository evidence tool uses the shared [evidence policy](./.github/evidence.policy.json) and compares the working tree with `origin/main` by default. `local-plan` prints the selected profile, producers, and obligations; `local` executes and verifies the selected evidence on the current OS. Add `--base <revision>` to select another comparison base, or `--scope all|native|coverage|packages` to plan or run one lane. Use `all` for the complete local policy selection; a scoped pass closes only its selected lane. `selection.json` exposes `requiresNativeCoverage` from the root policy selection. Test-only changes use the direct patch gate; source-code changes combine coverage and package checks, with native fan-in on PRs. Package checks may still be affected by ignored local artifacts in inspected paths; ignore status does not skip a package failure. See the [coverage fan-in guide](./guides/coverage-fan-in.md) and the [validation tool reference](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) for coverage gates, evidence output, and CI behavior. The standalone `coverage-solution.sh` remains an unconditional compatibility command; it is not the current `build.yml` evidence path.
 
 ### CI test-result diagnostics
 
-The [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) requires both the native coverage-security matrix
-and a separate packed Durable consumer proof before starting full solution coverage. The consumer
+The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) resolves the shared evidence policy first. Coverage selections run full solution coverage and a separate packed Durable consumer proof. The native coverage-security matrix and PR fan-in run only when the root policy selection includes coverage plus another producer; test-only selections use the direct patch gate. The consumer
 job runs the same [packed-consumer verification](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) with the exact
 coverage SDK and locked restore. Its failure blocks the build and downstream documentation export.
-Keeping this proof in its own job preserves the build's 45-minute budget for solution verification;
-it does not reduce the selected tests, change exclusive scheduling, or relax either coverage gate.
+The coverage lane runs the complete solution through the C# repository evidence validation tool and preserves the existing aggregate and patch gates; see the [coverage fan-in guide](./guides/coverage-fan-in.md) for the current workflow and artifact layout.
+
+The direct Codecov-mode patch gate follows the [CLI's documented no-measurable-points behavior](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-gate). Native fan-in keeps its strict nonempty-denominator verification. Package checks are not exempted based on Git ignore status: ignored local artifacts in paths the existing package checks inspect can still cause a package-check failure; review the package diagnostics and remove or resolve unintended local artifacts.
 
 The GitHub Actions full-solution coverage lane publishes a bounded, failure-first test summary from
 the AppSurface-managed JUnit output. The CLI owns this report alongside its slow-test diagnostics:
 it names failed projects and test cases, includes safely truncated failure detail, and never exceeds
 the GitHub step-summary limit. This summary deliberately replaces the per-project GitHub Actions
 test logger in the broad coverage lane, which can exceed that limit as the suite grows. Download the
-`test-result-diagnostics` artifact for the complete JUnit XML and per-project `dotnet test` logs,
+`test-result-diagnostics` artifact for the complete JUnit XML and per-project `dotnet test` logs under `TestResults/coverage-evidence/coverage/`,
 especially for fork pull requests where [Codecov test-result reporting](https://docs.codecov.com/docs/test-analytics)
 is unavailable without a repository token.
 
@@ -118,12 +115,9 @@ The coverage run treats missing or malformed JUnit evidence as a diagnostics war
 replacement failure for the original test result; use the artifact and the coverage-step log to
 diagnose that condition.
 
-The wrapper requires a non-sandboxed host by default and fails before discovery, cleanup, build,
-or tests when an explicit sandbox marker is enabled. Set `COVERAGE_REQUIRE_NON_SANDBOX=false` only
-when a restricted run is intentional. The check does not classify generic CI or container hosts as sandboxes; see the
-[non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
+The compatibility `coverage-solution.sh` wrapper requires a non-sandboxed host by default and fails before discovery, cleanup, build, or tests when an explicit sandbox marker is enabled. Set `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted compatibility-script run is intentional. The current repository evidence producer also requires a non-sandboxed host for its collection command; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
 
-When `COVERAGE_GATE_DIFF_BASE` selects a patch comparison, the gate also writes
+When the compatibility CLI gate uses `COVERAGE_GATE_DIFF_BASE` to select a patch comparison, it also writes
 `TestResults/coverage-merged/coverage-patch-targets.json` and
 `TestResults/coverage-merged/coverage-patch-targets.md`, even without patch thresholds. Read the
 brief, open each `path:line`, identify the relevant test project, run

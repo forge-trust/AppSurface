@@ -132,7 +132,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 ### [EvidenceHost](./start-here/evidencehost.md)
 
 - [**EvidenceHost guide**](./start-here/evidencehost.md) – Contract-first changed-risk planning so CI can require meaningful coverage or E2E evidence without turning an intentionally low-risk change or an incomplete test profile into a misleading coverage claim.
-- [**Native EvidenceHost acceptance**](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) – AppSurface's own packed CLI and installed-consumer journeys, with bounded commands, owned scratch budgets, independent assertions and verifiable manifests.
+- [**Repository EvidenceHost acceptance**](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) – AppSurface's own solution coverage, package checks, packed CLI and installed-consumer journeys, selected locally and in CI by the same checked-in policy and gated on verified manifests. Start with the [local evidence command](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) for current branch and working-tree changes.
 - [**ForgeTrust.AppSurface.Evidence.Contracts**](./Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) – Versioned plans, producers, manifests, claims, and canonical digest verification.
 - [**ForgeTrust.AppSurface.Evidence.Planner**](./Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) – Deterministic explicit-diff policy resolution with conservative fallback and ambiguity rejection.
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate, explicit consumer-owned lifecycle for Aspire readiness and browser/E2E producers; it is never mixed into normal application startup.
@@ -216,18 +216,26 @@ dotnet build
 dotnet test --no-build
 ```
 
-Run the repository's full AppSurface coverage-and-gate lane:
+Plan and run the evidence selected for the current branch and working tree:
 
 ```bash
-./scripts/coverage-solution.sh
+dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local-plan
+dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local
 ```
 
-For a local checkout, the default patch comparison is `origin/main`. The coverage wrapper uses
+The shared [repository evidence policy](./.github/evidence.policy.json) selects solution coverage,
+package checks and native acceptance locally and in CI. Use `--scope coverage` to execute only the
+coverage projection of the plan or `--scope packages` for package validation. Explicit documentation
+exemptions avoid these producers; unknown inputs select the conservative set. The
+[repository evidence reference](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#shared-policy-and-ci)
+documents the producers, prerequisites, scoped manifests and CI gates.
+
+For a local checkout, the default patch comparison is the merge base with `origin/main`, including
+staged, unstaged and untracked content in a captured patch. Coverage uses
 [`--patch-line-mode codecov`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
-so the local changed-line gate handles partial conditions the same way as Codecov. The CI workflow
-overrides the comparison value with `HEAD^1` for its pull-request merge checkout, so its patch gate
-evaluates exactly the tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate
-gate, as CI does for baseline builds.
+so changed-line gates handle partial conditions consistently. CI checks out the event's exact PR head
+and uses its merge base with the pinned event base; main baseline runs enforce aggregate coverage.
+The older `scripts/coverage-solution.sh` remains available as an unconditional compatibility recipe.
 
 Matching local and hosted patch results also requires the same coverage artifact and changed-line
 inventory. If the results disagree, compare the commit and base, source paths, and measurable
@@ -242,7 +250,10 @@ The repository lane requires a non-sandboxed host by default. Set
 `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check
 deliberately leaves ordinary CI and container hosts valid; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
 
-This command:
+The policy-selected coverage producer writes to the printed run's `proof/coverage` directory
+(CI uses `TestResults/coverage-evidence/coverage`). The compatibility wrapper has the same collection
+and threshold behavior and uses the fixed `TestResults/coverage-merged` paths listed below:
+
 - Runs each solution test project.
 - Leaves assembly scope to the public CLI and Coverlet defaults; the merged artifact
   includes RazorWire production sources when their tests exercise them.
