@@ -98,6 +98,23 @@ when a contributor needs a focused run or a shard merge.
 
 ### CI test-result diagnostics
 
+The [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) requires both the native coverage-security matrix
+and a separate packed Durable consumer proof before starting full solution coverage. The consumer
+job runs the same [packed-consumer verification](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) with the exact
+coverage SDK and locked restore. Its failure blocks the build and downstream documentation export.
+Keeping this proof in its own job preserves the build's 60-minute budget for solution verification;
+it does not reduce the selected tests, change exclusive scheduling, or relax either coverage gate.
+
+The [Package Artifacts workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-artifacts.yml) reclaims the preinstalled
+Android toolkit at `/usr/local/lib/android` before restore or proof work on its disposable GitHub-hosted
+Linux runner. This .NET/Node job does not use Android. Preparation rejects other runner environments,
+reports available blocks and inodes before and after, and preserves .NET, Node, NuGet caches, checkout
+files, proof workspaces, package archives, and diagnostic evidence. The executable
+[runner-preparation guard checks](https://github.com/forge-trust/AppSurface/blob/main/.github/tests/package_runner_capacity_tests.py) exercise the actual
+workflow shell with a recording `sudo`; they do not reclaim space on a developer machine. If the job
+reports `No space left on device`, inspect its disk diagnostics and the uploaded package-consumer logs
+before changing cache ownership, artifact retention, or verification requirements.
+
 The GitHub Actions full-solution coverage lane publishes a bounded, failure-first test summary from
 the AppSurface-managed JUnit output. The CLI owns this report alongside its slow-test diagnostics:
 it names failed projects and test cases, includes safely truncated failure detail, and never exceeds

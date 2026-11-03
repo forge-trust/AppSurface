@@ -72,6 +72,8 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = TestDirectory.Create();
         using var console = new FakeInMemoryConsole();
+        using var published = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
@@ -79,11 +81,30 @@ public sealed class CoverageRunWatchdogTests
             CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
+        supervisor.ArtifactPublished = _ =>
+        {
+            published.Set();
+            release.Wait();
+        };
         supervisor.BindOutputDirectory(output.Path);
         using var operation = supervisor.Start("project", "tests/Quiet.Tests/Quiet.Tests.csproj");
 
         var artifact = Path.Join(output.Path, "coverage-watchdog.json");
-        await WaitForFileAsync(artifact);
+        Task warning;
+        try
+        {
+            Assert.True(published.Wait(TimeSpan.FromSeconds(5)));
+            await WaitForFileAsync(artifact);
+            Assert.Empty(console.ReadErrorString());
+            warning = WaitForErrorOccurrencesAsync(console, "Coverage watchdog warning", 1);
+            Assert.False(warning.IsCompleted);
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        await warning;
 
         Assert.False(supervisor.CancellationToken.IsCancellationRequested);
         Assert.Contains("\"outcome\": \"warning\"", await File.ReadAllTextAsync(artifact), StringComparison.Ordinal);
@@ -467,7 +488,10 @@ public sealed class CoverageRunWatchdogTests
         using var process = Process.Start(CreateLongRunningProcess())!;
         lease.Attach(process);
         Assert.Same(process, await processKilled.Task.WaitAsync(TimeSpan.FromSeconds(2)));
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        // Join the supervisor's cached drain instead of registering a concurrent exit waiter on its Process.
+        var drain = await supervisor.TerminateAndDrainProcessesAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(drain.Confirmed);
+        Assert.Equal("complete", drain.Status);
         lease.Complete();
         await WaitForFileAsync(Path.Join(output.Path, "coverage-watchdog.json"));
 
@@ -971,6 +995,7 @@ public sealed class CoverageRunWatchdogTests
         Assert.All(options.EnumerateArray(), item => Assert.True(item.GetString()!.Length <= 256));
         Assert.Equal(1024, primary.GetProperty("state").GetString()!.Length);
         Assert.Equal(1024, primary.GetProperty("log").GetString()!.Length);
+        await WaitForErrorOccurrencesAsync(console, "operation=discovery", 1);
         Assert.Contains("operation=discovery", console.ReadErrorString(), StringComparison.Ordinal);
     }
 

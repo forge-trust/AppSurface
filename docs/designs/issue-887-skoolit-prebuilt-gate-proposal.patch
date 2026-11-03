@@ -1,0 +1,21 @@
+--- a/scripts/qa/run-keycloak-theme-gates.sh
++++ b/scripts/qa/run-keycloak-theme-gates.sh
+@@ -417,7 +417,17 @@
+
+ run_image() {
+   local image="${SKOOLIT_KEYCLOAK_IMAGE:-skoolit-keycloak:gate}"
+-  scripts/keycloak-theme.sh build "$image"
++  local expected="${SKOOLIT_KEYCLOAK_PREBUILT_IMAGE_ID:-}"
++  if [[ -z "$expected" ]]; then
++    scripts/keycloak-theme.sh build "$image"
++    return
++  fi
++  [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]] ||
++    problem "prebuilt-keycloak-image-id-invalid" "supply the exact platform image ID from the captured-plan build receipt"
++  [[ "$(docker image inspect "$image" --format '{{.Id}}')" == "$expected" ]] ||
++    problem "prebuilt-keycloak-image-id-mismatch" "select the captured-plan output matching the reviewed build receipt"
++  export SKOOLIT_KEYCLOAK_IMAGE="$expected"
++  scripts/keycloak-theme.sh inspect "$expected"
+ }
+
+ run_upgrade() {

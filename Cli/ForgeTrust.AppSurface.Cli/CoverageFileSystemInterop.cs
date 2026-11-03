@@ -18,6 +18,14 @@ namespace ForgeTrust.AppSurface.CoverageArtifacts;
 /// </remarks>
 internal static partial class CoverageFileSystemInterop
 {
+    /// <summary>Atomically creates a fresh Windows directory with the supplied private owner/ACL; an existing path is never accepted.</summary>
+    /// <param name="path">An extended absolute path beneath a retained validated parent.</param>
+    /// <param name="securityAttributes">Pointer to caller-pinned SECURITY_ATTRIBUTES and descriptor for this call.</param>
+    /// <returns>True only for a newly created directory; the native last error identifies every failure.</returns>
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateDirectoryW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool WindowsCreateDirectory(string path, nint securityAttributes);
+
     /// <summary>Selects no-follow directory and file flags for Darwin or a supported Linux architecture.</summary>
     /// <param name="macos">Whether Darwin constants apply.</param>
     /// <param name="architecture">Native process architecture; Linux x64 and ARM64 use distinct directory and no-follow flags.</param>

@@ -6,12 +6,25 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class RecommendationSnapshotTests
 {
+    private sealed class CacheClock : TimeProvider, ISystemClock
+    {
+        private long _ticks = DateTimeOffset.UtcNow.Ticks;
+        public DateTimeOffset UtcNow => GetUtcNow();
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+        public void Advance(TimeSpan duration)
+        {
+            if (duration < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(duration));
+            Interlocked.Add(ref _ticks, duration.Ticks);
+        }
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -264,13 +277,19 @@ public sealed class RecommendationSnapshotTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task FailedStaleRefreshAndExpiredFailure_ShouldPreserveTheExistingFiniteCacheContract(bool expireBeforeRefresh)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task FailedStaleRefreshAndExpiredFailure_ShouldPreserveTheExistingFiniteCacheContract(
+        bool expireBeforeRefresh,
+        bool useTimeProvider)
     {
-        var clock = new SnapshotClock();
+        var clock = new CacheClock();
         using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
-        using var memo = new Memo(cache, TimeSpan.FromMilliseconds(100), clock);
+        using var memo = useTimeProvider
+            ? new Memo(cache, TimeSpan.FromMilliseconds(100), (TimeProvider)clock)
+            : new Memo(cache, TimeSpan.FromMilliseconds(100), () => clock.UtcNow);
         var environment = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => environment.ContentRootPath).Returns(Path.GetTempPath());
         var harvester = A.Fake<IDocHarvester>();
@@ -342,18 +361,6 @@ public sealed class RecommendationSnapshotTests
             try { await second.WaitAsync(TimeSpan.FromSeconds(5)); }
             catch (InvalidOperationException) when (expireBeforeRefresh) { }
             finally { await memo.DrainBackgroundRefreshesAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
-        }
-    }
-
-    private sealed class SnapshotClock : TimeProvider, Microsoft.Extensions.Internal.ISystemClock
-    {
-        private long _ticks = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).Ticks;
-        public DateTimeOffset UtcNow => GetUtcNow();
-        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
-        internal void Advance(TimeSpan elapsed)
-        {
-            if (elapsed < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(elapsed));
-            Interlocked.Add(ref _ticks, elapsed.Ticks);
         }
     }
 

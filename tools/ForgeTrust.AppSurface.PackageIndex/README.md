@@ -98,9 +98,40 @@ The required hosts are exactly `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64
 The [schema-11 operations guide](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
 defines the candidate, published and deployment gates for complete runtime-set preflight. The release carriers use
 [`verify-preflight-artifacts.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-preflight-artifacts.sh) and its
-[disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
+[disposable package consumer](https://github.com/forge-trust/AppSurface/blob/main/Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
+The version-parameterized [consumer project template](https://github.com/forge-trust/AppSurface/blob/main/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
+is not a directly restorable checkout project. The shared script calls the
+[consumer materializer](https://github.com/forge-trust/AppSurface/blob/main/Durable/materialize-preflight-consumer.sh)
+to copy that template, its adjacent C# source files and repository build policy into an owned temporary
+consumer directory, without copying bin/obj outputs. Restore and both run commands receive the exact
+package version from the verified bundle; there is no fallback version. This keeps automatic
+dependency-submission discovery from attempting an unconfigured restore while preserving every
+package-hash, closure, identity, schema, guard, timeout and receipt gate. The carrier's internal
+`--consumer-project-template` input names the source template; the shared script cleans up its
+materialized project with the rest of the proof's owned directory before promoting a receipt.
+
+The ordinary `PostgreSqlPreflightConsumer.csproj` is a source-backed, non-packable development project for editing,
+compilation and generic dependency discovery, including GitHub automatic dependency submission. It references the
+local provider project. The separate `PostgreSqlPreflightConsumer.csproj.template` is the artifact-only project selected
+by the release carrier; its provider reference requires the exact manifest-derived `AppSurfacePackageVersion`, has
+no default published-version fallback, and must not be replaced by the source-backed project.
+
+The shared [`materialize-preflight-consumer.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/materialize-preflight-consumer.sh) stages the package
+project in the verifier's private scratch directory. It preserves authored sources and nested resources, omits generated
+`bin`/`obj` directories and exactly the same-directory development `.csproj`, and copies the repository's authored
+[`Directory.Build.props`](../../Directory.Build.props) and [`Directory.Build.targets`](../../Directory.Build.targets).
+The staged `.csproj` bytes match the package template and contain no project reference. Occupied destinations,
+source/destination overlap, missing build policy and unsupported links are rejected before staging. Nested resources
+sharing the project basename remain intact. The verifier uses `--consumer-project-template` for release proof;
+explicit legacy `--consumer-project` callers retain an already-materialized package-project path with the canonical
+`PostgreSqlPreflightConsumer.csproj` basename. Source `ProjectReference` inputs are rejected, and the provider
+package reference must use `$(AppSurfacePackageVersion)`.
+Both modes are described by the script's help and must not be combined. Artifact receipts still require the exact
+verified version, frozen first-party feed, complete archive equality checks and checked cleanup. A source build or
+empty-version restore cannot replace candidate or published artifact proof.
+
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
 and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
 runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule
@@ -264,7 +295,7 @@ On macOS, the evidence workflow uses the [native PostgreSQL acquisition helper](
 
 The [native smoke contract](../../start-here/durable-worker.md) uses `/tmp` for its private cluster root on Linux and `/private/tmp` on macOS. Windows and other platforms use the system temporary directory. Linux and macOS intentionally use these short roots rather than `TMPDIR` because the [socket-path guard](DurableTemplateNativePostgreSql.cs) enforces PostgreSQL's unchanged 103-byte Unix-domain socket limit. This choice applies to the native cluster root only; the generated smoke still fails closed if its selected root cannot satisfy ownership or path checks.
 
-Native setup shares one 90-second deadline across initialization, startup, ownership checks, authentication and server-version verification, followed by a separate 20-second cleanup budget. Tool acquisition has its own five-minute deadline. The internal [`NativePostgreSqlBudgets` test seam](DurableTemplateNativePostgreSql.cs) accepts positive lower setup and cleanup limits for bounded regression tests; it cannot raise the production ceilings. Every setup request receives at most the remaining portion of the selected setup budget. At native-smoke dispatch, the verifier samples that remainder once and uses the same value for both `APPSURFACE_TEMPLATE_NATIVE_SETUP_REMAINING_MS` and the child command timeout, which adds the fixed 35-second outer allowance. This prevents the independently shrinking clock from producing a timeout smaller than the remaining budget advertised to the child; it does not reset or extend the setup deadline. Setup authentication also retains its five-second per-probe cap, taking the smaller limit; standalone authentication after setup keeps the five-second cap. A lower test budget applies to `initdb` and the final `psql` version probe as well as startup and authentication; advancing to another phase does not reset it. These limits are verifier contracts, not generated application settings.
+Native setup shares one 90-second deadline across initialization, startup, ownership checks, authentication and server-version verification, followed by a separate 20-second cleanup budget. Tool acquisition has its own five-minute deadline. The internal [`NativePostgreSqlBudgets` test seam](DurableTemplateNativePostgreSql.cs) accepts positive lower setup and cleanup limits for bounded regression tests; it cannot raise the production ceilings. Every setup request receives at most the remaining portion of the selected setup budget. At native-smoke dispatch, the verifier samples that remainder once and uses the same value for both `APPSURFACE_TEMPLATE_NATIVE_SETUP_REMAINING_MS` and the child command timeout, which adds the fixed 35-second outer allowance. The added allowance prevents the runner timeout from falling below the setup budget advertised to the child; it does not reset or extend the setup deadline. Setup authentication also retains its five-second per-probe cap, taking the smaller limit; standalone authentication after setup keeps the five-second cap. A lower test budget applies to `initdb` and the final `psql` version probe as well as startup and authentication; advancing to another phase does not reset it. These limits are verifier contracts, not generated application settings.
 
 The native bootstrap child uses PostgreSQL's [`OSTYPE=msys` Windows prompt fallback](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/common/sprompt.c#L81-L108) to read the redirected password input instead of `CONIN$`/`CONOUT$`. This value is set only in that Windows child's launch environment; Unix and parent environments are unchanged. The password remains on stdin, SCRAM authentication and restricted-token behavior remain enabled, and timeout/termination/output-drain checks remain required. This removes a console-input dependency; a passing test of launch settings alone does not qualify a hosted native cluster. See the [native proof contract](#durable-worker-template-proof-806) for required authentication and cleanup evidence.
 

@@ -15,7 +15,7 @@ public sealed class Memo : IMemo, IDisposable
     private readonly ConcurrentDictionary<object, SemaphoreSlim> _locks = new();
     private readonly ConcurrentDictionary<Task, byte> _backgroundRefreshes = new();
     private readonly TimeSpan _failureCacheDuration;
-    private readonly TimeProvider _timeProvider;
+    private readonly Func<DateTimeOffset> _utcNow;
     private int _disposed;
 
     /// <summary>
@@ -113,9 +113,30 @@ public sealed class Memo : IMemo, IDisposable
     /// deterministic fresh/stale/expired transitions, rather than relying on wall-clock scheduling delays.
     /// </remarks>
     public Memo(IMemoryCache cache, TimeSpan failureCacheDuration, TimeProvider timeProvider)
+        : this(cache, failureCacheDuration, GetUtcNow(cache, timeProvider), nameof(timeProvider))
+    {
+    }
+
+    /// <summary>Creates a memo with an explicit clock for deterministic cache-contract tests.</summary>
+    /// <param name="cache">Storage whose expiration clock must agree with <paramref name="utcNow"/>.</param>
+    /// <param name="failureCacheDuration">Positive duration for caching factory failures.</param>
+    /// <param name="utcNow">Thread-safe UTC clock shared with the backing cache; public constructors use system UTC.</param>
+    /// <exception cref="ArgumentNullException">The cache or clock is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The failure duration is not positive.</exception>
+    /// <remarks>This internal seam changes time observation only, never freshness, stale or failure durations.</remarks>
+    internal Memo(IMemoryCache cache, TimeSpan failureCacheDuration, Func<DateTimeOffset> utcNow)
+        : this(cache, failureCacheDuration, utcNow, nameof(utcNow))
+    {
+    }
+
+    private Memo(
+        IMemoryCache cache,
+        TimeSpan failureCacheDuration,
+        Func<DateTimeOffset> utcNow,
+        string clockParameterName)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _utcNow = utcNow ?? throw new ArgumentNullException(clockParameterName);
 
         if (failureCacheDuration <= TimeSpan.Zero)
         {
@@ -126,6 +147,13 @@ public sealed class Memo : IMemo, IDisposable
         }
 
         _failureCacheDuration = failureCacheDuration;
+    }
+
+    private static Func<DateTimeOffset> GetUtcNow(IMemoryCache cache, TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        return timeProvider.GetUtcNow;
     }
 
     // ── Zero arguments ──────────────────────────────────────────────────
@@ -918,7 +946,7 @@ public sealed class Memo : IMemo, IDisposable
             shouldRefresh = false;
             expired = false;
 
-            var now = _timeProvider.GetUtcNow();
+            var now = _utcNow();
             if (now < entry.FreshUntilUtc)
             {
                 return true;
@@ -1024,7 +1052,7 @@ public sealed class Memo : IMemo, IDisposable
             {
                 lock (currentEntry.Gate)
                 {
-                    if (_timeProvider.GetUtcNow() < currentEntry.FreshUntilUtc)
+                    if (_utcNow() < currentEntry.FreshUntilUtc)
                     {
                         return;
                     }
@@ -1110,7 +1138,7 @@ public sealed class Memo : IMemo, IDisposable
     {
         var freshDuration = policy.AbsoluteExpiration!.Value;
         var staleDuration = policy.StaleWhileRevalidate!.Value;
-        var now = _timeProvider.GetUtcNow();
+        var now = _utcNow();
         var entry = new StaleCacheEntry(result, now.Add(freshDuration), now.Add(freshDuration).Add(staleDuration));
         var options = CreateEntryOptions(keyLock);
         options.AbsoluteExpirationRelativeToNow = freshDuration.Add(staleDuration);

@@ -14,7 +14,9 @@ public class MemoTests : IDisposable
         Assert.Equal("cache", Assert.Throws<ArgumentNullException>(() =>
             new Memo(null!, TimeSpan.FromSeconds(1), TimeProvider.System)).ParamName);
         Assert.Equal("timeProvider", Assert.Throws<ArgumentNullException>(() =>
-            new Memo(cache, TimeSpan.FromSeconds(1), null!)).ParamName);
+            new Memo(cache, TimeSpan.FromSeconds(1), (TimeProvider)null!)).ParamName);
+        Assert.Equal("utcNow", Assert.Throws<ArgumentNullException>(() =>
+            new Memo(cache, TimeSpan.FromSeconds(1), (Func<DateTimeOffset>)null!)).ParamName);
         foreach (var duration in new[] { TimeSpan.Zero, TimeSpan.FromTicks(-1) })
             Assert.Equal("failureCacheDuration", Assert.Throws<ArgumentOutOfRangeException>(() =>
                 new Memo(cache, duration, TimeProvider.System)).ParamName);
@@ -647,6 +649,14 @@ public class MemoTests : IDisposable
     public void Constructor_NullCache_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new Memo(null!));
+    }
+
+    [Fact]
+    public void Constructor_NullClock_Throws()
+    {
+        var cache = A.Fake<IMemoryCache>();
+        Assert.Throws<ArgumentNullException>(() =>
+            new Memo(cache, TimeSpan.FromMilliseconds(100), (Func<DateTimeOffset>)null!));
     }
 
     [Fact]

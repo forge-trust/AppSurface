@@ -187,9 +187,12 @@ class OrdinaryBuildMeasurementIntegrationControls(unittest.TestCase):
         line = next(row.strip() for row in build.splitlines() if row.strip().startswith('needs:'))
         required = {'worker-controls', 'evidence-native-measurement', 'account-creation',
                     'account-rollback', 'packaged-producer', 'coverage-security-platform',
-                    'durable-postgresql-compatibility',
+                    'durable-postgresql-compatibility', 'packed-durable-consumers',
                     *(f'worker-measurement-{selector}' for selector in selectors)}
         self.assertEqual(required, set(part.strip() for part in line.removeprefix('needs: [').removesuffix(']').split(',')))
+        packed = self.job(current, 'packed-durable-consumers')
+        self.assertIn('dotnet restore ForgeTrust.AppSurface.slnx --locked-mode', packed)
+        self.assertIn('./Durable/verify-packed-consumers.sh', packed)
         self.assertIn('/usr/bin/bash ./scripts/coverage-solution.sh', build)
         # The broker uses a private base environment. The fixed env command must carry
         # fan-in inputs and same-run provenance into the nonroot coverage process.

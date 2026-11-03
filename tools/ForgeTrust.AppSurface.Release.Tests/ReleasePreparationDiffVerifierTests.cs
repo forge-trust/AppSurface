@@ -280,6 +280,60 @@ public sealed class ReleasePreparationDiffVerifierTests
     }
 
     [Fact]
+    public async Task VerifyPrepDiffAllowsAnOrdinaryConsumerTemplateRenameWithoutAReleaseManifest()
+    {
+        var runner = CreateRunnerForNoFetchDiff(
+            "R100\0Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj\0Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template\0");
+
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+        Assert.Empty(result.Diagnostics);
+        Assert.DoesNotContain(runner.Calls, call => call.StartsWith("dotnet ", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("CHANGELOG.md", "old-changelog.md")]
+    [InlineData("old-changelog.md", "CHANGELOG.md")]
+    [InlineData("releases/current.md", "old-current.md")]
+    [InlineData("old-current.md", "releases/current.md")]
+    [InlineData("releases/current.md.yml", "old-current.yml")]
+    [InlineData("old-current.yml", "releases/current.md.yml")]
+    [InlineData("releases/unreleased.md", "old-unreleased.md")]
+    [InlineData("old-unreleased.md", "releases/unreleased.md")]
+    [InlineData("releases/unreleased.md.yml", "old-unreleased.yml")]
+    [InlineData("old-unreleased.yml", "releases/unreleased.md.yml")]
+    [InlineData("releases/unreleased.entries/entry.md", "old-entry.md")]
+    [InlineData("old-entry.md", "releases/unreleased.entries/entry.md")]
+    [InlineData("releases/v1.2.3.md", "old-release.md")]
+    [InlineData("old-release.md", "releases/v1.2.3.md")]
+    [InlineData("releases/v1.2.3.release.json", "old-release.json")]
+    [InlineData("old-release.json", "releases/v1.2.3.release.json")]
+    public async Task VerifyPrepDiffStillRejectsRenamesTouchingEitherReleaseOwnedPath(string original, string destination)
+    {
+        var runner = CreateRunnerForNoFetchDiff($"R100\0{original}\0{destination}\0");
+
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-rename-forbidden");
+    }
+
+    [Fact]
+    public async Task VerifyPrepDiffStillRejectsProductRenamesInAReleasePreparationCandidate()
+    {
+        var runner = CreateRunnerForNoFetchDiff(CompleteReleasePreparationDiff("R100\0old.cs\0new.cs\0"));
+
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-rename-forbidden");
+    }
+
+    [Fact]
     public async Task VerifyPrepDiffRejectsReleaseArtifactsWithoutAReleaseManifest()
     {
         var runner = CreateRunnerForNoFetchDiff("M\0CHANGELOG.md\0");
@@ -532,6 +586,98 @@ public sealed class ReleasePreparationDiffVerifierTests
             && diagnostic.Cause.Contains("diff failed", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("R100", "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj", "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template")]
+    [InlineData("R075", "src/old name.cs", "src/new name.cs")]
+    public async Task VerifyPrepDiffAllowsOrdinaryRenamesOutsideReleasePreparation(string status, string source, string destination)
+    {
+        var runner = CreateRunnerForNoFetchDiff($"{status}\0{source}\0{destination}\0");
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(source, Assert.Single(result.Changes).OriginalPath);
+        Assert.Equal(destination, result.Changes[0].Path);
+        Assert.DoesNotContain(runner.Calls, call => call.Contains("release-prep-witness", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("CHANGELOG.md")]
+    [InlineData("releases/current.md")]
+    [InlineData("releases/current.md.yml")]
+    [InlineData("releases/unreleased.md")]
+    [InlineData("releases/unreleased.md.yml")]
+    [InlineData("releases/unreleased.entries/2026-10-28-test.md")]
+    [InlineData("releases/v1.2.3.md")]
+    [InlineData("releases/v1.2.3.md.yml")]
+    [InlineData("releases/v1.2.3.release.json")]
+    [InlineData("releases/v1.2.3.evidence.json")]
+    public async Task VerifyPrepDiffRejectsRenamesIntoAndOutOfEveryReleaseOwnedFamily(string protectedPath)
+    {
+        foreach (var (source, destination) in new[] { (protectedPath, "src/ordinary.txt"), ("src/ordinary.txt", protectedPath) })
+        {
+            var result = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff($"R100\0{source}\0{destination}\0")).VerifyAsync(
+                Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-rename-forbidden");
+        }
+    }
+
+    [Theory]
+    [InlineData("../unsafe.cs", "src/safe.cs")]
+    [InlineData("src/safe.cs", "../unsafe.cs")]
+    public async Task VerifyPrepDiffRejectsUnsafeOrdinaryRenameEndpoints(string source, string destination)
+    {
+        var result = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff($"R100\0{source}\0{destination}\0")).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-unexpected-path");
+    }
+
+    [Fact]
+    public async Task VerifyPrepDiffRejectsDuplicateOrdinaryRenameDestinations()
+    {
+        var result = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff("R100\0src/one.cs\0src/new.cs\0R100\0src/two.cs\0src/new.cs\0")).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-unsupported-status"
+            && diagnostic.Problem == "Release preparation reports one path more than once.");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VerifyPrepDiffRejectsRenamesWithinAReleasePreparationCandidate(bool consumedEntry)
+    {
+        var repositoryRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationDiffVerifierTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Join(repositoryRoot, "releases"));
+        const string entry = "releases/unreleased.entries/2026-10-28-consumed.md";
+        try
+        {
+            var manifest = consumedEntry
+                ? ValidReleaseManifestJson().Replace("\"consumedUnreleasedEntryPaths\":[]", $"\"consumedUnreleasedEntryPaths\":[\"{entry}\"]", StringComparison.Ordinal)
+                : ValidReleaseManifestJson();
+            await File.WriteAllTextAsync(Path.Join(repositoryRoot, "releases", "v1.2.3.release.json"), manifest);
+            var rename = consumedEntry ? $"R100\0{entry}\0src/moved-entry.md\0" : "R100\0src/one.cs\0src/two.cs\0";
+            var result = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff(CompleteReleasePreparationDiff(rename))).VerifyAsync(
+                repositoryRoot, "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-rename-forbidden");
+            if (consumedEntry)
+                Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-release-manifest-shape"
+                    && diagnostic.Cause.Contains(entry, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task VerifyPrepDiffRejectsUnsafeDuplicateRenamedAndCopiedPaths()
     {
@@ -543,7 +689,7 @@ public sealed class ReleasePreparationDiffVerifierTests
         Assert.Contains(unsafeResult.Diagnostics, diagnostic => diagnostic.Code == "release-prep-unsupported-status"
             && diagnostic.Problem == "Release preparation reports one path more than once.");
 
-        var renameResult = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff("R100\0old.md\0new.md\0C100\0source.md\0copy.md\0")).VerifyAsync(
+        var renameResult = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff("R100\0releases/current.md\0new.md\0C100\0source.md\0copy.md\0")).VerifyAsync(
             Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
 
         Assert.Contains(renameResult.Diagnostics, diagnostic => diagnostic.Code == "release-prep-rename-forbidden");
