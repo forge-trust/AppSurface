@@ -175,10 +175,26 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
+  - project: Auth/ForgeTrust.AppSurface.Auth.Keycloak/ForgeTrust.AppSurface.Auth.Keycloak.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: do_not_publish
+    publish_reason: Coordinated prerelease publication and published-byte consumer proof require explicit release-owner authorization.
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 37
+    use_when: Build and inspect a reviewed captured Keycloak security recipe without Aspire dependencies.
+    includes: Immutable recipes and host trust policy, exact material capture, aligned artifact replacement, signed runtime package closure, deterministic embedded archive repair, fixed offline build contexts, exact-image inspection and safe typed failures.
+    does_not_include: Default security pins, arbitrary shell or plugin hooks, scan exceptions, registry publication, realm administration, deployment or traffic authority.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth.Keycloak/README.md
+    recipe_summary: Start with the [captured recipe guide](../Auth/ForgeTrust.AppSurface.Auth.Keycloak/README.md) and [compiled checkout example](../examples/auth-keycloak-security-recipes/README.md); publication remains separately authorized.
   - project: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj
     release_guidance_variant: apphost
     classification: public
-    publish_decision: publish
+    publish_decision: do_not_publish
+    publish_reason: Coordinated publication is held with the new Keycloak recipe dependency until explicit release-owner authorization.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
@@ -191,6 +207,7 @@ packages:
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` in AppHost/dev/test projects only when a real local OIDC provider proof should pair with `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`; use the [theme lifecycle guide](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#theme-quickstart) and [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep it separate from DevAuth, OIDC registration, and Auth.Testing.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Aspire
+      - ForgeTrust.AppSurface.Auth.Keycloak
   - project: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/realm-ready/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker.csproj
     classification: excluded
     publish_decision: do_not_publish

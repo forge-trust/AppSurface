@@ -1,0 +1,53 @@
+# Historical private-draft patch; not intended to apply to the current checkout.
+# The source-only 256 MiB ceiling is approved. Default/final-image inspection remains 128 MiB.
+# See issue-887-feasibility-card.md, issue-887-source-oci-budget-proposal.md, and issue-887-feasibility-findings.md.
+--- a/OciReader.cs
++++ b/OciReader.cs
+@@ -16,7 +16,7 @@
+ internal sealed record OciReaderLimits(long MaxArchiveBytes = 1L * 1024 * 1024 * 1024, long MaxCompressedBlobBytes = 1L * 1024 * 1024 * 1024,
+     long MaxExpandedLayerBytes = 2L * 1024 * 1024 * 1024, long MaxExpandedTotalBytes = 4L * 1024 * 1024 * 1024,
+     int MaxJsonBytes = 1 * 1024 * 1024, int MaxLayers = 64, int MaxLayerMembers = 250_000, int MaxTotalMembers = 1_000_000,
+-    int MaxPaths = 1_000_000, int MaxPathLength = 4096, int MaxPayloadBytes = 1 * 1024 * 1024, int MaxPayloadAggregateBytes = 4 * 1024 * 1024, long MaxSelectedOutputBytes = 1L * 1024 * 1024 * 1024);
++    int MaxPaths = 1_000_000, int MaxPathLength = 4096, int MaxPayloadBytes = 1 * 1024 * 1024, int MaxPayloadAggregateBytes = 4 * 1024 * 1024, long MaxSelectedOutputBytes = 1L * 1024 * 1024 * 1024, long MaxLayerEntryBytes = 128L * 1024 * 1024);
+ internal sealed record ObservedFile(string Path, string Type, string Sha256, long Length, int Mode, long Uid, long Gid, string? LinkTarget, int Layer,
+     byte[]? TargetedPayload = null);
+ internal sealed record ObservedOciImage(string IndexDigest, string ManifestDigest, string Platform, string ConfigDigest, string ConfigUser,
+@@ -28,6 +28,7 @@
+ internal sealed class OciReader
+ {
+     internal static readonly OciReaderLimits DefaultLimits = new();
++    internal static readonly OciReaderLimits SourceCaptureLimits = new(MaxLayerEntryBytes: 256L * 1024 * 1024);
+     private readonly OciReaderLimits limits;
+     internal OciReader(OciReaderLimits? limits = null) => this.limits = limits ?? DefaultLimits;
+
+@@ -68,7 +69,7 @@
+         var ports = root.GetProperty("config").TryGetProperty("ExposedPorts", out JsonElement pe) && pe.ValueKind == JsonValueKind.Object ? pe.EnumerateObject().Select(x=>x.Name).Order().ToImmutableArray() : ImmutableArray<string>.Empty;
+         JsonElement layers = manifest.RootElement.GetProperty("layers"); if (layers.GetArrayLength() != diffIds.Length || layers.GetArrayLength() > limits.MaxLayers) throw new InvalidDataException("Layer count mismatch or exceeds budget.");
+         var merged = new SortedDictionary<string, ObservedFile>(StringComparer.Ordinal); long expandedTotal = 0; int totalMembers = 0;
+-        for (int i=0; i<layers.GetArrayLength(); i++) { d.Check(); JsonElement ld=layers[i]; RejectUnknown(ld, "layer descriptor", "mediaType", "digest", "size", "annotations"); if (StringProperty(ld,"mediaType") != "application/vnd.oci.image.layer.v1.tar+gzip") throw new InvalidDataException("Unsupported layer media type."); string digest=StringProperty(ld,"digest"); Blob blob=RequireBlob(blobs,digest,ld.GetProperty("size").GetInt64()); string actual; using FileStream input=File.OpenRead(blob.Path); using GZipStream gzip=new(input,CompressionMode.Decompress); using var hashing=new HashingStream(gzip,limits.MaxExpandedLayerBytes,d); using var preflight=new TarBudgetReadStream(hashing,limits.MaxExpandedLayerBytes,128L*1024*1024,limits.MaxLayerMembers); using var tr=new TarReader(preflight,true); int members=0; TarEntry? member; while((member=tr.GetNextEntry()) is not null) { d.Check(); if(++members>limits.MaxLayerMembers || ++totalMembers>limits.MaxTotalMembers) throw new InvalidDataException("Layer member budget exceeded."); string item=SafePath(member.Name.TrimEnd('/')); string leaf=item[(item.LastIndexOf('/')+1)..]; if(leaf==".wh..wh..opq"){RemoveLower(merged,Prefix(item),i,selectedState); continue;} if(leaf.StartsWith(".wh.",StringComparison.Ordinal)){if(leaf.Length==4)throw new InvalidDataException("Malformed whiteout.");RemoveLower(merged,Join(Parent(item),leaf[4..]),i,selectedState);continue;} string kind=member.EntryType switch { TarEntryType.RegularFile or TarEntryType.V7RegularFile=>"file", TarEntryType.Directory=>"directory", TarEntryType.SymbolicLink=>"symlink", TarEntryType.HardLink=>"hardlink", _=>throw new InvalidDataException("Unsupported special node.") }; if(kind!="directory") RemovePath(merged,item,selectedState); else if(merged.TryGetValue(item,out var old)&&old.Type!="directory") RemovePath(merged,item,selectedState); byte[]? payload=null; string hash=kind=="file"?Hash(member.DataStream??Stream.Null,d,expected.PayloadPaths?.Contains(item)==true,limits.MaxPayloadBytes,out payload,selectedState?.CapturePath(item),selectedState is null ? null : new Action<int>(selectedState.ConsumeTargeted),selectedState is null ? null : new Action<int>(selectedState.ConsumeSelected)):""; merged[item]=new ObservedFile(item,kind,hash,member.Length,(int)(member.Mode& (UnixFileMode)0xFFF),member.Uid,member.Gid,kind is "symlink" or "hardlink"?member.LinkName:null,i,payload); if(merged.Count>limits.MaxPaths)throw new InvalidDataException("Merged path count exceeds budget."); }
++        for (int i=0; i<layers.GetArrayLength(); i++) { d.Check(); JsonElement ld=layers[i]; RejectUnknown(ld, "layer descriptor", "mediaType", "digest", "size", "annotations"); if (StringProperty(ld,"mediaType") != "application/vnd.oci.image.layer.v1.tar+gzip") throw new InvalidDataException("Unsupported layer media type."); string digest=StringProperty(ld,"digest"); Blob blob=RequireBlob(blobs,digest,ld.GetProperty("size").GetInt64()); string actual; using FileStream input=File.OpenRead(blob.Path); using GZipStream gzip=new(input,CompressionMode.Decompress); using var hashing=new HashingStream(gzip,limits.MaxExpandedLayerBytes,d); using var preflight=new TarBudgetReadStream(hashing,limits.MaxExpandedLayerBytes,limits.MaxLayerEntryBytes,limits.MaxLayerMembers); using var tr=new TarReader(preflight,true); int members=0; TarEntry? member; while((member=tr.GetNextEntry()) is not null) { d.Check(); if(++members>limits.MaxLayerMembers || ++totalMembers>limits.MaxTotalMembers) throw new InvalidDataException("Layer member budget exceeded."); string item=SafePath(member.Name.TrimEnd('/')); string leaf=item[(item.LastIndexOf('/')+1)..]; if(leaf==".wh..wh..opq"){RemoveLower(merged,Prefix(item),i,selectedState); continue;} if(leaf.StartsWith(".wh.",StringComparison.Ordinal)){if(leaf.Length==4)throw new InvalidDataException("Malformed whiteout.");RemoveLower(merged,Join(Parent(item),leaf[4..]),i,selectedState);continue;} string kind=member.EntryType switch { TarEntryType.RegularFile or TarEntryType.V7RegularFile=>"file", TarEntryType.Directory=>"directory", TarEntryType.SymbolicLink=>"symlink", TarEntryType.HardLink=>"hardlink", _=>throw new InvalidDataException("Unsupported special node.") }; if(kind!="directory") RemovePath(merged,item,selectedState); else if(merged.TryGetValue(item,out var old)&&old.Type!="directory") RemovePath(merged,item,selectedState); byte[]? payload=null; string hash=kind=="file"?Hash(member.DataStream??Stream.Null,d,expected.PayloadPaths?.Contains(item)==true,limits.MaxPayloadBytes,out payload,selectedState?.CapturePath(item),selectedState is null ? null : new Action<int>(selectedState.ConsumeTargeted),selectedState is null ? null : new Action<int>(selectedState.ConsumeSelected)):""; merged[item]=new ObservedFile(item,kind,hash,member.Length,(int)(member.Mode& (UnixFileMode)0xFFF),member.Uid,member.Gid,kind is "symlink" or "hardlink"?member.LinkName:null,i,payload); if(merged.Count>limits.MaxPaths)throw new InvalidDataException("Merged path count exceeds budget."); }
+             preflight.Finish(); actual="sha256:"+Convert.ToHexString(hashing.Hash()).ToLowerInvariant(); expandedTotal=checked(expandedTotal+hashing.BytesRead); if(expandedTotal>limits.MaxExpandedTotalBytes || actual!=diffIds[i]) throw new InvalidDataException("Expanded layer diffID mismatch."); }
+         ValidateExpectedFiles(merged, expected.SelectedFiles); selectedState?.Publish(merged); var status=merged.Values.Where(x=>x.Path is "var/lib/dpkg/status" or "var/lib/dpkg/status.d" && x.TargetedPayload is not null).Select(x=>x.Path).ToImmutableArray(); return new ObservedOciImage(Sha256(indexBytes),manifestDigest,platform,configDigest,user,entrypoint,env.ToImmutableDictionary(StringComparer.Ordinal),ports,diffIds,merged.Values.ToImmutableArray(),status,limits,compressed,expandedTotal);
+     }
+--- a/CaptureVerification.cs
++++ b/CaptureVerification.cs
+@@ -10,7 +10,7 @@
+     {
+         var source = recipe.SourceImage;
+         OciLayout.VerifyUpstreamIndex(Material(directory, source.IndexMaterialId!), source.Index, source.PlatformManifest, source.Platform);
+-        var observed = new OciReader().Read(Material(directory, source.ArchiveMaterialId!), new(null, source.PlatformManifest,
++        var observed = new OciReader(OciReader.SourceCaptureLimits).Read(Material(directory, source.ArchiveMaterialId!), new(null, source.PlatformManifest,
+             source.Platform, source.ConfigDigest!, source.DiffIds), token);
+         Require(observed.Entries.Any(x => x.Path == "opt/keycloak/bin/kc.sh" && x.Type == "file"), "Source profile is missing Keycloak.");
+         foreach (var image in recipe.RuntimeFrontendOciIdentities.Concat(recipe.Operations.OfType<KeycloakOperation.RuntimeProfileOperation>().SelectMany(x => x.Profile.RuntimeOciIdentities)))
+--- a/Materialization.cs
++++ b/Materialization.cs
+@@ -52,7 +52,7 @@
+     {
+         var source = recipe.SourceImage;
+         var expectedSource = new OciExpectedImage(null, source.PlatformManifest, source.Platform, source.ConfigDigest!, source.DiffIds);
+-        var reader = new OciReader();
++        var reader = new OciReader(OciReader.SourceCaptureLimits);
+         var observed = reader.Read(Material(inputs, source.ArchiveMaterialId!), expectedSource, token);
+         const string prefix = "opt/keycloak/";
+         var sourceFiles = observed.Entries.Where(x => x.Path.StartsWith(prefix, StringComparison.Ordinal) && x.Type == "file").ToArray();

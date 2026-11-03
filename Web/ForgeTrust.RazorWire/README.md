@@ -686,7 +686,7 @@ Wraps content in a `<turbo-frame>`.
 - `src`: URL to load content from.
 - `loading`: load strategy such as `lazy`.
 - `permanent`: persists the element across Turbo page transitions.
-- `swr`: enables stale-while-revalidate behavior.
+- `swr`: enables stale-while-revalidate behavior. [SWR and live stream ordering](Docs/swr-stream-ordering.md) explains how overlapping snapshots preserve newer stream changes, cancellation, and host-owned consistency limits.
 - `client-module`: client module specifier to mount for hybrid islands. Use a relative path, root-relative path, same-origin URL, explicit HTTPS URL, or bare import-map specifier.
 - `client-strategy`: mount timing such as `load`, `visible`, or `idle`.
 - `client-props`: JSON payload passed to the client module's mount function.
