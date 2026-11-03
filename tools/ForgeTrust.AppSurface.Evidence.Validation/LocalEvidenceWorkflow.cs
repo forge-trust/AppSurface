@@ -16,7 +16,7 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed class LocalEvidenceWorkflow
 {
     private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _command;
-    private readonly Func<IReadOnlyDictionary<string, string>, CancellationToken, Task<int>> _workflow;
+    private readonly Func<IReadOnlyDictionary<string, string>, CancellationToken, Task<int>>? _workflow;
 
     /// <summary>
     /// Creates local orchestration. Tests may replace the package command or the execution operation while planning
@@ -30,7 +30,7 @@ internal sealed class LocalEvidenceWorkflow
     {
         var runner = new EvidenceCommandRunner();
         _command = command ?? runner.RunAsync;
-        _workflow = workflow ?? RepositoryEvidenceWorkflow.RunAsync;
+        _workflow = workflow;
     }
 
     /// <summary>Plans or executes current local changes and returns zero only for successful verification or an empty inventory.</summary>
@@ -125,7 +125,10 @@ internal sealed class LocalEvidenceWorkflow
                 common["--scratch-parent"] = Path.GetTempPath();
             }
         }
-        var runExitCode = await _workflow(common, cancellationToken);
+        var runExitCode = _workflow is null
+            ? await RepositoryEvidenceWorkflow.RunAsync(common, cancellationToken,
+                token => RequireUnchangedAsync(git, repository, changes, policy, policyDigest, token))
+            : await _workflow(common, cancellationToken);
         ValidationProof.Require(runExitCode == 0, "local evidence execution");
         var manifestPath = Path.Join(proof, "evidence-manifest.json");
         var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath, cancellationToken));

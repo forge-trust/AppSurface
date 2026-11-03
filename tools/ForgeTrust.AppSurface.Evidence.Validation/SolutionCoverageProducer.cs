@@ -54,7 +54,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var expected = ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx"));
             if (expected.Count == 0) throw new InvalidDataException("The solution contains no test projects.");
             var nativeFanIn = !string.IsNullOrWhiteSpace(_settings.NativeCoverageDirectory);
-            var requireCleanSource = string.IsNullOrWhiteSpace(_settings.DiffFile);
+            if (!string.IsNullOrWhiteSpace(_settings.DiffFile) && _settings.VerifyLocalSourceAsync is null)
+                throw new InvalidDataException("A local patch requires in-process source verification; use the local operation.");
             if (nativeFanIn && (string.IsNullOrWhiteSpace(_settings.DiffBase) || !string.IsNullOrWhiteSpace(_settings.DiffFile)))
                 throw new InvalidDataException("Native fan-in requires a pinned Git diff base and no local patch override.");
             stage = "identity";
@@ -62,7 +63,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var tree = (await ExecuteTextAsync("git", ["rev-parse", "--verify", "HEAD^{tree}"], root, proof, cancellationToken)).Trim();
             var sdk = (await ExecuteTextAsync(_settings.DotnetPath, ["--version"], root, proof, cancellationToken)).Trim();
             if (commit.Length != 40 || tree.Length != 40 || sdk.Length is 0 or > 64) throw new InvalidDataException("Repository or SDK identity is invalid.");
-            if (requireCleanSource) await RequireCleanSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
+            await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
             Directory.CreateDirectory(coverage);
 
             stage = "collection";
@@ -80,7 +81,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             ValidateTimings(timings, expected);
             if (!File.Exists(report) || new FileInfo(report).Length == 0) throw new InvalidDataException("The merged solution coverage report is missing.");
 
-            if (requireCleanSource) await RequireCleanSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
+            await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
 
             stage = "aggregate-gate";
             var aggregateGate = Path.Join(coverage, "aggregate-gate");
@@ -133,7 +134,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
 
             ValidateGate(aggregateJson, patch: false);
             if (patchJson is not null) ValidateGate(patchJson, patch: true);
-            if (requireCleanSource) await RequireCleanSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
+            await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
             await WriteJsonAsync(context.Artifacts, "aggregate-gate", "proof/aggregate-gate.json", aggregateJson, cancellationToken);
             if (patchJson is not null) await WriteJsonAsync(context.Artifacts, "patch-gate", "proof/patch-gate.json", patchJson, cancellationToken);
             await context.Artifacts.WriteAsync("transcript", "proof/transcript.json", JsonSerializer.SerializeToUtf8Bytes(proof), cancellationToken);
@@ -186,8 +187,13 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         return result.StandardOutput;
     }
 
-    private async Task RequireCleanSourceAsync(string root, string commit, List<CommandProof> proof, CancellationToken ct)
+    private async Task RequireUnchangedSourceAsync(string root, string commit, List<CommandProof> proof, CancellationToken ct)
     {
+        if (!string.IsNullOrWhiteSpace(_settings.DiffFile))
+        {
+            await _settings.VerifyLocalSourceAsync!(ct).ConfigureAwait(false);
+            return;
+        }
         var head = (await ExecuteTextAsync("git", ["rev-parse", "--verify", "HEAD^{commit}"], root, proof, ct)).Trim();
         var status = await ExecuteTextAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], root, proof, ct);
         if (head != commit || status.Length != 0) throw new InvalidDataException("CI coverage requires the unchanged checked-out commit.");

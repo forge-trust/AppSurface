@@ -104,7 +104,9 @@ CI coverage pins source identity and requires a clean, unchanged checkout before
 collection and after gate verification, including direct runs without native fan-in. Supply a pinned
 Git base for native fan-in; a local patch override cannot be combined with native CI captures. Dirty
 local runs use their source digest and captured patch, with the local workflow checking that digest
-around execution instead of requiring a clean checkout.
+around execution instead of requiring a clean checkout. The local workflow supplies that digest check
+to each coverage checkpoint through an in-process callback. Direct `run --diff-file` calls fail closed;
+use `--operation local` to collect and verify a dirty working tree.
 
 `package-checks` runs the existing [PackageIndex](../ForgeTrust.AppSurface.PackageIndex/README.md)
 `gate`, `verify` and `verify-packages` commands, using a fresh exact version and an isolated NuGet cache.

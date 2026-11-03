@@ -21,7 +21,11 @@ internal static class RepositoryEvidenceWorkflow
     private const int MaximumJsonBytes = 16 * 1024 * 1024;
 
     /// <summary>Runs one explicit repository planning, execution, or gate operation; incomplete evidence returns nonzero.</summary>
-    internal static async Task<int> RunAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken)
+    /// <param name="options">Validated command options and trusted plan inputs.</param>
+    /// <param name="cancellationToken">Cancels execution and artifact verification.</param>
+    /// <param name="verifyLocalSourceAsync">Optional in-process local source and policy digest check; required for patch overrides.</param>
+    internal static async Task<int> RunAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
+        Func<CancellationToken, Task>? verifyLocalSourceAsync = null)
     {
         var operation = Required(options, "--operation");
         if (operation is not ("plan" or "run" or "verify")) throw new ArgumentException("Operation must be plan, run or verify.");
@@ -70,7 +74,8 @@ internal static class RepositoryEvidenceWorkflow
                     Required(options, "--source-commit"), dotnet,
                     Path.GetFullPath(options.GetValueOrDefault("--scratch-parent", Path.GetTempPath())), output);
             checks = new RepositoryCheckSettings(repository, dotnet, output,
-                options.GetValueOrDefault("--diff-base"), options.GetValueOrDefault("--native-coverage-directory"), options.GetValueOrDefault("--diff-file"));
+                options.GetValueOrDefault("--diff-base"), options.GetValueOrDefault("--native-coverage-directory"), options.GetValueOrDefault("--diff-file"))
+            { VerifyLocalSourceAsync = verifyLocalSourceAsync };
         }
 
         Directory.CreateDirectory(output);

@@ -211,7 +211,9 @@ public sealed class SolutionCoverageProducerTests
     public async Task ProduceAsync_ValidatesPatchGateFlagsAndThresholds(string defect)
     {
         using var fixture = new Fixture();
-        var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output, DiffFile: TestPathUtils.PathUnder(fixture.Root, "local.patch"));
+        var sourceChecks = 0;
+        var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output, DiffFile: TestPathUtils.PathUnder(fixture.Root, "local.patch"))
+        { VerifyLocalSourceAsync = _ => { sourceChecks++; return Task.CompletedTask; } };
         await File.WriteAllTextAsync(settings.DiffFile!, "diff --git a/file.cs b/file.cs\n");
         EvidenceCommandRequest? patchRequest = null;
         var producer = fixture.CreateWithSettings(settings, async (request, _) =>
@@ -229,6 +231,7 @@ public sealed class SolutionCoverageProducerTests
 
         if (defect is "success" or "zero-patch")
         {
+            Assert.Equal(3, sourceChecks);
             Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
             Assert.Equal(["coverage/solution-complete@1", "coverage/thresholds@1"], result.SatisfiedAssertionIds);
             Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
@@ -354,6 +357,83 @@ public sealed class SolutionCoverageProducerTests
         Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
         Assert.Empty(result.SatisfiedAssertionIds);
         Assert.Empty(commands);
+    }
+
+    [Fact]
+    public async Task ProduceAsync_RejectsPatchOverrideWithoutLocalSourceVerification()
+    {
+        using var fixture = new Fixture();
+        var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output,
+            DiffFile: TestPathUtils.PathUnder(fixture.Root, "local.patch"));
+        var commands = new List<EvidenceCommandRequest>();
+        var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+        {
+            commands.Add(request);
+            await fixture.CompleteCommandAsync(request);
+            if (request.Arguments.Contains("--min-patch-line")) await fixture.WriteGateAsync(request, "success");
+            return Success();
+        });
+
+        var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Empty(commands);
+        Assert.Empty(result.SatisfiedAssertionIds);
+    }
+
+    [Fact]
+    public async Task ProduceAsync_RejectsSourceDirtiedByGateBeforePublishingClaim()
+    {
+        using var fixture = new Fixture();
+        fixture.GitStatusResponses.Enqueue(string.Empty);
+        fixture.GitStatusResponses.Enqueue(string.Empty);
+        fixture.GitStatusResponses.Enqueue(" M src/Changed.cs\n");
+        var producer = fixture.Create(async (request, _) =>
+        {
+            await fixture.CompleteCommandAsync(request);
+            return Success();
+        });
+
+        var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Equal(3, fixture.GitCommands.Count(command => command.Arguments.Contains("status")));
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.DoesNotContain(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task ProduceAsync_RejectsLocalSourceDriftAtEachCheckpoint(int failingCheckpoint)
+    {
+        using var fixture = new Fixture();
+        var sourceChecks = 0;
+        var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output,
+            DiffFile: TestPathUtils.PathUnder(fixture.Root, "local.patch"))
+        {
+            VerifyLocalSourceAsync = _ => ++sourceChecks == failingCheckpoint
+                ? Task.FromException(new InvalidOperationException("Local source changed."))
+                : Task.CompletedTask,
+        };
+        var commands = new List<EvidenceCommandRequest>();
+        var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+        {
+            commands.Add(request);
+            await fixture.CompleteCommandAsync(request);
+            if (request.Arguments.Contains("--min-patch-line")) await fixture.WriteGateAsync(request, "success");
+            return Success();
+        });
+
+        var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Equal(failingCheckpoint, sourceChecks);
+        Assert.Equal(failingCheckpoint > 1, commands.Any(command => command.Arguments.Contains("--solution")));
+        Assert.Equal(failingCheckpoint > 2, commands.Any(command => command.Arguments.Contains("gate")));
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.DoesNotContain(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName is "aggregate-gate" or "patch-gate");
     }
 
     [Theory]
