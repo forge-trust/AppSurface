@@ -277,17 +277,22 @@ public sealed class SolutionCoverageProducerTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => producer.ProduceAsync(fixture.Context, cancellation.Token).AsTask());
     }
 
-    [Fact]
-    public async Task ProduceAsync_RejectsDirtySourceBeforeNativeCollection()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProduceAsync_RejectsDirtySourceBeforeCollection(bool native)
     {
         using var fixture = new Fixture();
         fixture.GitStatusResponses.Enqueue(" M src/Changed.cs\n");
         var commands = new List<EvidenceCommandRequest>();
-        var settings = fixture.NativeSettings(diffBase: "base-commit");
+        var settings = native
+            ? fixture.NativeSettings(diffBase: "base-commit")
+            : new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output, DiffBase: "base-commit");
         var producer = fixture.CreateWithSettings(settings, async (request, _) =>
         {
             commands.Add(request);
             await fixture.CompleteCommandAsync(request);
+            if (request.Arguments.Contains("--min-patch-line")) await fixture.WriteGateAsync(request, "success");
             return Success();
         });
 
@@ -300,17 +305,23 @@ public sealed class SolutionCoverageProducerTests
         Assert.DoesNotContain(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName is "aggregate-gate" or "patch-gate");
     }
 
-    [Fact]
-    public async Task ProduceAsync_RejectsSourceDirtiedByCollectionBeforeGatesOrClaim()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProduceAsync_RejectsSourceDirtiedByCollectionBeforeGatesOrClaim(bool native)
     {
         using var fixture = new Fixture();
         fixture.GitStatusResponses.Enqueue(string.Empty);
         fixture.GitStatusResponses.Enqueue("?? src/GeneratedSource.cs\n");
         var commands = new List<EvidenceCommandRequest>();
-        var producer = fixture.CreateWithSettings(fixture.NativeSettings(diffBase: "base-commit"), async (request, _) =>
+        var settings = native
+            ? fixture.NativeSettings(diffBase: "base-commit")
+            : new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output, DiffBase: "base-commit");
+        var producer = fixture.CreateWithSettings(settings, async (request, _) =>
         {
             commands.Add(request);
             await fixture.CompleteCommandAsync(request);
+            if (request.Arguments.Contains("--min-patch-line")) await fixture.WriteGateAsync(request, "success");
             return Success();
         });
 

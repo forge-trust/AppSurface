@@ -100,9 +100,11 @@ Main baseline runs enforce aggregate coverage without inventing a PR patch. Repo
 under `coverage/`, with optional `coverage-fanin/` and `coverage-fanin-composed/` children. Test-only PRs
 run the direct patch gate and do not produce those fan-in directories; source-code-plus-package PRs require
 the three native captures and fan-in verification.
-Native fan-in pins source identity before collection and rejects a dirty checkout before capture and
-after verification. Supply a pinned Git base for this mode; a local patch override cannot be combined
-with native CI captures. Dirty local runs use their source digest and captured patch instead.
+CI coverage pins source identity and requires a clean, unchanged checkout before collection, after
+collection and after gate verification, including direct runs without native fan-in. Supply a pinned
+Git base for native fan-in; a local patch override cannot be combined with native CI captures. Dirty
+local runs use their source digest and captured patch, with the local workflow checking that digest
+around execution instead of requiring a clean checkout.
 
 `package-checks` runs the existing [PackageIndex](../ForgeTrust.AppSurface.PackageIndex/README.md)
 `gate`, `verify` and `verify-packages` commands, using a fresh exact version and an isolated NuGet cache.
