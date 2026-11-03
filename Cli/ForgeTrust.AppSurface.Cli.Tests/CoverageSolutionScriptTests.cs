@@ -68,11 +68,18 @@ public sealed class CoverageSolutionScriptTests
     {
         var workflow = ReadWorkflow();
 
-        Assert.Contains("timeout-minutes: 45", workflow, StringComparison.Ordinal);
+        var yaml = new YamlStream();
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var build = (YamlMappingNode)jobs.Children[new YamlScalarNode("build")];
+        Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
         Assert.Contains("ForgeTrust.AppSurface.Evidence.Validation.dll", workflow, StringComparison.Ordinal);
         Assert.Contains("--operation plan --scope coverage --policy .github/evidence.policy.json", workflow, StringComparison.Ordinal);
         Assert.Contains("--operation run --scope coverage", workflow, StringComparison.Ordinal);
         Assert.Contains("--operation verify --scope coverage", workflow, StringComparison.Ordinal);
+        Assert.Contains("Verify Cloud Run execution fixture comparisons", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.diff_base }}", workflow, StringComparison.Ordinal);
         Assert.Contains("--manifest \"$evidence_root/evidence-manifest.json\" --artifact-root \"$evidence_root/artifacts\"", workflow, StringComparison.Ordinal);
         Assert.Contains("Publish bounded test-result and slow-test diagnostics summary", workflow, StringComparison.Ordinal);
@@ -102,7 +109,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Equal(
             new[] { "coverage-evidence-plan", "coverage-security-platform", "packed-durable-consumers" },
             dependencies.Children.Cast<YamlScalarNode>().Select(node => node.Value));
-        Assert.Equal("45", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
+        Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
         var buildCondition = ((YamlScalarNode)build.Children[new YamlScalarNode("if")]).Value!;
         Assert.Contains("needs.coverage-evidence-plan.result == 'success'", buildCondition, StringComparison.Ordinal);
         Assert.Contains("needs.packed-durable-consumers.result == 'success'", buildCondition, StringComparison.Ordinal);

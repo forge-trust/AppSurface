@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NuGetLockFilePath>packages.$(NETCoreSdkRuntimeIdentifier).lock.json</NuGetLockFilePath>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="JunitXml.TestLogger" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ForgeTrust.AppSurface.Auth.Keycloak/ForgeTrust.AppSurface.Auth.Keycloak.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
+    <Compile Include="ContractsTests.cs" />
+    <Compile Include="DiagnosticsTests.cs" />
+    <Compile Include="TestRecipes.cs" />
+    <Compile Include="ArchiveTests.cs" />
+    <Compile Include="DebPayloadTests.cs" />
+    <Compile Include="OciReaderTests.cs" />
+    <Compile Include="InfrastructureTests.cs" />
+    <Compile Include="CanonicalGoldenTests.cs" />
+    <Compile Include="ConcurrencyContractTests.cs" />
+    <Compile Include="AcquisitionBoundaryTests.cs" />
+    <Compile Include="SignedRepositoryTests.cs" />
+    <Compile Include="OciLayoutTests.cs" />
+    <Compile Include="DockerInspectionTests.cs" />
+    <Compile Include="EvidenceTests.cs" />
+    <Compile Include="InspectionTests.cs" />
+    <Compile Include="CaptureVerificationTests.cs" />
+    <Compile Include="TarBudgetTests.cs" />
+    <Compile Include="TemporaryDiskBudgetTests.cs" />
+    <Compile Include="Tests/RuntimeConformanceTests.cs" />
+    <Compile Include="Tests/CaptureTests.cs" />
+    <Compile Include="Tests/ValidationBoundaryTests.cs" />
+    <Compile Include="Tests/OperationBoundaryTests.cs" />
+    <Compile Include="Tests/TinyImageFixture.cs" />
+    <Compile Include="Tests/SecurityRecipeFixture.cs" />
+    <Compile Include="Tests/SecurityRecipeTests.cs" />
+    <Compile Include="Tests/CompleteRecipeFixture.cs" />
+    <Compile Include="Tests/CompleteRecipeTests.cs" />
+    <Compile Include="Tests/InspectionImageMutations.cs" />
+    <Compile Include="Tests/CacheBindingTests.cs" />
+    <Compile Include="OciReaderBoundaryTests.cs" />
+    <Compile Include="Tests/MaterializationTests.cs" />
+    <Compile Include="StageEventsTests.cs" />
+    <Compile Include="BoundedExportTests.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

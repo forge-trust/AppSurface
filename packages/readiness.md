@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 63
-- Evidence status: manifest evidence complete: 43; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 11
-- Product families: AppSurface: 41; Forge Trust: 2; Internal support: 17; RazorWire: 3
+- Packages: 65
+- Evidence status: manifest evidence complete: 42; transitive package evidence complete: 7; proof-host evidence complete: 2; public preview held from publishing: 2; excluded by publish decision: 12
+- Product families: AppSurface: 42; Forge Trust: 2; Internal support: 18; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -24,8 +24,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Auth` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Auth/ForgeTrust.AppSurface.Auth/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.Auth.Keycloak` | public | do not publish | public preview held from publishing | None | None | None | [README](../Auth/ForgeTrust.AppSurface.Auth.Keycloak/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) | [notes](../releases/current.md) |
-| AppSurface | `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Aspire` | [README](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` | public | do not publish | public preview held from publishing | None | None | `ForgeTrust.AppSurface.Aspire`<br />`ForgeTrust.AppSurface.Auth.Keycloak` | [README](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) | [notes](../releases/current.md) |
 | Internal support | `ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.Testing` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Intelligence` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) | [notes](../releases/current.md) |
@@ -70,6 +71,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | Forge Trust | `ForgeTrust.AppSurface.Docs` | proof host | support publish | proof-host evidence complete | None | None | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Caching`<br />`ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.ReleaseContracts`<br />`ForgeTrust.AppSurface.Theming`<br />`ForgeTrust.AppSurface.Web`<br />`ForgeTrust.AppSurface.Web.Tailwind`<br />`ForgeTrust.RazorWire` | [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md) | [notes](../releases/unreleased.md) |
 | Forge Trust | `ForgeTrust.AppSurface.Docs.Standalone` | proof host | do not publish | proof-host evidence complete | None | None | None | [Standalone host README](../Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Docs.ConsumerFixture` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
+| Internal support | `PostgreSqlPreflightConsumer` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Durable.LegacyCoreProviderAbiConsumer` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |

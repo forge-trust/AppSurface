@@ -1,5 +1,15 @@
 # Deferred work
 
+## Measure real Cloud Run observer adoption after #891
+
+**What:** Evaluate one consenting internal workflow using the exact execution observer and measure classification usefulness and replaced custom code.
+
+**Why:** The two required neutral consumers prove reusable contracts; they do not establish production value or an acceptable Unknown rate. **Pros:** Exposes missing evidence and practical caller decisions before broader adoption; gives honest outcome measurements. **Cons:** Needs an application owner, separately authorized provider access and a real deployment window; synthetic fixtures cannot supply that evidence.
+
+**Context:** Start with the [#891 execution-observation design](docs/designs/issue-891-cloud-run-execution-observation.md). Preserve full parity, exact identity, budget and zero mutation. Measure safe diagnostic frequencies, actual custom implementation/test lines replaced, and caller actions after Unknown. No automatic recovery is added to the package.
+
+**Effort:** Human M / agent S, estimated; owner and provider access dominate elapsed time. **Priority:** P3. **Depends on / blocked by:** Accepted exact-version evidence manifest, working packaged observer, named adopter and separately authorized cloud reads/release. Deferred by autoplan CEO C6; this adds no #891 acceptance gate.
+
 ## Coverage storage: remote/team retention follow-up
 
 - **What:** Evaluate an optional remote archive/export integration only after an adopter needs evidence beyond the user-local managed history. **Why:** Local byte/age retention cannot promise durable team access. **Pros:** Could preserve selected release or investigation evidence across machines. **Cons:** Adds credentials, transfer cost, remote retention and deletion ownership. **Context:** The [coverage storage design](docs/designs/coverage-artifact-storage.md) keeps ordinary upgrades local, preserves current reports and exposes explicit pin/restore; existing uploads remain available. **Effort:** L human / M agent, estimated. **Priority:** P3. **Depends on:** Shipped local lifecycle plus an identified adopter/owner and concrete remote retention requirement. Deferred in CEO C6; no remote service is part of this delivery.

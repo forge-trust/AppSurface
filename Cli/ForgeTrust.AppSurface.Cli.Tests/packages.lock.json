@@ -81,11 +81,6 @@
           "Microsoft.Extensions.Http": "8.0.0"
         }
       },
-      "BouncyCastle.Cryptography": {
-        "type": "Transitive",
-        "resolved": "2.7.0",
-        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
-      },
       "Docker.DotNet.Enhanced": {
         "type": "Transitive",
         "resolved": "4.3.3",
@@ -827,6 +822,7 @@
           "ForgeTrust.AppSurface.Config.LocalSecrets": "[0.1.0, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Deployment.GcpCloudRun": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
           "ForgeTrust.AppSurface.Durable.PostgreSql": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Cli": "[0.1.0, )",
@@ -875,6 +871,15 @@
           "CliWrap": "[3.10.1, )",
           "Microsoft.Extensions.Hosting": "[10.0.8, )",
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
+        }
+      },
+      "forgetrust.appsurface.deployment": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.deployment.gcpcloudrun": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Deployment": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.docs": {
@@ -1101,6 +1106,12 @@
           "StreamJsonRpc": "2.22.23",
           "System.IO.Hashing": "10.0.8"
         }
+      },
+      "BouncyCastle.Cryptography": {
+        "type": "CentralTransitive",
+        "requested": "[2.7.0, )",
+        "resolved": "2.7.0",
+        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
       "CliFx": {
         "type": "CentralTransitive",

@@ -2,47 +2,7 @@ using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.AppSurface.Web.Theming;
 
-var builder = WebApplication.CreateBuilder(args);
-TenantThemeProofHostEnvironment.ThrowUnlessDevelopment(builder.Environment.EnvironmentName);
-
-builder.Services.AddRazorPages();
-
-builder.Services.AddAppSurfaceTheming(options =>
-{
-    var defaultPair = AppSurfaceThemePair.AppSurface();
-    options.DefaultTheme = defaultPair.Id;
-    options.DefaultMode = AppSurfaceThemeMode.System;
-    options.Pairs.Add(defaultPair);
-    options.Pairs.Add(new AppSurfaceThemePair(new AppSurfaceThemeId("shared-blue"), defaultPair.Light, defaultPair.Dark));
-});
-builder.Services.AddScoped<TenantThemeContext>();
-builder.Services.AddSingleton(
-    serviceProvider =>
-        TenantThemeMap.Create(
-            serviceProvider.GetRequiredService<IAppSurfaceThemeRegistry>(),
-            [
-                new TenantThemeMapping("tenant-a", new AppSurfaceThemeId("shared-blue")),
-                new TenantThemeMapping("tenant-b", new AppSurfaceThemeId("shared-blue"))
-            ]));
-builder.Services.AddScoped<IAppSurfaceWebThemeSelectionPolicy, TenantThemeSelectionPolicy>();
-builder.Services.AddAppSurfaceWebThemeSelection();
-
-var app = builder.Build();
-app.Services.GetRequiredService<TenantThemeMap>();
-app.Use(
-    async (httpContext, next) =>
-    {
-        // Proof-only stand-in for a host's authentication and authorization boundary. Production code must obtain
-        // this context from already-authorized application state, never trust a request header as a tenant identity.
-        var requestedTenant = httpContext.Request.Headers["X-Proof-Authorized-Tenant"].ToString();
-        var tenantContext = httpContext.RequestServices.GetRequiredService<TenantThemeContext>();
-        tenantContext.TenantId = requestedTenant is "tenant-a" or "tenant-b" ? requestedTenant : null;
-
-        // The conservative host response-cache policy. AppSurface does not add this header or own cache behavior.
-        httpContext.Response.Headers.CacheControl = "private, no-store";
-        await next(httpContext);
-    });
-app.MapRazorPages();
+var app = Program.BuildApplication(WebApplication.CreateBuilder(args));
 app.Run();
 
 public sealed class TenantThemeContext
@@ -132,4 +92,59 @@ public sealed class TenantThemeSelectionPolicy(TenantThemeContext context, Tenan
     }
 }
 
-public partial class Program;
+public partial class Program
+{
+    /// <summary>Builds the sample's actual development host without starting or disposing it.</summary>
+    /// <param name="builder">The host builder, including the Development environment and server selection.</param>
+    /// <param name="configureServices">Optional test override applied after sample defaults and before building.</param>
+    /// <returns>The application whose startup and disposal belong to the caller.</returns>
+    /// <remarks>Tests await startup directly so failed-startup diagnostics cannot race entry-point disposal.</remarks>
+    internal static WebApplication BuildApplication(
+        WebApplicationBuilder builder,
+        Action<IServiceCollection>? configureServices = null)
+    {
+        TenantThemeProofHostEnvironment.ThrowUnlessDevelopment(builder.Environment.EnvironmentName);
+
+        builder.Services.AddRazorPages();
+
+        builder.Services.AddAppSurfaceTheming(options =>
+        {
+            var defaultPair = AppSurfaceThemePair.AppSurface();
+            options.DefaultTheme = defaultPair.Id;
+            options.DefaultMode = AppSurfaceThemeMode.System;
+            options.Pairs.Add(defaultPair);
+            options.Pairs.Add(new AppSurfaceThemePair(new AppSurfaceThemeId("shared-blue"), defaultPair.Light, defaultPair.Dark));
+        });
+        builder.Services.AddScoped<TenantThemeContext>();
+        builder.Services.AddSingleton(
+            serviceProvider =>
+                TenantThemeMap.Create(
+                    serviceProvider.GetRequiredService<IAppSurfaceThemeRegistry>(),
+                    [
+                        new TenantThemeMapping("tenant-a", new AppSurfaceThemeId("shared-blue")),
+                        new TenantThemeMapping("tenant-b", new AppSurfaceThemeId("shared-blue"))
+                    ]));
+        builder.Services.AddScoped<IAppSurfaceWebThemeSelectionPolicy, TenantThemeSelectionPolicy>();
+        builder.Services.AddAppSurfaceWebThemeSelection();
+
+        configureServices?.Invoke(builder.Services);
+
+        var app = builder.Build();
+        app.Services.GetRequiredService<TenantThemeMap>();
+        app.Use(
+            async (httpContext, next) =>
+            {
+                // Proof-only stand-in for a host's authentication and authorization boundary. Production code must obtain
+                // this context from already-authorized application state, never trust a request header as a tenant identity.
+                var requestedTenant = httpContext.Request.Headers["X-Proof-Authorized-Tenant"].ToString();
+                var tenantContext = httpContext.RequestServices.GetRequiredService<TenantThemeContext>();
+                tenantContext.TenantId = requestedTenant is "tenant-a" or "tenant-b" ? requestedTenant : null;
+
+                // The conservative host response-cache policy. AppSurface does not add this header or own cache behavior.
+                httpContext.Response.Headers.CacheControl = "private, no-store";
+                await next(httpContext);
+            });
+        app.MapRazorPages();
+        return app;
+    }
+}

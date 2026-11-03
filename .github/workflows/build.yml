@@ -527,7 +527,7 @@ jobs:
     needs: [coverage-evidence-plan, coverage-security-platform, packed-durable-consumers]
     if: ${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && needs.packed-durable-consumers.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result == 'skipped')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
@@ -614,6 +614,9 @@ jobs:
 
       - name: Verify the Durable doctor report consumer
         run: python3 -m unittest discover -s examples/durable-external-activation -p 'test_*.py'
+
+      - name: Verify Cloud Run execution fixture comparisons
+        run: python3 -m unittest discover -s Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1 -p 'test_*.py'
 
       - name: Download same-run native coverage evidence
         if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}

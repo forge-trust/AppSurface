@@ -99,6 +99,7 @@ The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main
 job runs the same [packed-consumer verification](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) with the exact
 coverage SDK and locked restore. Its failure blocks the build and downstream documentation export.
 The coverage lane runs the complete solution through the C# repository evidence validation tool and preserves the existing aggregate and patch gates; see the [coverage fan-in guide](./guides/coverage-fan-in.md) for the current workflow and artifact layout.
+Keeping the packed consumer proof in its own job preserves the build job's 60-minute budget for solution verification; it does not reduce the selected tests, change exclusive scheduling, or relax either coverage gate.
 
 The direct Codecov-mode patch gate follows the [CLI's documented no-measurable-points behavior](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-gate). Native fan-in keeps its strict nonempty-denominator verification. Package checks are not exempted based on Git ignore status: ignored local artifacts in paths the existing package checks inspect can still cause a package-check failure; review the package diagnostics and remove or resolve unintended local artifacts.
 
@@ -114,6 +115,16 @@ is unavailable without a repository token.
 The coverage run treats missing or malformed JUnit evidence as a diagnostics warning, never as a
 replacement failure for the original test result; use the artifact and the coverage-step log to
 diagnose that condition.
+
+The [Package Artifacts workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-artifacts.yml) reclaims the preinstalled
+Android toolkit at `/usr/local/lib/android` before restore or proof work on its disposable GitHub-hosted
+Linux runner. This .NET/Node job does not use Android. Preparation rejects other runner environments,
+reports available blocks and inodes before and after, and preserves .NET, Node, NuGet caches, checkout
+files, proof workspaces, package archives, and diagnostic evidence. The executable
+[runner-preparation guard checks](https://github.com/forge-trust/AppSurface/blob/main/.github/tests/package_runner_capacity_tests.py) exercise the actual
+workflow shell with a recording `sudo`; they do not reclaim space on a developer machine. If the job
+reports `No space left on device`, inspect its disk diagnostics and the uploaded package-consumer logs
+before changing cache ownership, artifact retention, or verification requirements.
 
 The compatibility `coverage-solution.sh` wrapper requires a non-sandboxed host by default and fails before discovery, cleanup, build, or tests when an explicit sandbox marker is enabled. Set `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted compatibility-script run is intentional. The current repository evidence producer also requires a non-sandboxed host for its collection command; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
 

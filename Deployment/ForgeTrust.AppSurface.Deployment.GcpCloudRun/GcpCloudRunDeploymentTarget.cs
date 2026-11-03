@@ -12,9 +12,9 @@ namespace ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 /// <summary>Compiles migration-job intent to GCP Cloud Run v2 artifacts and performs read-only deployed parity checks.</summary>
 public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
 {
-    private const string IntentFileName = "deployment-intent.v1.json";
-    private const string TerraformFileName = "gcp-cloud-run-migration.tf.json";
-    private const string PlanFileName = "gcp-cloud-run-migration.plan.json";
+    internal const string IntentFileName = "deployment-intent.v1.json";
+    internal const string TerraformFileName = "gcp-cloud-run-migration.tf.json";
+    internal const string PlanFileName = "gcp-cloud-run-migration.plan.json";
     private const int MaxCloudRunEnvironmentVariables = 1000;
     private readonly IGcloudCommandRunner _commandRunner;
 
@@ -69,6 +69,7 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
             profile.Region,
             request.GeneratorVersion,
             request.Intent.SourceRevision.Value,
+            profile.ProjectNumber,
             DeploymentCanonicalJson.Hash(intentBytes),
             DeploymentCanonicalJson.Hash(terraformBytes),
             new ReadOnlyDictionary<string, string>(new SortedDictionary<string, string>(request.Intent.MigrationJobs.ToDictionary(job => job.Id.Value, job => $"google_cloud_run_v2_job.appsurface_migration[\"{job.Id.Value}\"]", StringComparer.Ordinal), StringComparer.Ordinal)),
@@ -90,30 +91,7 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
         ArgumentNullException.ThrowIfNull(request);
         if (request.RenderResult is null) throw Failure("ASDEPLOY163", "Deployment artifact set is invalid.", "The render result is missing.", "Regenerate the complete artifact bundle.");
         if (!Enum.IsDefined(request.ParityMode)) throw Failure("ASDEPLOY164", "Verification parity mode is unsupported.", $"'{request.ParityMode}' is not a defined parity mode.", "Use shadow before cutover or owned after the generated configuration becomes authoritative.");
-        if (!string.Equals(request.RenderResult.Target, Name, StringComparison.Ordinal)) throw Failure("ASDEPLOY150", "Verification target mismatch.", "The evidence bundle belongs to another deployment target.", "Verify artifacts with the target that rendered them.");
-        if (request.RenderResult.Artifacts is null || request.RenderResult.Artifacts.Count != 3 || request.RenderResult.Artifacts.Any(item => item is null) || request.RenderResult.Artifacts.Select(item => item.FileName).Distinct(StringComparer.Ordinal).Count() != 3)
-        {
-            throw Failure("ASDEPLOY163", "Deployment artifact set is invalid.", "The bundle must contain exactly one of each v1 artifact.", "Regenerate the complete artifact bundle.");
-        }
-        var artifacts = request.RenderResult.Artifacts.ToDictionary(artifact => artifact.FileName, StringComparer.Ordinal);
-        var intent = RequireArtifact(artifacts, IntentFileName);
-        var terraform = RequireArtifact(artifacts, TerraformFileName);
-        var planArtifact = RequireArtifact(artifacts, PlanFileName);
-        GcpCloudRunDeploymentPlan plan;
-        try
-        {
-            plan = JsonSerializer.Deserialize<GcpCloudRunDeploymentPlan>(planArtifact.Content, JsonOptions) ?? throw new JsonException("Plan was empty.");
-        }
-        catch (JsonException)
-        {
-            throw Failure("ASDEPLOY151", "Deployment evidence is malformed.", "The plan artifact is not valid v1 JSON.", "Regenerate the artifacts with aspire publish.");
-        }
-
-        if (plan.Schema != "https://appsurface.dev/schemas/gcp-cloud-run-migration-plan.v1.json" || plan.SchemaVersion != "1.0" || plan.Target != Name || plan.IntentSha256 != intent.Sha256 || plan.TerraformSha256 != terraform.Sha256 || string.IsNullOrWhiteSpace(plan.Project) || string.IsNullOrWhiteSpace(plan.Region) || plan.ResourceAddresses is null || plan.RequiredCapabilities is null || plan.Expected is null || plan.Expected.Count == 0 || plan.Expected.Any(item => item is null || string.IsNullOrWhiteSpace(item.LogicalId) || string.IsNullOrWhiteSpace(item.PhysicalJobName)) || plan.Expected.Select(item => item.LogicalId).Distinct(StringComparer.Ordinal).Count() != plan.Expected.Count || plan.Expected.Select(item => item.PhysicalJobName).Distinct(StringComparer.Ordinal).Count() != plan.Expected.Count || !HasCrossArtifactIdentity(plan, intent.Content, terraform.Content))
-        {
-            throw Failure("ASDEPLOY152", "Deployment evidence identity mismatch.", "Schema, target, or cross-artifact hashes differ.", "Regenerate and keep the three artifacts together.");
-        }
-
+        var plan = ValidateBundleLegacy(request.RenderResult);
         var diagnostics = new List<DeploymentDiagnostic>();
         var compared = 0;
         foreach (var expected in plan.Expected.OrderBy(item => item.LogicalId, StringComparer.Ordinal))
@@ -136,6 +114,37 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
         }
 
         return new DeploymentVerifyResult(diagnostics.Count == 0, compared, diagnostics.AsReadOnly(), "not-independently-verified");
+    }
+
+    /// <summary>Validates the legacy three-artifact bundle without imposing observer input limits.</summary>
+    internal static GcpCloudRunDeploymentPlan ValidateBundleLegacy(DeploymentRenderResult renderResult)
+    {
+        if (renderResult is null) throw Failure("ASDEPLOY163", "Deployment artifact set is invalid.", "The render result is missing.", "Regenerate the complete artifact bundle.");
+        if (!string.Equals(renderResult.Target, "gcp-cloud-run", StringComparison.Ordinal)) throw Failure("ASDEPLOY150", "Verification target mismatch.", "The evidence bundle belongs to another deployment target.", "Verify artifacts with the target that rendered them.");
+        if (renderResult.Artifacts is null || renderResult.Artifacts.Count != 3 || renderResult.Artifacts.Any(item => item is null) || renderResult.Artifacts.Select(item => item.FileName).Distinct(StringComparer.Ordinal).Count() != 3)
+        {
+            throw Failure("ASDEPLOY163", "Deployment artifact set is invalid.", "The bundle must contain exactly one of each v1 artifact.", "Regenerate the complete artifact bundle.");
+        }
+        var artifacts = renderResult.Artifacts.ToDictionary(artifact => artifact.FileName, StringComparer.Ordinal);
+        var intent = RequireArtifact(artifacts, IntentFileName);
+        var terraform = RequireArtifact(artifacts, TerraformFileName);
+        var planArtifact = RequireArtifact(artifacts, PlanFileName);
+        GcpCloudRunDeploymentPlan plan;
+        try
+        {
+            plan = JsonSerializer.Deserialize<GcpCloudRunDeploymentPlan>(planArtifact.Content, JsonOptions) ?? throw new JsonException("Plan was empty.");
+        }
+        catch (JsonException)
+        {
+            throw Failure("ASDEPLOY151", "Deployment evidence is malformed.", "The plan artifact is not valid v1 JSON.", "Regenerate the artifacts with aspire publish.");
+        }
+
+        if (plan.Schema != "https://appsurface.dev/schemas/gcp-cloud-run-migration-plan.v1.json" || plan.SchemaVersion != "1.0" || plan.Target != "gcp-cloud-run" || plan.IntentSha256 != intent.Sha256 || plan.TerraformSha256 != terraform.Sha256 || string.IsNullOrWhiteSpace(plan.Project) || string.IsNullOrWhiteSpace(plan.Region) || plan.ResourceAddresses is null || plan.RequiredCapabilities is null || plan.Expected is null || plan.Expected.Count == 0 || plan.Expected.Any(item => item is null || string.IsNullOrWhiteSpace(item.LogicalId) || string.IsNullOrWhiteSpace(item.PhysicalJobName)) || plan.Expected.Select(item => item.LogicalId).Distinct(StringComparer.Ordinal).Count() != plan.Expected.Count || plan.Expected.Select(item => item.PhysicalJobName).Distinct(StringComparer.Ordinal).Count() != plan.Expected.Count || !HasCrossArtifactIdentity(plan, intent.Content, terraform.Content))
+        {
+            throw Failure("ASDEPLOY152", "Deployment evidence identity mismatch.", "Schema, target, or cross-artifact hashes differ.", "Regenerate and keep the three artifacts together.");
+        }
+
+        return plan;
     }
 
     private static bool HasCrossArtifactIdentity(GcpCloudRunDeploymentPlan plan, byte[] intentBytes, byte[] terraformBytes)
@@ -175,6 +184,20 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
             var network = taskTemplate.GetProperty("vpc_access").GetProperty("network_interfaces")[0];
             var cloudSql = taskTemplate.GetProperty("volumes")[0].GetProperty("cloud_sql_instance").GetProperty("instances")[0].GetString()!;
             var labels = terraformJob.GetProperty("labels");
+            if (terraform.RootElement.TryGetProperty("locals", out var locals)
+                && locals.TryGetProperty("appsurface_execution_identity", out var identity))
+            {
+                if (plan.ProjectNumber is null
+                    || identity.GetProperty("project").GetString() != plan.Project
+                    || identity.GetProperty("project_number").GetString() != plan.ProjectNumber)
+                {
+                    return false;
+                }
+            }
+            else if (plan.ProjectNumber is not null)
+            {
+                return false;
+            }
             return plan.Expected.All(expected =>
             {
                 if (!jobs.TryGetProperty(expected.LogicalId, out var job)
@@ -280,7 +303,7 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
             });
         }
 
-        return new Dictionary<string, object?>
+        var result = new Dictionary<string, object?>
         {
             ["terraform"] = new { required_providers = new { google = new { source = "hashicorp/google" } } },
             ["resource"] = new Dictionary<string, object>
@@ -346,6 +369,15 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
                 },
             },
         };
+        if (profile.ProjectNumber is not null)
+        {
+            result["locals"] = new Dictionary<string, object>
+            {
+                ["appsurface_execution_identity"] = new { project = profile.Project, project_number = profile.ProjectNumber },
+            };
+        }
+
+        return result;
     }
 
     private static GcpCloudRunMigrationParity CreateParity(MigrationJobIntent job, GcpCloudRunBindingProfile profile, DeploymentIntent intent)
@@ -500,7 +532,7 @@ public sealed class GcpCloudRunDeploymentTarget : IDeploymentTarget
 /// <summary>Safe normalized Cloud Run migration-job configuration used for shadow and owned parity.</summary>
 internal sealed record GcpCloudRunMigrationParity(string LogicalId, string PhysicalJobName, string Image, string Command, int CommandElements, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment, int Tasks, int Parallelism, int Retries, string Timeout, string Network, string Subnetwork, string Egress, string CloudSqlInstanceConnectionName, string SecretEnvironmentVariable, int SecretEnvironments, string SecretId, string SecretVersion, string ServiceAccount, string? EnvironmentLabel, string? SourceRevisionLabel);
 
-internal sealed record GcpCloudRunDeploymentPlan([property: JsonPropertyName("$schema")] string Schema, string SchemaVersion, string Target, string Environment, string Project, string Region, string GeneratorVersion, string SourceRevision, string IntentSha256, string TerraformSha256, IReadOnlyDictionary<string, string> ResourceAddresses, IReadOnlyList<DeploymentCapability> RequiredCapabilities, IReadOnlyList<GcpCloudRunMigrationParity> Expected);
+internal sealed record GcpCloudRunDeploymentPlan([property: JsonPropertyName("$schema")] string Schema, string SchemaVersion, string Target, string Environment, string Project, string Region, string GeneratorVersion, string SourceRevision, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProjectNumber, string IntentSha256, string TerraformSha256, IReadOnlyDictionary<string, string> ResourceAddresses, IReadOnlyList<DeploymentCapability> RequiredCapabilities, IReadOnlyList<GcpCloudRunMigrationParity> Expected);
 
 /// <summary>Executes one read-only gcloud invocation expressed as an argument array.</summary>
 public interface IGcloudCommandRunner

@@ -10,6 +10,12 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 {
     private readonly string _root = CreatePrivateTestRoot();
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+    public DurableTemplateNativePostgreSqlTests(Xunit.Abstractions.ITestOutputHelper output)
+    {
+        _output = output;
+    }
 
     [Fact]
     public async Task StartProvesPrivateScramClusterAndProjectsSecretOnlyToPsqlEnvironment()
@@ -972,7 +978,25 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
                 new DateTimeOffset(process.StartTime.ToUniversalTime()).ToUnixTimeSeconds());
             File.WriteAllText(pidPath, RenderPostmasterPid(identity, dataDirectory, port));
 
-            Assert.Equal(identity, runtime.FindOwnedPostmaster(dataDirectory, executablePath, port));
+            var observedIdentity = runtime.FindOwnedPostmaster(dataDirectory, executablePath, port);
+            if (observedIdentity != identity)
+            {
+                // Failure-only evidence: never retry ownership verification or change its verdict.
+                try
+                {
+                    using var observation = Process.GetProcessById(process.Id);
+                    var exited = observation.HasExited;
+                    _output.WriteLine($"Owned process identity mismatch: expected={identity}; observed={observedIdentity}; exited={exited}; "
+                        + (exited
+                            ? $"exit-code={observation.ExitCode}"
+                            : $"name={observation.ProcessName}; executable={observation.MainModule?.FileName}; start={new DateTimeOffset(observation.StartTime.ToUniversalTime()).ToUnixTimeSeconds()}"));
+                }
+                catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    _output.WriteLine($"Owned process identity mismatch: expected={identity}; observed={observedIdentity}; diagnostic={exception.GetType().Name}");
+                }
+            }
+            Assert.Equal(identity, observedIdentity);
             Assert.True(runtime.IsSameProcessAlive(identity, executablePath));
             Assert.False(runtime.IsSameProcessAlive(
                 identity with { StartTimeUnixSeconds = identity.StartTimeUnixSeconds + 100 },

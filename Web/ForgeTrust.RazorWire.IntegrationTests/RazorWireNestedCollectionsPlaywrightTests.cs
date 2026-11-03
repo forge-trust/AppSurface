@@ -17,27 +17,86 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
     }
 
     [Fact]
-    public async Task NestedCollections_ReadinessDoesNotDependOnTheExternalFontService()
+    public async Task NestedCollections_FunctionalFontFallbackBypassesStalledDecorativeStylesheet()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
-        var releaseFontRequest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFont = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fontRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fontSettled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await context.RouteAsync("https://fonts.googleapis.com/**", async route =>
         {
-            await releaseFontRequest.Task;
-            await route.AbortAsync();
+            fontRequested.TrySetResult();
+            try
+            {
+                await releaseFont.Task;
+                await route.AbortAsync();
+            }
+            finally
+            {
+                fontSettled.TrySetResult();
+            }
         });
         var page = await context.NewPageAsync();
-        var opening = OpenNestedCollectionsAsync(page, "physical");
+
         try
         {
-            await opening.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.Equal(new[] { "4", "9" }, await GetKeysAsync(ActionsRoot(page)));
+            var fontResponse = await page.RunAndWaitForResponseAsync(
+                () => OpenNestedCollectionsAsync(page, "mark"),
+                response => response.Url.StartsWith("https://fonts.googleapis.com/", StringComparison.Ordinal));
+            Assert.Equal(StatusCodes.Status200OK, fontResponse.Status);
+            Assert.False(fontRequested.Task.IsCompleted);
+            var dates = ChildCollection(ParentRow(page, "4"));
+            await dates.Locator(":scope > button[data-rw-form-collection-add]").ClickAsync();
+            Assert.Equal(new[] { "0", "7", "8" }, await GetKeysAsync(dates));
+            Assert.Equal("Added date.", await OwnedStatusTextAsync(dates));
         }
         finally
         {
-            releaseFontRequest.TrySetResult();
-            // Observe the navigation after releasing a deliberately unresponsive dependency.
-            await opening;
+            releaseFont.TrySetResult();
+            if (fontRequested.Task.IsCompleted)
+            {
+                await fontSettled.Task;
+            }
+        }
+    }
+
+    [Fact]
+    public async Task NestedCollections_FunctionalFontFallbackStillRejectsStalledApplicationScript()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var releaseScript = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var scriptRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var scriptSettled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await page.RouteAsync("**/_content/ForgeTrust.RazorWire/razorwire/razorwire.js*", async route =>
+        {
+            scriptRequested.TrySetResult();
+            try
+            {
+                await releaseScript.Task;
+                await route.AbortAsync();
+            }
+            finally
+            {
+                scriptSettled.TrySetResult();
+            }
+        });
+
+        try
+        {
+            // Preserve the ordinary navigation deadline: a missing application script must still fail it.
+            var failure = await Assert.ThrowsAsync<TimeoutException>(() => OpenNestedCollectionsAsync(page, "mark"));
+            Assert.True(scriptRequested.Task.IsCompleted);
+            Assert.Contains("Timeout 30000ms exceeded", failure.Message, StringComparison.Ordinal);
+            Assert.Contains("waiting until \"load\"", failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            releaseScript.TrySetResult();
+            if (scriptRequested.Task.IsCompleted)
+            {
+                await scriptSettled.Task;
+            }
         }
     }
 
@@ -960,7 +1019,7 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
             ViewportSize = new ViewportSize { Width = 1280, Height = 900 }
         });
         var page = await context.NewPageAsync();
-        await OpenNestedCollectionsAsync(page, "physical");
+        await OpenNestedCollectionsAsync(page, "physical", useFunctionalFontFallback: false);
 
         await page.EvaluateAsync(
             """
@@ -1095,11 +1154,13 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
         }
         """);
 
-    private async Task OpenNestedCollectionsAsync(IPage page, string mode)
+    private async Task OpenNestedCollectionsAsync(IPage page, string mode, bool useFunctionalFontFallback = true)
     {
-        // These collection tests do not measure typography. Keep the optional external font
-        // service out of readiness while retaining the full load and enhancement checks.
-        await page.RouteAsync("https://fonts.googleapis.com/**", route => route.AbortAsync());
+        if (useFunctionalFontFallback)
+        {
+            await RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync(page.Context);
+        }
+
         await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/NestedCollections?mode={mode}");
         await page.WaitForFunctionAsync(
             """
