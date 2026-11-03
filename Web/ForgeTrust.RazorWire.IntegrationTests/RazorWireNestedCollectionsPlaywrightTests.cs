@@ -16,6 +16,31 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
         _fixture = fixture;
     }
 
+    [Fact]
+    public async Task NestedCollections_ReadinessDoesNotDependOnTheExternalFontService()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var releaseFontRequest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await context.RouteAsync("https://fonts.googleapis.com/**", async route =>
+        {
+            await releaseFontRequest.Task;
+            await route.AbortAsync();
+        });
+        var page = await context.NewPageAsync();
+        var opening = OpenNestedCollectionsAsync(page, "physical");
+        try
+        {
+            await opening.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(new[] { "4", "9" }, await GetKeysAsync(ActionsRoot(page)));
+        }
+        finally
+        {
+            releaseFontRequest.TrySetResult();
+            // Observe the navigation after releasing a deliberately unresponsive dependency.
+            await opening;
+        }
+    }
+
     [Theory]
     [InlineData("physical")]
     [InlineData("mark")]
@@ -1072,6 +1097,9 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
 
     private async Task OpenNestedCollectionsAsync(IPage page, string mode)
     {
+        // These collection tests do not measure typography. Keep the optional external font
+        // service out of readiness while retaining the full load and enhancement checks.
+        await page.RouteAsync("https://fonts.googleapis.com/**", route => route.AbortAsync());
         await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/NestedCollections?mode={mode}");
         await page.WaitForFunctionAsync(
             """

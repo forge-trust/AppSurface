@@ -704,6 +704,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             }
         });
         var page = await context.NewPageAsync();
+        await page.Clock.InstallAsync();
 
         await AppSurfaceDocsRouteHelper.GotoFirstAvailableAsync(
             page,
@@ -751,6 +752,10 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
+        // Frame restoration schedules animation frames and 80/240ms callbacks. Complete them
+        // before checking the settled position or exercising a subsequent user scroll.
+        await page.Clock.RunForAsync(500);
+
         var scrollTop = await page.EvaluateAsync<int>(
             "() => Math.round(document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER)");
         Assert.InRange(scrollTop, 0, 8);
@@ -764,6 +769,8 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             """,
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.Clock.RunForAsync(500);
 
         await page.EvaluateAsync(ScrollMainContentToBottomScript);
         var scrollState = await page.EvaluateAsync<DetailsScrollState>(
