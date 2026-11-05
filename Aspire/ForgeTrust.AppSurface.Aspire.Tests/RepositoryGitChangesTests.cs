@@ -301,6 +301,30 @@ public sealed class RepositoryGitChangesTests : IDisposable
     public void MalformedStatusesAndPaths_AreRejected(string input) =>
         Assert.Throws<FormatException>(() => RepositoryGitChanges.ParseNameStatus(Encoding.UTF8.GetBytes(input)));
 
+    [Fact]
+    public void FixtureCleanup_RemovesReadOnlyGitObjectsWithoutFollowingLinks()
+    {
+        var owned = Path.Join(_root, "cleanup-owned");
+        var objects = Path.Join(owned, ".git", "objects", "ab");
+        Directory.CreateDirectory(objects);
+        var gitObject = Path.Join(objects, "read-only-object");
+        File.WriteAllText(gitObject, "owned Git object");
+        File.SetAttributes(gitObject, File.GetAttributes(gitObject) | FileAttributes.ReadOnly);
+        var outside = Path.Join(_root, "cleanup-external");
+        Directory.CreateDirectory(outside);
+        var sentinel = Path.Join(outside, "sentinel.txt");
+        File.WriteAllText(sentinel, "preserve external bytes");
+        File.SetAttributes(sentinel, File.GetAttributes(sentinel) | FileAttributes.ReadOnly);
+        Directory.CreateSymbolicLink(Path.Join(owned, "directory-link"), outside);
+        File.CreateSymbolicLink(Path.Join(owned, "file-link"), sentinel);
+
+        NativeEvidenceTestDirectory.Delete(owned);
+
+        Assert.False(Directory.Exists(owned));
+        Assert.Equal("preserve external bytes", File.ReadAllText(sentinel));
+        Assert.True(File.GetAttributes(sentinel).HasFlag(FileAttributes.ReadOnly));
+    }
+
     private void Initialize()
     {
         Git("init", "-q");
@@ -341,5 +365,5 @@ public sealed class RepositoryGitChangesTests : IDisposable
         return output.Trim();
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => NativeEvidenceTestDirectory.Delete(_root);
 }

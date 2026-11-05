@@ -315,7 +315,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => workflow.RunAsync(Options(fixture, "local"), cancelled.Token));
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => NativeEvidenceTestDirectory.Delete(_root);
 
     private string LastOutput => _lastOutput ?? throw new InvalidOperationException("Test output path was not initialized.");
 

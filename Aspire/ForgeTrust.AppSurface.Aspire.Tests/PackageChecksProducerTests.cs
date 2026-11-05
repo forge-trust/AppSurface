@@ -332,7 +332,7 @@ public sealed class PackageChecksProducerTests
             "stale-output" => valid,
             "relative-repository" => valid with { RepositoryRoot = "relative-repository" },
             "relative-dotnet" => valid with { DotnetPath = "dotnet" },
-            "relative-output" => valid with { OutputDirectory = Path.GetRelativePath(Environment.CurrentDirectory, output) },
+            "relative-output" => valid with { OutputDirectory = "relative-evidence-output" },
             _ => throw new ArgumentOutOfRangeException(nameof(defect)),
         };
         if (defect == "stale-output") Directory.CreateDirectory(TestPathUtils.PathUnder(output, "package-checks"));

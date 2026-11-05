@@ -463,7 +463,7 @@ public sealed class NativeEvidenceProgramTests
             return stdout;
         }
 
-        public void Dispose() => Directory.Delete(Root, recursive: true);
+        public void Dispose() => NativeEvidenceTestDirectory.Delete(Root);
     }
 
     private sealed record InvocationResult(int ExitCode, string StandardOutput, string StandardError);
