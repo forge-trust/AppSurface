@@ -61,6 +61,25 @@ public sealed class EvidenceCoverageFanInProducerTests
     }
 
     [Fact]
+    public async Task InvalidFacadePolicyReturnsSafeInvalidResultWithoutDeliveryOrAssertion()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var request = fixture.AcceptRequest() with
+        {
+            Policy = fixture.Policy with { Source = fixture.Policy.Source with { Sdk = string.Empty } }
+        };
+        var (producer, declaration, plan) = CreateProducer(request);
+        var writer = new EvidenceArtifactWriter(declaration, Path.Join(fixture.TempPath, "evidence-artifacts"));
+
+        var result = await producer.ProduceAsync(Context(plan, declaration, writer), CancellationToken.None);
+
+        AssertNoAssertion(result, EvidenceProducerOutcome.Invalid);
+        Assert.StartsWith("ASCOV301", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(Directory.Exists(fixture.Accepted));
+    }
+
+    [Fact]
     public async Task NullContextIsRejectedBeforeAnyAcceptance()
     {
         using var fixture = await Fixture.CreateAsync();

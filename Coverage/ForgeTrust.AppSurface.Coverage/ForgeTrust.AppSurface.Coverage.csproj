@@ -11,4 +11,13 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
   </ItemGroup>
+
+  <Target Name="PinCoverageEnginePackageVersion" BeforeTargets="GenerateNuspec">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
+          Condition="'%(_ProjectReferencesWithVersions.Filename)' == 'ForgeTrust.AppSurface.Evidence.Coverage'">
+        <ProjectVersion>[$(PackageVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+  </Target>
 </Project>

@@ -272,6 +272,40 @@ public sealed class CoverageFanInPublicationTests
         Assert.Equal(committed.Generation, store.GetCurrentRun(afterOutput)?.ManifestBase.RunId);
     }
 
+    [Fact]
+    public async Task CancellationDuringOwnedReplacementKeepsPriorSnapshotAndLeavesNewGenerationUncommitted()
+    {
+        using var fixture = new Fixture();
+        var priorFiles = Payloads();
+        var prior = await fixture.PublishAsync(files: priorFiles);
+        var replacementFiles = Payloads("<coverage lines-covered='2'/>", "replacement receipt");
+        using var cancellation = new CancellationTokenSource();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.PublishAsync(
+            files: replacementFiles,
+            replaceOwned: true,
+            token: cancellation.Token,
+            beforeCommit: cancellation.Cancel));
+
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.False(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+        Assert.Equal(replacementFiles["coverage.xml"], File.ReadAllBytes(Path.Join(fixture.Output, "coverage.xml")));
+        Assert.Equal(replacementFiles["receipt.json"], File.ReadAllBytes(Path.Join(fixture.Output, "receipt.json")));
+        Assert.True(Directory.Exists(Path.Join(fixture.StoreHome, "archives", prior.Generation)));
+
+        using var store = CoverageArtifactStore.Open(fixture.StoreHome);
+        var incomplete = Assert.IsType<CoverageArtifactCurrentRun>(store.GetCurrentRun(fixture.Output));
+        Assert.NotEqual(prior.Generation, incomplete.ManifestBase.RunId);
+        Assert.False(incomplete.ManifestBase.Complete);
+        Assert.Equal(1, store.GetStatus().ArchivedRuns);
+        Assert.True(store.GetStatus().PinnedBytes > 0);
+
+        var restored = Path.Join(fixture.OutputParent, "restored-prior");
+        await store.RestoreAsync(prior.Generation, restored, CancellationToken.None);
+        Assert.Equal(priorFiles["coverage.xml"], File.ReadAllBytes(Path.Join(restored, "coverage.xml")));
+        Assert.Equal(priorFiles["receipt.json"], File.ReadAllBytes(Path.Join(restored, "receipt.json")));
+    }
+
     [CoverageUnixTheory]
     [InlineData(0)]
     public async Task ReplacingRootAncestorBeforeCommitPreventsMarkerPublication(int _)

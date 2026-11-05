@@ -89,6 +89,32 @@ public sealed class CoverageFanInIOTests
     }
 
     [Fact]
+    public void FailedMultiRootAcquisitionReleasesEarlierLeasesAndRetainsContendedLease()
+    {
+        using var temp = TestDirectory.Create();
+        var first = temp.CreateDirectory("first");
+        var second = temp.CreateDirectory("second");
+        string firstIdentity;
+        string secondIdentity;
+        using (var firstRoot = CoverageRunOutputLease.AcquireArtifactDirectory(first, false, false)!)
+            firstIdentity = firstRoot.ArtifactDirectoryIdentity;
+        using (var secondRoot = CoverageRunOutputLease.AcquireArtifactDirectory(second, false, false)!)
+            secondIdentity = secondRoot.ArtifactDirectoryIdentity;
+
+        var acquiredFirst = StringComparer.Ordinal.Compare(firstIdentity, secondIdentity) < 0 ? first : second;
+        var contendedSecond = acquiredFirst == first ? second : first;
+        var contendedIdentity = acquiredFirst == first ? secondIdentity : firstIdentity;
+        using var competingWriter = CoverageArtifactOperationLease.Acquire(contendedSecond, true);
+        using var io = new CoverageFanInIO(Bounds(), CancellationToken.None);
+
+        Assert.Throws<CoverageExecutionException>(() => io.Acquire([(first, false), (second, false)]));
+
+        using var releasedWriter = CoverageArtifactOperationLease.Acquire(acquiredFirst, true);
+        Assert.NotEqual(contendedIdentity, releasedWriter.PhysicalIdentity);
+        Assert.Equal(contendedIdentity, competingWriter.PhysicalIdentity);
+    }
+
+    [Fact]
     public void MetadataAndStagingShareTheAlreadyAdmittedInputBudget()
     {
         using var temp = TestDirectory.Create();

@@ -29,9 +29,20 @@ internal static class InstalledPackageProof
                 var metadata = document.Descendants().Single(x => x.Name.LocalName == "metadata");
                 if (metadata.Elements().Single(x => x.Name.LocalName == "id").Value != id || metadata.Elements().Single(x => x.Name.LocalName == "version").Value != version)
                     throw new InvalidDataException();
-                if (document.Descendants().Where(x => x.Name.LocalName == "dependency").Any(x =>
-                    ((string?)x.Attribute("id"))?.StartsWith("ForgeTrust.", StringComparison.Ordinal) == true
-                    && (string?)x.Attribute("version") != version)) throw new InvalidDataException();
+                var firstPartyDependencies = document.Descendants().Where(x => x.Name.LocalName == "dependency"
+                    && ((string?)x.Attribute("id"))?.StartsWith("ForgeTrust.", StringComparison.Ordinal) == true).ToArray();
+                if (id == "ForgeTrust.AppSurface.Coverage")
+                {
+                    var engineDependencies = firstPartyDependencies.Where(x =>
+                        string.Equals((string?)x.Attribute("id"), "ForgeTrust.AppSurface.Evidence.Coverage", StringComparison.Ordinal)).ToArray();
+                    if (engineDependencies.Length == 0 || engineDependencies.Any(x =>
+                        !string.Equals((string?)x.Attribute("version"), $"[{version}]", StringComparison.Ordinal)))
+                        throw new InvalidDataException();
+                }
+                if (firstPartyDependencies.Any(x =>
+                    !(id == "ForgeTrust.AppSurface.Coverage"
+                        && string.Equals((string?)x.Attribute("id"), "ForgeTrust.AppSurface.Evidence.Coverage", StringComparison.Ordinal))
+                    && !string.Equals((string?)x.Attribute("version"), version, StringComparison.Ordinal))) throw new InvalidDataException();
                 hashes[id] = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(package)));
             }
             Directory.CreateDirectory(output); var app = Path.Join(output, "app"); Directory.CreateDirectory(app);

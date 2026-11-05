@@ -279,6 +279,44 @@ public sealed class CoverageFanInCommandTests
     }
 
     [Theory]
+    [InlineData("schemaVersion")]
+    [InlineData("operation")]
+    [InlineData("request")]
+    [InlineData("unexpected")]
+    public async Task Cli_rejects_missing_or_unknown_envelope_members_before_preparing_result(string member)
+    {
+        using var root = TestDirectory.Create();
+        var envelope = JsonNode.Parse(CaptureEnvelope(root.Path))!.AsObject();
+        if (member == "unexpected") envelope[member] = JsonValue.Create(true);
+        else envelope.Remove(member);
+        var requestPath = root.WriteFile("request.json", envelope.ToJsonString(WireOptions));
+        var resultPath = Path.Join(root.Path, "result.json");
+        var delivery = new CountingDeliveryFactory();
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () =>
+            await new CoverageFanInCaptureCommand(delivery)
+            { Request = requestPath, Result = resultPath, Json = true }.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Equal(2, exception.ExitCode);
+        Assert.Equal(0, delivery.PrepareCalls);
+        using var terminal = JsonDocument.Parse(console.ReadOutputString());
+        Assert.Equal("invalidInput", terminal.RootElement.GetProperty("status").GetString());
+        Assert.Equal("notStarted", terminal.RootElement.GetProperty("delivery").GetProperty("status").GetString());
+        Assert.False(File.Exists(resultPath));
+        Assert.DoesNotContain(root.Path, console.ReadOutputString() + console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Dispatch_rejects_an_unknown_operation_instead_of_calling_a_facade()
+    {
+        var command = new CoverageFanInCaptureCommand();
+
+        Assert.Throws<CoverageFanInCliInputException>(() => command.InvokeAsync(
+            new ParsedCoverageFanInRequest("unknown", new object()), TextWriter.Null, CancellationToken.None));
+    }
+
+    [Theory]
     [InlineData(CoverageOperationOutcome.TimedOut, "timedOut", 124)]
     [InlineData(CoverageOperationOutcome.Cancelled, "cancelled", 130)]
     public async Task TypedOperationFailuresPreserveOutcomeExitCodeAndDeliverKnownEffects(
@@ -338,6 +376,9 @@ public sealed class CoverageFanInCommandTests
         {
             ["acceptance.json"] = "acceptance",
             ["collector.cobertura.xml"] = "collectorCoverage",
+            ["collector-inventory.json"] = "collectorInventory",
+            ["collector-0000.cobertura.xml"] = "collectorCoverage",
+            ["collector-0001.cobertura.xml"] = "collectorCoverage",
             ["composed-gate.json"] = "composedGate",
             ["composed-gate.md"] = "composedGateSummary",
             ["coverage.cobertura.xml"] = "coverage",
@@ -637,6 +678,27 @@ public sealed class CoverageFanInCommandTests
         }
     }
 
+    [Fact]
+    public async Task Request_at_the_one_mibibyte_limit_is_admitted_and_reaches_operation_validation()
+    {
+        using var root = TestDirectory.Create();
+        var request = CaptureEnvelope(root.Path);
+        request += new string(' ', 1024 * 1024 - System.Text.Encoding.UTF8.GetByteCount(request));
+        var requestPath = root.WriteFile("maximum-request.json", request);
+        var resultPath = Path.Join(root.Path, "result.json");
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () =>
+            await new CoverageFanInCaptureCommand
+            { Request = requestPath, Result = resultPath, Json = true }.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Equal(1, exception.ExitCode);
+        using var terminal = JsonDocument.Parse(console.ReadOutputString());
+        Assert.Equal("rejected", terminal.RootElement.GetProperty("status").GetString());
+        Assert.True(File.Exists(resultPath));
+        Assert.DoesNotContain("ASCOVF001", console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("capture", false, "capture", true)]
     [InlineData("collect", false, "capture", false)]
@@ -752,6 +814,28 @@ public sealed class CoverageFanInCommandTests
 
         Assert.Equal(2, exception.ExitCode);
         Assert.Equal("keep-this-result", File.ReadAllText(resultPath));
+        Assert.DoesNotContain(root.Path, console.ReadOutputString() + console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Result_destination_rejects_a_linked_file_without_touching_its_target()
+    {
+        using var root = TestDirectory.Create();
+        var requestPath = root.WriteFile("request.json", CaptureEnvelope(root.Path));
+        var targetPath = root.WriteFile("foreign-result.json", "preserve-foreign-bytes");
+        var resultPath = Path.Join(root.Path, "linked-result.json");
+        TestFileSystem.CreateFileLinkOrSkip(resultPath, targetPath);
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () =>
+            await new CoverageFanInCaptureCommand
+            { Request = requestPath, Result = resultPath, Json = true }.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Equal(2, exception.ExitCode);
+        Assert.Equal("preserve-foreign-bytes", File.ReadAllText(targetPath));
+        using var terminal = JsonDocument.Parse(console.ReadOutputString());
+        Assert.Equal("invalidInput", terminal.RootElement.GetProperty("status").GetString());
+        Assert.False(Directory.Exists(Path.Join(root.Path, "operation-output")));
         Assert.DoesNotContain(root.Path, console.ReadOutputString() + console.ReadErrorString(), StringComparison.Ordinal);
     }
 

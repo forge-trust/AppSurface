@@ -117,6 +117,7 @@ public sealed class CoverageFanInRuntimeLocatorTests
 
     [Theory]
     [InlineData("manifest-directory")]
+    [InlineData("root-file")]
     [InlineData("linked-file")]
     [InlineData("linked-directory")]
     [InlineData("linked-root")]
@@ -129,6 +130,10 @@ public sealed class CoverageFanInRuntimeLocatorTests
         var runtime = GetRuntimeDirectory(temp.Path);
         switch (mutation)
         {
+            case "root-file":
+                Directory.Move(runtime, runtime + "-retained");
+                File.WriteAllText(runtime, "not a runtime directory");
+                break;
             case "manifest-directory":
                 var manifest = Path.Join(runtime, "runtime-manifest.json");
                 File.Delete(manifest); Directory.CreateDirectory(manifest);

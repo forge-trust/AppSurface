@@ -10,6 +10,59 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageFanInNativeWorkflowTests
 {
     [Theory]
+    [InlineData("foreign-platform")]
+    [InlineData("populated-collection")]
+    [InlineData("failed-project")]
+    public async Task NativeCollectionCannotPublishWhenExecutionOrDestinationIsInvalid(string scenario)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        if (scenario == "failed-project")
+            await fixture.AddFailingNativeTestAsync();
+        var policy = await fixture.PolicyAsync(useAllNative: true);
+        if (scenario == "foreign-platform")
+        {
+            var native = policy.Supplements[0];
+            policy = policy with
+            {
+                Supplements = [native with { Platform = OperatingSystem.IsWindows() ? "Linux" : "Windows" }]
+            };
+        }
+        var sentinel = Path.Join(fixture.NativeCollection, "caller-owned.txt");
+        if (scenario == "populated-collection")
+        {
+            Directory.CreateDirectory(fixture.NativeCollection);
+            await File.WriteAllTextAsync(sentinel, "preserve this collection");
+        }
+        using var progress = new StringWriter();
+
+        var result = await CoverageFanIn.CollectAndCaptureAsync(new CoverageCollectRequest(
+            policy, fixture.Repository, fixture.NativeCapture, fixture.NativeCollection, "native", 180,
+            SolutionPath: fixture.Solution, Parallelism: 1, NoRestore: true), progress: progress, diagnostics: progress);
+
+        Assert.Equal(scenario == "failed-project" ? CoverageOperationOutcome.Incomplete : CoverageOperationOutcome.Rejected,
+            result.Outcome);
+        Assert.False(result.Accepted);
+        Assert.False(result.Verified);
+        Assert.False(result.Effects.GenerationCommitted);
+        Assert.False(Directory.Exists(fixture.NativeCapture));
+        Assert.DoesNotContain(fixture.Repository, progress.ToString(), StringComparison.Ordinal);
+        if (scenario == "populated-collection")
+        {
+            Assert.Equal("preserve this collection", await File.ReadAllTextAsync(sentinel));
+            Assert.Equal([sentinel], Directory.GetFiles(fixture.NativeCollection));
+        }
+        else if (scenario == "foreign-platform")
+            Assert.False(Directory.Exists(fixture.NativeCollection));
+        else
+        {
+            Assert.True(Directory.Exists(fixture.NativeCollection));
+            using var timings = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(fixture.NativeCollection, "timings.json")));
+            Assert.Contains(timings.RootElement.GetProperty("projects").EnumerateArray(),
+                project => project.GetProperty("exitCode").GetInt32() != 0);
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Public_collect_and_capture_runs_primary_and_native_reports_through_strict_normalization(bool useAllNative)
@@ -203,6 +256,14 @@ public sealed class CoverageFanInNativeWorkflowTests
                     useAllNative ? "FullyQualifiedName~Consumer." : "FullyQualifiedName~Consumer.Alpha.Tests.AlphaDecisionTests",
                     useAllNative ? TestProjects : ["Consumer.Alpha.Tests/Consumer.Alpha.Tests.csproj"])],
                 new CoverageGatePolicy(CoverageGateMode.AggregateOnly));
+        }
+
+        internal async Task AddFailingNativeTestAsync()
+        {
+            await File.WriteAllTextAsync(Path.Join(Repository, "Consumer.Alpha.Tests", "RequiredFailureTests.cs"),
+                "namespace Consumer.Alpha.Tests; public sealed class RequiredFailureTests { [Xunit.Fact] public void RequiredExecutionFails() => Xunit.Assert.Equal(1, 2); }");
+            await Command(Repository, "git", "add", ".");
+            await Command(Repository, "git", "commit", "-m", "add required failing producer test");
         }
 
         private static string FindRepositoryRoot()

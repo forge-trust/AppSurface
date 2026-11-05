@@ -1191,6 +1191,123 @@ public sealed class CoverageFanInIndependentVerifierTests
             raw, normalized, sourceRoot));
     }
 
+    [Theory]
+    [InlineData("patchDiffSource", "{}")]
+    [InlineData("patchLine", "{}")]
+    [InlineData("patchBranch", "{}")]
+    public void VerifyGatesAggregateOnlyRejectsPatchFactsEvenWhenBothReceiptsAgree(string field, string value)
+    {
+        var coverage = AggregateCoverage();
+        using var report = AggregateOnlyGate(coverage);
+        using var policy = JsonDocument.Parse("""
+            {"gate":{"mode":"aggregateOnly","minLine":95,"minBranch":85,"minPatchLine":95,"minPatchBranch":85,
+              "tolerance":0.5,"patchLineMode":"codecov","diffBase":null}}
+            """);
+        CoverageFanInIndependentVerifier.VerifyGates(report.RootElement, report.RootElement, policy.RootElement,
+            coverage, coverage);
+        using var forged = WithJsonValue(report, field, value);
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            forged.RootElement, forged.RootElement, policy.RootElement, coverage, coverage));
+    }
+
+    [Fact]
+    public void VerifyGatesMeasurableModeCountsAHitWithoutClaimingCompleteBranchCoverage()
+    {
+        var primary = AggregateCoverage();
+        var composed = AggregateCoverage();
+        composed.Descendants("line").First().SetAttributeValue("condition-coverage", "50% (1/2)");
+        composed.Root!.SetAttributeValue("branches-covered", "16");
+        using var primaryTemplate = Gate(primary, isPrimary: true);
+        using var composedTemplate = Gate(composed, isPrimary: false, patchBranchCovered: 1);
+        using var primaryGate = WithJsonValue(primaryTemplate, "patchLineMode", "\"measurable\"");
+        var composedNode = JsonNode.Parse(composedTemplate.RootElement.GetRawText())!;
+        composedNode["patchLineMode"] = "measurable";
+        composedNode["thresholds"]!["patchBranch"] = 50;
+        composedNode["effectiveThresholds"]!["patchBranch"] = 49.5m;
+        using var composedGate = JsonDocument.Parse(composedNode.ToJsonString());
+        using var policy = JsonDocument.Parse("""
+            {"gate":{"mode":"aggregateAndPatch","minLine":95,"minBranch":85,"minPatchLine":95,"minPatchBranch":50,
+              "tolerance":0.5,"patchLineMode":"measurable","diffBase":"base"}}
+            """);
+
+        CoverageFanInIndependentVerifier.VerifyGates(primaryGate.RootElement, composedGate.RootElement,
+            policy.RootElement, primary, composed, Diff);
+
+        using var codecovPrimary = WithJsonValue(primaryGate, "patchLineMode", "\"codecov\"");
+        using var codecovComposed = WithJsonValue(composedGate, "patchLineMode", "\"codecov\"");
+        using var codecovPolicy = WithJsonValue(policy, "gate.patchLineMode", "\"codecov\"");
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            codecovPrimary.RootElement, codecovComposed.RootElement, codecovPolicy.RootElement, primary, composed, Diff));
+    }
+
+    [Theory]
+    [InlineData("hits", "3")]
+    [InlineData("number", "4")]
+    [InlineData("name", "Other")]
+    [InlineData("signature", "(string)")]
+    public void VerifyCompositionRejectsChangedMethodFactsWithUnchangedMethodCountAndClassTotals(string field, string value)
+    {
+        var composed = XDocument.Parse(ComposedGolden);
+        var method = composed.Descendants("class").Single(x => (string?)x.Attribute("name") == "Widget")
+            .Descendants("method").First();
+        var target = field is "hits" or "number" ? method.Descendants("line").Single() : method;
+        target.SetAttributeValue(field, value);
+
+        Assert.Throws<InvalidDataException>(() => VerifyComposition(composed));
+    }
+
+    [Theory]
+    [InlineData("diff --git a/src/Second.cs b/src/Second.cs", "-old\n+new")]
+    [InlineData("diff --git a/src/Second.cs b/src/Second.cs", "-old\n-old\n+new")]
+    [InlineData("diff --git a/src/Second.cs b/src/Second.cs", "-old\n+new\n+new")]
+    [InlineData("@@ -2 +2 @@", "-old\n+new")]
+    [InlineData("@@ -2 +2 @@", "-old\n-old\n+new")]
+    [InlineData("@@ -2 +2 @@", "-old\n+new\n+new")]
+    public void VerifyGatesRejectsASecondSectionBeforeBothHunkRangesAreConsumed(string nextSection, string incompleteBody)
+    {
+        var coverage = AggregateCoverage();
+        var diff = FileDiff("b/src/Widget.cs", "@@ -1,2 +1,2 @@\n" + incompleteBody + "\n" + nextSection);
+        using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
+        using var policy = PatchPolicy();
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, composedGate.RootElement, policy.RootElement, coverage, coverage, diff));
+    }
+
+    [Fact]
+    public void VerifyGatesCountsARepeatedChangedLineOnceAcrossCompleteDiffSections()
+    {
+        var coverage = AggregateCoverage();
+        var section = FileDiff("src/Widget.cs", "@@ -1 +1 @@\n-old\n+new");
+        var diff = section + "\n" + section;
+        using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
+        using var policy = PatchPolicy();
+
+        CoverageFanInIndependentVerifier.VerifyGates(primaryGate.RootElement, composedGate.RootElement,
+            policy.RootElement, coverage, coverage, diff);
+
+        using var doubleCounted = WithJsonValue(composedGate, "patchLine.changed", "2");
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, doubleCounted.RootElement, policy.RootElement, coverage, coverage, diff));
+    }
+
+    [Fact]
+    public void VerifyNormalizationRejectsMethodOnlyEvidenceEvenWhenBothDocumentsAgree()
+    {
+        var raw = XDocument.Parse(PrimaryPathsGolden);
+        raw.Descendants("class").Single().Element("lines")!.RemoveNodes();
+        raw.Root!.SetAttributeValue("lines-valid", "0");
+        raw.Root.SetAttributeValue("lines-covered", "0");
+        raw.Root.SetAttributeValue("branches-valid", "0");
+        raw.Root.SetAttributeValue("branches-covered", "0");
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, new XDocument(raw), SourceRoot));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.ValidateNormalization(raw, new XDocument(raw), SourceRoot));
+    }
+
     private static string FileDiff(string newPath, string hunk) => $"""
         diff --git a/src/Widget.cs {newPath}
         --- a/src/Widget.cs

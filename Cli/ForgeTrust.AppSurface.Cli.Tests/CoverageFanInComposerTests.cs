@@ -856,6 +856,64 @@ public sealed class CoverageFanInComposerTests
         Assert.Equal("src/A.cs", Assert.Single(composed.Descendants("class")).Attribute("filename")!.Value);
     }
 
+    [Theory]
+    [InlineData("0% (0/9223372036854775808)")]
+    [InlineData("100% (1/9223372036854775808)")]
+    public void ComposeRejectsOverflowingBranchDenominatorWithoutChangingCollectorEvidence(string condition)
+    {
+        var raw = ValidReport();
+        raw.Descendants("line").Single().SetAttributeValue("condition-coverage", condition);
+        var before = new XDocument(raw);
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.Compose([(raw, WindowsRoot)]));
+
+        Assert.True(XNode.DeepEquals(before, raw));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NormalizationRetainsHitObservedAfterAnUncoveredDuplicateRegardlessOfRecordOrder(bool reverse)
+    {
+        var raw = XDocument.Parse("""
+            <coverage lines-valid="2" lines-covered="1" branches-valid="0" branches-covered="0">
+              <sources><source>src</source></sources><packages><package name="P"><classes>
+                <class name="A" filename="A.cs"><lines><line number="1" hits="0"/><line number="1" hits="3"/></lines></class>
+              </classes></package></packages>
+            </coverage>
+            """);
+        if (reverse)
+            raw.Descendants("class").Single().Element("lines")!.ReplaceNodes(raw.Descendants("line").Reverse().ToArray());
+        var normalized = new XDocument(raw);
+        CoverageFanInComposer.NormalizePaths(normalized, WindowsRoot);
+
+        Assert.Equal("src/A.cs", normalized.Descendants("class").Single().Attribute("filename")!.Value);
+        CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot);
+        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, WindowsRoot);
+
+        foreach (var line in normalized.Descendants("line")) line.SetAttributeValue("hits", "0");
+        normalized.Root!.SetAttributeValue("lines-covered", "0");
+        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, WindowsRoot));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CollectorMethodProjectionRejectsMissingFileIdentityWithoutMutatingEitherInput(bool missingRawFilename)
+    {
+        var raw = MethodNormalizationRaw();
+        var normalized = MethodNormalizationGolden();
+        (missingRawFilename ? raw : normalized).Descendants("class").First().Attribute("filename")!.Remove();
+        var rawBefore = new XDocument(raw);
+        var normalizedBefore = new XDocument(normalized);
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.RetainCollectorMethods(raw, normalized, WindowsRoot));
+
+        Assert.True(XNode.DeepEquals(rawBefore, raw));
+        Assert.True(XNode.DeepEquals(normalizedBefore, normalized));
+    }
+
     private static (long Covered, long Valid) ParseBranchCounts(string value)
     {
         var open = value.IndexOf('(');
