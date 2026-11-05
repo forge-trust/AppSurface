@@ -266,8 +266,10 @@ public sealed class DurableTemplateWorkflowTransportTests
 
                 if (scenario == "missing")
                 {
-                    var barePrefix = await RunCommandAsync("brew", ["--prefix", "postgresql@16"], root, environment);
+                    var barePrefix = await RunCommandAsync(brewPath, ["--prefix", "postgresql@16"], root, environment);
                     Assert.Equal(0, barePrefix.ExitCode);
+                    Assert.Equal(prefix + "\n", barePrefix.StandardOutput);
+                    Assert.Equal(new[] { "--prefix postgresql@16" }, await File.ReadAllLinesAsync(callsPath));
                     Assert.False(Directory.Exists(prefix));
                     File.Delete(callsPath);
                 }
