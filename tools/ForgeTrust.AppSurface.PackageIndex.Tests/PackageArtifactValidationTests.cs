@@ -7954,7 +7954,9 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         Assert.Contains("--operation verify --scope packages", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("--policy .github/evidence.policy.json", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("--manifest \"$proof/evidence-manifest.json\" --artifact-root \"$proof/artifacts\"", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("package-evidence-*/package-checks/**", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("package-evidence-*/package-checks/artifacts/durable-template-consumer-proof.json", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("package-evidence-*/package-checks/**", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("package-evidence-*/package-checks/artifacts/**", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("package-evidence-*/artifacts/**", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("stage = \"gate\";", packageChecksProducer, StringComparison.Ordinal);
         Assert.Contains("stage = \"verify\";", packageChecksProducer, StringComparison.Ordinal);

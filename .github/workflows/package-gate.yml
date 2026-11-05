@@ -99,8 +99,22 @@ jobs:
             ${{ runner.temp }}/package-evidence-*/evidence-summary.md
             ${{ runner.temp }}/package-evidence-*/evidence-manifest.json
             ${{ runner.temp }}/package-evidence-*/artifacts/**
-            ${{ runner.temp }}/package-evidence-*/package-checks/**
-            !${{ runner.temp }}/package-evidence-*/package-checks/nuget-packages/**
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/package-validation-report.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/durable-template-consumer-proof.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/tailwind-package-consumer-proof.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof.evidence.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/NuGet.tool.config
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/consumer/NuGet.config
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/consumer/.config/dotnet-tools.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/consumer/TestResults/**
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/logs/**
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/consumer/NuGet.config
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/consumer/Docs.ConsumerProof.csproj
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/consumer/packages.lock.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/consumer/obj/project.assets.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/logs/**
             ${{ runner.temp }}/package-plan-*/changes/**
             ${{ runner.temp }}/package-plan-*/plan/**
           if-no-files-found: warn

@@ -224,8 +224,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
 
         var diagnostics = FindStep(steps, "Upload package validation diagnostics");
         var diagnosticPaths = diagnostics["with"].AsMapping()["path"].AsScalar();
-        Assert.Contains("${{ runner.temp }}/package-evidence-*/package-checks/**", diagnosticPaths);
-        Assert.Contains("!${{ runner.temp }}/package-evidence-*/package-checks/nuget-packages/**", diagnosticPaths);
+        Assert.Contains("${{ runner.temp }}/package-evidence-*/package-checks/artifacts/durable-template-consumer-proof.json", diagnosticPaths);
+        Assert.DoesNotContain("${{ runner.temp }}/package-evidence-*/package-checks/**", diagnosticPaths);
+        Assert.DoesNotContain("${{ runner.temp }}/package-evidence-*/package-checks/artifacts/**", diagnosticPaths);
+        Assert.DoesNotContain("nuget-packages", diagnosticPaths);
     }
 
     private static YamlMappingNode LoadWorkflow(string repository, string name)
