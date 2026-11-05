@@ -72,6 +72,30 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release -- --package-proof --feed $feed --version $version --output $proof --dotnet (Get-Command dotnet).Source
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Reject case-varied engine version skew before proof output
+        shell: pwsh
+        run: |
+          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
+          $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-invalid-metadata'
+          $output = Join-Path $env:RUNNER_TEMP 'native-coverage-invalid-proof'
+          New-Item -ItemType Directory -Path $feed | Out-Null
+          # These are metadata-only admission fixtures. The canonical exact edge must
+          # not hide a case-varied, open engine edge in another framework group.
+          foreach ($id in @('ForgeTrust.AppSurface.Coverage', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Cli')) {
+            $dependencies = ''
+            if ($id -eq 'ForgeTrust.AppSurface.Coverage') {
+              $dependencies = "<dependencies><group targetFramework='net10.0'><dependency id='ForgeTrust.AppSurface.Evidence.Coverage' version='[$version]' /></group><group targetFramework='net9.0'><dependency id='forgetrust.appsurface.evidence.coverage' version='$version' /></group></dependencies>"
+            }
+            $metadata = "<package xmlns='http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd'><metadata><id>$id</id><version>$version</version>$dependencies</metadata></package>"
+            $archive = [System.IO.Compression.ZipFile]::Open((Join-Path $feed "$id.$version.nupkg"), [System.IO.Compression.ZipArchiveMode]::Create)
+            try {
+              $writer = [System.IO.StreamWriter]::new($archive.CreateEntry("$id.nuspec").Open())
+              try { $writer.Write($metadata) } finally { $writer.Dispose() }
+            } finally { $archive.Dispose() }
+          }
+          $diagnostic = & dotnet tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/Release/net10.0/ForgeTrust.AppSurface.Coverage.Dogfood.dll --package-proof --feed $feed --version $version --output $output --dotnet (Get-Command dotnet).Source 2>&1
+          if ($LASTEXITCODE -eq 0 -or (Test-Path $output) -or !($diagnostic -match 'ASCOV312 Packed coverage proof failed')) { throw 'Invalid engine metadata passed admission or created proof output, or the proof runner failed to execute.' }
+          exit 0
       # Retain the native fixture's failure proof before negative tests can fail.
       # Both acceptance layers remain required; a failed journey cannot skip tests.
       - name: Test native lifecycle contracts
