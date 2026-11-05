@@ -4,7 +4,7 @@ This repository tool uses the public [EvidenceHost lifecycle](../../start-here/e
 
 ## Local development
 
-Run the same checked-in [evidence policy](../../.github/evidence.policy.json) locally before a push:
+Run the same checked-in [evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) locally before a push:
 
 ```bash
 dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local-plan
@@ -60,8 +60,8 @@ retains HEAD and does not claim those edits were committed or independently atte
 
 ## Shared policy and CI
 
-The [native acceptance workflow](../../.github/workflows/native-evidence-validation.yml) uses the checked-in
-[evidence policy](../../.github/evidence.policy.json) and real changed paths to decide which native journeys
+The [native acceptance workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/native-evidence-validation.yml) uses the checked-in
+[evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) and real changed paths to decide which native journeys
 each Ubuntu, Windows and macOS lane must complete. Its final `Evidence manifest gate` requires successful
 verification in all three lanes. Configure that check as required in repository branch protection when
 adopting this workflow; a workflow file cannot configure branch protection itself.
@@ -130,9 +130,9 @@ explains the phase receipt and its limits; missing test results never authorize 
 Both repository producers propagate the selected `--dotnet` host through `DOTNET_HOST_PATH` and the
 child process search path, so nested SDK commands resolve the same host.
 
-The [build workflow](../../.github/workflows/build.yml) plans coverage before native collection and emits
+The [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) plans coverage before native collection and emits
 a verified empty-lane manifest when coverage is unselected. The
-[package gate](../../.github/workflows/package-gate.yml) plans before web/package prerequisites and uses
+[package gate](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml) plans before web/package prerequisites and uses
 the shared package producer. Existing artifact production, release policy and publishing workflows keep
 their delivery responsibilities; this policy controls validation evidence, not publication.
 

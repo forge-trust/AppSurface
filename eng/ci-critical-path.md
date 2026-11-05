@@ -1,6 +1,6 @@
 # AppSurface CI Critical Path
 
-This note is the CI-000 baseline for build-time work. Historical timing samples below describe the runs taken at the dates shown; the current coverage decision path is governed by the shared [evidence policy](../.github/evidence.policy.json) and the tracked workflows.
+This note is the CI-000 baseline for build-time work. Historical timing samples below describe the runs taken at the dates shown; the current coverage decision path is governed by the shared [evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) and the tracked workflows.
 
 ## Current PR validation path
 

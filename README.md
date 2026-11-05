@@ -7,7 +7,7 @@
 [![CodeQL](https://img.shields.io/badge/CodeQL-enabled-0f6fff?logo=github&logoColor=white)](https://github.com/forge-trust/AppSurface/security/code-scanning)
 [![Codecov](https://codecov.io/gh/forge-trust/AppSurface/branch/main/graph/badge.svg)](https://codecov.io/gh/forge-trust/AppSurface)
 [![NuGet Packages](https://img.shields.io/badge/NuGet-package%20chooser-004880?logo=nuget&logoColor=white)](./packages/README.md)
-[![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot&logoColor=white)](./.github/dependabot.yml)
+[![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot&logoColor=white)](https://github.com/forge-trust/AppSurface/blob/main/.github/dependabot.yml)
 [![Security Policy](https://img.shields.io/badge/security-private%20reporting-2ea44f?logo=github)](./SECURITY.md)
 [![License](https://img.shields.io/badge/license-Polyform%20Small%20Business-blue)](./licensing.md)
 
@@ -223,7 +223,7 @@ dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configura
 dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local
 ```
 
-The shared [repository evidence policy](./.github/evidence.policy.json) selects solution coverage,
+The shared [repository evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) selects solution coverage,
 package checks and native acceptance locally and in CI. Use `--scope coverage` to execute only the
 coverage projection of the plan or `--scope packages` for package validation. Explicit documentation
 exemptions avoid these producers; unknown inputs select the conservative set. The

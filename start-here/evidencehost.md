@@ -85,7 +85,7 @@ Similarly, v1 validates a registered release envelope but labels it `ValidatedNo
 
 For a complete native example that validates AppSurface's own packed CLI and installed consumer, use the [native EvidenceHost acceptance recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). It demonstrates bounded commands, owned storage, independent assertions and durable manifest output.
 
-AppSurface's own [native CI policy](../.github/evidence.policy.json) now selects those journeys from the
+AppSurface's own [native CI policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) now selects those journeys from the
 real PR diff. The [local development command](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development)
 uses the same policy for committed, staged, unstaged and untracked changes, packing only when required.
 The [shared CI recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#shared-policy-and-ci)
