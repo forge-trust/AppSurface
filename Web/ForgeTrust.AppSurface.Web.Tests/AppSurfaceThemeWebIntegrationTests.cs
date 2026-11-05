@@ -5,11 +5,13 @@ using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web.TagHelpers;
 using ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture;
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Razor.TagHelpers;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -1104,24 +1106,20 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         bool replaceDocumentProvider,
         string expectedDiagnostic)
     {
-        await using var factory = new WebApplicationFactory<global::Program>()
-            .WithWebHostBuilder(builder =>
+        var builder = CreateTenantThemeProofBuilder();
+        await using var app = global::Program.BuildApplication(builder, services =>
+        {
+            if (replaceDocumentProvider)
             {
-                builder.UseEnvironment(Environments.Development);
-                builder.ConfigureServices(services =>
-                {
-                    if (replaceDocumentProvider)
-                    {
-                        services.Replace(ServiceDescriptor.Singleton<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>());
-                    }
-                    else
-                    {
-                        services.AddSingleton<IAppSurfaceWebThemeSelectionPolicy, CountingThemeSelectionPolicy>();
-                    }
-                });
-            });
+                services.Replace(ServiceDescriptor.Singleton<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>());
+            }
+            else
+            {
+                services.AddSingleton<IAppSurfaceWebThemeSelectionPolicy, CountingThemeSelectionPolicy>();
+            }
+        });
 
-        var exception = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => app.StartAsync());
 
         Assert.Contains(expectedDiagnostic, exception.Message, StringComparison.Ordinal);
     }
@@ -1129,22 +1127,29 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     [Fact]
     public async Task TenantThemeProofHost_ShouldRejectLateTransientNeutralThemeServicesAtStartup()
     {
-        await using var factory = new WebApplicationFactory<global::Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.UseEnvironment(Environments.Development);
-                builder.ConfigureServices(services =>
-                {
-                    services.RemoveAll<IAppSurfaceThemeRegistry>();
-                    services.RemoveAll<IAppSurfaceThemeResolver>();
-                    services.AddTransient<IAppSurfaceThemeRegistry>(_ => CreateRegistry("shared-blue"));
-                    services.AddTransient<IAppSurfaceThemeResolver>(_ => CreateRegistry("shared-blue"));
-                });
-            });
+        var builder = CreateTenantThemeProofBuilder();
+        await using var app = global::Program.BuildApplication(builder, services =>
+        {
+            services.RemoveAll<IAppSurfaceThemeRegistry>();
+            services.RemoveAll<IAppSurfaceThemeResolver>();
+            services.AddTransient<IAppSurfaceThemeRegistry>(_ => CreateRegistry("shared-blue"));
+            services.AddTransient<IAppSurfaceThemeResolver>(_ => CreateRegistry("shared-blue"));
+        });
 
-        var exception = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => app.StartAsync());
 
         Assert.Contains("ASWEBTHEME003", exception.Message, StringComparison.Ordinal);
+    }
+
+    private static WebApplicationBuilder CreateTenantThemeProofBuilder()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ApplicationName = typeof(global::Program).Assembly.GetName().Name,
+            EnvironmentName = Environments.Development
+        });
+        builder.WebHost.UseTestServer();
+        return builder;
     }
 
     [Theory]
