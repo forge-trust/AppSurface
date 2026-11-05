@@ -10,6 +10,7 @@ using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -17,6 +18,15 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public class DocAggregatorTests : IDisposable
 {
+    private sealed class CacheClock : ISystemClock
+    {
+        private long _ticks = DateTimeOffset.UnixEpoch.Ticks;
+
+        public DateTimeOffset UtcNow => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+
+        public void Advance(TimeSpan elapsed) => Interlocked.Add(ref _ticks, elapsed.Ticks);
+    }
+
     private readonly IDocHarvester _harvesterFake;
     private readonly AppSurfaceDocsOptions _options;
     private readonly IWebHostEnvironment _envFake;
@@ -601,8 +611,9 @@ public class DocAggregatorTests : IDisposable
                 return secondHarvestRelease.Task;
             });
 
-        using var cache = new MemoryCache(new MemoryCacheOptions());
-        using var memo = new Memo(cache);
+        var clock = new CacheClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        using var memo = new Memo(cache, TimeSpan.FromSeconds(2), () => clock.UtcNow);
         var aggregator = new DocAggregator(
             [harvester],
             new AppSurfaceDocsOptions
@@ -619,7 +630,8 @@ public class DocAggregatorTests : IDisposable
             _loggerFake);
 
         var first = await aggregator.GetDocsAsync();
-        await Task.Delay(cacheExpiration.Add(TimeSpan.FromMilliseconds(100)));
+        // Keep both expiration checks inside the stale window regardless of scheduling delays.
+        clock.Advance(cacheExpiration.Add(TimeSpan.FromMilliseconds(100)));
         var second = await aggregator.GetDocsAsync();
 
         Assert.Equal("Harvest 1", Assert.Single(first).Title);

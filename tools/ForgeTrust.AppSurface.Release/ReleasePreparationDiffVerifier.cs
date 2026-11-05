@@ -270,13 +270,17 @@ internal sealed class ReleasePreparationDiffVerifier
                     $"'{change.Path}' appears multiple times in the complete Git diff.", "Resolve the duplicate path operation and rerun verify-prep-diff.");
             }
 
-            if (change.Status.StartsWith('R')
-                && (manifests.Length > 0
-                    || IsReleasePreparationOwnedPath(change.Path)
-                    || IsReleasePreparationOwnedPath(change.OriginalPath!)))
+            if (change.Status.StartsWith('R'))
             {
-                Add(diagnostics, "release-prep-rename-forbidden", "Release preparation may not rename files.",
-                    $"Git reported {change.Status}: {change.OriginalPath} -> {change.Path}.", "Commit the intended release artifacts as ordinary additions, modifications, or manifest-declared deletions.");
+                // Ordinary product PRs do not become release preparation solely because Git detects a rename.
+                // Both endpoints still protect release-owned paths, including moves out of those paths.
+                if (manifests.Length != 0
+                    || IsReleasePreparationOwnedPath(change.Path)
+                    || (change.OriginalPath is not null && IsReleasePreparationOwnedPath(change.OriginalPath)))
+                {
+                    Add(diagnostics, "release-prep-rename-forbidden", "Release preparation may not rename files.",
+                        $"Git reported {change.Status}: {change.OriginalPath} -> {change.Path}.", "Commit the intended release artifacts as ordinary additions, modifications, or manifest-declared deletions.");
+                }
                 continue;
             }
 
