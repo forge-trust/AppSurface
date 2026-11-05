@@ -240,6 +240,38 @@ public sealed class CoverageFanInComposerTests
     }
 
     [Fact]
+    public void Compose_PromotesOnlyMatchingMethodOverloadFromACompleteObservation()
+    {
+        var primary = XDocument.Parse("""
+            <coverage><packages><package name="P"><classes><class name="A" filename="A.cs"><lines>
+              <line number="5" hits="1" condition-coverage="25% (1/4)" />
+            </lines><methods>
+              <method name="Decide" signature="(int)"><lines><line number="5" hits="1" condition-coverage="25% (1/4)" /></lines></method>
+              <method name="Decide" signature="(string)"><lines><line number="5" hits="1" condition-coverage="25% (1/4)" /></lines></method>
+            </methods></class></classes></package></packages></coverage>
+            """);
+        var native = new XDocument(primary);
+        native.Descendants("method").First().Descendants("line").Single()
+            .SetAttributeValue("condition-coverage", "100% (4/4)");
+        native.Descendants("method").Last().Descendants("line").Single()
+            .SetAttributeValue("condition-coverage", "50% (1/2)");
+
+        var composed = CoverageFanInComposer.Compose([(primary, WindowsRoot), (native, WindowsRoot)]);
+
+        var methods = composed.Descendants("method").ToDictionary(x => x.Attribute("signature")!.Value);
+        Assert.Equal((1L, 4L, 4L), ReadLines(methods["(int)"].Element("lines")!)[(5, 0)]);
+        Assert.Equal((1L, 1L, 4L), ReadLines(methods["(string)"].Element("lines")!)[(5, 0)]);
+        Assert.Equal((1L, 1L, 4L), ReadLines(composed.Descendants("class").Single().Element("lines")!)[(5, 0)]);
+        primary.Root!.SetAttributeValue("lines-covered", "1");
+        primary.Root.SetAttributeValue("lines-valid", "1");
+        primary.Root.SetAttributeValue("branches-covered", "1");
+        primary.Root.SetAttributeValue("branches-valid", "4");
+        var primaryPaths = new XDocument(primary);
+        CoverageFanInIndependentVerifier.VerifyComposition([(primary, WindowsRoot), (native, WindowsRoot)],
+            composed, primaryPaths);
+    }
+
+    [Fact]
     public void NormalizePaths_ShouldLeaveEarlierFilenamesUntouchedWhenLaterPathIsInvalid()
     {
         var report = XDocument.Parse("""

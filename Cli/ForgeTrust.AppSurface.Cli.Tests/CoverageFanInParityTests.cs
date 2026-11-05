@@ -239,6 +239,30 @@ public sealed class CoverageFanInParityTests
         Assert.Equal("preserve composition neighbor", File.ReadAllText(sentinel));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompositionReplacementPreservesModifiedOrUnknownOwnedContents(bool addUnknown)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.CapturePrimaryAsync();
+        var native = await fixture.ImportThreePlatformCapturesAsync(fixture.Policy);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.ComposeAsync(fixture.Compose(native))).Outcome);
+        if (addUnknown)
+            File.WriteAllText(TestPathUtils.PathUnder(fixture.Composed, "caller-owned.txt"), "preserve these bytes");
+        else
+            File.AppendAllText(TestPathUtils.PathUnder(fixture.Composed, "coverage.cobertura.xml"), "<!-- caller change -->");
+        var before = Snapshot(fixture.Composed);
+
+        var result = await CoverageFanIn.ComposeAsync(fixture.Compose(native) with
+        { OutputMode = CoverageOutputMode.ReplaceOwned });
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.False(result.Effects.GenerationCommitted);
+        Assert.Equal(before, Snapshot(fixture.Composed));
+    }
+
     [Fact]
     public async Task ChangedCompositionIsRejectedBeforeAcceptancePublishesEitherGate()
     {
@@ -280,7 +304,10 @@ public sealed class CoverageFanInParityTests
         internal string Accepted => Path.Join(Temp.Path, "accepted");
         internal CoverageFanInPolicy Policy { get; private set; } = null!;
 
-        private Fixture() => Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", Path.Join(Temp.Path, "store"));
+        private Fixture()
+        {
+            Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", Path.Join(Temp.Path, "store"));
+        }
 
         internal static async Task<Fixture> CreateAsync()
         {

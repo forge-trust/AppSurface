@@ -39,8 +39,26 @@ if [[ -n "${COVERAGE_FANIN_NATIVE:-}" ]]; then
   if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
     dotnet_run_args+=(--no-restore)
   fi
-  dotnet "${dotnet_run_args[@]}" -- "${dogfood_args[@]}"
-  exit 0
+  dogfood_status=0
+  dotnet "${dotnet_run_args[@]}" -- "${dogfood_args[@]}" || dogfood_status=$?
+  # A numeric rejection retains its private reports. Publish the canonical CI
+  # reports through the installed gate command as well, preserving the refusal.
+  # Earlier capture/composition refusals have no gate results to publish.
+  if [[ "$dogfood_status" -ne 0 && ! -f "$COVERAGE_DOGFOOD_OUTPUT/accepted/rejection.json" ]]; then
+    exit "$dogfood_status"
+  fi
+  aggregate_args=(--coverage "$COVERAGE_DOGFOOD_OUTPUT/composed/primary-paths.cobertura.xml"
+    --min-line 95 --min-branch 85 --output "$COVERAGE_DIRECTORY/aggregate-gate")
+  if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
+    aggregate_args+=(--diff-base "$COVERAGE_GATE_DIFF_BASE" --patch-line-mode codecov)
+  fi
+  "$COVERAGE_CLI_PATH" coverage gate "${aggregate_args[@]}"
+  if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
+    "$COVERAGE_CLI_PATH" coverage gate --coverage "$COVERAGE_DOGFOOD_OUTPUT/composed/coverage.cobertura.xml" \
+      --diff-base "$COVERAGE_GATE_DIFF_BASE" --min-patch-line 95 --min-patch-branch 85 \
+      --patch-line-mode codecov --output "$COVERAGE_DIRECTORY"
+  fi
+  exit "$dogfood_status"
 fi
 
 cli=(dotnet run --project "$CLI_PROJECT" --configuration "$BUILD_CONFIGURATION")
