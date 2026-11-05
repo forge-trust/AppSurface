@@ -76,6 +76,77 @@ public sealed class CoverageFanInPublicationTests
         Assert.False(Directory.Exists(otherOutput));
     }
 
+    [Theory]
+    [InlineData("unknown-stage")]
+    [InlineData("invalid-operation-id")]
+    [InlineData("invalid-policy-digest")]
+    public async Task InvalidPublicationIdentityIsRejectedBeforeCreatingOutput(string defect)
+    {
+        using var fixture = new Fixture();
+        var operationId = defect == "invalid-operation-id" ? "not-a-guid" : Guid.NewGuid().ToString("N");
+        var digest = defect == "invalid-policy-digest" ? "not-a-digest" : PolicyDigest;
+        var stage = defect == "unknown-stage" ? "verification" : CaptureStage;
+
+        await Assert.ThrowsAsync<ArgumentException>(() => CoverageFanInPublication.PublishAsync(
+            fixture.Output, fixture.Repository, stage, operationId, digest, Payloads(), false,
+            Bounds, CancellationToken.None));
+
+        Assert.False(Directory.Exists(fixture.Output));
+        using var store = CoverageArtifactStore.OpenReadOnly();
+        Assert.Null(store.GetCurrentRun(fixture.Output));
+    }
+
+    [Theory]
+    [InlineData("reserved-marker")]
+    [InlineData("hidden-stage-name")]
+    [InlineData("component-traversal")]
+    public async Task InvalidPublicationArtifactNamesAreRejectedWithoutCreatingCustody(string defect)
+    {
+        using var fixture = new Fixture();
+        var name = defect switch
+        {
+            "reserved-marker" => CoverageFanInIO.CompletionName,
+            "hidden-stage-name" => ".unexpected.json",
+            "component-traversal" => "../outside.json",
+            _ => throw new ArgumentOutOfRangeException(nameof(defect))
+        };
+
+        var publish = () => fixture.PublishAsync(files:
+            new Dictionary<string, byte[]> { [name] = [1, 2, 3] });
+        if (defect == "component-traversal")
+            await Assert.ThrowsAsync<InvalidDataException>(publish);
+        else
+            await Assert.ThrowsAsync<ArgumentException>(publish);
+
+        Assert.False(Directory.Exists(fixture.Output));
+        using var store = CoverageArtifactStore.OpenReadOnly();
+        Assert.Null(store.GetCurrentRun(fixture.Output));
+    }
+
+    [Theory]
+    [InlineData("xml-per-file")]
+    [InlineData("json-per-file")]
+    [InlineData("total-bytes")]
+    public async Task PublicationByteBudgetRejectionsLeaveNoOutputOrRegistration(string budget)
+    {
+        using var fixture = new Fixture();
+        var limits = budget switch
+        {
+            "xml-per-file" => Bounds with { XmlBytes = 2 },
+            "json-per-file" => Bounds with { JsonBytes = 2 },
+            "total-bytes" => Bounds with { TotalBytes = 1 },
+            _ => throw new ArgumentOutOfRangeException(nameof(budget))
+        };
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => CoverageFanInPublication.PublishAsync(
+            fixture.Output, fixture.Repository, CaptureStage, Guid.NewGuid().ToString("N"), PolicyDigest,
+            Payloads(), false, limits, CancellationToken.None));
+
+        Assert.False(Directory.Exists(fixture.Output));
+        using var store = CoverageArtifactStore.OpenReadOnly();
+        Assert.Null(store.GetCurrentRun(fixture.Output));
+    }
+
     [Fact]
     public async Task ForeignOutputIsPreservedWhenReplacementIsRequested()
     {
@@ -245,6 +316,68 @@ public sealed class CoverageFanInPublicationTests
             }));
         Assert.Equal(1, calls);
         Assert.False(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletionMetadataMustFitBothPerFileAndInvocationBudgets(bool totalBudget)
+    {
+        using var fixture = new Fixture();
+        var files = Payloads();
+        var limits = totalBudget ? Bounds with { TotalBytes = files.Values.Sum(x => x.Length) }
+            : Bounds with { JsonBytes = 64 };
+        await Assert.ThrowsAsync<InvalidDataException>(() => CoverageFanInPublication.PublishAsync(
+            fixture.Output, fixture.Repository, CaptureStage, Guid.NewGuid().ToString("N"), PolicyDigest,
+            files, false, limits, CancellationToken.None));
+        Assert.False(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+        using var store = CoverageArtifactStore.OpenReadOnly();
+        Assert.Null(store.GetCurrentRun(fixture.Output));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BorrowedCustodyMustBeExclusiveAndBelongToTheExactOutput(bool wrongRoot)
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Output);
+        var leaseRoot = wrongRoot ? Path.Join(fixture.OutputParent, "other") : fixture.Output;
+        Directory.CreateDirectory(leaseRoot);
+        using (CoverageArtifactOperationLease.Acquire(leaseRoot, true)) { }
+        using var lease = CoverageArtifactOperationLease.Acquire(leaseRoot, wrongRoot);
+        await Assert.ThrowsAsync<IOException>(() => CoverageFanInPublication.PublishAsync(
+            fixture.Output, fixture.Repository, CaptureStage, Guid.NewGuid().ToString("N"), PolicyDigest,
+            Payloads(), false, Bounds, CancellationToken.None, heldOutputLease: lease));
+        Assert.False(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+    }
+
+    [Fact]
+    public async Task FreshBorrowedOutputRejectsUnexpectedFilesBeforeCreatingAStage()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Output);
+        using var lease = CoverageArtifactOperationLease.Acquire(fixture.Output, true);
+        var foreign = Path.Join(fixture.Output, "foreign.json");
+        File.WriteAllText(foreign, "preserve");
+        await Assert.ThrowsAsync<IOException>(() => CoverageFanInPublication.PublishAsync(
+            fixture.Output, fixture.Repository, CaptureStage, Guid.NewGuid().ToString("N"), PolicyDigest,
+            Payloads(), false, Bounds, CancellationToken.None, heldOutputLease: lease));
+        Assert.Equal("preserve", File.ReadAllText(foreign));
+        Assert.Empty(Directory.GetDirectories(fixture.Output));
+    }
+
+    [Fact]
+    public async Task ReplacementRefusesPriorPayloadThatExceedsTheNewBudget()
+    {
+        using var fixture = new Fixture();
+        await fixture.PublishAsync();
+        var marker = File.ReadAllBytes(Path.Join(fixture.Output, CoverageFanInIO.CompletionName));
+        await Assert.ThrowsAsync<InvalidDataException>(() => CoverageFanInPublication.PublishAsync(
+            fixture.Output, fixture.Repository, CaptureStage, Guid.NewGuid().ToString("N"), PolicyDigest,
+            new Dictionary<string, byte[]> { ["new.xml"] = [1] }, true, Bounds with { XmlBytes = 1 }, CancellationToken.None));
+        Assert.Equal(marker, File.ReadAllBytes(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+        Assert.True(File.Exists(Path.Join(fixture.Output, "coverage.xml")));
     }
 
     private static IReadOnlyDictionary<string, byte[]> Payloads(

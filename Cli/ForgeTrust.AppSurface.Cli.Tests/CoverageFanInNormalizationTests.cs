@@ -68,6 +68,45 @@ public sealed class CoverageFanInNormalizationTests
         Assert.Equal(1, runtime.Calls);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NormalizationRejectsDirectoriesAndLinkedOutputFiles(bool linkedFile)
+    {
+        using var temp = TestDirectory.Create();
+        var input = temp.WriteFile("coverage.xml", "<coverage/>");
+        var outside = temp.WriteFile("outside.xml", "<coverage/>");
+        var output = Path.Join(temp.Path, "output");
+        var runtime = new Runtime((directory, _) =>
+        {
+            Directory.CreateDirectory(directory);
+            if (linkedFile) TestFileSystem.CreateFileLinkOrSkip(Path.Join(directory, "Cobertura.xml"), outside);
+            else Directory.CreateDirectory(Path.Join(directory, "unexpected"));
+            return Task.CompletedTask;
+        });
+        var normalize = () => new CoverageFanInNormalization(runtime, Bounds)
+            .MergeAsync([input], output, CancellationToken.None);
+        if (linkedFile) await Assert.ThrowsAnyAsync<IOException>(normalize);
+        else await Assert.ThrowsAsync<InvalidDataException>(normalize);
+        Assert.Equal("<coverage/>", File.ReadAllText(outside));
+    }
+
+    [Fact]
+    public async Task IndividuallySmallOutputsStillShareTheStagingByteBudget()
+    {
+        using var temp = TestDirectory.Create();
+        var input = temp.WriteFile("coverage.xml", "<coverage/>");
+        var runtime = new Runtime((directory, _) =>
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Join(directory, "Cobertura.xml"), "<coverage/>");
+            File.WriteAllText(Path.Join(directory, "Summary.txt"), "summary");
+            return Task.CompletedTask;
+        });
+        await Assert.ThrowsAsync<InvalidDataException>(() => new CoverageFanInNormalization(runtime, Bounds with { TotalBytes = 25 })
+            .MergeAsync([input], Path.Join(temp.Path, "output"), CancellationToken.None));
+    }
+
     private sealed class Runtime(Func<string, CancellationToken, Task> run) : ICoverageRunReportGenerator
     {
         internal int Calls { get; private set; }

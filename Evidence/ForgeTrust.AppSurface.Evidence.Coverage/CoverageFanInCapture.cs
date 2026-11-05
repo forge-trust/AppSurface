@@ -96,7 +96,7 @@ internal static partial class CoverageFanInEngine
             || manifest.GetProperty("observation").GetString() is not ("CollectedExecution" or "TrustedProducer"))
             throw new InvalidDataException("Capture identity, policy or observation differs.");
         var sourceRoot = manifest.GetProperty("sourceRoot").GetString();
-        if (string.IsNullOrWhiteSpace(sourceRoot) || !(sourceRoot.StartsWith('/')
+        if (string.IsNullOrWhiteSpace(sourceRoot) || !(sourceRoot.StartsWith('/') || sourceRoot.StartsWith(@"\\", StringComparison.Ordinal)
             || sourceRoot.Length > 2 && char.IsAsciiLetter(sourceRoot[0]) && sourceRoot[1] == ':' && sourceRoot[2] is '\\' or '/'))
             throw new InvalidDataException("Capture source-root is not absolute.");
         var supplement = producerId == "primary" ? (JsonElement?)null : r.Expected.Supplements.Single(x => x.GetProperty("id").GetString() == producerId);
@@ -113,8 +113,14 @@ internal static partial class CoverageFanInEngine
             || files.GetProperty(auxiliaryName).GetString() != CoverageFanInIO.Hash(auxiliary))
             throw new InvalidDataException("Capture integrity differs.");
         var document = io.Xml(coverage);
-        if (producerId == "primary") CoverageFanInIndependentVerifier.VerifyPrimaryInventory(Parse(auxiliary),
-            r.Expected.TestProjects, r.Expected.Configuration, r.Expected.Instrumentation.GetProperty("driver").GetString()!);
+        if (producerId == "primary")
+        {
+            CoverageFanInIndependentVerifier.VerifyPrimaryInventory(Parse(auxiliary),
+                r.Expected.TestProjects, r.Expected.Configuration, r.Expected.Instrumentation.GetProperty("driver").GetString()!);
+            // Portable capture has the same measurable-point admission as a fresh producer.
+            // Matching transport hashes cannot make malformed coverage a successful capture.
+            _ = CoverageFanInComposer.Compose([(document, sourceRoot)]);
+        }
         else
         {
             var raw = io.Xml(auxiliary, allowInertGeneratorDoctype: true);

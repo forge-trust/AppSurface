@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
 
@@ -69,6 +71,84 @@ public sealed class CoverageFanInRuntimeLocatorTests
 
         Assert.Equal("ASCOV140", extraException.Code);
         Assert.Contains("unlisted runtime file", extraException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PinnedManifestParserRejectsInvalidIdentityInventoryAndPaths()
+    {
+        var pinned = File.ReadAllBytes(Path.Join(GetRuntimeDirectory(AppContext.BaseDirectory), "runtime-manifest.json"));
+        var valid = StrictReportGeneratorRuntimeLocator.ParseManifest(pinned);
+        Assert.Contains("ReportGenerator.dll", valid.Keys);
+        foreach (var mutation in new Action<JsonNode>[]
+        {
+            n => n["schemaVersion"] = 2, n => n["component"] = "Other", n => n["version"] = "5.5.11",
+            n => n["targetFramework"] = "net9.0", n => n["entryPoint"] = "Other.dll",
+            n => n["extra"] = true, n => n.AsObject().Remove("version"),
+            n => n["files"] = new JsonArray(), n => n["files"]![0] = "invalid",
+            n => n["files"]![0]!["sha256"] = null, n => n["files"]![0]!["sha256"] = "short",
+            n => n["files"]![0]!["sha256"] = new string('z', 64),
+            n => n["files"]!.AsArray().Add(n["files"]![0]!.DeepClone()),
+            n => n["files"]![0]!["path"] = "../outside.dll", n => n["files"]![0]!["path"] = "/outside.dll",
+            n => n["files"]![0]!["path"] = "win\\file.dll", n => n["files"]![0]!["path"] = "a//file.dll",
+            n => n["files"]![0]!["path"] = "a/./file.dll", n => n["files"]![0]!["path"] = "",
+            n => n["files"]!.AsArray().Remove(n["files"]!.AsArray().Single(f => f!["path"]!.GetValue<string>() == "ReportGenerator.dll"))
+        })
+        {
+            var node = JsonNode.Parse(pinned)!;
+            mutation(node);
+            Assert.Throws<InvalidDataException>(() => StrictReportGeneratorRuntimeLocator.ParseManifest(
+                Encoding.UTF8.GetBytes(node.ToJsonString())));
+        }
+        Assert.Throws<InvalidDataException>(() => StrictReportGeneratorRuntimeLocator.ParseManifest(Encoding.UTF8.GetBytes("[]")));
+        var duplicate = Encoding.UTF8.GetString(pinned).Replace("\"schemaVersion\": 1", "\"schemaVersion\": 1, \"schemaVersion\": 1", StringComparison.Ordinal);
+        Assert.Throws<InvalidDataException>(() => StrictReportGeneratorRuntimeLocator.ParseManifest(Encoding.UTF8.GetBytes(duplicate)));
+    }
+
+    [Fact]
+    public void TruncatedPinnedManifestFailsBeforeAnyRuntimeExecution()
+    {
+        using var temp = CopyPayloadToTemporaryDirectory();
+        var manifest = Path.Join(GetRuntimeDirectory(temp.Path), "runtime-manifest.json");
+        File.WriteAllText(manifest, "{");
+        var error = Assert.Throws<CoverageExecutionException>(() => new StrictReportGeneratorRuntimeLocator().ResolveRuntime(temp.Path));
+        Assert.Equal("ASCOV140", error.Code);
+        Assert.Contains("unexpected size", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("manifest-directory")]
+    [InlineData("linked-file")]
+    [InlineData("linked-directory")]
+    [InlineData("linked-root")]
+    public void RuntimePayloadRejectsNonregularEntriesAndPreservesOutsideData(string mutation)
+    {
+        using var temp = CopyPayloadToTemporaryDirectory();
+        using var outside = TemporaryDirectory.Create("coverage-fanin-runtime-outside-");
+        var sentinel = TestPathUtils.PathUnder(outside.Path, "sentinel.txt");
+        File.WriteAllText(sentinel, "outside bytes");
+        var runtime = GetRuntimeDirectory(temp.Path);
+        switch (mutation)
+        {
+            case "manifest-directory":
+                var manifest = Path.Join(runtime, "runtime-manifest.json");
+                File.Delete(manifest); Directory.CreateDirectory(manifest);
+                break;
+            case "linked-file":
+                TestFileSystem.CreateFileLinkOrSkip(Path.Join(runtime, "unlisted-link"), sentinel);
+                break;
+            case "linked-directory":
+                TestFileSystem.CreateDirectoryLinkOrSkip(Path.Join(runtime, "unlisted-directory"), outside.Path);
+                break;
+            case "linked-root":
+                var owned = runtime + "-retained";
+                Directory.Move(runtime, owned);
+                TestFileSystem.CreateDirectoryLinkOrSkip(runtime, owned);
+                break;
+        }
+        var error = Assert.Throws<CoverageExecutionException>(() => new StrictReportGeneratorRuntimeLocator().ResolveRuntime(temp.Path));
+        Assert.Equal("ASCOV140", error.Code);
+        Assert.Equal("outside bytes", File.ReadAllText(sentinel));
+        Assert.Single(Directory.EnumerateFiles(outside.Path));
     }
 
     [Fact]

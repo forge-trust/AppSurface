@@ -136,6 +136,25 @@ public sealed class CoverageFanInIndependentVerifierTests
     }
 
     [Fact]
+    public void VerifyComposition_RejectsMalformedClassOrMethodPointsEvenWhenSnapshotsAgree()
+    {
+        var valid = XDocument.Parse(PrimaryPathsGolden);
+        CoverageFanInIndependentVerifier.VerifyComposition([(valid, SourceRoot)], valid, valid);
+
+        var invalidClassPoint = new XDocument(valid);
+        invalidClassPoint.Descendants("class").Single().Element("lines")!.Elements("line").First()
+            .SetAttributeValue("number", "0");
+        var overflowingMethodPoint = new XDocument(valid);
+        overflowingMethodPoint.Descendants("method").First().Element("lines")!.Element("line")!
+            .SetAttributeValue("hits", "2147483648");
+
+        // Matching copies cannot turn malformed producer observations into valid evidence.
+        foreach (var malformed in new[] { invalidClassPoint, overflowingMethodPoint })
+            Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyComposition(
+                [(malformed, SourceRoot)], new XDocument(malformed), new XDocument(malformed)));
+    }
+
+    [Fact]
     public void VerifyNormalization_AllowsPathRewriteButRejectsInventedHitsBranchesAndPoints()
     {
         const string rawText = """
@@ -384,10 +403,253 @@ public sealed class CoverageFanInIndependentVerifierTests
             Diff.Replace("+new", "+changed", StringComparison.Ordinal)));
     }
 
+    [Fact]
+    public void VerifyGates_RejectsComposedSummaryThatDisagreesWithClassSnapshot()
+    {
+        var primary = AggregateCoverage();
+        var composed = new XDocument(primary);
+        using var primaryGate = Gate(primary, isPrimary: true);
+        using var composedGate = Gate(composed, isPrimary: false);
+        using var policy = PatchPolicy();
+        CoverageFanInIndependentVerifier.VerifyGates(primaryGate.RootElement, composedGate.RootElement,
+            policy.RootElement, primary, composed, Diff);
+
+        var changedComposed = new XDocument(composed);
+        changedComposed.Descendants("line").Single(x => (string?)x.Attribute("number") == "20")
+            .SetAttributeValue("hits", "0");
+        // The unchanged composed root and report claim 19/20, but only 18 class points remain covered.
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, composedGate.RootElement, policy.RootElement, primary, changedComposed, Diff));
+    }
+
+    [Fact]
+    public void VerifyGates_RejectsWeakerReportThresholdsAndForgedEffectiveFloor()
+    {
+        var coverage = AggregateCoverage();
+        using var primaryGate = Gate(coverage, isPrimary: true);
+        using var composedGate = Gate(coverage, isPrimary: false);
+        using var policy = PatchPolicy();
+
+        var weaker = JsonNode.Parse(primaryGate.RootElement.GetRawText())!;
+        weaker["thresholds"]!["line"] = 90m;
+        weaker["effectiveThresholds"]!["line"] = 89.5m;
+        using var weakerReport = JsonDocument.Parse(weaker.ToJsonString());
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            weakerReport.RootElement, composedGate.RootElement, policy.RootElement, coverage, coverage, Diff));
+
+        var forgedFloor = JsonNode.Parse(primaryGate.RootElement.GetRawText())!;
+        forgedFloor["effectiveThresholds"]!["line"] = 90m;
+        using var forgedReport = JsonDocument.Parse(forgedFloor.ToJsonString());
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            forgedReport.RootElement, composedGate.RootElement, policy.RootElement, coverage, coverage, Diff));
+    }
+
+    [Theory]
+    [InlineData("mode", "\"unknown\"")]
+    [InlineData("minLine", "-1")]
+    [InlineData("minBranch", "101")]
+    [InlineData("minPatchLine", "null")]
+    [InlineData("minPatchBranch", "\"85\"")]
+    [InlineData("tolerance", "101")]
+    [InlineData("tolerance", "1e100")]
+    [InlineData("patchLineMode", "\"unknown\"")]
+    [InlineData("diffBase", "null")]
+    [InlineData("diffBase", "\" \"")]
+    public void VerifyGates_RejectsMalformedTrustedGatePolicy(string field, string jsonValue)
+    {
+        var coverage = AggregateCoverage();
+        using var primaryGate = Gate(coverage, isPrimary: true);
+        using var composedGate = Gate(coverage, isPrimary: false);
+        using var policy = PatchPolicy();
+        using var malformed = WithJsonValue(policy, "gate." + field, jsonValue);
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, composedGate.RootElement, malformed.RootElement, coverage, coverage, Diff));
+    }
+
+    [Theory]
+    [InlineData("passed", "false")]
+    [InlineData("coverage", "\"primary-paths.cobertura.xml\"")]
+    [InlineData("thresholds.branch", "1")]
+    [InlineData("thresholds.patchLine", "null")]
+    [InlineData("thresholds.patchBranch", "\"85\"")]
+    [InlineData("effectiveThresholds.patchBranch", "80")]
+    [InlineData("line.covered", "18")]
+    [InlineData("line.valid", "21")]
+    [InlineData("line.percent", "94")]
+    [InlineData("branch.percent", "84")]
+    [InlineData("patchDiffSource.kind", "\"file\"")]
+    [InlineData("patchDiffSource.strictness", "\"external\"")]
+    [InlineData("patchDiffSource.label", "\"other\"")]
+    [InlineData("patchDiffSource.diffBase", "\"other\"")]
+    [InlineData("patchDiffSource.path", "\"diff.patch\"")]
+    [InlineData("patchDiffSource.bytes", "0")]
+    [InlineData("patchDiffSource.empty", "true")]
+    [InlineData("patchLine.diffBase", "\"other\"")]
+    [InlineData("patchLine.covered", "0")]
+    [InlineData("patchBranch.measurable", "2147483648")]
+    [InlineData("patchBranch.percent", "99")]
+    public void VerifyGates_RejectsForgedReportFactsDespitePassingFlag(string field, string jsonValue)
+    {
+        var coverage = AggregateCoverage();
+        using var primaryGate = Gate(coverage, isPrimary: true);
+        using var composedGate = Gate(coverage, isPrimary: false);
+        using var policy = PatchPolicy();
+        using var forged = WithJsonValue(composedGate, field, jsonValue);
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, forged.RootElement, policy.RootElement, coverage, coverage, Diff));
+    }
+
+    [Theory]
+    [InlineData(false, "TrUe", null)]
+    [InlineData(true, "true", "100% (2/1)")]
+    [InlineData(false, "true", "0% (0/0)")]
+    [InlineData(true, "true", "1/2")]
+    [InlineData(false, "true", "100% (2147483648/2147483648)")]
+    [InlineData(true, "true", "0% (-1/2)")]
+    public void VerifyComposition_RejectsMalformedBranchEvidenceEvenWhenSnapshotsMatch(
+        bool methodPoint, string branch, string? condition)
+    {
+        var malformed = XDocument.Parse(PrimaryPathsGolden);
+        var point = methodPoint
+            ? malformed.Descendants("method").First().Element("lines")!.Element("line")!
+            : malformed.Descendants("class").Single().Element("lines")!.Element("line")!;
+        point.SetAttributeValue("branch", branch);
+        point.SetAttributeValue("condition-coverage", condition);
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyComposition(
+            [(malformed, SourceRoot)], new XDocument(malformed), new XDocument(malformed)));
+    }
+
+    [Theory]
+    [InlineData("/work/repo", "src", "Widget.cs")]
+    [InlineData(@"C:\agent\work", "src", "Widget.cs")]
+    [InlineData(@"\\server\share\repo", @"\\server\share\repo\src", "Widget.cs")]
+    [InlineData(@"\\server\share\repo", "src", @"\\server\share\repo\src\Widget.cs")]
+    public void VerifyNormalizationAndComposition_ResolveRelativeAndUncSourceBases(
+        string sourceRoot, string source, string filename)
+    {
+        var raw = CoverageWithSource(source, filename);
+        var normalized = CoverageWithFilename("src/Widget.cs");
+
+        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, sourceRoot);
+        CoverageFanInIndependentVerifier.VerifyComposition([(raw, sourceRoot)], normalized, normalized);
+    }
+
+    [Theory]
+    [InlineData("relative/repo", "src", "Widget.cs")]
+    [InlineData(@"\\server", "src", "Widget.cs")]
+    [InlineData(@"\\server\share\repo", @"\\other\share\repo", "src/Widget.cs")]
+    [InlineData(@"\\server\share\repo", @"\\server\other\repo", "src/Widget.cs")]
+    [InlineData(@"\\server\share\repo", @"\\server\share\repository", "src/Widget.cs")]
+    [InlineData("/work/repo", "/work", "repo")]
+    [InlineData("/work/repo", "/work/repo", "/outside/Widget.cs")]
+    [InlineData("/work/repo", "/work/repo", "src//Widget.cs")]
+    [InlineData("/work/repo", "/work/repo", "src/./Widget.cs")]
+    [InlineData("/work/repo", "/work/repo", "src/Widget:stream")]
+    [InlineData("/work/repo", "/work/repo", "src/\0Widget.cs")]
+    public void VerifyNormalization_RejectsMalformedOrForeignPortableSourcePaths(
+        string sourceRoot, string source, string filename)
+    {
+        var raw = CoverageWithSource(source, filename);
+        var normalized = CoverageWithFilename("src/Widget.cs");
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
+            raw, normalized, sourceRoot));
+    }
+
+    [Theory]
+    [InlineData(false, "number", "not-a-number")]
+    [InlineData(false, "hits", "2147483648")]
+    [InlineData(true, "number", "0")]
+    [InlineData(true, "hits", "-1")]
+    [InlineData(true, "hits", "2147483648")]
+    public void VerifyNormalization_RejectsMalformedPointNumbersBeforeComparingFidelity(
+        bool methodPoint, string attribute, string value)
+    {
+        var raw = CoverageWithFilename("src/Widget.cs");
+        var normalized = new XDocument(raw);
+        var cls = normalized.Descendants("class").Single();
+        var point = cls.Element("lines")!.Element("line")!;
+        if (methodPoint)
+        {
+            point = new XElement(point);
+            cls.Add(new XElement("methods", new XElement("method", new XAttribute("name", "Run"),
+                new XAttribute("signature", "()"), new XElement("lines", point))));
+        }
+        point.SetAttributeValue(attribute, value);
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
+            raw, normalized, SourceRoot));
+    }
+
+    [Theory]
+    [InlineData("src/Tab\tWidget.cs", "\"b/src/Tab\\tWidget.cs\"")]
+    [InlineData("src/New\nWidget.cs", "\"b/src/New\\nWidget.cs\"")]
+    [InlineData("src/Return\rWidget.cs", "\"b/src/Return\\rWidget.cs\"")]
+    [InlineData("src/Quote\"Widget.cs", "\"b/src/Quote\\\"Widget.cs\"")]
+    [InlineData("src/Widget.cs", "\"b/src\\\\Widget.cs\"")]
+    [InlineData("src/😀Widget.cs", "\"b/src/😀Widget.cs\"")]
+    public void VerifyGates_AcceptsEscapedGitPathsAndContextWithoutCountingContextAsChanged(
+        string filename, string quotedPath)
+    {
+        var coverage = AggregateCoverage();
+        coverage.Descendants("class").Single().SetAttributeValue("filename", filename);
+        var diff = FileDiff(quotedPath, "@@ -1,2 +1,2 @@\n-old\n+new\n context")
+            .Replace("\n", "\r\n", StringComparison.Ordinal);
+        using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
+        using var policy = PatchPolicy();
+
+        // Only line 1 changed; the covered context line must not inflate either patch denominator.
+        CoverageFanInIndependentVerifier.VerifyGates(primaryGate.RootElement, composedGate.RootElement,
+            policy.RootElement, coverage, coverage, diff);
+    }
+
+    [Fact]
+    public void VerifyCompositionAndGates_PreserveOriginalPrimaryCompilerPointSummary()
+    {
+        // The primary summary includes two covered compiler points absent from serialized class records.
+        var primary = XDocument.Parse("""
+            <coverage lines-covered="3" lines-valid="3" branches-covered="4" branches-valid="4">
+              <packages><package name="Core"><classes><class name="Widget" filename="src/Widget.cs"><lines>
+                <line number="1" hits="1" branch="true" condition-coverage="100% (2/2)" />
+              </lines></class></classes></package></packages>
+            </coverage>
+            """);
+        var primaryPaths = new XDocument(primary);
+        var composed = XDocument.Parse("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="2" branches-valid="2">
+              <packages><package name="Core"><classes><class name="Widget" filename="src/Widget.cs"><lines>
+                <line number="1" hits="1" branch="true" condition-coverage="100% (2/2)" />
+              </lines></class></classes></package></packages>
+            </coverage>
+            """);
+        // Gate() supplies hand-authored report metadata; no production composer or gate is the oracle.
+        using var primaryGate = Gate(primaryPaths, isPrimary: true);
+        using var composedGate = Gate(composed, isPrimary: false);
+        using var policy = PatchPolicy();
+        CoverageFanInIndependentVerifier.VerifyComposition([(primary, SourceRoot)], composed, primaryPaths);
+        CoverageFanInIndependentVerifier.VerifyGates(primaryGate.RootElement, composedGate.RootElement,
+            policy.RootElement, primaryPaths, composed, Diff);
+
+        var changedPrimary = new XDocument(primaryPaths);
+        changedPrimary.Root!.SetAttributeValue("lines-covered", "1");
+        changedPrimary.Root.SetAttributeValue("lines-valid", "1");
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyComposition(
+            [(primary, SourceRoot)], composed, changedPrimary));
+    }
+
     [Theory]
     [InlineData("@@ -1, +1 @@\n-old\n+new")]
     [InlineData("@@ -1 +1,2 @@\n-old\n+new")]
     [InlineData("@@ -1 +0,1 @@\n-old\n+new")]
+    [InlineData("@@ -1,0 +1 @@\n context")]
+    [InlineData("@@ -1 +1,0 @@\n+new")]
+    [InlineData("@@ -1 +1,2 @@\n-old\n+new\n?unexpected")]
+    [InlineData("@@ -1,2147483648 +1 @@\n-old\n+new")]
+    [InlineData("@@ -1 +2147483648 @@\n-old\n+new")]
     public void VerifyGates_RejectsMalformedOrTruncatedHunkRanges(string hunk)
     {
         var coverage = AggregateCoverage();
@@ -449,18 +711,19 @@ public sealed class CoverageFanInIndependentVerifierTests
             policy.RootElement, coverage, coverage, diff);
     }
 
-    [Fact]
-    public void VerifyGates_RejectsInvalidUtf8OctalPath()
+    [Theory]
+    [InlineData("\"b/src/Widget\\377.cs\"")]
+    [InlineData("\"b/src/Widget\\777.cs\"")]
+    [InlineData("\"b/src/Widget\\q.cs\"")]
+    [InlineData("\"b/src/Widget.cs")]
+    [InlineData("\"b/src/Widget\\\"")]
+    [InlineData("b/../Widget.cs")]
+    [InlineData("b/src//Widget.cs")]
+    [InlineData("b//absolute/Widget.cs")]
+    public void VerifyGates_RejectsMalformedOrEscapingGitPaths(string newPath)
     {
         var coverage = AggregateCoverage();
-        var diff = """
-            diff --git "a/src/Widget\377.cs" "b/src/Widget\377.cs"
-            --- "a/src/Widget\377.cs"
-            +++ "b/src/Widget\377.cs"
-            @@ -1 +1 @@
-            -old
-            +new
-            """;
+        var diff = FileDiff(newPath, "@@ -1 +1 @@\n-old\n+new");
         using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
         using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
         using var policy = PatchPolicy();
@@ -531,6 +794,30 @@ public sealed class CoverageFanInIndependentVerifierTests
 
         Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
             raw, normalized, "/private/var/tmp/repo"));
+    }
+
+    [Fact]
+    public void VerifyNormalization_RejectsReducedPointDenominatorDespiteUnchangedAggregateTotals()
+    {
+        var raw = XDocument.Parse("""
+            <coverage lines-covered="2" lines-valid="2" branches-covered="3" branches-valid="4">
+              <packages><package name="Core"><classes><class name="Widget" filename="src/Widget.cs"><lines>
+                <line number="1" hits="1" branch="true" condition-coverage="50% (1/2)" />
+                <line number="2" hits="1" branch="true" condition-coverage="100% (2/2)" />
+              </lines></class></classes></package></packages>
+            </coverage>
+            """);
+        CoverageFanInIndependentVerifier.VerifyNormalization(raw, new XDocument(raw), SourceRoot);
+
+        var normalized = new XDocument(raw);
+        var points = normalized.Descendants("line").ToArray();
+        points[0].SetAttributeValue("condition-coverage", "0% (0/1)");
+        points[1].SetAttributeValue("condition-coverage", "100% (3/3)");
+
+        // Both reports still total 3/4, and neither point's covered ratio improves.
+        // Moving a denominator to another point must not conceal a dropped branch.
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
+            raw, normalized, SourceRoot));
     }
 
     [Fact]
@@ -626,6 +913,109 @@ public sealed class CoverageFanInIndependentVerifierTests
         [(XDocument.Parse(Primary), SourceRoot), (XDocument.Parse(Native), @"C:/agent/work")],
         composed, XDocument.Parse(PrimaryPathsGolden));
 
+    [Theory]
+    [InlineData("configuration", "\"Debug\"")]
+    [InlineData("coverageDriver", "\"msbuild\"")]
+    [InlineData("merge.exitCode", "1")]
+    [InlineData("artifacts.coverageFiles", "0")]
+    [InlineData("projects", "{}")]
+    [InlineData("projects", "[]")]
+    public void VerifyPrimaryInventoryRejectsInconsistentExecutionMetadata(string field, string value)
+    {
+        using var good = JsonDocument.Parse("""
+            {"configuration":"Release","coverageDriver":"collector","merge":{"exitCode":0},"artifacts":{"coverageFiles":1},"projects":[
+            {"project":"checks/A.csproj","exitCode":0,"executionStatus":"completed","coverageArtifactStatus":"produced"}]}
+            """);
+        using var bad = WithJsonValue(good, field, value);
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyPrimaryInventory(
+            bad.RootElement, ["checks/A.csproj"], "Release", "collector"));
+    }
+
+    [Theory]
+    [InlineData("exitCode", "1")]
+    [InlineData("executionStatus", "\"skipped\"")]
+    [InlineData("coverageArtifactStatus", "\"missing\"")]
+    [InlineData("project", "\"checks/Other.csproj\"")]
+    public void VerifyPrimaryInventoryRejectsFailedOrSubstitutedProject(string field, string value)
+    {
+        var entry = JsonNode.Parse("""{"project":"checks/A.csproj","exitCode":0,"executionStatus":"completed","coverageArtifactStatus":"produced"}""")!;
+        entry[field] = JsonNode.Parse(value);
+        var timings = new JsonObject
+        {
+            ["configuration"] = "Release",
+            ["coverageDriver"] = "collector",
+            ["merge"] = new JsonObject { ["exitCode"] = 0 },
+            ["artifacts"] = new JsonObject { ["coverageFiles"] = 1 },
+            ["projects"] = new JsonArray(entry)
+        };
+        using var document = JsonDocument.Parse(timings.ToJsonString());
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyPrimaryInventory(
+            document.RootElement, ["checks/A.csproj"], "Release", "collector"));
+    }
+
+    [Fact]
+    public void VerifierRejectsNullEmptyAndMalformedInputsAtItsBoundary()
+    {
+        var report = XDocument.Parse(PrimaryPathsGolden);
+        foreach (var inputs in new IReadOnlyList<(XDocument, string)>[]
+        {
+            null!, [], [(null!, SourceRoot)], [(report, " ")]
+        })
+            Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyComposition(inputs, report, report));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(null!, report, SourceRoot));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(report, null!, SourceRoot));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(report, report, " "));
+        using var timings = JsonDocument.Parse("{}");
+        foreach (var inventory in new IReadOnlyList<string>[] { null!, [], [" "], ["same", "same"] })
+            Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyPrimaryInventory(timings.RootElement, inventory, "Release", "collector"));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyComposition([(report, SourceRoot)], new XDocument(), report));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyComposition([(report, SourceRoot)], XDocument.Parse("<other/>"), report));
+    }
+
+    [Theory]
+    [InlineData("thresholds.line", "1")]
+    [InlineData("effectiveThresholds.branch", "1")]
+    [InlineData("line.valid", "-1")]
+    [InlineData("line.covered", "-1")]
+    [InlineData("branch.covered", "21")]
+    [InlineData("patchDiffSource.sha256", "null")]
+    [InlineData("patchDiffSource.bytes", "\"1\"")]
+    [InlineData("patchDiffSource.bytes", "1e30")]
+    [InlineData("patchDiffSource.empty", "0")]
+    [InlineData("patchLine.changed", "2")]
+    [InlineData("patchLine.percent", "null")]
+    [InlineData("patchLine.covered", "2147483648")]
+    [InlineData("patchLineMode", "true")]
+    [InlineData("patchLineMode", "\"measurable\"")]
+    [InlineData("patchBranch.percent", "1e100")]
+    public void VerifyGatesRejectsIndependentCounterAndTypeFaults(string field, string value)
+    {
+        var coverage = AggregateCoverage();
+        using var primary = Gate(coverage, true);
+        using var composed = Gate(coverage, false);
+        using var policy = PatchPolicy();
+        using var bad = WithJsonValue(composed, field, value);
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(primary.RootElement,
+            bad.RootElement, policy.RootElement, coverage, coverage, Diff));
+    }
+
+    [Theory]
+    [InlineData("\"b/src/Alarm\\aWidget.cs\"")]
+    [InlineData("\"b/src/Back\\bWidget.cs\"")]
+    [InlineData("\"b/src/Vertical\\vWidget.cs\"")]
+    [InlineData("\"b/src/Form\\fWidget.cs\"")]
+    [InlineData("\"b/src/Bad\\qWidget.cs\"")]
+    public void VerifyGatesRejectsUnsupportedEscapedPathsWithoutTrustingReceipt(string path)
+    {
+        var coverage = AggregateCoverage();
+        var diff = FileDiff(path, "@@ -1 +1 @@\n-old\n+new");
+        using var primary = Gate(coverage, true, diffText: diff);
+        using var composed = Gate(coverage, false, diffText: diff);
+        using var policy = PatchPolicy();
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(primary.RootElement,
+            composed.RootElement, policy.RootElement, coverage, coverage, diff));
+    }
+
     private static string FileDiff(string newPath, string hunk) => $"""
         diff --git a/src/Widget.cs {newPath}
         --- a/src/Widget.cs
@@ -643,6 +1033,17 @@ public sealed class CoverageFanInIndependentVerifierTests
             report[metricName]!["percent"] = 0;
         }
         return JsonDocument.Parse(report.ToJsonString());
+    }
+
+    private static JsonDocument WithJsonValue(JsonDocument original, string field, string jsonValue)
+    {
+        var node = JsonNode.Parse(original.RootElement.GetRawText())!;
+        var path = field.Split('.');
+        var parent = node;
+        foreach (var segment in path[..^1])
+            parent = parent[segment]!;
+        parent[path[^1]] = JsonNode.Parse(jsonValue);
+        return JsonDocument.Parse(node.ToJsonString());
     }
 
     private static XDocument AggregateCoverage()

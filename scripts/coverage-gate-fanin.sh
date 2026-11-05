@@ -52,12 +52,16 @@ if [[ -n "${COVERAGE_FANIN_NATIVE:-}" ]]; then
   if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
     aggregate_args+=(--diff-base "$COVERAGE_GATE_DIFF_BASE" --patch-line-mode codecov)
   fi
-  "$COVERAGE_CLI_PATH" coverage gate "${aggregate_args[@]}"
+  aggregate_status=0
+  "$COVERAGE_CLI_PATH" coverage gate "${aggregate_args[@]}" || aggregate_status=$?
+  patch_status=0
   if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
     "$COVERAGE_CLI_PATH" coverage gate --coverage "$COVERAGE_DOGFOOD_OUTPUT/composed/coverage.cobertura.xml" \
       --diff-base "$COVERAGE_GATE_DIFF_BASE" --min-patch-line 95 --min-patch-branch 85 \
-      --patch-line-mode codecov --output "$COVERAGE_DIRECTORY"
+      --patch-line-mode codecov --output "$COVERAGE_DIRECTORY" || patch_status=$?
   fi
+  if [[ "$dogfood_status" -eq 0 && "$aggregate_status" -ne 0 ]]; then exit "$aggregate_status"; fi
+  if [[ "$dogfood_status" -eq 0 && "$patch_status" -ne 0 ]]; then exit "$patch_status"; fi
   exit "$dogfood_status"
 fi
 

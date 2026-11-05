@@ -85,7 +85,11 @@ internal static partial class CoveragePolicyEncoding
         if (!Enum.IsDefined(gate.Mode) || new[] { gate.MinLine, gate.MinBranch, gate.MinPatchLine,
                 gate.MinPatchBranch, gate.Tolerance }.Any(x => x < 0 || x > 100 || decimal.Round(x, 6) != x)
             || gate.PatchLineMode is not ("codecov" or "measurable")) throw Invalid("gate");
-        if (gate.Mode == CoverageGateMode.AggregateAndPatch) Text(gate.DiffBase, "diffBase");
+        if (gate.Mode == CoverageGateMode.AggregateAndPatch)
+        {
+            Text(gate.DiffBase, "diffBase");
+            if (gate.DiffBase!.StartsWith('-')) throw Invalid("diffBase");
+        }
         else if (gate.DiffBase is not null) throw Invalid("diffBase");
         var instrumentation = policy.Instrumentation ?? new();
         if (instrumentation.Driver != "collector" || instrumentation.Format != "cobertura"

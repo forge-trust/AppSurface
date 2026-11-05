@@ -1,4 +1,6 @@
+using System.Text.Json;
 using ForgeTrust.AppSurface.Coverage;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -56,5 +58,116 @@ public sealed class CoverageFanInApiValidationTests
         Assert.Contains("caller retains progress", progress.ToString());
         Assert.Contains("caller retains diagnostics", diagnostics.ToString());
         Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Path));
+    }
+
+    [Theory]
+    [InlineData("compose-inventory")]
+    [InlineData("accept-composition")]
+    [InlineData("verify-accepted")]
+    [InlineData("collect-deadline")]
+    public async Task EngineRejectsIncompleteOperationContractsBeforeFilesystemEffects(string scenario)
+    {
+        using var temp = TestDirectory.Create();
+        var expected = Expected();
+        var output = Path.Join(temp.Path, "output");
+        var request = new CoverageFanInEngineRequest(expected, temp.Path, output,
+            PrimaryCaptureDirectory: Path.Join(temp.Path, "primary"),
+            SupplementaryCaptureDirectories: []);
+        var operation = scenario switch
+        {
+            "compose-inventory" => "compose",
+            "accept-composition" => "accept",
+            "verify-accepted" => "verify",
+            "collect-deadline" => "collect",
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario))
+        };
+
+        if (scenario == "accept-composition")
+        {
+            request = request with { ComposedOutputDirectory = null };
+        }
+        else if (scenario == "compose-inventory")
+        {
+            request = request with { SupplementaryCaptureDirectories = null };
+        }
+        else if (scenario == "verify-accepted")
+        {
+            request = request with { ComposedOutputDirectory = Path.Join(temp.Path, "composed") };
+        }
+        else if (scenario == "collect-deadline")
+        {
+            request = request with { DeadlineSeconds = 0, CollectionDirectory = Path.Join(temp.Path, "collection") };
+        }
+
+        var result = await CoverageFanInEngine.ExecuteAsync(operation, request,
+            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+
+        Assert.Equal("Rejected", result.Outcome);
+        Assert.Equal("ASCOV301", Assert.Single(result.Diagnostics).Code);
+        Assert.False(result.Created);
+        Assert.False(result.Committed);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Path));
+    }
+
+    [Fact]
+    public async Task EngineReportsUnknownOperationAfterConfirmingTrustedSourceIdentity()
+    {
+        using var temp = TestDirectory.Create();
+        var project = Path.Join(temp.Path, "tests", "A.Tests.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+        await File.WriteAllTextAsync(project, "<Project />");
+        var source = CoverageFanInPolicyTests.Policy().Source;
+        var policy = CoverageFanInPolicyTests.Policy() with
+        {
+            TestProjects = ["tests/A.Tests.csproj"]
+        };
+        var frozen = CoveragePolicyEncoding.Freeze(policy);
+        var expected = new CoverageFanInExpected(
+            JsonSerializer.SerializeToElement(frozen, CoveragePolicyEncoding.Json),
+            CoveragePolicyEncoding.Digest(frozen));
+        var request = new CoverageFanInEngineRequest(expected, temp.Path, Path.Join(temp.Path, "output"))
+        {
+            IdentityRunner = new IdentityRunner((command, _) => Task.FromResult(new CoverageRunProcessResult(
+                0,
+                command.FileName == "dotnet" ? source.Sdk : string.Join(" ", command.Arguments) switch
+                {
+                    "rev-parse --show-toplevel" => temp.Path,
+                    "rev-parse HEAD" => source.Commit,
+                    "rev-parse HEAD^{tree}" => source.Tree,
+                    "status --porcelain --untracked-files=all" => string.Empty,
+                    _ => throw new InvalidOperationException("Unexpected source identity command.")
+                })))
+        };
+
+        var result = await CoverageFanInEngine.ExecuteAsync("unrecognized", request,
+            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+
+        Assert.Equal("Rejected", result.Outcome);
+        Assert.Equal("ASCOV301", Assert.Single(result.Diagnostics).Code);
+        Assert.Contains("unrecognized", Assert.Single(result.Diagnostics).Field);
+        Assert.False(result.Created);
+        Assert.False(result.Committed);
+        Assert.Equal(5, ((IdentityRunner)request.IdentityRunner).Calls);
+        Assert.False(Directory.Exists(request.OutputDirectory));
+    }
+
+    private static CoverageFanInExpected Expected()
+    {
+        var policy = CoveragePolicyEncoding.Freeze(CoverageFanInPolicyTests.Policy());
+        return new(JsonSerializer.SerializeToElement(policy, CoveragePolicyEncoding.Json),
+            CoveragePolicyEncoding.Digest(policy));
+    }
+
+    private sealed class IdentityRunner(
+        Func<CoverageRunProcessRequest, CancellationToken, Task<CoverageRunProcessResult>> execute)
+        : ICoverageRunProcessRunner
+    {
+        internal int Calls { get; private set; }
+
+        public Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return execute(request, cancellationToken);
+        }
     }
 }

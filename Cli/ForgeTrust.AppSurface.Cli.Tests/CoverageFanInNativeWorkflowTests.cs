@@ -203,21 +203,29 @@ public sealed class CoverageFanInNativeWorkflowTests
             };
             foreach (var argument in arguments)
                 process.StartInfo.ArgumentList.Add(argument);
-            process.Start();
-            var stdout = process.StandardOutput.ReadToEndAsync();
-            var stderr = process.StandardError.ReadToEndAsync();
+            // A reusable build server can outlive its launcher while retaining redirected
+            // pipe handles. Keep fixture setup self-contained and bound the complete drain,
+            // including the period after the immediate process has exited.
+            process.StartInfo.Environment["DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER"] = "1";
+            process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+            process.StartInfo.Environment["UseSharedCompilation"] = "false";
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            process.Start();
+            var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
+            string output;
+            string error;
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
+                output = await stdout;
+                error = await stderr;
             }
             catch (OperationCanceledException)
             {
-                process.Kill(entireProcessTree: true);
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
                 throw new TimeoutException($"{executable} exceeded the fixture setup deadline.");
             }
-            var output = await stdout;
-            var error = await stderr;
             Assert.True(process.ExitCode == 0, $"{executable} {string.Join(' ', arguments)} failed: {error}\n{output}");
             return output.Trim();
         }

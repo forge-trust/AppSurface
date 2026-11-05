@@ -137,6 +137,41 @@ public sealed class CoverageFanInIOTests
     }
 
     [Fact]
+    public void AdmissionRefusesOversizedBytesRetainedDtdReuseAndUnknownInventory()
+    {
+        using var temp = TestDirectory.Create();
+        var input = temp.CreateDirectory("input");
+        var path = Path.Join(input, "payload.json");
+        File.WriteAllText(path, "12345");
+        using (var limited = new CoverageFanInIO(Bounds(json: 4), CancellationToken.None))
+        {
+            limited.Acquire([(input, false)], requireCoordination: false);
+            Assert.Throws<InvalidDataException>(() => limited.Read(path));
+            Assert.Throws<InvalidOperationException>(() => limited.Acquire([(input, false)], requireCoordination: false));
+            Assert.Throws<InvalidDataException>(() => limited.ExactInventory(input, ["required.json"]));
+        }
+        using (var alias = new CoverageFanInIO(Bounds(), CancellationToken.None))
+            Assert.Throws<InvalidDataException>(() => alias.Acquire([(input, false), (input, false)], requireCoordination: false));
+        using (var missing = new CoverageFanInIO(Bounds(), CancellationToken.None))
+            Assert.Throws<IOException>(() => missing.Acquire([(Path.Join(temp.Path, "missing"), false)], requireCoordination: false));
+        using var io = new CoverageFanInIO(Bounds(), CancellationToken.None);
+        var inert = Encoding.UTF8.GetBytes("<!DOCTYPE coverage SYSTEM 'http://cobertura.sourceforge.net/xml/coverage-04.dtd'><coverage/>");
+        Assert.Null(io.Xml(inert, allowInertGeneratorDoctype: true).DocumentType);
+        Assert.Throws<InvalidDataException>(() => io.Xml(inert));
+        using var tiny = new CoverageFanInIO(Bounds(xml: 2), CancellationToken.None);
+        Assert.Throws<InvalidDataException>(() => tiny.Xml(Encoding.UTF8.GetBytes("<coverage/>")));
+    }
+
+    [Theory]
+    [InlineData("<a>long text</a>")]
+    [InlineData("<a value='long text' />")]
+    public void XmlTextAndAttributeTokenLimitsRejectBeforeMaterialization(string xml)
+    {
+        using var io = new CoverageFanInIO(Bounds(token: 3), CancellationToken.None);
+        Assert.Throws<InvalidDataException>(() => io.Xml(Encoding.UTF8.GetBytes(xml)));
+    }
+
+    [Fact]
     public void RetainedInputReplacementOrSameObjectModificationFailsFinalBindingChecks()
     {
         using var temp = TestDirectory.Create();

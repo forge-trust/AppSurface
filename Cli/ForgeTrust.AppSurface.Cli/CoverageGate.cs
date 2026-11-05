@@ -2034,7 +2034,7 @@ internal static class GitDiffReader
     /// Reads a zero-context diff between <paramref name="diffBase"/> and <c>HEAD</c>.
     /// </summary>
     /// <param name="repositoryRoot">Repository root where git should run.</param>
-    /// <param name="diffBase">Git ref or commit compared with HEAD.</param>
+    /// <param name="diffBase">Nonempty Git ref or commit compared with HEAD. Option-like values beginning with '-' are rejected before Git runs.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="maxBytes">Maximum UTF-8 byte length accepted from git.</param>
     /// <returns>Unified diff text.</returns>
@@ -2045,6 +2045,11 @@ internal static class GitDiffReader
         long maxBytes = DefaultMaximumDiffBytes)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+        // ArgumentList prevents shell expansion, but Git still parses a leading dash as
+        // an option before the revision/path separator. In particular, --output could
+        // create a file outside the admitted coverage generation.
+        if (string.IsNullOrWhiteSpace(diffBase) || diffBase.StartsWith('-'))
+            throw new CommandException("ASCOV010 The diff base must be a Git revision, not a command option.");
         var startInfo = new ProcessStartInfo("git")
         {
             WorkingDirectory = repositoryRoot,

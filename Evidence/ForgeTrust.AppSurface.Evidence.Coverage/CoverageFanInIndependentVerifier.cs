@@ -170,8 +170,8 @@ internal static class CoverageFanInIndependentVerifier
         CheckEffective(effective, "branch", expectedBranch, policy.Tolerance);
         CheckEffective(effective, "patchLine", expectedPatchLine, policy.Tolerance);
         CheckEffective(effective, "patchBranch", expectedPatchBranch, policy.Tolerance);
-        CheckAggregateMetric(Property(report, "line"), coverage, "lines-covered", "lines-valid", effective, "line");
-        CheckAggregateMetric(Property(report, "branch"), coverage, "branches-covered", "branches-valid", effective, "branch");
+        CheckAggregateMetric(Property(report, "line"), coverage, "lines-covered", "lines-valid", effective, "line", isComposed);
+        CheckAggregateMetric(Property(report, "branch"), coverage, "branches-covered", "branches-valid", effective, "branch", isComposed);
 
         if (patch is null)
         {
@@ -256,15 +256,19 @@ internal static class CoverageFanInIndependentVerifier
     }
 
     private static void CheckAggregateMetric(JsonElement metric, XDocument coverage, string coveredName,
-        string validName, JsonElement effective, string effectiveName)
+        string validName, JsonElement effective, string effectiveName, bool requireDerivedTotals)
     {
         var covered = Int(metric, "covered");
         var valid = Int(metric, "valid");
         var percent = Decimal(metric, "percent");
         var root = Root(coverage, GateError);
         var facts = ReadSnapshot(coverage, null);
-        CheckRootTotals(coverage, facts, GateError);
-        Require(covered == Counter(root, coveredName) && valid == Counter(root, validName) && valid > 0, GateError);
+        // Composition independently binds the primary's exact original summary, including
+        // generator-only compiler points. Replacing it with class totals changes the existing
+        // primary gate's measurement. Only the composed summary is derived from class points.
+        if (requireDerivedTotals) CheckRootTotals(coverage, facts, GateError);
+        Require(covered == Counter(root, coveredName) && valid == Counter(root, validName)
+            && valid > 0 && covered >= 0 && covered <= valid, GateError);
         var expected = RoundPercent(covered, valid);
         Require(percent == expected && percent >= Decimal(effective, effectiveName), GateError);
     }

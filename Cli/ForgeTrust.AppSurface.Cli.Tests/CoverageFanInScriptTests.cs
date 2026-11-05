@@ -11,6 +11,8 @@ public sealed class CoverageFanInScriptTests
     [Theory]
     [InlineData("accepted", "HEAD~1", 0, 2)]
     [InlineData("rejected", "HEAD~1", 1, 2)]
+    [InlineData("aggregate-rejected", "HEAD~1", 1, 2)]
+    [InlineData("aggregate-rejected", "", 1, 1)]
     [InlineData("accepted", "", 0, 1)]
     [InlineData("invalid", "HEAD~1", 2, 0)]
     public async Task NativeWrapperRetainsCanonicalReportsAndNeverTurnsAdapterRefusalIntoSuccess(
@@ -36,7 +38,7 @@ public sealed class CoverageFanInScriptTests
             mkdir -p "$COVERAGE_DOGFOOD_OUTPUT/accepted" "$COVERAGE_DOGFOOD_OUTPUT/composed"
             printf '<coverage />' > "$COVERAGE_DOGFOOD_OUTPUT/composed/coverage.cobertura.xml"
             printf '<coverage />' > "$COVERAGE_DOGFOOD_OUTPUT/composed/primary-paths.cobertura.xml"
-            if [[ "$FIXTURE_OUTCOME" == rejected ]]; then
+            if [[ "$FIXTURE_OUTCOME" == rejected || "$FIXTURE_OUTCOME" == aggregate-rejected ]]; then
               printf '{}' > "$COVERAGE_DOGFOOD_OUTPUT/accepted/rejection.json"
               exit 1
             fi
@@ -67,6 +69,7 @@ public sealed class CoverageFanInScriptTests
             mkdir -p "$output"
             passed=true
             if [[ "$patch" == true && "$FIXTURE_OUTCOME" == rejected ]]; then passed=false; fi
+            if [[ "$patch" == false && "$FIXTURE_OUTCOME" == aggregate-rejected ]]; then passed=false; fi
             printf '{"passed":%s}' "$passed" > "$output/coverage-gate.json"
             printf '# Gate: %s\n' "$passed" > "$output/coverage-gate.md"
             if [[ "$patch" == true ]]; then
@@ -110,7 +113,7 @@ public sealed class CoverageFanInScriptTests
             Assert.True(File.Exists(Path.Join(coverage, "coverage-patch-targets.json")));
             Assert.True(File.Exists(Path.Join(coverage, "coverage-patch-targets.md")));
             using var report = JsonDocument.Parse(File.ReadAllBytes(Path.Join(coverage, "coverage-gate.json")));
-            Assert.Equal(outcome == "accepted", report.RootElement.GetProperty("passed").GetBoolean());
+            Assert.Equal(outcome != "rejected", report.RootElement.GetProperty("passed").GetBoolean());
         }
     }
 }

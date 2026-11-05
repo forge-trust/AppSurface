@@ -119,6 +119,10 @@ public sealed class CoverageFanInWorkflowTests
         using var fixture = await Fixture.Create();
         var first = await CoverageFanIn.CaptureAsync(fixture.Capture());
         Assert.Equal(CoverageOperationOutcome.Succeeded, first.Outcome);
+        var sourceMarkerPath = Path.Join(fixture.Captured, CoverageFanInIO.CompletionName);
+        var sourceMarker = JsonNode.Parse(File.ReadAllBytes(sourceMarkerPath))!.AsObject();
+        sourceMarker["generation"] = "transport-metadata-is-not-local-custody";
+        File.WriteAllText(sourceMarkerPath, sourceMarker.ToJsonString());
         var receiving = Path.Join(fixture.Temp.Path, "receiving");
         var imported = await CoverageFanIn.CaptureAsync(new(fixture.Policy, fixture.Repository, receiving, "primary",
             ImportDirectory: fixture.Captured,
@@ -128,6 +132,13 @@ public sealed class CoverageFanInWorkflowTests
         Assert.Equal(CoverageObservation.TrustedProducer, imported.Observation);
         Assert.NotEqual(first.Effects.Generation, imported.Effects.Generation);
         Assert.Equal(File.ReadAllBytes(Path.Join(fixture.Captured, "manifest.json")), File.ReadAllBytes(Path.Join(receiving, "manifest.json")));
+        var receivingMarker = JsonNode.Parse(File.ReadAllBytes(Path.Join(receiving, CoverageFanInIO.CompletionName)))!.AsObject();
+        Assert.Equal(imported.Effects.Generation, receivingMarker["generation"]!.GetValue<string>());
+        Assert.Equal("imported", receivingMarker["materialization"]!.GetValue<string>());
+        Assert.NotEqual(sourceMarker["physicalIdentity"]!.GetValue<string>(),
+            receivingMarker["physicalIdentity"]!.GetValue<string>());
+        using (var store = CoverageArtifactStore.OpenReadOnly())
+            Assert.Equal(imported.Effects.Generation, store.GetCurrentRun(receiving)?.ManifestBase.RunId);
         var composition = fixture.Compose() with { PrimaryCaptureDirectory = receiving };
         Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(composition)).Outcome);
         var accepted = await CoverageFanIn.AcceptAsync(fixture.Accept() with { PrimaryCaptureDirectory = receiving });
@@ -135,6 +146,62 @@ public sealed class CoverageFanInWorkflowTests
         Assert.True(accepted.Effects.Imported);
         Assert.Equal(CoverageObservation.TrustedProducer, accepted.Observation);
         Assert.True(accepted.Accepted);
+    }
+
+    [Theory]
+    [InlineData("schemaVersion")]
+    [InlineData("stage")]
+    [InlineData("policyDigest")]
+    [InlineData("physicalIdentity")]
+    [InlineData("materialization")]
+    [InlineData("generation")]
+    [InlineData("operationId")]
+    public async Task PublicComposeRejectsCaptureWithInvalidLocalGenerationBinding(string field)
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        var markerPath = Path.Join(fixture.Captured, CoverageFanInIO.CompletionName);
+        MutateGenerationMarker(markerPath, field);
+        var captureAfterMutation = Snapshot(fixture.Captured);
+
+        var result = await CoverageFanIn.ComposeAsync(fixture.Compose());
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.False(result.Effects.OutputCreated);
+        Assert.False(result.Effects.GenerationCommitted);
+        Assert.False(Directory.Exists(fixture.Composed));
+        Assert.Equal(captureAfterMutation, Snapshot(fixture.Captured));
+    }
+
+    [Theory]
+    [InlineData("schemaVersion")]
+    [InlineData("stage")]
+    [InlineData("policyDigest")]
+    [InlineData("physicalIdentity")]
+    [InlineData("materialization")]
+    [InlineData("generation")]
+    [InlineData("operationId")]
+    public async Task PublicAcceptRejectsCompositionWithInvalidGenerationBinding(string field)
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        var markerPath = Path.Join(fixture.Composed, CoverageFanInIO.CompletionName);
+        MutateGenerationMarker(markerPath, field);
+        var compositionAfterMutation = Snapshot(fixture.Composed);
+
+        var result = await CoverageFanIn.AcceptAsync(fixture.Accept());
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.False(result.Accepted);
+        Assert.False(result.Verified);
+        Assert.False(result.Effects.OutputCreated);
+        Assert.False(result.Effects.GenerationCommitted);
+        Assert.False(Directory.Exists(fixture.Accepted));
+        Assert.Equal(compositionAfterMutation, Snapshot(fixture.Composed));
     }
 
     [Fact]
@@ -245,6 +312,16 @@ public sealed class CoverageFanInWorkflowTests
 
         var mutations = new (string Name, Action<JsonObject> Mutate)[]
         {
+            ("scope", manifest => manifest["scope"] = "native"),
+            ("policy-encoding", manifest => manifest["policyEncoding"] = "unknown"),
+            ("run", manifest => manifest["run"]!["attempt"] = 99),
+            ("observation", manifest => manifest["observation"] = "ImportedExecution"),
+            ("blank-root", manifest => manifest["sourceRoot"] = " "),
+            ("relative-root", manifest => manifest["sourceRoot"] = "relative"),
+            ("short-root", manifest => manifest["sourceRoot"] = "C:"),
+            ("invalid-drive", manifest => manifest["sourceRoot"] = "0:/repo"),
+            ("invalid-drive-separator", manifest => manifest["sourceRoot"] = "C:repo"),
+            ("null-root", manifest => manifest["sourceRoot"] = null),
             ("source", manifest => manifest["source"]!["commit"] = new string('a', 40)),
             ("sdk", manifest => manifest["source"]!["sdk"] = "different-sdk"),
             ("configuration", manifest => manifest["source"]!["configuration"] = "Debug"),
@@ -343,6 +420,56 @@ public sealed class CoverageFanInWorkflowTests
         AssertVerifyRejected(await CoverageFanIn.VerifyAsync(fixture.Verify()));
     }
 
+    [Theory]
+    [InlineData("schemaVersion")]
+    [InlineData("stage")]
+    [InlineData("policyDigest")]
+    [InlineData("physicalIdentity")]
+    [InlineData("materialization")]
+    [InlineData("generation")]
+    [InlineData("operationId")]
+    public async Task PublicVerifyRejectsEachInvalidCompletionBindingWithoutChangingCustody(string field)
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.AcceptAsync(fixture.Accept())).Outcome);
+
+        var markerPath = Path.Join(fixture.Accepted, "generation.json");
+        MutateGenerationMarker(markerPath, field);
+        var afterMutation = Snapshot(fixture.Accepted);
+
+        var result = await CoverageFanIn.VerifyAsync(fixture.Verify());
+
+        AssertVerifyRejected(result);
+        Assert.Equal(afterMutation, Snapshot(fixture.Accepted));
+    }
+
+    [Fact]
+    public async Task PublicVerifyRejectsCopiedGenerationWithoutAdoptingItsCustody()
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.AcceptAsync(fixture.Accept())).Outcome);
+
+        var copied = fixture.CopyDirectory(fixture.Accepted, "accepted-copy");
+        var before = Snapshot(copied);
+        var copiedRequest = fixture.Verify() with { AcceptedOutputDirectory = copied };
+
+        AssertVerifyRejected(await CoverageFanIn.VerifyAsync(copiedRequest));
+
+        Assert.Equal(before, Snapshot(copied));
+        using var store = CoverageArtifactStore.OpenReadOnly();
+        Assert.Null(store.GetCurrentRun(copied));
+    }
+
     [Fact]
     public async Task PublicVerifyWithMissingCoordinationStoreCreatesNothing()
     {
@@ -361,6 +488,147 @@ public sealed class CoverageFanInWorkflowTests
         AssertVerifyRejected(result);
         Assert.False(Directory.Exists(fixture.StoreHome));
         Assert.Equal(before, Snapshot(fixture.Temp.Path));
+    }
+
+    private static void MutateGenerationMarker(string markerPath, string field)
+    {
+        var marker = JsonNode.Parse(File.ReadAllBytes(markerPath))!.AsObject();
+        marker[field] = field switch
+        {
+            "schemaVersion" => 1,
+            "stage" => "invalid-stage",
+            "policyDigest" => new string('0', 64),
+            "physicalIdentity" => "different-directory-identity",
+            "materialization" => "unrecognized",
+            "generation" or "operationId" => "not-a-guid",
+            _ => throw new ArgumentOutOfRangeException(nameof(field))
+        };
+        File.WriteAllText(markerPath, marker.ToJsonString());
+    }
+
+    [Theory]
+    [InlineData("schemaVersion", "1")]
+    [InlineData("policyDigest", "\"other\"")]
+    [InlineData("source.commit", "\"other\"")]
+    [InlineData("run.attempt", "2")]
+    [InlineData("coverageSha256", "\"other\"")]
+    [InlineData("primarySha256", "\"other\"")]
+    [InlineData("inputs", "[]")]
+    [InlineData("inputs.0.manifestSha256", "\"other\"")]
+    [InlineData("inputs.0.producerId", "\"other\"")]
+    public async Task AcceptanceRejectsSelfConsistentlyPublishedCompositionFaults(string field, string value)
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        // A producer can publish internally consistent hashes and custody for false semantic facts.
+        // Acceptance must independently bind those facts to the original captures.
+        await RepublishFault(fixture, fixture.Composed, "composition", "verification.json", field, value);
+        var before = Snapshot(fixture.Composed);
+        var result = await CoverageFanIn.AcceptAsync(fixture.Accept());
+        AssertVerifyRejected(result);
+        Assert.False(Directory.Exists(fixture.Accepted));
+        Assert.Equal(before, Snapshot(fixture.Composed));
+    }
+
+    [Theory]
+    [InlineData("schemaVersion", "1")]
+    [InlineData("policyDigest", "\"other\"")]
+    [InlineData("source.commit", "\"other\"")]
+    [InlineData("run.attempt", "2")]
+    [InlineData("evaluationIntent", "\"historicalReplay\"")]
+    [InlineData("compositionReceiptSha256", "\"other\"")]
+    [InlineData("primaryGateSha256", "\"other\"")]
+    [InlineData("patchOutcome", "\"PatchNotRequested\"")]
+    [InlineData("inputs", "[]")]
+    [InlineData("composedGateSha256", "\"other\"")]
+    [InlineData("diffSha256", "\"other\"")]
+    public async Task VerificationRejectsSelfConsistentlyPublishedAcceptanceFaults(string field, string value)
+    {
+        using var fixture = await Fixture.Create();
+        await fixture.SelectPatch();
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.AcceptAsync(fixture.Accept())).Outcome);
+        await RepublishFault(fixture, fixture.Accepted, "acceptance", "acceptance.json", field, value);
+        var before = Snapshot(fixture.Accepted);
+        AssertVerifyRejected(await CoverageFanIn.VerifyAsync(fixture.Verify()));
+        Assert.Equal(before, Snapshot(fixture.Accepted));
+    }
+
+    private static async Task RepublishFault(Fixture fixture, string directory, string stage, string artifact,
+        string field, string value)
+    {
+        var files = Directory.EnumerateFiles(directory).Where(path => !Path.GetFileName(path).StartsWith('.')
+            && Path.GetFileName(path) != CoverageFanInIO.CompletionName)
+            .ToDictionary(path => Path.GetFileName(path), File.ReadAllBytes, StringComparer.Ordinal);
+        var node = JsonNode.Parse(files[artifact])!;
+        var path = field.Split('.');
+        var parent = node;
+        foreach (var part in path[..^1]) parent = parent is JsonArray ? parent[int.Parse(part)]! : parent[part]!;
+        if (parent is JsonArray) parent[int.Parse(path[^1])] = JsonNode.Parse(value);
+        else parent[path[^1]] = JsonNode.Parse(value);
+        files[artifact] = JsonSerializer.SerializeToUtf8Bytes(node);
+        var limits = CoveragePolicyEncoding.Freeze(fixture.Policy).Limits!;
+        var bounds = new CoverageFanInBounds(limits.XmlBytes, limits.JsonBytes, limits.TotalBytes, limits.Depth,
+            limits.LineRecordsPerReport, limits.XmlElementsPerReport, limits.AttributesPerElement,
+            limits.TokenCharacters, limits.BranchRecordsPerReport, limits.TotalRecords);
+        await CoverageFanInPublication.PublishAsync(directory, fixture.Repository, stage,
+            Guid.NewGuid().ToString("N"), CoveragePolicyEncoding.Digest(fixture.Policy), files, true, bounds, CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData("C:/agent/work")]
+    [InlineData(@"C:\agent\work")]
+    [InlineData(@"\\server\share\repo")]
+    public async Task PortableImportAcceptsDeclaredForeignAbsoluteRootsWithoutClaimingLocalExecution(string sourceRoot)
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        var transported = fixture.CopyDirectory(fixture.Captured, "transported");
+        var manifestPath = Path.Join(transported, "manifest.json");
+        var manifest = JsonNode.Parse(File.ReadAllBytes(manifestPath))!;
+        manifest["sourceRoot"] = sourceRoot;
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+        var output = Path.Join(fixture.Temp.Path, "imported");
+        var result = await CoverageFanIn.CaptureAsync(new(fixture.Policy, fixture.Repository, output, "primary",
+            ImportDirectory: transported, OriginalSourceRoot: sourceRoot));
+        Assert.Equal(CoverageOperationOutcome.Succeeded, result.Outcome);
+        Assert.True(result.Effects.Imported);
+        Assert.Equal(CoverageObservation.TrustedProducer, result.Observation);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(fixture.Compose() with
+        { PrimaryCaptureDirectory = output })).Outcome);
+    }
+
+    [Theory]
+    [InlineData("root")]
+    [InlineData("hits")]
+    [InlineData("line-number")]
+    [InlineData("filename")]
+    public async Task ImportedPrimaryMustContainValidMeasurablePointsDespiteMatchingPayloadHashes(string defect)
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        var transported = fixture.CopyDirectory(fixture.Captured, "transported");
+        var reportPath = Path.Join(transported, "coverage.cobertura.xml");
+        var report = System.Xml.Linq.XDocument.Load(reportPath);
+        switch (defect)
+        {
+            case "root": report.Root!.Name = "other"; break;
+            case "hits": report.Descendants("line").Single().SetAttributeValue("hits", "-1"); break;
+            case "line-number": report.Descendants("line").Single().SetAttributeValue("number", "0"); break;
+            default: report.Descendants("class").Single().SetAttributeValue("filename", "../outside.cs"); break;
+        }
+        report.Save(reportPath);
+        var manifestPath = Path.Join(transported, "manifest.json");
+        var manifest = JsonNode.Parse(File.ReadAllBytes(manifestPath))!;
+        manifest["files"]!["coverage.cobertura.xml"] = Hash(File.ReadAllBytes(reportPath));
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+        var output = Path.Join(fixture.Temp.Path, "imported");
+        var result = await CoverageFanIn.CaptureAsync(new(fixture.Policy, fixture.Repository, output, "primary",
+            ImportDirectory: transported, OriginalSourceRoot: manifest["sourceRoot"]!.GetValue<string>()));
+        AssertVerifyRejected(result);
+        Assert.False(Directory.Exists(output));
     }
 
     private static async Task AssertImportRejected(Fixture fixture, string sourceDirectory, string producerId,

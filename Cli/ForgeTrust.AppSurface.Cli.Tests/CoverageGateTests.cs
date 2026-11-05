@@ -3335,6 +3335,25 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ReadDiffAsync_RejectsOptionLikeBaseWithoutWritingOutsideReports()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-git-options-");
+        File.WriteAllText(Path.Join(temp.Path, "Sample.cs"), "public class Sample { }\n");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        var destination = Path.Join(temp.Path, "unexpected-output");
+
+        await Assert.ThrowsAsync<CommandException>(() => GitDiffReader.ReadDiffAsync(
+            temp.Path, "--output=" + destination, CancellationToken.None));
+
+        Assert.False(File.Exists(destination));
+        Assert.False(File.Exists(destination + "...HEAD"));
+    }
+
+    [Fact]
     public async Task ReadDiffAsync_ThrowsDiagnostic_WhenDiffExceedsConfiguredLimit()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");

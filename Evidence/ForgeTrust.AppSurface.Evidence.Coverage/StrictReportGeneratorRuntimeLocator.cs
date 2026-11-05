@@ -119,7 +119,9 @@ internal sealed class StrictReportGeneratorRuntimeLocator : IReportGeneratorPack
         return buffer[..expectedLength];
     }
 
-    private static IReadOnlyDictionary<string, string> ParseManifest(byte[] manifestBytes)
+    /// <summary>Validates the pinned manifest format and returns its exact runtime inventory.</summary>
+    /// <remarks>Intentionally internal so package-format regressions can be tested without modifying assembly resources.</remarks>
+    internal static IReadOnlyDictionary<string, string> ParseManifest(byte[] manifestBytes)
     {
         using var document = JsonDocument.Parse(manifestBytes, new JsonDocumentOptions { MaxDepth = 8 });
         var root = document.RootElement;

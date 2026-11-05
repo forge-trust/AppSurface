@@ -237,6 +237,144 @@ public sealed class CoverageFanInCommandTests
     }
 
     [Fact]
+    public void StrictEnvelopeAndOperationSelectorsRefuseInvalidShapesBeforeAnyOperation()
+    {
+        using var root = TestDirectory.Create();
+        var baseline = CaptureEnvelope(root.Path);
+        foreach (var json in new[]
+        {
+            "[]", "null", "42",
+            baseline.Replace("\"schemaVersion\":2", "\"schemaVersion\":1", StringComparison.Ordinal),
+            baseline.Replace("\"schemaVersion\":2", "\"schemaVersion\":2.5", StringComparison.Ordinal),
+            baseline.Replace("\"operation\":\"capture\"", "\"operation\":3", StringComparison.Ordinal),
+            baseline.Replace("\"operation\":\"capture\"", "\"operation\":\"unknown\"", StringComparison.Ordinal),
+            baseline.Replace("\"repositoryRoot\":", "\"unknown\":true,\"repositoryRoot\":", StringComparison.Ordinal),
+            baseline.Replace("\"producerId\":\"primary\"", "\"producerId\":42", StringComparison.Ordinal)
+        })
+            Assert.ThrowsAny<Exception>(() => CoverageFanInRequestReader.Parse(System.Text.Encoding.UTF8.GetBytes(json)));
+
+        var policy = ValidPolicy with { Supplements = [new("native", "Linux", "Category=fast")] };
+        var validImport = new CoverageCaptureRequest(policy, root.Path, "fresh", "native", ImportDirectory: "download",
+            OriginalSourceRoot: "/producer");
+        CoverageFanInRequestReader.ValidateOperationRequest(new("capture", validImport));
+        foreach (var invalid in new[]
+        {
+            validImport with { ProducerId = "undeclared" }, validImport with { OriginalSourceRoot = null },
+            validImport with { CoveragePath = "coverage.xml" }, validImport with { TimingsPath = "timings.json" },
+            validImport with { RawCoveragePath = "raw.xml" },
+            validImport with { ImportDirectory = null, CoveragePath = "coverage.xml", RawCoveragePath = "raw.xml", OriginalSourceRoot = "/unexpected" },
+            validImport with { ImportDirectory = null, CoveragePath = "coverage.xml", RawCoveragePath = null, OriginalSourceRoot = null },
+            validImport with { ImportDirectory = null, CoveragePath = "coverage.xml", RawCoveragePath = "raw.xml", OriginalSourceRoot = null, TimingsPath = "unexpected" }
+        })
+            Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(new("capture", invalid)));
+        var collect = new CoverageCollectRequest(ValidPolicy, root.Path, "out", "collection", "primary", 60);
+        foreach (var invalid in new[] { collect with { CollectionDirectory = " " }, collect with { DeadlineSeconds = 0 },
+            collect with { DeadlineSeconds = 86401 }, collect with { Parallelism = 0 } })
+            Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(new("collect", invalid)));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(
+            new("accept", new CoverageAcceptRequest(ValidPolicy, root.Path, "primary", [], "", "out"))));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(
+            new("verify", new CoverageVerifyRequest(ValidPolicy, root.Path, "primary", [], "composed", ""))));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(root.Path));
+    }
+
+    [Theory]
+    [InlineData(CoverageOperationOutcome.TimedOut, "timedOut", 124)]
+    [InlineData(CoverageOperationOutcome.Cancelled, "cancelled", 130)]
+    public async Task TypedOperationFailuresPreserveOutcomeExitCodeAndDeliverKnownEffects(
+        CoverageOperationOutcome outcome, string status, int exitCode)
+    {
+        using var root = TestDirectory.Create();
+        var request = root.WriteFile("request.json", CaptureEnvelope(root.Path));
+        var result = new CoverageFanInResult("capture", outcome, "current", null,
+            new CoverageOperationEffects(false, false, true, false, null), [], []);
+        using var console = new FakeInMemoryConsole();
+        var error = await Assert.ThrowsAsync<CommandException>(async () =>
+            await new ResultCommand("capture", result, SafeCoverageFanInResultDeliveryFactory.Instance)
+            { Request = request, Result = TestPathUtils.PathUnder(root.Path, "terminal.json"), Json = true }
+                .ExecuteAsync(console, CancellationToken.None));
+        Assert.Equal(exitCode, error.ExitCode);
+        using var terminal = JsonDocument.Parse(console.ReadOutputString());
+        Assert.Equal(status, terminal.RootElement.GetProperty("status").GetString());
+        Assert.True(terminal.RootElement.GetProperty("effectsKnown").GetBoolean());
+        Assert.False(terminal.RootElement.GetProperty("effects").GetProperty("generationCommitted").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CollectBooleanOptionsAcceptExplicitTrueAndFalseAndRejectOtherTypes()
+    {
+        using var root = TestDirectory.Create();
+        foreach (var value in new[] { "true", "false" })
+        {
+            var node = JsonNode.Parse(Envelope("collect", CollectRequest(root.Path)))!;
+            node["request"]!["noRestore"] = JsonNode.Parse(value);
+            node["request"]!["noBuild"] = JsonNode.Parse(value);
+            var parsed = CoverageFanInRequestReader.Parse(System.Text.Encoding.UTF8.GetBytes(node.ToJsonString()));
+            Assert.Equal(value == "true", ((CoverageCollectRequest)parsed.Request).NoRestore);
+            Assert.Equal(value == "true", ((CoverageCollectRequest)parsed.Request).NoBuild);
+        }
+        var malformed = JsonNode.Parse(Envelope("collect", CollectRequest(root.Path)))!;
+        malformed["request"]!["noRestore"] = "true";
+        var request = root.WriteFile("malformed.json", malformed.ToJsonString());
+        using var console = new FakeInMemoryConsole();
+        var exception = await Assert.ThrowsAsync<CommandException>(async () =>
+            await new CoverageFanInCaptureCommand
+            {
+                Collect = true,
+                Request = request,
+                Result = TestPathUtils.PathUnder(root.Path, "terminal.json"),
+                Json = true
+            }.ExecuteAsync(console, CancellationToken.None));
+        Assert.Equal(2, exception.ExitCode);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(root.Path, "terminal.json")));
+    }
+
+    [Fact]
+    public async Task Acceptance_terminal_projection_delivers_every_known_artifact_role_without_host_paths()
+    {
+        using var root = TestDirectory.Create();
+        var requestPath = root.WriteFile("request.json", Envelope("accept", RequestFor("accept", root.Path)));
+        var roles = new Dictionary<string, string>
+        {
+            ["acceptance.json"] = "acceptance",
+            ["collector.cobertura.xml"] = "collectorCoverage",
+            ["composed-gate.json"] = "composedGate",
+            ["composed-gate.md"] = "composedGateSummary",
+            ["coverage.cobertura.xml"] = "coverage",
+            ["diff.patch"] = "patchDiff",
+            ["generation.json"] = "generation",
+            ["manifest.json"] = "manifest",
+            ["primary-gate.json"] = "primaryGate",
+            ["primary-gate.md"] = "primaryGateSummary",
+            ["primary-paths.cobertura.xml"] = "primaryCoverage",
+            ["rejection.json"] = "rejection",
+            ["timings.json"] = "timings",
+            ["verification.json"] = "verification",
+            ["unknown-private-role"] = "artifact"
+        };
+        var result = new CoverageFanInResult("accept", CoverageOperationOutcome.Succeeded, "current-operation", null,
+            new CoverageOperationEffects(true, true, true, false, "current-generation"),
+            roles.Keys.Select(role => new CoverageArtifactReference(role, "/private/secret/" + role, 1, new string('a', 64))).ToArray(),
+            [], accepted: true, verified: true, patchOutcome: "PatchAccepted");
+        using var console = new FakeInMemoryConsole();
+        var destination = TestPathUtils.PathUnder(root.Path, "terminal.json");
+
+        await new ResultCommand("accept", result, SafeCoverageFanInResultDeliveryFactory.Instance)
+        { Request = requestPath, Result = destination, Json = true }.ExecuteAsync(console, CancellationToken.None);
+
+        using var terminal = JsonDocument.Parse(console.ReadOutputString());
+        Assert.Equal("succeeded", terminal.RootElement.GetProperty("status").GetString());
+        var projected = terminal.RootElement.GetProperty("result");
+        Assert.True(projected.GetProperty("accepted").GetBoolean());
+        Assert.True(projected.GetProperty("verified").GetBoolean());
+        Assert.Equal("PatchAccepted", projected.GetProperty("patchOutcome").GetString());
+        Assert.Equal(roles.Values, projected.GetProperty("artifacts").EnumerateArray()
+            .Select(artifact => artifact.GetProperty("role").GetString()));
+        Assert.DoesNotContain("/private/secret", File.ReadAllText(destination), StringComparison.Ordinal);
+        Assert.Equal(console.ReadOutputString().Trim(), File.ReadAllText(destination).Trim());
+    }
+
+    [Fact]
     public async Task Current_committed_capture_json_redacts_absolute_artifact_paths()
     {
         using var fixture = await CurrentCaptureFixture.Create();
@@ -710,6 +848,171 @@ public sealed class CoverageFanInCommandTests
     }
 
     private static string CaptureEnvelope(string repositoryRoot) => Envelope("capture", CaptureRequest(repositoryRoot));
+
+    [Theory]
+    [InlineData("capture", "policy", "null")]
+    [InlineData("capture", "repositoryRoot", "42")]
+    [InlineData("capture", "repositoryRoot", "\" \"")]
+    [InlineData("capture", "producerId", "null")]
+    [InlineData("capture", "outputMode", "0")]
+    [InlineData("capture", "outputMode", "\"unknown\"")]
+    [InlineData("capture", "coveragePath", "false")]
+    [InlineData("collect", "deadlineSeconds", "1.5")]
+    [InlineData("collect", "deadlineSeconds", "2147483648")]
+    [InlineData("collect", "noBuild", "1")]
+    [InlineData("collect", "noRestore", "[]")]
+    [InlineData("collect", "parallelism", "\"2\"")]
+    [InlineData("compose", "primaryCaptureDirectory", "null")]
+    [InlineData("compose", "supplementaryCaptureDirectories", "{}")]
+    [InlineData("compose", "supplementaryCaptureDirectories", "[null]")]
+    [InlineData("compose", "supplementaryCaptureDirectories", "[42]")]
+    [InlineData("compose", "outputDirectory", "\"\"")]
+    [InlineData("accept", "composedOutputDirectory", "null")]
+    [InlineData("accept", "evaluationIntent", "true")]
+    [InlineData("verify", "acceptedOutputDirectory", "null")]
+    [InlineData("verify", "policy.limits.xmlBytes", "\"1024\"")]
+    [InlineData("verify", "policy.limits.xmlBytes", "9223372036854775808")]
+    [InlineData("verify", "policy.gate.minLine", "1e100")]
+    [InlineData("verify", "policy.supplements", "{}")]
+    public async Task TypedWireFieldsRejectWrongShapesWithoutPreparingDelivery(string operation, string field, string value)
+    {
+        using var root = TestDirectory.Create();
+        var document = JsonNode.Parse(Envelope(operation, RequestFor(operation, root.Path)))!;
+        var parts = field.Split('.');
+        var current = document["request"]!;
+        foreach (var part in parts[..^1])
+        {
+            current[part] ??= new JsonObject();
+            current = current[part]!;
+        }
+        current[parts[^1]] = JsonNode.Parse(value);
+        var request = root.WriteFile("invalid.json", document.ToJsonString());
+        var result = TestPathUtils.PathUnder(root.Path, "terminal.json");
+        using var console = new FakeInMemoryConsole();
+        var error = await Assert.ThrowsAsync<CommandException>(async () =>
+            await CommandFor(operation, request, result).ExecuteAsync(console, CancellationToken.None));
+        Assert.Equal(2, error.ExitCode);
+        Assert.False(File.Exists(result));
+        using var terminal = JsonDocument.Parse(console.ReadOutputString());
+        Assert.Equal("invalidInput", terminal.RootElement.GetProperty("status").GetString());
+        Assert.False(terminal.RootElement.GetProperty("delivery").GetProperty("resultFileCreated").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("capture")]
+    [InlineData("collect")]
+    [InlineData("compose")]
+    [InlineData("accept")]
+    [InlineData("verify")]
+    public void RequiredWireMembersCannotBeOmittedOrReplacedWithAnotherShape(string operation)
+    {
+        using var root = TestDirectory.Create();
+        var valid = JsonNode.Parse(Envelope(operation, RequestFor(operation, root.Path)))!;
+        foreach (var name in valid["request"]!.AsObject().Select(x => x.Key).ToArray())
+        {
+            if (operation == "capture" && name is "coveragePath" or "timingsPath") continue;
+            var missing = valid.DeepClone();
+            missing["request"]!.AsObject().Remove(name);
+            Assert.ThrowsAny<Exception>(() => CoverageFanInRequestReader.Parse(System.Text.Encoding.UTF8.GetBytes(missing.ToJsonString())));
+        }
+        foreach (var shape in new[] { "null", "[]", "true" })
+        {
+            valid["request"] = JsonNode.Parse(shape);
+            Assert.ThrowsAny<Exception>(() => CoverageFanInRequestReader.Parse(System.Text.Encoding.UTF8.GetBytes(valid.ToJsonString())));
+        }
+    }
+
+    [Theory]
+    [InlineData("argument")]
+    [InlineData("invalidOperation")]
+    public async Task SynchronousFacadeValidationIsAnInputFailureWithNoResultFile(string failure)
+    {
+        using var root = TestDirectory.Create();
+        var request = root.WriteFile("request.json", CaptureEnvelope(root.Path));
+        var result = TestPathUtils.PathUnder(root.Path, "terminal.json");
+        using var console = new FakeInMemoryConsole();
+        var error = await Assert.ThrowsAsync<CommandException>(async () =>
+            await new SynchronousValidationCommand(failure) { Request = request, Result = result, Json = true }
+                .ExecuteAsync(console, CancellationToken.None));
+        Assert.Equal(2, error.ExitCode);
+        Assert.False(File.Exists(result));
+        Assert.DoesNotContain("validation-secret", console.ReadOutputString() + console.ReadErrorString());
+    }
+
+    [Fact]
+    public void TerminalEnumEncodingRefusesNumbersUnknownNamesAndUndefinedValues()
+    {
+        var options = new JsonSerializerOptions();
+        var factory = new StrictCoverageEnumConverterFactory();
+        options.Converters.Add(factory);
+        Assert.False(factory.CanConvert(typeof(string)));
+        Assert.False(StrictCoverageEnumConverterFactory.IsToken(typeof(CoverageOperationOutcome), null));
+        Assert.Equal(CoverageOperationOutcome.Succeeded, JsonSerializer.Deserialize<CoverageOperationOutcome>("\"succeeded\"", options));
+        Assert.Equal("\"succeeded\"", JsonSerializer.Serialize(CoverageOperationOutcome.Succeeded, options));
+        foreach (var json in new[] { "0", "\"Succeeded\"", "\"unknown\"" })
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CoverageOperationOutcome>(json, options));
+        Assert.Throws<JsonException>(() => JsonSerializer.Serialize((CoverageOperationOutcome)int.MaxValue, options));
+    }
+
+    private sealed class SynchronousValidationCommand(string failure) : CoverageFanInCommandBase("capture", true)
+    {
+        internal override ValueTask<CoverageFanInResult> InvokeAsync(ParsedCoverageFanInRequest request,
+            TextWriter diagnostics, CancellationToken cancellationToken) => throw (failure == "argument"
+                ? new ArgumentException("validation-secret") : new InvalidOperationException("validation-secret"));
+    }
+
+    [Fact]
+    public void TypedSelectorsRequireCompletePathsAndExactSupplementInventories()
+    {
+        var policy = ValidPolicy;
+        foreach (var primary in new[] { "", " " })
+            Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(
+                new("compose", new CoverageComposeRequest(policy, "repo", primary, [], "out"))));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(
+            new("compose", new CoverageComposeRequest(policy, "repo", "primary", null!, "out"))));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(
+            new("compose", new CoverageComposeRequest(policy, "repo", "primary", [], " "))));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(
+            new("accept", new CoverageAcceptRequest(policy, "repo", "primary", [], "composed", " "))));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(
+            new("verify", new CoverageVerifyRequest(policy, "repo", "primary", [], " ", "accepted"))));
+        foreach (var request in new[]
+        {
+            new CoverageCaptureRequest(policy, "repo", "out", "primary", "coverage", "timings", RawCoveragePath: "raw"),
+            new CoverageCaptureRequest(policy, "repo", "out", "primary", "coverage"),
+            new CoverageCaptureRequest(policy, "repo", "out", "primary", "coverage", " "),
+        })
+            Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(new("capture", request)));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(new("unknown", new object())));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateCanonicalPolicy(new("unknown", new object())));
+    }
+
+    [Theory]
+    [InlineData("compose")]
+    [InlineData("accept")]
+    [InlineData("verify")]
+    public async Task EveryCommandSupportsTheSameExplicitDeliveryBoundary(string operation)
+    {
+        using var root = TestDirectory.Create();
+        var request = root.WriteFile("request.json", Envelope(operation, RequestFor(operation, root.Path)));
+        var delivery = new CountingDeliveryFactory();
+        CoverageFanInCommandBase command = operation switch
+        {
+            "compose" => new CoverageFanInComposeCommand(delivery),
+            "accept" => new CoverageFanInAcceptCommand(delivery),
+            _ => new CoverageFanInVerifyCommand(delivery)
+        };
+        command.Request = request;
+        command.Result = TestPathUtils.PathUnder(root.Path, "terminal.json");
+        command.Json = true;
+        using var console = new FakeInMemoryConsole();
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console, CancellationToken.None));
+        Assert.Equal(1, error.ExitCode);
+        Assert.Equal(1, delivery.PrepareCalls);
+        using var terminal = JsonDocument.Parse(console.ReadOutputString());
+        Assert.Equal("deliveryFailed", terminal.RootElement.GetProperty("status").GetString());
+        Assert.Equal(operation, terminal.RootElement.GetProperty("operation").GetString());
+    }
 
     private static object RequestFor(string operation, string root) => operation switch
     {

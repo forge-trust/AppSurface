@@ -23,6 +23,56 @@ public sealed class EvidenceCoverageFanInProducerTests
     private const string DotnetPath = "dotnet";
 
     [Theory]
+    [InlineData("id-null")]
+    [InlineData("id-blank")]
+    [InlineData("request")]
+    [InlineData("policy")]
+    [InlineData("test-projects")]
+    [InlineData("supplements")]
+    [InlineData("capture-paths")]
+    [InlineData("assertion-null")]
+    [InlineData("assertion-blank")]
+    [InlineData("slot-null")]
+    [InlineData("slot-blank")]
+    public void ConstructorRejectsMissingIdentityAndCollectionShapes(string shape)
+    {
+        var policy = new CoverageFanInPolicy(new(new string('a', 40), new string('b', 40), "10.0.402", "Release"),
+            new("local", "constructor-tests", "run-1", 1), ["checks/Verification.csproj"], [],
+            new(CoverageGateMode.AggregateOnly));
+        var request = new CoverageAcceptRequest(policy, "repository", "captured", [], "composed", "accepted");
+        string id = ProducerId, assertion = AssertionId, slot = SlotId;
+        switch (shape)
+        {
+            case "id-null": id = null!; break;
+            case "id-blank": id = " \t"; break;
+            case "request": request = null!; break;
+            case "policy": request = request with { Policy = null! }; break;
+            case "test-projects": request = request with { Policy = policy with { TestProjects = null! } }; break;
+            case "supplements": request = request with { Policy = policy with { Supplements = null! } }; break;
+            case "capture-paths": request = request with { SupplementaryCaptureDirectories = null! }; break;
+            case "assertion-null": assertion = null!; break;
+            case "assertion-blank": assertion = " \t"; break;
+            case "slot-null": slot = null!; break;
+            case "slot-blank": slot = " \t"; break;
+            default: throw new ArgumentOutOfRangeException(nameof(shape));
+        }
+
+        Assert.ThrowsAny<ArgumentException>(() => new EvidenceCoverageFanInProducer(id, request, assertion, slot));
+    }
+
+    [Fact]
+    public async Task NullContextIsRejectedBeforeAnyAcceptance()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var (producer, _, _) = CreateProducer(fixture.AcceptRequest());
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await producer.ProduceAsync(null!, CancellationToken.None));
+
+        Assert.False(Directory.Exists(fixture.Accepted));
+    }
+
+    [Theory]
     [InlineData("line")]
     [InlineData("branch")]
     [InlineData("patch-line")]
@@ -128,6 +178,36 @@ public sealed class EvidenceCoverageFanInProducerTests
         Assert.False(Directory.Exists(fixture.Accepted));
     }
 
+    [Theory]
+    [InlineData("missing-producer")]
+    [InlineData("missing-gate")]
+    [InlineData("different-gate")]
+    public async Task CorrectContextCannotOverrideMissingOrMismatchedProducerInPlan(string difference)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.PrepareInputsAsync();
+        var (producer, declaration, plan) = CreateProducer(fixture.AcceptRequest());
+        IReadOnlyList<EvidenceProducerDeclaration> selected = difference switch
+        {
+            "missing-producer" => [],
+            "missing-gate" => [declaration with { CoverageGate = null }],
+            "different-gate" => [declaration with
+            {
+                CoverageGate = declaration.CoverageGate! with { MinLinePercent = 100 }
+            }],
+            _ => throw new ArgumentOutOfRangeException(nameof(difference))
+        };
+        var mismatchedPlan = plan with { Profile = plan.Profile with { Producers = selected } };
+        var writer = new EvidenceArtifactWriter(declaration, Path.Join(fixture.TempPath, "evidence-artifacts"));
+
+        var result = await producer.ProduceAsync(Context(mismatchedPlan, declaration, writer), CancellationToken.None);
+
+        AssertNoAssertion(result, EvidenceProducerOutcome.Invalid);
+        Assert.StartsWith("ASCOV310", result.Diagnostic, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(fixture.Accepted));
+        Assert.Empty(writer.WrittenArtifacts);
+    }
+
     [Fact]
     public async Task AggregateOnlyPolicyCannotMeetDefaultPatchRequirement()
     {
@@ -139,6 +219,69 @@ public sealed class EvidenceCoverageFanInProducerTests
 
         AssertNoAssertion(result, EvidenceProducerOutcome.Invalid);
         Assert.False(Directory.Exists(fixture.Accepted));
+    }
+
+    [Fact]
+    public async Task ExplicitAggregateOnlyObligationIsAcceptedAndDeliveredWithoutClaimingPatchAcceptance()
+    {
+        using var fixture = await Fixture.CreateAsync(requirePatch: false);
+        await fixture.PrepareInputsAsync();
+        var (producer, declaration, plan) = CreateProducer(fixture.AcceptRequest(), requirePatch: false);
+        var artifactRoot = Path.Join(fixture.TempPath, "evidence-artifacts");
+        var writer = new EvidenceArtifactWriter(declaration, artifactRoot);
+
+        var result = await producer.ProduceAsync(Context(plan, declaration, writer), CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        Assert.Equal([AssertionId], result.SatisfiedAssertionIds);
+        Assert.Single(writer.WrittenArtifacts);
+        using var delivered = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(artifactRoot, SlotPath)));
+        Assert.True(delivered.RootElement.GetProperty("accepted").GetBoolean());
+        Assert.True(delivered.RootElement.GetProperty("verified").GetBoolean());
+        Assert.Equal("PatchNotRequested", delivered.RootElement.GetProperty("patchOutcome").GetString());
+        Assert.True(delivered.RootElement.GetProperty("effects").GetProperty("generationCommitted").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ImportedTrustedProducerAcceptanceIsDeliveredButCannotMeetObservedPrimaryRequirement()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.PrepareInputsAsync();
+        using var manifest = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(fixture.Captured, "manifest.json")));
+        var importedPath = Path.Join(fixture.TempPath, "imported-primary");
+        var imported = await CoverageFanIn.CaptureAsync(new CoverageCaptureRequest(
+            fixture.Policy, fixture.Repository, importedPath, "primary", ImportDirectory: fixture.Captured,
+            OriginalSourceRoot: manifest.RootElement.GetProperty("sourceRoot").GetString()));
+        Assert.Equal(CoverageOperationOutcome.Succeeded, imported.Outcome);
+        Assert.True(imported.Effects.Imported);
+        Assert.Equal(CoverageObservation.TrustedProducer, imported.Observation);
+        var composedPath = Path.Join(fixture.TempPath, "imported-composed");
+        var composed = await CoverageFanIn.ComposeAsync(new CoverageComposeRequest(
+            fixture.Policy, fixture.Repository, importedPath, [], composedPath));
+        Assert.Equal(CoverageOperationOutcome.Succeeded, composed.Outcome);
+        var request = fixture.AcceptRequest() with
+        {
+            PrimaryCaptureDirectory = importedPath,
+            ComposedOutputDirectory = composedPath
+        };
+        var (producer, declaration, plan) = CreateProducer(request, requireObservedPrimary: true);
+        var artifactRoot = Path.Join(fixture.TempPath, "evidence-artifacts");
+        var writer = new EvidenceArtifactWriter(declaration, artifactRoot);
+
+        var result = await producer.ProduceAsync(Context(plan, declaration, writer), CancellationToken.None);
+
+        AssertNoAssertion(result, EvidenceProducerOutcome.Failed);
+        Assert.StartsWith("ASCOV310", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Single(writer.WrittenArtifacts);
+        using var delivered = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(artifactRoot, SlotPath)));
+        Assert.Equal("succeeded", delivered.RootElement.GetProperty("outcome").GetString());
+        Assert.Equal("trustedProducer", delivered.RootElement.GetProperty("observation").GetString());
+        Assert.True(delivered.RootElement.GetProperty("accepted").GetBoolean());
+        Assert.True(delivered.RootElement.GetProperty("verified").GetBoolean());
+        var effects = delivered.RootElement.GetProperty("effects");
+        Assert.True(effects.GetProperty("imported").GetBoolean());
+        Assert.True(effects.GetProperty("generationCommitted").GetBoolean());
+        Assert.True(effects.GetProperty("cleanupComplete").GetBoolean());
     }
 
     [Fact]
@@ -236,14 +379,51 @@ public sealed class EvidenceCoverageFanInProducerTests
         Assert.Equal([AssertionId], result.SatisfiedAssertionIds);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConstructorSnapshotsSupplementProjectInventoryAndReceivingPaths(bool explicitInventory)
+    {
+        var projects = new List<string> { "checks/Verification.csproj" };
+        var platform = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "Darwin" : "Linux";
+        var supplements = new List<CoverageSupplement>
+        {
+            new("native", platform, "Category=fast", explicitInventory ? projects : null)
+        };
+        using var fixture = await Fixture.CreateAsync(supplements: supplements);
+        await fixture.PrepareInputsAsync();
+        var paths = fixture.SupplementaryCaptures.ToList();
+        var request = fixture.AcceptRequest() with { SupplementaryCaptureDirectories = paths };
+        var (producer, declaration, plan) = CreateProducer(request);
+
+        projects[0] = "changed-after-construction.csproj";
+        supplements[0] = supplements[0] with { TestProjects = ["unplanned-after-construction.csproj"] };
+        paths[0] = Path.Join(fixture.TempPath, "unplanned-capture");
+        var artifactRoot = Path.Join(fixture.TempPath, "evidence-artifacts");
+        var writer = new EvidenceArtifactWriter(declaration, artifactRoot);
+
+        var result = await producer.ProduceAsync(Context(plan, declaration, writer), CancellationToken.None);
+
+        Assert.True(result.Outcome == EvidenceProducerOutcome.Passed,
+            await File.ReadAllTextAsync(TestPathUtils.PathUnder(artifactRoot, SlotPath)));
+        Assert.Equal([AssertionId], result.SatisfiedAssertionIds);
+        Assert.Single(writer.WrittenArtifacts);
+    }
+
     private static EvidenceProducerContext Context(EvidencePlan plan, EvidenceProducerDeclaration declaration,
         EvidenceArtifactWriter? writer) => new(plan, declaration, TimeProvider.System, writer);
 
     private static (EvidenceCoverageFanInProducer Producer, EvidenceProducerDeclaration Declaration, EvidencePlan Plan)
-        CreateProducer(CoverageAcceptRequest request)
+        CreateProducer(CoverageAcceptRequest request, bool requirePatch = true, bool requireObservedPrimary = false)
     {
-        var producer = new EvidenceCoverageFanInProducer(ProducerId, request, AssertionId, SlotId);
+        var producer = new EvidenceCoverageFanInProducer(ProducerId, request, AssertionId, SlotId,
+            requirePatch, requireObservedPrimary);
         var declaration = Declaration();
+        if (request.Policy.Gate.Mode == CoverageGateMode.AggregateOnly)
+            declaration = declaration with
+            {
+                CoverageGate = new EvidenceCoverageGateRequirements(95, 85, PatchLineMode: "codecov", TolerancePercent: 0.5m)
+            };
         return (producer, declaration, Plan(declaration));
     }
 
@@ -307,8 +487,10 @@ public sealed class EvidenceCoverageFanInProducerTests
         internal string Tree { get; }
         internal string Sdk { get; }
         internal CoverageFanInPolicy Policy { get; }
+        internal IReadOnlyList<string> SupplementaryCaptures { get; private set; } = [];
 
-        internal static async Task<Fixture> CreateAsync(bool requirePatch = true)
+        internal static async Task<Fixture> CreateAsync(bool requirePatch = true,
+            IReadOnlyList<CoverageSupplement>? supplements = null)
         {
             var tempPath = Path.Join(Path.GetTempPath(), "appsurface-evidence-coverage-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tempPath);
@@ -340,7 +522,7 @@ public sealed class EvidenceCoverageFanInProducerTests
                     new(commit, tree, sdk, "Release"),
                     new("local", "evidence-adapter-tests", Guid.NewGuid().ToString("N"), 1),
                     ["checks/Verification.csproj"],
-                    [],
+                    supplements ?? [],
                     gate);
                 return new Fixture(tempPath, baselineCommit, commit, tree, sdk, policy)
                 {
@@ -367,12 +549,22 @@ public sealed class EvidenceCoverageFanInProducerTests
             var capture = await CoverageFanIn.CaptureAsync(new CoverageCaptureRequest(
                 Policy, Repository, Captured, "primary", CoveragePath, TimingsPath));
             Assert.Equal(CoverageOperationOutcome.Succeeded, capture.Outcome);
+            var supplements = new List<string>();
+            foreach (var supplement in Policy.Supplements)
+            {
+                var output = Path.Join(TempPath, "captured-" + supplement.Id);
+                var native = await CoverageFanIn.CaptureAsync(new CoverageCaptureRequest(
+                    Policy, Repository, output, supplement.Id, CoveragePath, RawCoveragePath: CoveragePath));
+                Assert.Equal(CoverageOperationOutcome.Succeeded, native.Outcome);
+                supplements.Add(output);
+            }
+            SupplementaryCaptures = supplements.AsReadOnly();
             var compose = await CoverageFanIn.ComposeAsync(new CoverageComposeRequest(
-                Policy, Repository, Captured, [], Composed));
+                Policy, Repository, Captured, SupplementaryCaptures, Composed));
             Assert.Equal(CoverageOperationOutcome.Succeeded, compose.Outcome);
         }
 
-        internal CoverageAcceptRequest AcceptRequest() => new(Policy, Repository, Captured, [], Composed, Accepted);
+        internal CoverageAcceptRequest AcceptRequest() => new(Policy, Repository, Captured, SupplementaryCaptures, Composed, Accepted);
 
         public void Dispose()
         {

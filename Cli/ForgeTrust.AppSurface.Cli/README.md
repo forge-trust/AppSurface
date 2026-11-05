@@ -1340,7 +1340,7 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV007` | A threshold or tolerance is outside the `0` through `100` range. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, `--min-patch-branch`, or `--tolerance`. |
 | `ASCOV008` | GitHub step summary could not be written. | Check `$GITHUB_STEP_SUMMARY` permissions or add `--no-github-summary`. |
 | `ASCOV009` | The report output path is unsafe. | Use a dedicated artifact directory, not a filesystem root or working directory. |
-| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage, or the diff exceeded 20 MiB. | Fetch the diff base, pass a valid local commit/ref to `--diff-base`, or reduce the comparison size. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
+| `ASCOV010` | The diff base was blank or option-like (began with `-`), the command could not run or read `git diff` for changed-line coverage, or the diff exceeded 20 MiB. | Fetch the diff base, pass a valid local commit/ref to `--diff-base`, or reduce the comparison size. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
 | `ASCOV011` | A patch threshold was set without a patch diff source. | Pass exactly one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
 | `ASCOV012` | Multiple patch diff sources were set. | Keep only one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
 | `ASCOV013` | An external diff file/stdin artifact is missing, unreadable, or larger than 20 MiB. | Regenerate the unified diff artifact or pass a smaller diff. |

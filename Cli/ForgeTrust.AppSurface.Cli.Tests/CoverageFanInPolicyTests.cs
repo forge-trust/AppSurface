@@ -154,6 +154,80 @@ public sealed class CoverageFanInPolicyTests
     }
 
     [Fact]
+    public void PolicyInventoryLimitsAndMissingComponentsAreRejectedWithoutChangingCallerCollections()
+    {
+        var policy = Policy();
+        foreach (var invalid in new[]
+        {
+            policy with { Source = null! }, policy with { Run = null! }, policy with { Gate = null! },
+            policy with { TestProjects = null! }, policy with { Supplements = null! },
+            policy with { TestProjects = [] },
+            policy with { TestProjects = Enumerable.Range(0, 10001).Select(i => $"checks/P{i}.csproj").ToArray() },
+            policy with { Supplements = Enumerable.Range(0, 1024).Select(i => new CoverageSupplement($"p{i}", $"os{i}", "fast")).ToArray() },
+            policy with { Supplements = [new("native", "Linux", "fast", Enumerable.Range(0, 10001).Select(i => $"checks/P{i}.csproj").ToArray())] },
+            policy with { Source = policy.Source with { Commit = null! } },
+            policy with { Source = policy.Source with { Tree = null! } },
+            policy with { Source = policy.Source with { Sdk = null! } },
+            policy with { Instrumentation = new(Format: "opencover") },
+            policy with { Instrumentation = new(Include: "\nprivate-sentinel") }
+        })
+            Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(invalid));
+        Assert.Equal(["tests/Second.csproj", "tests/First.csproj"], policy.TestProjects);
+        var maximum = policy with { TestProjects = Enumerable.Range(0, 10000).Select(i => $"checks/P{i}.csproj").ToArray() };
+        Assert.Equal(10000, CoveragePolicyEncoding.Freeze(maximum).TestProjects.Count);
+        Assert.Equal("[Core]*", CoveragePolicyEncoding.Freeze(policy with { Instrumentation = new(Include: "[Core]*") }).Instrumentation!.Include);
+    }
+
+    [Theory]
+    [InlineData("alpha-_.Z9", "OS-_.9")]
+    [InlineData("a", "z")]
+    public void PolicyProducerTokensAcceptEveryDocumentedAsciiPunctuation(string id, string platform)
+    {
+        var frozen = CoveragePolicyEncoding.Freeze(Policy() with { Supplements = [new(id, platform, "Category=fast")] });
+        Assert.Equal(id, frozen.Supplements[0].Id);
+        Assert.Equal(platform, frozen.Supplements[0].Platform);
+    }
+
+    [Theory]
+    [InlineData("CONIN$")]
+    [InlineData("CONOUT$")]
+    [InlineData("COM9")]
+    [InlineData("LPT9")]
+    [InlineData("COM¹")]
+    [InlineData("LPT²")]
+    [InlineData("COM³")]
+    [InlineData("con.txt")]
+    public void PolicyProjectPathsRejectPortableWindowsDeviceAliases(string component)
+        => Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(Policy() with
+        { TestProjects = [$"checks/{component}/Unit.csproj"] }));
+
+    [Theory]
+    [InlineData("-12.5", "-12.5")]
+    [InlineData("1e2", "100")]
+    [InlineData("-1e2", "-100")]
+    [InlineData("1.25e1", "12.5")]
+    public void LosslessDecimalDecodingRetainsSignAndPositiveExponent(string json, string expected)
+        => Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture),
+            CoveragePolicyEncoding.Decode<decimal>(Utf8(json)));
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("9223372036854775808")]
+    [InlineData("-9223372036854775809")]
+    [InlineData("1.5")]
+    public void LosslessLongDecodingRejectsWrongTypesRangesAndFractions(string json)
+        => Assert.Throws<JsonException>(() => CoveragePolicyEncoding.Decode<long>(Utf8(json)));
+
+    [Fact]
+    public void UnicodeWireStringsRetainPairedSurrogatesAndOrdinaryEscapes()
+    {
+        var decoded = CoveragePolicyEncoding.Decode<CoverageRunIdentity>(Utf8(
+            """{"producerSystem":"local","runScope":"quoted\"path\\x\uD83D\uDE80","runId":"run-1","attempt":1}"""));
+        Assert.Equal("quoted\"path\\x🚀", decoded.RunScope);
+        Assert.NotEmpty(CoveragePolicyEncoding.CanonicalBytes(Policy() with { Run = decoded }));
+    }
+
+    [Fact]
     public void NumericDecodingIsLosslessCanonicalAndRejectsFractionsOrPrecisionLoss()
     {
         var integer = CoveragePolicyEncoding.Decode<CoverageRunIdentity>(Utf8(
@@ -265,6 +339,7 @@ public sealed class CoverageFanInPolicyTests
             original with { Gate = original.Gate with { PatchLineMode = "Codecov" } },
             original with { Gate = new(CoverageGateMode.AggregateAndPatch) },
             original with { Gate = new(CoverageGateMode.AggregateOnly, DiffBase: "main") },
+            original with { Gate = new(CoverageGateMode.AggregateAndPatch, DiffBase: "--output=caller-path") },
             original with { Instrumentation = new(Driver: "reportgenerator") },
             original with { Instrumentation = new(Exclude: " \t") },
             original with { Supplements = [new("", "linux", "fast")] },

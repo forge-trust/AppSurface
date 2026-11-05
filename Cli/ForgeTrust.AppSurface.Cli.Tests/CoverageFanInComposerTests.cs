@@ -144,6 +144,33 @@ public sealed class CoverageFanInComposerTests
         Assert.Equal("2", composed.Root.Attribute("branches-covered")?.Value);
     }
 
+    [Theory]
+    [InlineData("0% (0/2)", 0L)]
+    [InlineData("50% (1/2)", 0L)]
+    [InlineData("100% (2/2)", 2L)]
+    [InlineData("100% (1/1)", 0L)]
+    public void Compose_PromotesPatchLineBranchesOnlyWhenSupplementCompletesRetainedDenominator(
+        string supplementCoverage, long expectedCovered)
+    {
+        var primary = XDocument.Parse("""
+            <coverage><packages><package name="P"><classes><class name="A" filename="src/A.cs"><lines>
+              <line number="7" hits="1" branch="true" condition-coverage="0% (0/2)" />
+            </lines></class></classes></package></packages></coverage>
+            """);
+        var supplement = XDocument.Parse($"""
+            <coverage><packages><package name="P"><classes><class name="A" filename="src/A.cs"><lines>
+              <line number="7" hits="3" branch="true" condition-coverage="{supplementCoverage}" />
+            </lines></class></classes></package></packages></coverage>
+            """);
+
+        var composed = CoverageFanInComposer.Compose([(primary, WindowsRoot), (supplement, WindowsRoot)]);
+        var line = Assert.Single(composed.Descendants("class")).Element("lines")!.Element("line")!;
+
+        Assert.Equal("3", line.Attribute("hits")?.Value);
+        Assert.Equal(expectedCovered, ParseBranchCounts(line.Attribute("condition-coverage")!.Value).Covered);
+        Assert.Equal(2L, ParseBranchCounts(line.Attribute("condition-coverage")!.Value).Valid);
+    }
+
     [Fact]
     public void Compose_ShouldRejectNullAndEmptyInputCollections()
     {
@@ -284,6 +311,24 @@ public sealed class CoverageFanInComposerTests
 
         Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.NormalizePaths(report, WindowsRoot));
 
+        Assert.True(XNode.DeepEquals(original, report));
+    }
+
+    [Fact]
+    public void NormalizePaths_ShouldRejectClassWithoutFilenameBeforeChangingAnyClassPath()
+    {
+        var report = XDocument.Parse("""
+            <coverage><packages><package name="P"><classes>
+              <class name="A" filename="C:\agent\work\src\A.cs" />
+              <class name="B" />
+            </classes></package></packages></coverage>
+            """);
+        var original = new XDocument(report);
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            CoverageFanInComposer.NormalizePaths(report, WindowsRoot));
+
+        Assert.Equal("Coverage path is invalid.", error.Message);
         Assert.True(XNode.DeepEquals(original, report));
     }
 
@@ -472,6 +517,27 @@ public sealed class CoverageFanInComposerTests
         Assert.Equal("src/B.cs", posix.Descendants("class").Single().Attribute("filename")?.Value);
     }
 
+    [Fact]
+    public void NormalizePaths_IgnoresEscapingSourceBasesAndAcceptsFilesystemRootAndTrailingRootSeparator()
+    {
+        var report = XDocument.Parse("""
+            <coverage><sources>
+              <source>C:\outside</source>
+              <source>C:\agent\work\</source>
+            </sources><packages><package name="P"><classes>
+              <class name="A" filename="src/A.cs" />
+            </classes></package></packages></coverage>
+            """);
+        CoverageFanInComposer.NormalizePaths(report, @"C:\agent\work\");
+
+        Assert.Equal("src/A.cs", report.Descendants("class").Single().Attribute("filename")?.Value);
+        Assert.Equal("C:/agent/work/", report.Root!.Element("sources")!.Element("source")!.Value);
+
+        var filesystemRoot = DocumentWithClassPath("src/B.cs");
+        CoverageFanInComposer.NormalizePaths(filesystemRoot, "/");
+        Assert.Equal("src/B.cs", filesystemRoot.Descendants("class").Single().Attribute("filename")?.Value);
+    }
+
     [Theory]
     [InlineData(@"C:\outside\A.cs", @"C:\agent\work")]
     [InlineData(@"C:\agent\work\..\outside\A.cs", @"C:\agent\work")]
@@ -479,6 +545,7 @@ public sealed class CoverageFanInComposerTests
     [InlineData("src//A.cs", @"C:\agent\work")]
     [InlineData("C:src/A.cs", @"C:\agent\work")]
     [InlineData("/agent/work/src/A.cs", @"C:\agent\work")]
+    [InlineData("//server", "//server/share/work")]
     public void NormalizePaths_ShouldRejectAliasesAndEscapes(string filename, string sourceRoot)
     {
         var document = DocumentWithClassPath(filename);
@@ -521,6 +588,30 @@ public sealed class CoverageFanInComposerTests
             CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
         normalized.Descendants("line").First().SetAttributeValue("hits", "3");
         normalized.Root!.SetAttributeValue("branches-valid", "0");
+        Assert.Throws<InvalidDataException>(() =>
+            CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, -1)]
+    public void ValidateNormalization_ShouldRejectNonPositiveRawLineNumbersAndNegativeHits(long number, long hits)
+    {
+        var raw = XDocument.Parse($"""
+            <coverage branches-valid="0"><packages><package name="P"><classes>
+              <class name="Raw" filename="C:\agent\work\src\A.cs"><lines>
+                <line number="{number}" hits="{hits}" branch="false" />
+              </lines></class>
+            </classes></package></packages></coverage>
+            """);
+        var normalized = XDocument.Parse($"""
+            <coverage branches-valid="0"><packages><package name="P"><classes>
+              <class name="Folded" filename="src/A.cs"><lines>
+                <line number="{number}" hits="{hits}" branch="false" />
+              </lines></class>
+            </classes></package></packages></coverage>
+            """);
+
         Assert.Throws<InvalidDataException>(() =>
             CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
     }
@@ -631,6 +722,64 @@ public sealed class CoverageFanInComposerTests
                 ["tests/A.Tests.csproj"],
                 "Release",
                 "collector"));
+    }
+
+    [Theory]
+    [InlineData("non-object-timings")]
+    [InlineData("null-inventory")]
+    [InlineData("empty-inventory")]
+    [InlineData("empty-project")]
+    [InlineData("duplicate-expected-project")]
+    [InlineData("empty-configuration")]
+    [InlineData("empty-driver")]
+    public void ValidatePrimaryTimings_ShouldRejectInvalidCallerInventoryAndIdentity(string scenario)
+    {
+        using var document = JsonDocument.Parse(CreateTimings(
+            [("tests/A.Tests.csproj", 0, "completed", "produced")]));
+        JsonElement timings = document.RootElement;
+        IReadOnlyList<string> expectedProjects = ["tests/A.Tests.csproj"];
+        var configuration = "Release";
+        var driver = "collector";
+
+        switch (scenario)
+        {
+            case "non-object-timings":
+                using (var scalar = JsonDocument.Parse("[]"))
+                    timings = scalar.RootElement.Clone();
+                break;
+            case "null-inventory":
+                expectedProjects = null!;
+                break;
+            case "empty-inventory":
+                expectedProjects = [];
+                break;
+            case "empty-project":
+                expectedProjects = [""];
+                break;
+            case "duplicate-expected-project":
+                expectedProjects = ["tests/A.Tests.csproj", "tests/A.Tests.csproj"];
+                break;
+            case "empty-configuration":
+                configuration = "";
+                break;
+            case "empty-driver":
+                driver = "";
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(scenario));
+        }
+
+        Assert.Throws<InvalidDataException>(() =>
+            CoverageFanInComposer.ValidatePrimaryTimings(timings, expectedProjects, configuration, driver));
+    }
+
+    private static (long Covered, long Valid) ParseBranchCounts(string value)
+    {
+        var open = value.IndexOf('(');
+        var slash = value.IndexOf('/');
+        var close = value.IndexOf(')');
+        return (long.Parse(value.AsSpan(open + 1, slash - open - 1), System.Globalization.CultureInfo.InvariantCulture),
+            long.Parse(value.AsSpan(slash + 1, close - slash - 1), System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private static XDocument MethodNormalizationRaw() => XDocument.Parse("""
