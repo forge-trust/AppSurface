@@ -5,6 +5,13 @@ internal static class NativeEvidenceTestDirectory
 {
     internal static void Delete(string root)
     {
+        var rootAttributes = File.GetAttributes(root);
+        if (rootAttributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            Directory.Delete(root);
+            return;
+        }
+
         foreach (var path in Directory.EnumerateFileSystemEntries(root))
         {
             var attributes = File.GetAttributes(path);
@@ -23,7 +30,6 @@ internal static class NativeEvidenceTestDirectory
             }
         }
 
-        var rootAttributes = File.GetAttributes(root);
         if (rootAttributes.HasFlag(FileAttributes.ReadOnly)) File.SetAttributes(root, rootAttributes & ~FileAttributes.ReadOnly);
         Directory.Delete(root);
     }

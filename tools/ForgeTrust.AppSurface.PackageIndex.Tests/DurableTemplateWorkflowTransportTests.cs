@@ -150,6 +150,8 @@ public sealed class DurableTemplateWorkflowTransportTests
         {
             var publisher = File.ReadAllText(WorkflowPath(workflowName));
             Assert.Contains("artifact-ids: ${{ needs.durable-template-evidence.outputs.receipt_artifact_ids }}", publisher, StringComparison.Ordinal);
+            Assert.Contains("verify-durable-template-evidence", publisher, StringComparison.Ordinal);
+            Assert.Contains(publishCommand, publisher, StringComparison.Ordinal);
             Assert.True(publisher.IndexOf("verify-durable-template-evidence", StringComparison.Ordinal)
                 < publisher.IndexOf(publishCommand, StringComparison.Ordinal),
                 $"{workflowName} must verify Durable template evidence before publishing.");

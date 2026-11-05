@@ -323,6 +323,13 @@ public sealed class RepositoryGitChangesTests : IDisposable
         Assert.False(Directory.Exists(owned));
         Assert.Equal("preserve external bytes", File.ReadAllText(sentinel));
         Assert.True(File.GetAttributes(sentinel).HasFlag(FileAttributes.ReadOnly));
+
+        var rootLink = Path.Join(_root, "cleanup-root-link");
+        Directory.CreateSymbolicLink(rootLink, outside);
+        NativeEvidenceTestDirectory.Delete(rootLink);
+        Assert.False(Directory.Exists(rootLink));
+        Assert.Equal("preserve external bytes", File.ReadAllText(sentinel));
+        Assert.True(File.GetAttributes(sentinel).HasFlag(FileAttributes.ReadOnly));
     }
 
     private void Initialize()
