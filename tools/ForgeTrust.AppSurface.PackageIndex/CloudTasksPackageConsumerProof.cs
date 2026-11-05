@@ -49,7 +49,7 @@ internal sealed class CloudTasksPackageConsumerProof
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(artifacts);
-        var proofPath = Path.Combine(request.ArtifactsDirectory, ReportFileName);
+        var proofPath = Path.Join(request.ArtifactsDirectory, ReportFileName);
         if (File.Exists(proofPath)) File.Delete(proofPath);
         if (!string.Equals(artifacts.PackageVersion, request.PackageVersion, StringComparison.OrdinalIgnoreCase))
             throw new PackageIndexException("Cloud Tasks packed proof package version does not match the validated artifact report.");

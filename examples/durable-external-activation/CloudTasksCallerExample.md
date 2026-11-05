@@ -6,6 +6,8 @@ This example shows how a GCP-targeted caller can compose the optional [Cloud Tas
 
 Register the metadata token source explicitly before the activation client. The metadata source obtains the caller's Cloud Run OAuth token for creating the Cloud Task. It is separate from the OIDC identity that Cloud Tasks will use when it dispatches to the worker.
 
+Use an existing target queue and give the caller identity `cloudtasks.tasks.create` for that queue plus `iam.serviceAccounts.actAs` for the selected worker OIDC service account. See the [creator permission and identity requirements](../../Durable/cloudtasks-activation.md#caller-token-versus-worker-oidc-identity) for the corresponding role and the separate worker authorization contract.
+
 ```csharp
 using ForgeTrust.AppSurface.Durable.CloudTasks;
 using Microsoft.Extensions.DependencyInjection;

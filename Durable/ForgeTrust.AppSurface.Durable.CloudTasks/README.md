@@ -6,21 +6,21 @@ This public preview package depends on the official Google Cloud Tasks client an
 
 ## Proof-first quickstart
 
-Use the repository's .NET SDK 10.0.402 with the .NET 10.0.13 runtime. The local SDK transport cases were also verified with .NET 10.0.2. The two-case local fixture proof below exercises a valid successful creation and a response lost after simulated acceptance. It requires no Docker and makes no Google API calls:
+Use the repository's .NET SDK 10.0.402 with the .NET 10.0.13 runtime. The local SDK transport cases were also verified with .NET 10.0.2. The command below runs the full local HTTP/2 transport theory, including successful creation and a response lost after simulated acceptance. It requires no Docker and makes no Google API calls:
 
 ```bash
 dotnet restore Durable/ForgeTrust.AppSurface.Durable.CloudTasks.Tests/ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj --locked-mode
 dotnet test Durable/ForgeTrust.AppSurface.Durable.CloudTasks.Tests/ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj --no-restore --filter 'FullyQualifiedName~SdkHttp2Tests.OfficialSdkRespectsBoundedTransport'
 ```
 
-The fixture asserts this synthetic task name: `projects/proof-project/locations/us-central1/queues/proof-queue/tasks/proof-task`.
+The fixture asserts this synthetic task name: `projects/proof-project/locations/us-central1/queues/proof-queue/tasks/proof-task`. The table highlights two outcomes from the theory:
 
 | Case | Token calls / SDK calls / wire requests | Fixture acceptances | Receipt |
 | --- | --- | --- | --- |
 | `success` | 1 / 1 / 1 | 1 | `Created/ASCT001` |
 | `response-lost` | 1 / 1 / 1 | 1 | `Indeterminate/ASCT305` |
 
-That filtered theory also checks response bounds and protocol-declared pre-acceptance replays. Its assertions measure SDK RPC invocations with an interceptor on the real SDK call invoker, separately from token calls, HTTP-handler sends, and wire requests; they also verify the exact expected name and safe receipt without printing credentials. A human should be able to complete this local two-case proof in under five minutes; that is an unmeasured usability target, not a result or release gate.
+That filtered theory also checks response bounds and protocol-declared pre-acceptance replays. Its assertions measure SDK RPC invocations with an interceptor on the real SDK call invoker, separately from token calls, HTTP-handler sends, and wire requests; they also verify the exact expected name and safe receipt without printing credentials. A human should be able to complete this local proof in under five minutes; that is an unmeasured usability target, not a result or release gate.
 
 Run `scripts/verify-cloudtasks-activation.sh` for the broader proof, including reference-host and persisted PostgreSQL Work composition plus packed GCP and neutral consumers. That full path requires Docker for the PostgreSQL host fixture. It is still local-only and does not call Google or publish.
 
