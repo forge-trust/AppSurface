@@ -42,29 +42,41 @@ internal static partial class CoverageFanInEngine
         await writers.Output.WriteLineAsync("Coverage collection completed; validating retained producer evidence.").ConfigureAwait(false);
         await VerifySourceAsync(r, token).ConfigureAwait(false);
         string? raw = null;
+        string? timingsHash = null;
+        IReadOnlyDictionary<string, string>? reportHashes = null;
+        IReadOnlyDictionary<string, string>? rawSet = null;
         if (producer is not null)
         {
-            var reports = Directory.EnumerateFiles(collection, "coverage.cobertura.xml", SearchOption.AllDirectories)
-                // The runner retains both the original attachment and a canonical
-                // per-project copy. Only the attachment is original collector evidence.
-                .Where(x => Path.GetRelativePath(collection, x).Split(Path.DirectorySeparatorChar)
-                    .Contains("collector-results", StringComparer.Ordinal)).Take(2).ToArray();
-            if (reports.Length != 1) throw new InvalidDataException("Native collection requires exactly one retained original collector report.");
-            raw = reports[0];
+            var reports = FindNativeReports(collection, projects, r.Expected, token, hash => timingsHash = hash,
+                hashes => reportHashes = hashes);
+            if (projects.Length == 1) raw = reports[projects[0]];
+            else rawSet = reports;
         }
         var captureRequest = r with
         {
-            CoveragePath = result.CoveragePath,
-            TimingsPath = producer is null ? Path.Join(collection, "timings.json") : null,
-            RawCoveragePath = raw
+            CoveragePath = rawSet is null ? result.CoveragePath : null,
+            TimingsPath = producer is null || rawSet is not null ? Path.Join(collection, "timings.json") : null,
+            RawCoveragePath = raw,
+            RawCoveragePaths = rawSet
         };
         using var io = new CoverageFanInIO(r.Expected.Bounds, token);
         io.Acquire(InputDirectories("capture", captureRequest).Select(x => (x, false)), requireCoordination: false);
+        if (timingsHash is not null && CoverageFanInIO.Hash(io.Read(Path.Join(collection, "timings.json"))) != timingsHash)
+            throw new InvalidDataException("Collected project-to-attachment timing binding changed before capture.");
+        if (reportHashes is not null) VerifySelectedNativeReports(io, reportHashes);
         state.Observation = "CollectedExecution";
         var files = Capture(captureRequest, io, state);
         io.VerifyBindings();
         io.AdmitOutput(files.Values);
         await PublishAsync(r, "capture", files, state, token, io).ConfigureAwait(false);
         return state.Result("Succeeded");
+    }
+
+    /// <summary>Binds selection-time original report bytes to the retained capture IO through publication.</summary>
+    internal static void VerifySelectedNativeReports(CoverageFanInIO io, IReadOnlyDictionary<string, string> hashes)
+    {
+        foreach (var (path, hash) in hashes)
+            if (CoverageFanInIO.Hash(io.Read(path, xml: true)) != hash)
+                throw new InvalidDataException("Selected collector attachment changed before capture.");
     }
 }

@@ -77,16 +77,18 @@ public sealed record CoverageFanInPolicy(CoverageSourceIdentity Source, Coverage
 /// <param name="RepositoryRoot">Matching clean local Git source.</param>
 /// <param name="OutputDirectory">Fresh owned capture destination, unless replacement is explicitly requested.</param>
 /// <param name="ProducerId">primary, or an exact supplementary producer ID.</param>
-/// <param name="CoveragePath">Successful normalized Cobertura report; absent for import.</param>
-/// <param name="TimingsPath">Complete successful primary inventory; absent for native/import.</param>
-/// <param name="RawCoveragePath">Original native collector bytes; absent for primary/import.</param>
+/// <param name="CoveragePath">Successful normalized Cobertura report; absent for import or indexed native capture.</param>
+/// <param name="TimingsPath">Complete successful primary or indexed native inventory; absent for single-report native/import.</param>
+/// <param name="RawCoveragePath">Original collector bytes for a single-project native producer; absent for primary/import/indexed native.</param>
 /// <param name="ImportDirectory">Explicit portable capture to validate/materialize; mutually exclusive with report paths.</param>
 /// <param name="OriginalSourceRoot">Exact original root mapping for imported evidence.</param>
 /// <param name="OutputMode">Fresh-only default.</param>
+/// <param name="RawCoveragePaths">For a native inventory with multiple projects, exact project-to-original-collector paths instead of RawCoveragePath. Requires complete TimingsPath.</param>
 public sealed record CoverageCaptureRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string OutputDirectory, string ProducerId, string? CoveragePath = null, string? TimingsPath = null,
     string? RawCoveragePath = null, string? ImportDirectory = null, string? OriginalSourceRoot = null,
-    CoverageOutputMode OutputMode = CoverageOutputMode.Fresh);
+    CoverageOutputMode OutputMode = CoverageOutputMode.Fresh,
+    IReadOnlyDictionary<string, string>? RawCoveragePaths = null);
 /// <summary>Collect the complete explicit inventory or declared native filter through the existing supervised engine.</summary>
 public sealed record CoverageCollectRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string OutputDirectory, string CollectionDirectory, string ProducerId, int DeadlineSeconds,

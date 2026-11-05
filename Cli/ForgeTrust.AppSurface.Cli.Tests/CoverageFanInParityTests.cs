@@ -326,9 +326,11 @@ public sealed class CoverageFanInParityTests
             fixture.Policy = new(new(commit, tree, sdk, "Release"),
                 new("local", "issue-897-parity", Guid.NewGuid().ToString("N"), 1),
                 ["checks/Unit.csproj", "checks/Integration.csproj"],
-                [new("native-linux", "Linux", "Category=platform"),
-                 new("native-windows", "Windows", "Category=platform"),
-                 new("native-darwin", "Darwin", "Category=platform")],
+                // Each portable synthetic capture below contains one original collector
+                // report. Declare that inventory explicitly; omission means both primary projects.
+                [new("native-linux", "Linux", "Category=platform", ["checks/Integration.csproj"]),
+                 new("native-windows", "Windows", "Category=platform", ["checks/Integration.csproj"]),
+                 new("native-darwin", "Darwin", "Category=platform", ["checks/Integration.csproj"])],
                 new(CoverageGateMode.AggregateOnly));
             fixture.Temp.WriteFile("producer/coverage.xml", ReportText);
             fixture.Temp.WriteFile("producer/timings.json", TimingsJson(fixture.Policy));

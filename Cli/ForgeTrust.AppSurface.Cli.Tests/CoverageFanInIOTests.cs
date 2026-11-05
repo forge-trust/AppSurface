@@ -172,6 +172,74 @@ public sealed class CoverageFanInIOTests
     }
 
     [Fact]
+    public void OutputCustodyRejectsRepeatedBindingInputAliasesAndMissingParents()
+    {
+        using var temp = TestDirectory.Create();
+        var input = temp.CreateDirectory("input");
+        var output = Path.Join(temp.Path, "output");
+        using var io = new CoverageFanInIO(Bounds(), CancellationToken.None);
+        io.Acquire([(input, false)], requireCoordination: false);
+        Assert.Throws<InvalidDataException>(() => io.BindOutput(input, false, () => { }));
+        Assert.Throws<DirectoryNotFoundException>(() => io.BindOutput(Path.Join(temp.Path, "missing", "output"), false, () => { }));
+        var created = 0;
+        var lease = io.BindOutput(output, false, () => created++);
+        Assert.True(lease.IsExclusive);
+        Assert.Equal(1, created);
+        Assert.Throws<InvalidOperationException>(() => io.BindOutput(Path.Join(temp.Path, "other"), false, () => { }));
+        io.VerifyBindings();
+    }
+
+    [Fact]
+    public void AcquiringOutputCustodyCannotAdoptOrEraseOccupiedOutput()
+    {
+        using var temp = TestDirectory.Create();
+        var output = Path.Join(temp.Path, "output");
+        using (CoverageRunOutputLease.AcquireArtifactDirectory(output, true, true)) { }
+        var path = Path.Join(output, "foreign.json"); File.WriteAllText(path, "preserve");
+        using var io = new CoverageFanInIO(Bounds(), CancellationToken.None);
+        Assert.Throws<IOException>(() => io.BindOutput(output, false, () => throw new InvalidOperationException()));
+        var lease = io.BindOutput(output, true, () => throw new InvalidOperationException());
+        Assert.True(lease.IsExclusive);
+        Assert.Equal("preserve", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void RetainedStreamHashRejectsGrowthAndHonorsCancellation()
+    {
+        using var exact = new MemoryStream("1234"u8.ToArray());
+        Assert.Equal(CoverageFanInIO.Hash("1234"u8.ToArray()), CoverageFanInIO.HashStream(exact, 4, CancellationToken.None));
+        exact.Position = 0;
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIO.HashStream(exact, 3, CancellationToken.None));
+        exact.Position = 0;
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => CoverageFanInIO.HashStream(exact, 4, cancelled.Token));
+        using var io = new CoverageFanInIO(Bounds(total: 3), CancellationToken.None);
+        Assert.Throws<InvalidDataException>(() => io.AdmitOutput([new byte[4]]));
+    }
+
+    [Fact]
+    public void RetainedInputNewObjectOrTruncationCannotReuseItsAdmittedBytes()
+    {
+        if (OperatingSystem.IsWindows()) return; // Windows denies the competing writer while handles are retained.
+        using var temp = TestDirectory.Create();
+        var root = temp.CreateDirectory("input");
+        var path = Path.Join(root, "input.json"); File.WriteAllText(path, "original");
+        using (var io = new CoverageFanInIO(Bounds(), CancellationToken.None))
+        {
+            io.Acquire([(root, false)], requireCoordination: false);
+            _ = io.Read(path);
+            File.Move(path, Path.Join(root, "retained-original.json"));
+            File.WriteAllText(path, "original");
+            Assert.Throws<IOException>(io.VerifyBindings);
+        }
+        using var truncated = new CoverageFanInIO(Bounds(), CancellationToken.None);
+        truncated.Acquire([(root, false)], requireCoordination: false);
+        _ = truncated.Read(path);
+        File.WriteAllText(path, "short");
+        Assert.Throws<IOException>(truncated.VerifyBindings);
+    }
+
+    [Fact]
     public void RetainedInputReplacementOrSameObjectModificationFailsFinalBindingChecks()
     {
         using var temp = TestDirectory.Create();

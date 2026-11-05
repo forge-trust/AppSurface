@@ -41,7 +41,9 @@ internal static partial class CoverageFanInEngine
             if (operation == "collect") return await CollectAsync(request, writers, state, deadline.Token).ConfigureAwait(false);
             using var io = new CoverageFanInIO(request.Expected.Bounds, deadline.Token);
             var inputs = InputDirectories(operation, request);
-            RejectOverlap(inputs, request.OutputDirectory);
+            if (operation == "capture")
+                foreach (var input in inputs) RejectOverlap([input], request.OutputDirectory);
+            else RejectOverlap(inputs, request.OutputDirectory);
             io.Acquire(inputs.Select(path => (path, false)), requireCoordination: operation != "capture");
             Dictionary<string, byte[]> files;
             if (operation == "capture") files = Capture(request, io, state);
@@ -124,11 +126,15 @@ internal static partial class CoverageFanInEngine
             _ = Producer(r);
             if (r.ImportDirectory is not null)
             {
-                if (r.CoveragePath is not null || r.TimingsPath is not null || r.RawCoveragePath is not null
+                if (r.CoveragePath is not null || r.TimingsPath is not null || r.RawCoveragePath is not null || r.RawCoveragePaths is not null
                     || string.IsNullOrWhiteSpace(r.OriginalSourceRoot)) throw new ArgumentException("Import selectors conflict.");
             }
-            else if (string.IsNullOrWhiteSpace(r.CoveragePath) || (r.ProducerId == "primary"
-                ? r.TimingsPath is null || r.RawCoveragePath is not null : r.RawCoveragePath is null || r.TimingsPath is not null))
+            else if ((r.RawCoveragePaths is null ? string.IsNullOrWhiteSpace(r.CoveragePath) : r.CoveragePath is not null)
+                || (r.ProducerId == "primary"
+                ? r.TimingsPath is null || r.RawCoveragePath is not null || r.RawCoveragePaths is not null
+                : r.RawCoveragePaths is not null
+                    ? r.RawCoveragePath is not null || r.TimingsPath is null
+                    : r.RawCoveragePath is null || r.TimingsPath is not null))
                 throw new ArgumentException("Producer inputs incomplete.");
         }
         if (operation is "compose" or "accept" or "verify")
@@ -153,7 +159,7 @@ internal static partial class CoverageFanInEngine
     private static List<string> InputDirectories(string operation, CoverageFanInEngineRequest r)
     {
         if (operation == "capture") return r.ImportDirectory is not null ? [Full(r.ImportDirectory)] :
-            new[] { r.CoveragePath, r.TimingsPath, r.RawCoveragePath }.Where(x => x is not null)
+            new[] { r.CoveragePath, r.TimingsPath, r.RawCoveragePath }.Concat(r.RawCoveragePaths?.Values ?? []).Where(x => x is not null)
                 .Select(x => Path.GetDirectoryName(Full(x!))!).Distinct(StringComparer.Ordinal).ToList();
         var paths = new List<string> { Full(r.PrimaryCaptureDirectory!) };
         paths.AddRange(r.SupplementaryCaptureDirectories!.Select(Full));

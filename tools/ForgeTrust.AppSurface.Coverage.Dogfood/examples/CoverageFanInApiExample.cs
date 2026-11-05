@@ -65,6 +65,40 @@ public static class CoverageFanInApiExample
                 RawCoveragePath: rawCollectorCoveragePath),
             cancellationToken);
 
+    /// <summary>
+    /// Captures a multi-project native supplement from its exact project-to-original-report inventory and
+    /// complete successful collection timings. The capture retains byte-exact originals as
+    /// <c>collector-0000.cobertura.xml</c>, <c>collector-0001.cobertura.xml</c>, and so on, plus
+    /// <c>collector-inventory.json</c> and <c>timings.json</c>; its normalized projection is derived from
+    /// those originals and independently verified.
+    /// </summary>
+    /// <remarks>
+    /// Keys must exactly match the supplement's declared test-project set, and each value must identify that
+    /// project's original collector attachment. The capture orders index records ordinally. Native inventories
+    /// support at most 9,995 projects because the unchanged 10,000-file storage inventory also reserves entries for the
+    /// projection, timings, index, manifest, and completion marker. Use <see cref="CaptureNativeAsync"/>
+    /// for a single-project supplement.
+    /// </remarks>
+    public static ValueTask<CoverageFanInResult> CaptureNativeSetAsync(
+        CoverageFanInPolicy policy,
+        string repositoryRoot,
+        string outputDirectory,
+        string supplementId,
+        IReadOnlyDictionary<string, string> rawCoveragePaths,
+        string timingsPath,
+        CancellationToken cancellationToken = default) =>
+        CoverageFanIn.CaptureAsync(
+            new CoverageCaptureRequest(
+                policy,
+                repositoryRoot,
+                outputDirectory,
+                supplementId,
+                CoveragePath: null,
+                TimingsPath: timingsPath,
+                RawCoveragePath: null,
+                RawCoveragePaths: rawCoveragePaths),
+            cancellationToken);
+
     /// <summary>Materializes a transported v2 capture into new local custody without changing its observation.</summary>
     public static ValueTask<CoverageFanInResult> ImportPortableSupplementAsync(
         CoverageFanInPolicy policy,

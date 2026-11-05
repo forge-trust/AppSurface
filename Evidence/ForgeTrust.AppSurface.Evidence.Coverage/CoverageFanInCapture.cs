@@ -15,27 +15,37 @@ internal static partial class CoverageFanInEngine
                 throw new InvalidDataException("Original source-root mapping differs.");
             state.Imported = true;
             state.Observation = imported.Manifest.GetProperty("observation").GetString();
-            return new(StringComparer.Ordinal)
+            var importedFiles = new Dictionary<string, byte[]>(imported.AuxiliaryFiles, StringComparer.Ordinal)
             {
                 [CoverageName] = imported.CoverageBytes,
-                [imported.AuxiliaryName] = imported.AuxiliaryBytes,
                 [ManifestName] = io.Read(Path.Join(r.ImportDirectory, ManifestName))
             };
+            return importedFiles;
         }
-        var rawCoverage = io.Read(r.CoveragePath!, xml: true);
-        var document = io.Xml(rawCoverage, allowInertGeneratorDoctype: true);
-        var auxiliaryName = r.ProducerId == "primary" ? "timings.json" : "collector.cobertura.xml";
-        var auxiliary = io.Read(r.ProducerId == "primary" ? r.TimingsPath! : r.RawCoveragePath!, xml: r.ProducerId != "primary");
-        if (r.ProducerId == "primary")
-            CoverageFanInComposer.ValidatePrimaryTimings(Parse(auxiliary), r.Expected.TestProjects, r.Expected.Configuration,
-                r.Expected.Instrumentation.GetProperty("driver").GetString()!);
+        XDocument document;
+        Dictionary<string, byte[]> auxiliaryFiles;
+        if (r.RawCoveragePaths is not null)
+        {
+            (document, auxiliaryFiles) = CaptureNativeSet(r, io);
+        }
         else
         {
-            var raw = io.Xml(auxiliary, allowInertGeneratorDoctype: true);
-            document = CoverageFanInComposer.RetainCollectorMethods(raw, document, Full(r.RepositoryRoot));
-            CoverageFanInComposer.ValidateNormalization(raw, document, Full(r.RepositoryRoot));
-            CoverageFanInIndependentVerifier.VerifyNormalization(raw, document, Full(r.RepositoryRoot));
-            CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, document, Full(r.RepositoryRoot));
+            document = io.Xml(io.Read(r.CoveragePath!, xml: true), allowInertGeneratorDoctype: true);
+            var auxiliaryName = r.ProducerId == "primary" ? "timings.json" : "collector.cobertura.xml";
+            var auxiliary = io.Read(r.ProducerId == "primary" ? r.TimingsPath! : r.RawCoveragePath!, xml: r.ProducerId != "primary");
+            auxiliaryFiles = new(StringComparer.Ordinal) { [auxiliaryName] = auxiliary };
+            if (r.ProducerId == "primary")
+                CoverageFanInComposer.ValidatePrimaryTimings(Parse(auxiliary), r.Expected.TestProjects, r.Expected.Configuration,
+                    r.Expected.Instrumentation.GetProperty("driver").GetString()!);
+            else
+            {
+                if (NativeProjects(r).Length != 1) throw new InvalidDataException("Multiple native projects require indexed originals and timings.");
+                var raw = io.Xml(auxiliary, allowInertGeneratorDoctype: true);
+                document = CoverageFanInComposer.RetainCollectorMethods(raw, document, Full(r.RepositoryRoot));
+                CoverageFanInComposer.ValidateNormalization(raw, document, Full(r.RepositoryRoot));
+                CoverageFanInIndependentVerifier.VerifyNormalization(raw, document, Full(r.RepositoryRoot));
+                CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, document, Full(r.RepositoryRoot));
+            }
         }
         // Validate measurable points even for a capture that will not be composed in this invocation.
         _ = CoverageFanInComposer.Compose([(document, Full(r.RepositoryRoot))]);
@@ -58,10 +68,13 @@ internal static partial class CoverageFanInEngine
             platform = producer is null ? Platform() : producer.Value.GetProperty("platform").GetString(),
             filter = producer?.GetProperty("filter").GetString(),
             observation = state.Observation,
-            files = new Dictionary<string, string>(StringComparer.Ordinal)
-            { [CoverageName] = CoverageFanInIO.Hash(coverage), [auxiliaryName] = CoverageFanInIO.Hash(auxiliary) }
+            files = auxiliaryFiles.ToDictionary(item => item.Key, item => CoverageFanInIO.Hash(item.Value), StringComparer.Ordinal)
+                .Append(new KeyValuePair<string, string>(CoverageName, CoverageFanInIO.Hash(coverage)))
+                .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal)
         });
-        return new(StringComparer.Ordinal) { [CoverageName] = coverage, [auxiliaryName] = auxiliary, [ManifestName] = manifest };
+        auxiliaryFiles.Add(CoverageName, coverage);
+        auxiliaryFiles.Add(ManifestName, manifest);
+        return auxiliaryFiles;
     }
 
     private static List<CoverageFanInBundle> LoadSet(CoverageFanInEngineRequest r, CoverageFanInIO io)
@@ -104,39 +117,50 @@ internal static partial class CoverageFanInEngine
             || manifest.GetProperty("filter").GetString() != supplement.Value.GetProperty("filter").GetString())
             || supplement is null && manifest.GetProperty("filter").ValueKind != JsonValueKind.Null)
             throw new InvalidDataException("Capture platform or instrumentation differs.");
-        var auxiliaryName = producerId == "primary" ? "timings.json" : "collector.cobertura.xml";
         var coverage = io.Read(Path.Join(directory, CoverageName), xml: true);
-        var auxiliary = io.Read(Path.Join(directory, auxiliaryName), xml: producerId != "primary");
         var files = manifest.GetProperty("files");
-        ExactProperties(files, [CoverageName, auxiliaryName]);
-        if (files.GetProperty(CoverageName).GetString() != CoverageFanInIO.Hash(coverage)
-            || files.GetProperty(auxiliaryName).GetString() != CoverageFanInIO.Hash(auxiliary))
-            throw new InvalidDataException("Capture integrity differs.");
         var document = io.Xml(coverage);
+        Dictionary<string, byte[]> auxiliaryFiles;
+        var bundleRequest = r with { ProducerId = producerId };
+        if (producerId != "primary" && files.TryGetProperty("collector-inventory.json", out _))
+            auxiliaryFiles = LoadNativeSet(bundleRequest, io, directory, document, sourceRoot, files);
+        else
+        {
+            var auxiliaryName = producerId == "primary" ? "timings.json" : "collector.cobertura.xml";
+            ExactProperties(files, [CoverageName, auxiliaryName]);
+            if (producerId != "primary" && NativeProjects(bundleRequest).Length != 1)
+                throw new InvalidDataException("Single-report capture cannot satisfy multiple native projects.");
+            auxiliaryFiles = new(StringComparer.Ordinal)
+            { [auxiliaryName] = io.Read(Path.Join(directory, auxiliaryName), xml: producerId != "primary") };
+        }
+        if (files.GetProperty(CoverageName).GetString() != CoverageFanInIO.Hash(coverage)
+            || auxiliaryFiles.Any(item => files.GetProperty(item.Key).GetString() != CoverageFanInIO.Hash(item.Value)))
+            throw new InvalidDataException("Capture integrity differs.");
         if (producerId == "primary")
         {
-            CoverageFanInIndependentVerifier.VerifyPrimaryInventory(Parse(auxiliary),
+            CoverageFanInIndependentVerifier.VerifyPrimaryInventory(Parse(auxiliaryFiles["timings.json"]),
                 r.Expected.TestProjects, r.Expected.Configuration, r.Expected.Instrumentation.GetProperty("driver").GetString()!);
             // Portable capture has the same measurable-point admission as a fresh producer.
             // Matching transport hashes cannot make malformed coverage a successful capture.
             _ = CoverageFanInComposer.Compose([(document, sourceRoot)]);
         }
-        else
+        else if (!auxiliaryFiles.ContainsKey("collector-inventory.json"))
         {
-            var raw = io.Xml(auxiliary, allowInertGeneratorDoctype: true);
+            var raw = io.Xml(auxiliaryFiles["collector.cobertura.xml"], allowInertGeneratorDoctype: true);
             CoverageFanInIndependentVerifier.VerifyNormalization(raw, document, sourceRoot);
             CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, document, sourceRoot);
         }
-        if (localCustody) VerifyGeneration(r, io, directory, "capture", [CoverageName, auxiliaryName, ManifestName]);
+        var payloadNames = auxiliaryFiles.Keys.Append(CoverageName).Append(ManifestName).ToArray();
+        if (localCustody) VerifyGeneration(r, io, directory, "capture", payloadNames);
         else
         {
             // Explicit import grants no deletion or adoption rights over the transport tree.
             // Uploads may retain local completion metadata, which never grants receiving-host custody.
-            var names = new List<string> { CoverageName, auxiliaryName, ManifestName };
+            var names = payloadNames.ToList();
             if (File.Exists(Path.Join(directory, CoverageFanInIO.CompletionName))) names.Add(CoverageFanInIO.CompletionName);
             io.ExactInventory(directory, names);
         }
-        return new(Full(directory), manifest, CoverageFanInIO.Hash(manifestBytes), document, coverage, auxiliary, auxiliaryName);
+        return new(Full(directory), manifest, CoverageFanInIO.Hash(manifestBytes), document, coverage, auxiliaryFiles);
     }
     private static void ExactProperties(JsonElement value, IReadOnlyList<string> expected)
     {

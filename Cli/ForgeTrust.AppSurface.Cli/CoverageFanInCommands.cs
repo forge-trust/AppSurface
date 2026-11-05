@@ -400,6 +400,7 @@ internal sealed record CoverageFanInCliResult(string Operation, CoverageOperatio
     {
         "acceptance.json" => "acceptance",
         "collector.cobertura.xml" => "collectorCoverage",
+        "collector-inventory.json" => "collectorInventory",
         "composed-gate.json" => "composedGate",
         "composed-gate.md" => "composedGateSummary",
         "coverage.cobertura.xml" => "coverage",
@@ -412,6 +413,7 @@ internal sealed record CoverageFanInCliResult(string Operation, CoverageOperatio
         "rejection.json" => "rejection",
         "timings.json" => "timings",
         "verification.json" => "verification",
+        _ when role.StartsWith("collector-", StringComparison.Ordinal) && role.EndsWith(".cobertura.xml", StringComparison.Ordinal) => "collectorCoverage",
         _ => "artifact",
     };
 }
@@ -486,13 +488,16 @@ internal static class CoverageFanInRequestReader
                 if (capture.ImportDirectory is not null)
                 {
                     if (!HasText(capture.OriginalSourceRoot) || capture.CoveragePath is not null
-                        || capture.TimingsPath is not null || capture.RawCoveragePath is not null)
+                        || capture.TimingsPath is not null || capture.RawCoveragePath is not null || capture.RawCoveragePaths is not null)
                         throw new CoverageFanInCliInputException();
                 }
-                else if (!HasText(capture.CoveragePath) || capture.OriginalSourceRoot is not null
+                else if ((capture.RawCoveragePaths is null ? !HasText(capture.CoveragePath) : capture.CoveragePath is not null)
+                    || capture.OriginalSourceRoot is not null
                     || (capture.ProducerId == "primary"
-                        ? !HasText(capture.TimingsPath) || capture.RawCoveragePath is not null
-                        : !HasText(capture.RawCoveragePath) || capture.TimingsPath is not null))
+                        ? !HasText(capture.TimingsPath) || capture.RawCoveragePath is not null || capture.RawCoveragePaths is not null
+                        : capture.RawCoveragePaths is not null
+                            ? !HasText(capture.TimingsPath) || capture.RawCoveragePath is not null
+                            : !HasText(capture.RawCoveragePath) || capture.TimingsPath is not null))
                 {
                     throw new CoverageFanInCliInputException();
                 }
@@ -615,6 +620,16 @@ internal static class CoverageFanInRequestReader
         {
             if (value.ValueKind != JsonValueKind.String || !StrictCoverageEnumConverterFactory.IsToken(type, value.GetString()))
                 throw new CoverageFanInCliInputException();
+            return;
+        }
+        if (type == typeof(IReadOnlyDictionary<string, string>))
+        {
+            if (value.ValueKind != JsonValueKind.Object) throw new CoverageFanInCliInputException();
+            foreach (var member in value.EnumerateObject())
+            {
+                if (string.IsNullOrWhiteSpace(member.Name)) throw new CoverageFanInCliInputException();
+                ValidateValue(typeof(string), member.Value, null);
+            }
             return;
         }
         if (type.IsArray || type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>))

@@ -1014,6 +1014,78 @@ public sealed class CoverageFanInCommandTests
         Assert.Equal(operation, terminal.RootElement.GetProperty("operation").GetString());
     }
 
+    [Theory]
+    [InlineData("missing-parent")]
+    [InlineData("request-directory")]
+    [InlineData("linked-request")]
+    public async Task RequestFileMustBeARegularFileInAnExistingUnlinkedDirectory(string defect)
+    {
+        using var root = TestDirectory.Create();
+        var request = root.WriteFile("request.json", CaptureEnvelope(root.Path));
+        if (defect == "missing-parent") request = Path.Join(root.Path, "missing", "request.json");
+        else if (defect == "request-directory") request = root.CreateDirectory("directory.json");
+        else
+        {
+            var target = request;
+            request = Path.Join(root.Path, "linked.json");
+            TestFileSystem.CreateFileLinkOrSkip(request, target);
+        }
+        var output = Path.Join(root.Path, "result.json");
+        using var console = new FakeInMemoryConsole();
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await new CoverageFanInCaptureCommand
+        { Request = request, Result = output, Json = true }.ExecuteAsync(console, CancellationToken.None));
+        Assert.Equal(2, error.ExitCode);
+        Assert.False(File.Exists(output));
+        Assert.DoesNotContain(root.Path, console.ReadOutputString() + console.ReadErrorString());
+    }
+
+    [Theory]
+    [InlineData("json")]
+    [InlineData("unauthorized")]
+    [InlineData("invalidData")]
+    public async Task SynchronousDependencyInputFaultsStayRedactedAndCannotCommitAResult(string fault)
+    {
+        using var root = TestDirectory.Create();
+        var request = root.WriteFile("request.json", CaptureEnvelope(root.Path));
+        var output = Path.Join(root.Path, "result.json");
+        using var console = new FakeInMemoryConsole();
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await new TypedInputFaultCommand(fault)
+        { Request = request, Result = output, Json = true }.ExecuteAsync(console, CancellationToken.None));
+        Assert.Equal(2, error.ExitCode);
+        Assert.False(File.Exists(output));
+        Assert.DoesNotContain("typed-input-secret", console.ReadOutputString() + console.ReadErrorString());
+    }
+
+    [Theory]
+    [InlineData(CoverageOperationOutcome.Incomplete)]
+    [InlineData(CoverageOperationOutcome.Rejected)]
+    public async Task HumanTerminalOutputRetainsNonSuccessWithoutAcceptanceClaims(CoverageOperationOutcome outcome)
+    {
+        using var root = TestDirectory.Create();
+        var request = root.WriteFile("request.json", CaptureEnvelope(root.Path));
+        var result = new CoverageFanInResult("capture", outcome, "operation", null,
+            new(false, false, true, false, null), [], []);
+        using var console = new FakeInMemoryConsole();
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await new ResultCommand("capture", result,
+            SafeCoverageFanInResultDeliveryFactory.Instance)
+        { Request = request, Result = Path.Join(root.Path, "terminal.json") }
+                .ExecuteAsync(console, CancellationToken.None));
+        Assert.Equal(1, error.ExitCode);
+        Assert.Contains(outcome.ToString(), console.ReadOutputString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("accepted generation", console.ReadOutputString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class TypedInputFaultCommand(string fault) : CoverageFanInCommandBase("capture", true)
+    {
+        internal override ValueTask<CoverageFanInResult> InvokeAsync(ParsedCoverageFanInRequest request,
+            TextWriter diagnostics, CancellationToken cancellationToken) => throw (fault switch
+            {
+                "json" => new JsonException("typed-input-secret"),
+                "unauthorized" => new UnauthorizedAccessException("typed-input-secret"),
+                _ => new InvalidDataException("typed-input-secret")
+            });
+    }
+
     private static object RequestFor(string operation, string root) => operation switch
     {
         "capture" => CaptureRequest(root),

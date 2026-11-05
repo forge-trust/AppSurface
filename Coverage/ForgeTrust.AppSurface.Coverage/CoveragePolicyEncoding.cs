@@ -67,7 +67,9 @@ internal static partial class CoveragePolicyEncoding
         {
             if (x is null || StringComparer.OrdinalIgnoreCase.Equals(x.Id, "primary")) throw Invalid("supplements");
             Token(x.Id, "producerId"); Token(x.Platform, "platform"); Text(x.Filter, "filter", 4096);
-            if (x.TestProjects is { Count: > 10000 }) throw Invalid("supplementTestProjects");
+            // One native capture reserves four payloads and its completion marker in
+            // the unchanged 10,000-file storage inventory contract.
+            if ((x.TestProjects?.Count ?? projects.Length) > 9995) throw Invalid("supplementTestProjects");
             var inventory = x.TestProjects?.Select(Relative).ToArray();
             if (inventory is { Length: 0 }) throw Invalid("supplementTestProjects");
             if (inventory is not null)
@@ -105,9 +107,16 @@ internal static partial class CoveragePolicyEncoding
             || limits.TokenCharacters < 1 || limits.BranchRecordsPerReport < 1 || limits.TotalRecords < 1
             || limits.OperationSeconds is < 1 or > 86400 || limits.IdentitySeconds is < 1 or > 300
             || supplements.Length + 1 > limits.InputBundles) throw Invalid("limits");
-        return policy with { TestProjects = Array.AsReadOnly(projects), Supplements = Array.AsReadOnly(supplements),
-            Instrumentation = instrumentation with { }, Limits = limits with { },
-            Source = source with { }, Run = policy.Run with { }, Gate = gate with { } };
+        return policy with
+        {
+            TestProjects = Array.AsReadOnly(projects),
+            Supplements = Array.AsReadOnly(supplements),
+            Instrumentation = instrumentation with { },
+            Limits = limits with { },
+            Source = source with { },
+            Run = policy.Run with { },
+            Gate = gate with { }
+        };
     }
 
     internal static byte[] CanonicalBytes(CoverageFanInPolicy policy)

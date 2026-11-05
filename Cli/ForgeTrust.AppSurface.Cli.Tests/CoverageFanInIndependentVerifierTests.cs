@@ -1016,6 +1016,181 @@ public sealed class CoverageFanInIndependentVerifierTests
             composed.RootElement, policy.RootElement, coverage, coverage, diff));
     }
 
+    [Theory]
+    [InlineData("[]", "[]")]
+    [InlineData("[1,true,false,null,\"x\",{},[]]", "[1.0,true,false,null,\"x\",{},[]]")]
+    [InlineData("[1]", "[1,2]")]
+    [InlineData("[1]", "[\"1\"]")]
+    [InlineData("[1]", "[2]")]
+    [InlineData("[\"one\"]", "[\"two\"]")]
+    [InlineData("{\"passed\":true}", "{\"passed\":true,\"line\":[]}")]
+    [InlineData("{\"passed\":true}", "{\"other\":true}")]
+    public void VerifyGates_RejectsMalformedBaselineReportShapesEvenWhenJsonValuesAreEquivalent(
+        string primaryJson, string composedJson)
+    {
+        var coverage = AggregateCoverage();
+        using var primary = JsonDocument.Parse(primaryJson);
+        using var composed = JsonDocument.Parse(composedJson);
+        using var policy = JsonDocument.Parse("""
+            {"gate":{"mode":"aggregateOnly","minLine":95,"minBranch":85,"minPatchLine":95,"minPatchBranch":85,
+              "tolerance":0.5,"patchLineMode":"codecov","diffBase":null}}
+            """);
+
+        // Array equality, numeric lexical equivalence and matching partial objects cannot supply a gate report.
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primary.RootElement, composed.RootElement, policy.RootElement, coverage, coverage));
+    }
+
+    [Theory]
+    [InlineData("passed", "0")]
+    [InlineData("line", "[]")]
+    [InlineData("line.covered", "\"19\"")]
+    [InlineData("line.valid", "null")]
+    [InlineData("thresholds", "[]")]
+    [InlineData("effectiveThresholds.patchLine", "\"94.5\"")]
+    [InlineData("patchDiffSource", "[]")]
+    [InlineData("patchDiffSource.bytes", "null")]
+    [InlineData("patchDiffSource.empty", "\"false\"")]
+    [InlineData("patchLine.diffBase", "42")]
+    public void VerifyGates_RejectsJsonKindsThatCannotRepresentRequiredCounterFacts(string field, string jsonValue)
+    {
+        var coverage = AggregateCoverage();
+        using var primary = Gate(coverage, isPrimary: true);
+        using var composed = Gate(coverage, isPrimary: false);
+        using var policy = PatchPolicy();
+        using var malformed = WithJsonValue(composed, field, jsonValue);
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primary.RootElement, malformed.RootElement, policy.RootElement, coverage, coverage, Diff));
+    }
+
+    [Theory]
+    [InlineData(0, 0, 2)]
+    [InlineData(0, 1, 3)]
+    [InlineData(1, 0, 3)]
+    [InlineData(1, 1, 4)]
+    public void VerifyGates_DuplicateMethodAndClassPointsRetainOneChangedLineAndAllBranchFacts(
+        int firstHits, int secondHits, int expectedBranches)
+    {
+        var coverage = AggregateCoverage();
+        var cls = coverage.Descendants("class").Single();
+        var methods = new XElement("methods");
+        foreach (var hits in new[] { firstHits, secondHits })
+        {
+            var point = new XElement("line", new XAttribute("number", 1), new XAttribute("hits", hits),
+                new XAttribute("branch", hits == 1 ? "true" : "false"));
+            if (hits == 1) point.SetAttributeValue("condition-coverage", "100% (1/1)");
+            methods.Add(new XElement("method", new XAttribute("name", "Run"), new XAttribute("signature", "()"),
+                new XElement("lines", point)));
+        }
+        cls.AddFirst(methods);
+        // The class contributes two branches; each covered method occurrence contributes one.
+        // The hand-authored vectors cover false/false, false/true and true/false hit merging.
+        CoverageFanInIndependentVerifier.VerifyComposition([(coverage, SourceRoot)], coverage, coverage);
+        using var primary = Gate(coverage, isPrimary: true,
+            patchBranchCovered: expectedBranches, patchBranchMeasurable: expectedBranches);
+        using var composed = Gate(coverage, isPrimary: false,
+            patchBranchCovered: expectedBranches, patchBranchMeasurable: expectedBranches);
+        using var policy = PatchPolicy();
+        CoverageFanInIndependentVerifier.VerifyGates(primary.RootElement, composed.RootElement,
+            policy.RootElement, coverage, coverage, Diff);
+
+        using var invented = Gate(coverage, isPrimary: false,
+            patchBranchCovered: expectedBranches + 1, patchBranchMeasurable: expectedBranches + 1);
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primary.RootElement, invented.RootElement, policy.RootElement, coverage, coverage, Diff));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void VerifyNormalizationAndCollectorMethods_PreserveOptionalMethodIdentityFields(
+        bool hasName, bool hasSignature)
+    {
+        var raw = CoverageWithFilename("src/Widget.cs");
+        var method = new XElement("method", new XElement("lines",
+            new XElement("line", new XAttribute("number", 1), new XAttribute("hits", 2),
+                new XAttribute("branch", "false"))));
+        if (hasName) method.SetAttributeValue("name", "Run");
+        if (hasSignature) method.SetAttributeValue("signature", "()");
+        raw.Descendants("class").Single().Add(new XElement("methods", method));
+        var normalized = new XDocument(raw);
+        CoverageFanInIndependentVerifier.VerifyComposition([(raw, SourceRoot)], normalized, normalized);
+        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, SourceRoot);
+        CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, normalized, SourceRoot);
+
+        var changed = normalized.Descendants("method").Single();
+        if (!hasName) changed.SetAttributeValue("name", "InventedName");
+        else if (!hasSignature) changed.SetAttributeValue("signature", "(int)");
+        else changed.SetAttributeValue("name", "Renamed");
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
+            raw, normalized, SourceRoot));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyCollectorMethods(
+            raw, normalized, SourceRoot));
+    }
+
+    [Theory]
+    [InlineData("missing-method")]
+    [InlineData("renamed-method")]
+    [InlineData("changed-numeric-hits")]
+    [InlineData("extra-method-only-owner")]
+    public void VerifyCollectorMethods_RejectsCountOrExactFactChangesUnderOriginalClassOwners(string mutation)
+    {
+        var raw = XDocument.Parse(PrimaryPathsGolden);
+        raw.Descendants("method").First().Element("lines")!.Element("line")!.SetAttributeValue("hits", "2");
+        var normalized = new XDocument(raw);
+        CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, normalized, SourceRoot);
+        var first = normalized.Descendants("method").First();
+        switch (mutation)
+        {
+            case "missing-method": first.Remove(); break;
+            case "renamed-method": first.SetAttributeValue("name", "Other"); break;
+            case "changed-numeric-hits": first.Element("lines")!.Element("line")!.SetAttributeValue("hits", "3"); break;
+            case "extra-method-only-owner":
+                normalized.Descendants("classes").Single().Add(new XElement("class",
+                    new XAttribute("name", "Extra"), new XAttribute("filename", "src/Extra.cs"),
+                    new XElement("methods", new XElement(first))));
+                break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyCollectorMethods(
+            raw, normalized, SourceRoot));
+    }
+
+    [Theory]
+    [InlineData("/", "/Widget.cs")]
+    [InlineData(@"C:\", @"C:\Widget.cs")]
+    [InlineData(@"\\server\share\", @"\\server\share\Widget.cs")]
+    public void VerifyNormalizationAndComposition_ResolveFilesDirectlyUnderFilesystemRoots(
+        string sourceRoot, string filename)
+    {
+        var raw = CoverageWithFilename(filename);
+        var normalized = CoverageWithFilename("Widget.cs");
+
+        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, sourceRoot);
+        CoverageFanInIndependentVerifier.VerifyComposition([(raw, sourceRoot)], normalized, normalized);
+    }
+
+    [Theory]
+    [InlineData("/", "/")]
+    [InlineData("/repo", "/repo")]
+    [InlineData(@"C:\repo", @"C:\repo")]
+    [InlineData(@"C:\repo", @"c:\repo\Widget.cs")]
+    [InlineData(@"\\server\share\repo", @"\\server\share")]
+    [InlineData(@"\\server\share\repo", @"\\server\share\repository\Widget.cs")]
+    public void VerifyNormalization_RejectsRootObjectsAndNonmatchingAbsoluteRootIdentities(
+        string sourceRoot, string filename)
+    {
+        var raw = CoverageWithFilename(filename);
+        var normalized = CoverageWithFilename("Widget.cs");
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
+            raw, normalized, sourceRoot));
+    }
+
     private static string FileDiff(string newPath, string hunk) => $"""
         diff --git a/src/Widget.cs {newPath}
         --- a/src/Widget.cs

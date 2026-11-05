@@ -20,6 +20,40 @@ internal static class CoverageFanInIndependentVerifier
     private const string InventoryError = "Primary coverage inventory failed independent verification.";
     private const string GateError = "Coverage gates failed independent verification.";
 
+    /// <summary>Derives a multi-project native projection solely from original collector records.</summary>
+    internal static void VerifyNativeCollection(IReadOnlyList<(XDocument Document, string SourceRoot)> originals,
+        XDocument projection)
+    {
+        try
+        {
+            Require(originals.Count > 1, CompositionError);
+            var expected = new SortedDictionary<ClassId, ClassFacts>(ClassIdComparer.Instance);
+            foreach (var original in originals)
+            {
+                var snapshot = ReadSnapshot(original.Document, original.SourceRoot);
+                Require(snapshot.Classes.Values.Any(facts => facts.Lines.Count > 0), CompositionError);
+                // Coverlet summaries may include compiler branches absent from serialized
+                // class records. Preserve those summaries in the original bytes; the native
+                // patch projection must retain every serialized class and method point.
+                // Its own root totals are independently derived below. Primary aggregate
+                // acceptance continues to use the unchanged primary normalizer summary.
+                foreach (var dimension in new[] { "lines", "branches" })
+                {
+                    var root = Root(original.Document, CompositionError);
+                    var valid = Counter(root, dimension + "-valid");
+                    var covered = Counter(root, dimension + "-covered");
+                    Require(valid >= 0 && covered >= 0 && covered <= valid, CompositionError);
+                }
+                Merge(expected, snapshot);
+            }
+            var actual = ReadSnapshot(projection, null);
+            Require(SnapshotsEqual(expected, actual.Classes), CompositionError);
+            CheckRootTotals(projection, actual, CompositionError);
+        }
+        catch (InvalidDataException) { throw; }
+        catch (Exception exception) when (IsMalformedInput(exception)) { throw new InvalidDataException(CompositionError); }
+    }
+
     /// <summary>Re-derives composition and the primary-path projection from original reports.</summary>
     internal static void VerifyComposition(
         IReadOnlyList<(XDocument Document, string SourceRoot)> inputs,

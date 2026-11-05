@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -51,12 +53,14 @@ internal static class Program
             throw new InvalidOperationException("Generated fixture source must be clean before collection.");
 
         var testProject = "checks/Branchy.Tests/Branchy.Tests.csproj";
+        var nativeTestProject = "checks/Branchy.Native.Tests/Branchy.Native.Tests.csproj";
+        var nativeProjects = new[] { testProject, nativeTestProject }.Order(StringComparer.Ordinal).ToArray();
         var runId = Guid.NewGuid().ToString("N");
         var policy = new CoverageFanInPolicy(
             new CoverageSourceIdentity(commit, tree, sdk, "Release"),
             new CoverageRunIdentity("local", "installed-package-dogfood", runId, 1),
-            [testProject],
-            [new CoverageSupplement("native", CurrentPlatform(), "FullyQualifiedName~DecisionTests", [testProject])],
+            nativeProjects,
+            [new CoverageSupplement("native", CurrentPlatform(), "FullyQualifiedName~DecisionTests", nativeProjects)],
             new CoverageGatePolicy(CoverageGateMode.AggregateOnly));
 
         var runRoot = Path.Join(root, "runs", Guid.NewGuid().ToString("N"));
@@ -97,11 +101,11 @@ internal static class Program
         using (var timings = JsonDocument.Parse(await File.ReadAllBytesAsync(timingsPath).ConfigureAwait(false)))
         {
             var projects = timings.RootElement.GetProperty("projects").EnumerateArray().ToArray();
-            if (projects.Length != 1
-                || projects[0].GetProperty("project").GetString() != testProject
-                || projects[0].GetProperty("exitCode").GetInt32() != 0
-                || projects[0].GetProperty("executionStatus").GetString() != "completed"
-                || projects[0].GetProperty("coverageArtifactStatus").GetString() != "produced")
+            if (projects.Length != nativeProjects.Length
+                || !projects.Select(project => project.GetProperty("project").GetString()).SequenceEqual(nativeProjects)
+                || projects.Any(project => project.GetProperty("exitCode").GetInt32() != 0
+                    || project.GetProperty("executionStatus").GetString() != "completed"
+                    || project.GetProperty("coverageArtifactStatus").GetString() != "produced"))
                 return 1;
         }
 
@@ -120,10 +124,25 @@ internal static class Program
         if (native.Outcome != CoverageOperationOutcome.Succeeded
             || native.Observation != CoverageObservation.CollectedExecution
             || !native.Effects.GenerationCommitted
-            || !native.Artifacts.Any(artifact => artifact.Role == "collector.cobertura.xml"))
+            || !native.Artifacts.Any(artifact => Path.GetFileName(artifact.Path) == "collector-inventory.json"))
             return 1;
+
+        var collectedRawPaths = ValidateCollectedNativeSet(nativeCapture, nativeCollection, nativeProjects);
+        var apiNativeCapture = Path.Join(runRoot, "native-set-capture");
+        var nativeSet = await RecordAsync("native-set-capture", runRoot, (token, progress, diagnostics) =>
+            CoverageFanInApiExample.CaptureNativeSetAsync(policy, repository, apiNativeCapture, "native",
+                collectedRawPaths, Path.Join(nativeCapture, "timings.json"), token)).ConfigureAwait(false);
+        PrintResult(nativeSet);
+        if (nativeSet.Outcome != CoverageOperationOutcome.Succeeded
+            || nativeSet.Observation != CoverageObservation.TrustedProducer
+            || !nativeSet.Effects.GenerationCommitted)
+            return 1;
+        _ = ValidateNativeCapture(apiNativeCapture, collectedRawPaths,
+            Path.Join(nativeCapture, "timings.json"), nativeProjects);
+
         CopyDirectory(nativeCapture, nativeTransport);
         ValidateNativeManifest(nativeTransport, policy, repository);
+        _ = ValidateNativeCapture(nativeTransport, collectedRawPaths, Path.Join(nativeCapture, "timings.json"), nativeProjects);
 
         var apiNativeParent = Path.Join(runRoot, "direct-api");
         Directory.CreateDirectory(apiNativeParent);
@@ -217,13 +236,16 @@ internal static class Program
     {
         var library = Path.Join(repository, "checks", "Branchy");
         var tests = Path.Join(repository, "checks", "Branchy.Tests");
+        var nativeTests = Path.Join(repository, "checks", "Branchy.Native.Tests");
         Directory.CreateDirectory(library);
         Directory.CreateDirectory(tests);
+        Directory.CreateDirectory(nativeTests);
 
         await File.WriteAllTextAsync(Path.Join(repository, "Consumer.slnx"), """
             <Solution>
               <Project Path="checks/Branchy/Branchy.csproj" />
               <Project Path="checks/Branchy.Tests/Branchy.Tests.csproj" />
+              <Project Path="checks/Branchy.Native.Tests/Branchy.Native.Tests.csproj" />
             </Solution>
             """).ConfigureAwait(false);
 
@@ -301,6 +323,45 @@ internal static class Program
                 }
             }
             """).ConfigureAwait(false);
+
+        await File.WriteAllTextAsync(Path.Join(nativeTests, "Branchy.Native.Tests.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <ImplicitUsings>enable</ImplicitUsings>
+                <Nullable>enable</Nullable>
+                <IsPackable>false</IsPackable>
+                <IsTestProject>true</IsTestProject>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
+                <PackageReference Include="coverlet.collector" Version="10.0.1" PrivateAssets="all" />
+                <PackageReference Include="xunit" Version="2.9.3" />
+                <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" PrivateAssets="all" />
+                <PackageReference Include="JunitXml.TestLogger" Version="8.0.0" PrivateAssets="all" />
+              </ItemGroup>
+              <ItemGroup>
+                <ProjectReference Include="../Branchy/Branchy.csproj" />
+              </ItemGroup>
+            </Project>
+            """).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Join(nativeTests, "NativeDecisionTests.cs"), """
+            using Branchy;
+            using Xunit;
+
+            public sealed class NativeDecisionTests
+            {
+                [Theory]
+                [InlineData(2, false, "disabled")]
+                [InlineData(-2, true, "negative")]
+                [InlineData(0, true, "zero")]
+                [InlineData(2, true, "positive")]
+                public void Classify_covers_each_native_decision_path(int value, bool enabled, string expected)
+                {
+                    Assert.Equal(expected, Decision.Classify(value, enabled));
+                }
+            }
+            """).ConfigureAwait(false);
     }
 
     private static async Task InitializeSourceAsync(string repository)
@@ -333,6 +394,99 @@ internal static class Program
             File.Copy(file, target);
         }
     }
+
+    private static IReadOnlyDictionary<string, string> ValidateCollectedNativeSet(
+        string capture, string collection, IReadOnlyList<string> projects)
+    {
+        var captureTimingsPath = Path.Join(capture, "timings.json");
+        var collectionTimingsPath = Path.Join(collection, "timings.json");
+        var timingsBytes = File.ReadAllBytes(captureTimingsPath);
+        if (!timingsBytes.AsSpan().SequenceEqual(File.ReadAllBytes(collectionTimingsPath)))
+            throw new InvalidDataException("Collected native timings were not retained byte-for-byte.");
+        using var timings = JsonDocument.Parse(timingsBytes);
+        var entries = timings.RootElement.GetProperty("projects").EnumerateArray().ToArray();
+        if (entries.Length != projects.Count
+            || !entries.Select(entry => entry.GetProperty("project").GetString()).SequenceEqual(projects)
+            || entries.Any(entry => entry.GetProperty("exitCode").GetInt32() != 0
+                || entry.GetProperty("executionStatus").GetString() != "completed"
+                || entry.GetProperty("coverageArtifactStatus").GetString() != "produced"))
+            throw new InvalidDataException("Native collection did not retain the complete successful project inventory.");
+
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var project = entry.GetProperty("project").GetString()
+                ?? throw new InvalidDataException("Native timings project is missing.");
+            var invocation = entry.GetProperty("invocationDirectory").GetString()
+                ?? throw new InvalidDataException("Native timings invocation directory is missing.");
+            var invocationPath = Path.Join(collection, invocation.Replace('/', Path.DirectorySeparatorChar));
+            var reports = Directory.EnumerateFiles(invocationPath, "coverage.cobertura.xml", SearchOption.AllDirectories).ToArray();
+            if (reports.Length != 1)
+                throw new InvalidDataException($"Native collector attachment inventory differs for {project}.");
+            result.Add(project, reports[0]);
+        }
+
+        _ = ValidateNativeCapture(capture, result, captureTimingsPath, projects);
+        return result;
+    }
+
+    private static IReadOnlyDictionary<string, string> ValidateNativeCapture(
+        string capture, IReadOnlyDictionary<string, string> originalPaths, string expectedTimingsPath,
+        IReadOnlyList<string> projects)
+    {
+        var timingsBytes = File.ReadAllBytes(Path.Join(capture, "timings.json"));
+        if (!timingsBytes.AsSpan().SequenceEqual(File.ReadAllBytes(expectedTimingsPath)))
+            throw new InvalidDataException("Native timings were not retained byte-for-byte.");
+        var inventoryBytes = File.ReadAllBytes(Path.Join(capture, "collector-inventory.json"));
+        var expectedPayloads = new Dictionary<string, byte[]>(StringComparer.Ordinal)
+        {
+            ["timings.json"] = timingsBytes,
+            ["collector-inventory.json"] = inventoryBytes,
+            ["coverage.cobertura.xml"] = File.ReadAllBytes(Path.Join(capture, "coverage.cobertura.xml"))
+        };
+        using var inventory = JsonDocument.Parse(inventoryBytes);
+        var index = inventory.RootElement;
+        if (!HasExactProperties(index, "schemaVersion", "reports") || index.GetProperty("schemaVersion").GetInt32() != 1)
+            throw new InvalidDataException("Native collector inventory schema version differs.");
+        var reports = index.GetProperty("reports").EnumerateArray().ToArray();
+        if (reports.Length != projects.Count || originalPaths.Count != projects.Count)
+            throw new InvalidDataException("Native collector inventory count differs.");
+        for (var i = 0; i < projects.Count; i++)
+        {
+            var fileName = CollectorFileName(i);
+            if (!HasExactProperties(reports[i], "project", "file")
+                || reports[i].GetProperty("project").GetString() != projects[i]
+                || reports[i].GetProperty("file").GetString() != fileName
+                || !originalPaths.TryGetValue(projects[i], out var originalPath))
+                throw new InvalidDataException("Native collector inventory order or project binding differs.");
+            var original = File.ReadAllBytes(originalPath);
+            expectedPayloads.Add(fileName, original);
+            if (!original.AsSpan().SequenceEqual(File.ReadAllBytes(Path.Join(capture, fileName))))
+                throw new InvalidDataException($"Original collector bytes were not retained for {projects[i]}.");
+        }
+
+        using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Join(capture, "manifest.json")));
+        var hashes = manifest.RootElement.GetProperty("files");
+        if (!hashes.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal)
+            .SetEquals(expectedPayloads.Keys))
+            throw new InvalidDataException("Native manifest payload inventory differs.");
+        foreach (var (name, bytes) in expectedPayloads)
+        {
+            var expectedHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            if (hashes.GetProperty(name).GetString() != expectedHash)
+                throw new InvalidDataException($"Native manifest hash differs for {name}.");
+        }
+        return projects.Select((project, index) => new KeyValuePair<string, string>(project,
+            Path.Join(capture, CollectorFileName(index)))).ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+    }
+
+    private static string CollectorFileName(int index) =>
+        "collector-" + index.ToString("D4", CultureInfo.InvariantCulture) + ".cobertura.xml";
+
+    private static bool HasExactProperties(JsonElement value, params string[] names) =>
+        value.ValueKind == JsonValueKind.Object
+        && value.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal)
+            .SetEquals(names);
 
     private static void ValidateNativeManifest(string capture, CoverageFanInPolicy policy, string repository)
     {

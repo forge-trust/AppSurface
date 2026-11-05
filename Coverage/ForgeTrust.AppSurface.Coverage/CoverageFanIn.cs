@@ -27,7 +27,8 @@ public static class CoverageFanIn
         if (!Enum.IsDefined(request.OutputMode)) throw CoveragePolicyEncoding.Invalid("outputMode");
         return Execute("capture", new(Expected(request.Policy), request.RepositoryRoot, request.OutputDirectory,
             request.ProducerId, request.CoveragePath, request.TimingsPath, request.RawCoveragePath,
-            request.ImportDirectory, request.OriginalSourceRoot, request.OutputMode == CoverageOutputMode.ReplaceOwned),
+            request.ImportDirectory, request.OriginalSourceRoot, request.OutputMode == CoverageOutputMode.ReplaceOwned)
+        { RawCoveragePaths = request.RawCoveragePaths is null ? null : new Dictionary<string, string>(request.RawCoveragePaths, StringComparer.Ordinal) },
             cancellationToken, progress, diagnostics);
     }
     /// <summary>Composes the exact declared capture set conservatively; does not accept coverage.</summary>

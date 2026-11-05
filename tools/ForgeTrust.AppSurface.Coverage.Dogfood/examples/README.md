@@ -8,6 +8,8 @@ Use ordinary [`coverage merge`](../../../../Cli/ForgeTrust.AppSurface.Cli/README
 
 Build the coordinated candidate packages first. For the complete walkthrough, the same local feed must contain `ForgeTrust.AppSurface.Coverage`, `ForgeTrust.AppSurface.Evidence.Coverage`, and `ForgeTrust.AppSurface.Cli` at the exact `CANDIDATE_VERSION`. The `--package-proof` path validates the two library packages in an isolated headless consumer and exercises the checked-in fixture's real collection path, public capture/composition/acceptance/verification flow, and altered-output rejection. The native-import journey also installs the candidate CLI from that same feed and passes its installed `appsurface` path to the repository adapter. It creates only the fresh proof output directory and retains stage logs there.
 
+The fixture's native producer declares two projects and retains their original collector reports, exact ordered index and successful timings. [`CaptureNativeSetAsync`](CoverageFanInApiExample.cs) shows how an existing trusted producer supplies `RawCoveragePaths` and `TimingsPath`; `CaptureNativeAsync` covers the single-project normalized/raw form. The [request reference](../../../Coverage/ForgeTrust.AppSurface.Coverage/README.md#request-and-result-reference) defines their mutually exclusive selectors. Both forms preserve original bytes and require independent checks before acceptance.
+
 Run this PowerShell 7 recipe from the repository root after setting `$CandidateFeed` to the local feed directory and `$CandidateVersion` to the exact package version. It needs no Bash syntax:
 
 ```powershell

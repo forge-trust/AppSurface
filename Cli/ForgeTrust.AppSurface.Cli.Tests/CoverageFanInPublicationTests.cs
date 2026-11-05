@@ -60,19 +60,21 @@ public sealed class CoverageFanInPublicationTests
     }
 
     [Fact]
-    public async Task PublicationAcceptsSixteenPayloadsAndRejectsSeventeenBeforeCreatingOutput()
+    public async Task PublicationAcceptsMaximumNativeInventoryPayloadAndRejectsTheNextFile()
     {
         using var fixture = new Fixture();
-        var sixteen = Enumerable.Range(0, 16)
-            .ToDictionary(index => $"artifact-{index:D2}.json", index => new byte[] { (byte)index });
-
-        await fixture.PublishAsync(files: sixteen);
+        var maximumPayloadFiles = CoverageArtifactLimits.MaximumFiles - 1;
+        var maximum = Enumerable.Range(0, maximumPayloadFiles)
+            .ToDictionary(index => $"artifact-{index:D4}.json", index => new[] { (byte)index });
+        await CoverageFanInPublication.PublishAsync(fixture.Output, fixture.Repository, CaptureStage,
+            Guid.NewGuid().ToString("N"), PolicyDigest, maximum, false,
+            Bounds with { JsonBytes = 2 * 1024 * 1024 }, CancellationToken.None);
 
         var otherOutput = Path.Join(fixture.OutputParent, "too-many");
-        var seventeen = Enumerable.Range(0, 17)
-            .ToDictionary(index => $"artifact-{index:D2}.json", index => new byte[] { (byte)index });
+        var tooMany = Enumerable.Range(0, maximumPayloadFiles + 1)
+            .ToDictionary(index => $"artifact-{index:D4}.json", index => new[] { (byte)index });
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.PublishAsync(
-            output: otherOutput, files: seventeen));
+            output: otherOutput, files: tooMany));
         Assert.False(Directory.Exists(otherOutput));
     }
 
@@ -378,6 +380,68 @@ public sealed class CoverageFanInPublicationTests
             new Dictionary<string, byte[]> { ["new.xml"] = [1] }, true, Bounds with { XmlBytes = 1 }, CancellationToken.None));
         Assert.Equal(marker, File.ReadAllBytes(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
         Assert.True(File.Exists(Path.Join(fixture.Output, "coverage.xml")));
+    }
+
+    [Theory]
+    [InlineData("zero-files")]
+    [InlineData("nonhex-digest")]
+    [InlineData("unknown-output-name")]
+    public async Task PublicationRejectsEveryUnsupportedMetadataShapeBeforeCreatingAStage(string defect)
+    {
+        using var fixture = new Fixture();
+        var digest = defect == "nonhex-digest" ? new string('z', 64) : PolicyDigest;
+        var files = defect == "zero-files" ? new Dictionary<string, byte[]>() : Payloads();
+        var output = defect == "unknown-output-name" ? Path.GetPathRoot(fixture.Output)! : fixture.Output;
+        var error = await Record.ExceptionAsync(() => CoverageFanInPublication.PublishAsync(output, fixture.Repository,
+            CaptureStage, Guid.NewGuid().ToString("N"), digest, files, false, Bounds, CancellationToken.None));
+        Assert.NotNull(error);
+        Assert.True(error is ArgumentException or InvalidDataException);
+        Assert.False(Directory.Exists(fixture.Output));
+    }
+
+    [Fact]
+    public async Task OccupiedDestinationCannotBeAdoptedByFreshPublication()
+    {
+        using var fixture = new Fixture();
+        await fixture.PublishAsync();
+        var marker = File.ReadAllBytes(Path.Join(fixture.Output, CoverageFanInIO.CompletionName));
+        await Assert.ThrowsAsync<IOException>(() => fixture.PublishAsync());
+        Assert.Equal(marker, File.ReadAllBytes(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+    }
+
+    [Fact]
+    public async Task ReplacementRefusesSameLengthPayloadTamperingAndMissingRegisteredFile()
+    {
+        using var fixture = new Fixture();
+        await fixture.PublishAsync();
+        var payload = Path.Join(fixture.Output, "coverage.xml");
+        var original = File.ReadAllText(payload);
+        File.WriteAllText(payload, original.Replace("'1'", "'0'", StringComparison.Ordinal));
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.PublishAsync(replaceOwned: true));
+        Assert.Contains("'0'", File.ReadAllText(payload));
+        File.WriteAllText(payload, original);
+        File.Delete(Path.Join(fixture.Output, "receipt.json"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.PublishAsync(replaceOwned: true));
+        Assert.True(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+        Assert.Equal(original, File.ReadAllText(payload));
+    }
+
+    [Fact]
+    public async Task BeforeCommitValidationMustFinishBeforeMarkerAndPostcommitObservationCannotUndoCommit()
+    {
+        using var fixture = new Fixture();
+        var reached = false;
+        var published = await CoverageFanInPublication.PublishAsync(fixture.Output, fixture.Repository, CaptureStage,
+            Guid.NewGuid().ToString("N"), PolicyDigest, Payloads(), false, Bounds, CancellationToken.None,
+            validateBeforeCommit: _ =>
+            {
+                reached = true;
+                Assert.False(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+                return Task.CompletedTask;
+            }, afterCommit: () => throw new IOException("observer-fault"));
+        Assert.True(reached);
+        Assert.NotEmpty(published.Generation);
+        Assert.True(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
     }
 
     private static IReadOnlyDictionary<string, byte[]> Payloads(

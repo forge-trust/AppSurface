@@ -12,6 +12,8 @@ internal sealed record CoverageFanInPublished(string Generation, IReadOnlyList<C
 /// never adopted by retries. Replacing a generation first snapshots its verified inventory under existing policy.</remarks>
 internal static class CoverageFanInPublication
 {
+    /// <summary>Reserves one storage inventory entry for the completion marker.</summary>
+    internal const int MaximumPayloadFiles = CoverageArtifactLimits.MaximumFiles - 1;
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private static readonly HashSet<string> Stages = new(["capture", "composition", "acceptance", "rejected-gates"], StringComparer.Ordinal);
 
@@ -24,7 +26,7 @@ internal static class CoverageFanInPublication
     {
         token.ThrowIfCancellationRequested();
         output = Path.GetFullPath(output); repository = Path.GetFullPath(repository);
-        if (!Stages.Contains(stage) || files.Count is < 1 or > 16 || !Guid.TryParseExact(operationId, "N", out _)
+        if (!Stages.Contains(stage) || files.Count is < 1 or > MaximumPayloadFiles || !Guid.TryParseExact(operationId, "N", out _)
             || policyDigest.Length != 64 || policyDigest.Any(c => !char.IsAsciiHexDigit(c)))
             throw new ArgumentException("Invalid publication metadata.");
         long admitted = 0;
@@ -59,7 +61,7 @@ internal static class CoverageFanInPublication
         if (existed && (heldOutputLease is null || replaceOwned))
         {
             previous = ValidatePrevious(root, output, stage, store, bounds, token);
-            priorEntries = root.EnumerateArtifactEntries(32);
+            priorEntries = root.EnumerateArtifactEntries(MaximumPayloadFiles + 3);
         }
         else if (root.EnumerateArtifactEntries(2).Any(x => x.Name != ".appsurface-coverage-operation.lock"))
             throw new IOException("Fresh output changed before publication.");
@@ -174,7 +176,7 @@ internal static class CoverageFanInPublication
         var expected = run.Inventory.Select(x => x.Path).ToHashSet(StringComparer.Ordinal);
         expected.Add(".appsurface-coverage-operation.lock");
         if (admittedStage is not null) expected.Add(admittedStage);
-        var entries = root.EnumerateArtifactEntries(32);
+        var entries = root.EnumerateArtifactEntries(MaximumPayloadFiles + 3);
         if (entries.Any(x => !expected.Contains(x.Name) || x.IsDirectory && x.Name != admittedStage)
             || run.Inventory.Any(x => !entries.Any(e => e.Name == x.Path)))
             throw new InvalidDataException("Unknown or incomplete owned output must be preserved.");

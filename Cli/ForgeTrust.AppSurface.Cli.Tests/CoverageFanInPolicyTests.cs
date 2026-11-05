@@ -425,6 +425,60 @@ public sealed class CoverageFanInPolicyTests
         }));
     }
 
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"wrong-kind\"")]
+    public void TypedDecoderRejectsNullAndNonPolicyRootValues(string json)
+    {
+        if (json == "null") Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Decode<CoverageFanInPolicy>(Utf8(json)));
+        else Assert.Throws<JsonException>(() => CoveragePolicyEncoding.Decode<CoverageFanInPolicy>(Utf8(json)));
+    }
+
+    [Theory]
+    [InlineData("-2147483649")]
+    [InlineData("2147483648")]
+    [InlineData("null")]
+    [InlineData("\"1\"")]
+    [InlineData("1e28")]
+    public void IntDecoderRejectsEveryNonrepresentableShape(string json)
+        => Assert.Throws<JsonException>(() => CoveragePolicyEncoding.Decode<int>(Utf8(json)));
+
+    [Theory]
+    [InlineData("id")]
+    [InlineData("platform")]
+    [InlineData("filter")]
+    [InlineData("configuration")]
+    public void PolicyTextAndTokenBoundariesAreValidatedAtTheActualField(string field)
+    {
+        var policy = Policy() with { Supplements = [new("native", "Linux", "fast")] };
+        foreach (var value in new[] { " ", new string('x', field == "filter" ? 4097 : 257), "bad\nvalue" })
+        {
+            var supplement = policy.Supplements[0];
+            var invalid = field switch
+            {
+                "id" => policy with { Supplements = [supplement with { Id = value }] },
+                "platform" => policy with { Supplements = [supplement with { Platform = value }] },
+                "filter" => policy with { Supplements = [supplement with { Filter = value }] },
+                _ => policy with { Source = policy.Source with { Configuration = value } }
+            };
+            Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(invalid));
+        }
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(policy with
+        { Supplements = [policy.Supplements[0] with { Id = "invalid/id" }] }));
+    }
+
+    [Fact]
+    public void ProjectPathsAndNumericWireLexemesEnforceFiniteDocumentedBounds()
+    {
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(Policy() with { TestProjects = [new string('a', 4097)] }));
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Decode<decimal>(Utf8("1e" + new string('0', 255))));
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Decode<decimal>(Utf8("1e2147483648")));
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Decode<decimal>(Utf8("1e1001")));
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Decode<decimal>(Utf8("1e-1001")));
+        foreach (var text in new[] { "\"\\uDC00\"", "\"\\uD800x\"", "\"\\uD800\\n\"", "\"\\uD800\\u0041\"" })
+            Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Decode<string>(Utf8(text)));
+    }
+
     private static string PolicyJson(
         string gateJson = "{\"mode\":\"aggregateOnly\"}",
         string runScopeJson = "\"dogfood\"",

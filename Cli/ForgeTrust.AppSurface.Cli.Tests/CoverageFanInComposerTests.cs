@@ -773,6 +773,89 @@ public sealed class CoverageFanInComposerTests
             CoverageFanInComposer.ValidatePrimaryTimings(timings, expectedProjects, configuration, driver));
     }
 
+    [Theory]
+    [InlineData("configuration", "null")]
+    [InlineData("coverageDriver", "0")]
+    [InlineData("merge", "[]")]
+    [InlineData("merge.exitCode", "\"0\"")]
+    [InlineData("merge.exitCode", "2147483648")]
+    [InlineData("artifacts", "false")]
+    [InlineData("artifacts.coverageFiles", "\"1\"")]
+    [InlineData("artifacts.coverageFiles", "2147483648")]
+    [InlineData("projects", "{}")]
+    [InlineData("projects.0", "42")]
+    [InlineData("projects.0.project", "null")]
+    [InlineData("projects.0.project", "\"\"")]
+    [InlineData("projects.0.exitCode", "null")]
+    [InlineData("projects.0.exitCode", "2147483648")]
+    [InlineData("projects.0.executionStatus", "true")]
+    [InlineData("projects.0.coverageArtifactStatus", "0")]
+    public void ValidatePrimaryTimingsRejectsTypedFieldCorruptionWithoutChangingInventory(string field, string jsonValue)
+    {
+        var expected = new[] { "tests/A.Tests.csproj" };
+        var node = System.Text.Json.Nodes.JsonNode.Parse(CreateTimings([(expected[0], 0, "completed", "produced")]))!;
+        var parts = field.Split('.');
+        var current = node;
+        foreach (var part in parts[..^1])
+            current = current is System.Text.Json.Nodes.JsonArray ? current[int.Parse(part)]! : current[part]!;
+        if (current is System.Text.Json.Nodes.JsonArray) current[int.Parse(parts[^1])] = System.Text.Json.Nodes.JsonNode.Parse(jsonValue);
+        else current[parts[^1]] = System.Text.Json.Nodes.JsonNode.Parse(jsonValue);
+        using var document = JsonDocument.Parse(node.ToJsonString());
+        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.ValidatePrimaryTimings(
+            document.RootElement, expected, "Release", "collector"));
+        Assert.Equal(["tests/A.Tests.csproj"], expected);
+    }
+
+    [Theory]
+    [InlineData("configuration")]
+    [InlineData("coverageDriver")]
+    [InlineData("merge")]
+    [InlineData("artifacts")]
+    [InlineData("projects")]
+    public void ValidatePrimaryTimingsRejectsEachOmittedRequiredObservation(string field)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(CreateTimings([("tests/A.Tests.csproj", 0, "completed", "produced")]))!.AsObject();
+        node.Remove(field);
+        using var document = JsonDocument.Parse(node.ToJsonString());
+        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.ValidatePrimaryTimings(
+            document.RootElement, ["tests/A.Tests.csproj"], "Release", "collector"));
+    }
+
+    [Fact]
+    public void CompositionAndNormalizationRetainMethodsWithoutOptionalNamesOrSignatures()
+    {
+        var raw = XDocument.Parse("""
+            <coverage branches-valid="0"><packages><package name="P"><classes><class name="A" filename="src/A.cs">
+              <methods><method><lines><line number="7" hits="2" /></lines></method></methods>
+              <lines><line number="1" hits="1" /></lines>
+            </class></classes></package></packages></coverage>
+            """);
+        var retained = CoverageFanInComposer.RetainCollectorMethods(raw, raw, WindowsRoot);
+        CoverageFanInComposer.ValidateNormalization(raw, retained, WindowsRoot);
+        var composed = CoverageFanInComposer.Compose([(raw, WindowsRoot), (retained, WindowsRoot)]);
+        var method = Assert.Single(composed.Descendants("method"));
+        Assert.Equal(string.Empty, method.Attribute("name")!.Value);
+        Assert.Equal(string.Empty, method.Attribute("signature")!.Value);
+        Assert.Equal("2", Assert.Single(method.Descendants("line")).Attribute("hits")!.Value);
+    }
+
+    [Theory]
+    [InlineData("/")]
+    [InlineData("C:/")]
+    [InlineData("//server/share/")]
+    public void RootMappedSourceBasesRemainPortableAtFilesystemBoundaries(string sourceRoot)
+    {
+        var report = XDocument.Parse($"""
+            <coverage><sources><source>{sourceRoot}</source></sources><packages><package name="P"><classes>
+              <class name="A" filename="src/A.cs"><lines><line number="1" hits="1" /></lines></class>
+            </classes></package></packages></coverage>
+            """);
+        CoverageFanInComposer.NormalizePaths(report, sourceRoot);
+        Assert.Equal("src/A.cs", Assert.Single(report.Descendants("class")).Attribute("filename")!.Value);
+        var composed = CoverageFanInComposer.Compose([(report, sourceRoot)]);
+        Assert.Equal("src/A.cs", Assert.Single(composed.Descendants("class")).Attribute("filename")!.Value);
+    }
+
     private static (long Covered, long Valid) ParseBranchCounts(string value)
     {
         var open = value.IndexOf('(');

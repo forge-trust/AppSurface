@@ -151,6 +151,69 @@ public sealed class CoverageFanInApiValidationTests
         Assert.False(Directory.Exists(request.OutputDirectory));
     }
 
+    [Theory]
+    [InlineData("capture", "repository")]
+    [InlineData("capture", "output")]
+    [InlineData("capture", "coverage")]
+    [InlineData("capture", "timings")]
+    [InlineData("capture", "raw")]
+    [InlineData("capture", "producer")]
+    [InlineData("import", "coverage")]
+    [InlineData("import", "timings")]
+    [InlineData("import", "raw")]
+    [InlineData("import", "source-root")]
+    [InlineData("compose", "primary")]
+    [InlineData("compose", "supplements")]
+    [InlineData("accept", "composition")]
+    [InlineData("verify", "composition")]
+    [InlineData("verify", "accepted")]
+    [InlineData("collect", "deadline-small")]
+    [InlineData("collect", "deadline-large")]
+    [InlineData("collect", "parallelism")]
+    [InlineData("collect", "collection")]
+    public async Task TypedPublicOperationsRejectOneIncompleteSelectorBeforeSourceAccess(string operation, string selector)
+    {
+        using var temp = TestDirectory.Create();
+        var policy = CoverageFanInPolicyTests.Policy();
+        var output = Path.Join(temp.Path, "output");
+        ValueTask<CoverageFanInResult> pending;
+        if (operation is "capture" or "import")
+        {
+            var request = new CoverageCaptureRequest(policy, temp.Path, output, "primary", "coverage", "timings");
+            if (operation == "import") request = request with { CoveragePath = null, TimingsPath = null, ImportDirectory = "portable", OriginalSourceRoot = "/producer" };
+            request = selector switch
+            {
+                "repository" => request with { RepositoryRoot = " " },
+                "output" => request with { OutputDirectory = " " },
+                "coverage" => request with { CoveragePath = operation == "import" ? "conflict" : " " },
+                "timings" => request with { TimingsPath = operation == "import" ? "conflict" : null },
+                "raw" => request with { RawCoveragePath = "conflict" },
+                "producer" => request with { ProducerId = "unknown" },
+                _ => request with { OriginalSourceRoot = " " }
+            };
+            pending = CoverageFanIn.CaptureAsync(request);
+        }
+        else if (operation == "compose")
+            pending = CoverageFanIn.ComposeAsync(new(policy, temp.Path, selector == "primary" ? " " : "primary",
+                selector == "supplements" ? ["undeclared"] : [], output));
+        else if (operation == "accept")
+            pending = CoverageFanIn.AcceptAsync(new(policy, temp.Path, "primary", [], " ", output));
+        else if (operation == "verify")
+            pending = CoverageFanIn.VerifyAsync(new(policy, temp.Path, "primary", [],
+                selector == "composition" ? " " : "composition", selector == "accepted" ? " " : "accepted"));
+        else
+            pending = CoverageFanIn.CollectAndCaptureAsync(new(policy, temp.Path, output,
+                selector == "collection" ? " " : "collection", "primary",
+                selector == "deadline-small" ? 0 : selector == "deadline-large" ? 86401 : 60,
+                Parallelism: selector == "parallelism" ? 0 : 1));
+        var result = await pending;
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.Equal("ASCOV301", Assert.Single(result.Diagnostics).Code);
+        Assert.False(result.Effects.OutputCreated);
+        Assert.False(result.Effects.GenerationCommitted);
+        Assert.Empty(Directory.GetFileSystemEntries(temp.Path));
+    }
+
     private static CoverageFanInExpected Expected()
     {
         var policy = CoveragePolicyEncoding.Freeze(CoverageFanInPolicyTests.Policy());

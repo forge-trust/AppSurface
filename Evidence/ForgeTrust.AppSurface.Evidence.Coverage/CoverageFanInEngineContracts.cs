@@ -31,6 +31,8 @@ internal sealed record CoverageFanInEngineRequest(CoverageFanInExpected Expected
 {
     /// <summary>Per-call identity execution seam for deadline/failure tests; public adapters leave it null.</summary>
     internal ICoverageRunProcessRunner? IdentityRunner { get; init; }
+    /// <summary>Exact native project-to-original-report mapping, with complete successful timings.</summary>
+    internal IReadOnlyDictionary<string, string>? RawCoveragePaths { get; init; }
 }
 /// <summary>Private safe terminal diagnostic, without dependency exception data.</summary>
 internal sealed record CoverageFanInEngineDiagnostic(string Code, string Stage, string Field, string Recovery);
@@ -44,4 +46,4 @@ internal sealed record CoverageFanInEngineResult(string Operation, string Outcom
     bool HistoricalReplay = false);
 /// <summary>Validated retained capture bytes. No semantic oracle is shared by composer and verifier.</summary>
 internal sealed record CoverageFanInBundle(string Directory, JsonElement Manifest, string ManifestHash,
-    XDocument Document, byte[] CoverageBytes, byte[] AuxiliaryBytes, string AuxiliaryName);
+    XDocument Document, byte[] CoverageBytes, IReadOnlyDictionary<string, byte[]> AuxiliaryFiles);
