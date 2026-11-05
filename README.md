@@ -480,3 +480,5 @@ AppSurface is licensed under the [Polyform Small Business License 1.0.0](./licen
 Free for individuals and businesses with fewer than 100 people and under
 $1,000,000 USD prior-year revenue (inflation-adjusted). Larger companies
 require a commercial license.
+
+For identity-bound cross-platform coverage, use the neutral [Coverage package](Coverage/ForgeTrust.AppSurface.Coverage/README.md) and [native fan-in guide](guides/coverage-fan-in.md). The supported API and installed CLI retain complete primary execution and independent aggregate/patch acceptance, with explicit consumer policy and owned output custody.

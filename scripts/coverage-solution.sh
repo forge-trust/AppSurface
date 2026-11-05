@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI_PROJECT="$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
+COVERAGE_DIRECTORY="${COVERAGE_DIRECTORY:-$ROOT_DIR/TestResults/coverage-merged}"
 
 fail_legacy_input() {
   local input="$1"
@@ -56,22 +57,24 @@ if [[ -z "${COVERAGE_GATE_DIFF_BASE+x}" ]]; then
   COVERAGE_GATE_DIFF_BASE="origin/main"
 fi
 
-dotnet_run_args=(
-  run
-  --project "$CLI_PROJECT"
-  --configuration "$BUILD_CONFIGURATION"
-)
-
-if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
-  dotnet_run_args+=(--no-restore)
+coverage_command=()
+if [[ -n "${COVERAGE_CLI_PATH:-}" ]]; then
+  # CI stages and installs the exact candidate CLI package before entering this
+  # wrapper. Local contributors keep the source-project default below.
+  coverage_command=("$COVERAGE_CLI_PATH")
+else
+  coverage_command=(dotnet run --project "$CLI_PROJECT" --configuration "$BUILD_CONFIGURATION")
+  if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
+    coverage_command+=(--no-restore)
+  fi
+  coverage_command+=(--)
 fi
 
-dotnet_run_args+=(
-  --
+coverage_command+=(
   coverage
   run
   --solution "$ROOT_DIR/ForgeTrust.AppSurface.slnx"
-  --output "$ROOT_DIR/TestResults/coverage-merged"
+  --output "$COVERAGE_DIRECTORY"
   --configuration "$BUILD_CONFIGURATION"
   --parallelism "${COVERAGE_PARALLELISM:-1}"
   # These suites start containers, nested dotnet builds, or time-sensitive child processes.
@@ -90,33 +93,17 @@ dotnet_run_args+=(
 )
 
 if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
-  dotnet_run_args+=(--no-restore)
+  coverage_command+=(--no-restore)
 fi
 
 if [[ "${COVERAGE_REQUIRE_NON_SANDBOX:-true}" != "false" ]]; then
-  dotnet_run_args+=(--require-non-sandbox)
+  coverage_command+=(--require-non-sandbox)
 fi
 
 cd "$ROOT_DIR"
-dotnet "${dotnet_run_args[@]}"
+"${coverage_command[@]}"
 
-# With attested native evidence, retain the original full-solution aggregate gate
-# independently. The cross-platform report is used only for the patch gate.
-if [[ -n "${COVERAGE_FANIN_NATIVE:-}" ]]; then
-  python3 "$ROOT_DIR/scripts/coverage_fanin.py" capture \
-    --configuration "$BUILD_CONFIGURATION" --scope solution \
-    --report "$ROOT_DIR/TestResults/coverage-merged/coverage.cobertura.xml" \
-    --timings "$ROOT_DIR/TestResults/coverage-merged/timings.json" \
-    --output "$ROOT_DIR/TestResults/coverage-merged/fanin-primary"
-  if [[ -z "${COVERAGE_FANIN_REPORT:-}" ]]; then
-    python3 "$ROOT_DIR/scripts/coverage_fanin.py" prepare-default \
-      --configuration "$BUILD_CONFIGURATION" --output "$ROOT_DIR/TestResults/coverage-fanin"
-  fi
-  python3 "$ROOT_DIR/scripts/coverage_fanin.py" merge \
-    --configuration "$BUILD_CONFIGURATION" \
-    --primary "$ROOT_DIR/TestResults/coverage-merged/fanin-primary" \
-    --native "$COVERAGE_FANIN_NATIVE" \
-    --output "${COVERAGE_FANIN_REPORT:-$ROOT_DIR/TestResults/coverage-fanin}"
-fi
-
+# The native dogfood path is invoked by coverage-gate-fanin.sh after the complete
+# primary run succeeds. That adapter calls only the installed candidate CLI for
+# capture, import, composition, acceptance, and independent verification.
 "$ROOT_DIR/scripts/coverage-gate-fanin.sh"

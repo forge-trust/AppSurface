@@ -1,0 +1,53 @@
+<Project>
+  <PropertyGroup>
+    <_AppSurfaceCoverageReportGeneratorOutputRoot>appsurface-coverage-runtime/reportgenerator/5.5.10/net10.0</_AppSurfaceCoverageReportGeneratorOutputRoot>
+    <_AppSurfaceCoverageReportGeneratorPackageRoot>tools/$(TargetFramework)/any/reportgenerator/5.5.10/net10.0</_AppSurfaceCoverageReportGeneratorPackageRoot>
+    <_AppSurfaceCoverageReportGeneratorSourceRoot Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' == 'true'">$(PkgReportGenerator)/tools/net10.0</_AppSurfaceCoverageReportGeneratorSourceRoot>
+    <_AppSurfaceCoverageReportGeneratorManifestSource Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' == 'true'">$(MSBuildThisFileDirectory)../reportgenerator-runtime-manifest.json</_AppSurfaceCoverageReportGeneratorManifestSource>
+    <_AppSurfaceCoverageReportGeneratorSourceRoot Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' != 'true'">$(MSBuildThisFileDirectory)../tools/$(TargetFramework)/any/reportgenerator/5.5.10/net10.0</_AppSurfaceCoverageReportGeneratorSourceRoot>
+    <_AppSurfaceCoverageReportGeneratorManifestSource Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' != 'true'">$(_AppSurfaceCoverageReportGeneratorSourceRoot)/runtime-manifest.json</_AppSurfaceCoverageReportGeneratorManifestSource>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' == 'true'">
+    <Content Include="$(_AppSurfaceCoverageReportGeneratorSourceRoot)/**/*">
+      <Link>$(_AppSurfaceCoverageReportGeneratorOutputRoot)/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <TargetPath>$(_AppSurfaceCoverageReportGeneratorOutputRoot)/%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <Pack>true</Pack>
+      <PackagePath>$(_AppSurfaceCoverageReportGeneratorPackageRoot)/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+      <CopyToOutputDirectory Condition="'$(AppSurfaceCoverageReportGeneratorRuntimeOwner)' == 'true'">PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory Condition="'$(AppSurfaceCoverageReportGeneratorRuntimeOwner)' == 'true'">PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="$(_AppSurfaceCoverageReportGeneratorManifestSource)">
+      <Link>$(_AppSurfaceCoverageReportGeneratorOutputRoot)/runtime-manifest.json</Link>
+      <TargetPath>$(_AppSurfaceCoverageReportGeneratorOutputRoot)/runtime-manifest.json</TargetPath>
+      <Pack>true</Pack>
+      <PackagePath>$(_AppSurfaceCoverageReportGeneratorPackageRoot)/runtime-manifest.json</PackagePath>
+      <CopyToOutputDirectory Condition="'$(AppSurfaceCoverageReportGeneratorRuntimeOwner)' == 'true'">PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory Condition="'$(AppSurfaceCoverageReportGeneratorRuntimeOwner)' == 'true'">PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' != 'true'">
+    <Content Include="$(_AppSurfaceCoverageReportGeneratorSourceRoot)/**/*">
+      <Link>$(_AppSurfaceCoverageReportGeneratorOutputRoot)/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <TargetPath>$(_AppSurfaceCoverageReportGeneratorOutputRoot)/%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="$(_AppSurfaceCoverageReportGeneratorManifestSource)">
+      <Link>$(_AppSurfaceCoverageReportGeneratorOutputRoot)/runtime-manifest.json</Link>
+      <TargetPath>$(_AppSurfaceCoverageReportGeneratorOutputRoot)/runtime-manifest.json</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(AppSurfaceCoverageReportGeneratorRuntimeOwner)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)ForgeTrust.AppSurface.Evidence.Coverage.ReportGenerator.targets"
+          Pack="true"
+          PackagePath="buildTransitive/ForgeTrust.AppSurface.Evidence.Coverage.targets" />
+    <None Include="$(MSBuildThisFileDirectory)../THIRD-PARTY-NOTICES.md"
+          Pack="true"
+          PackagePath="THIRD-PARTY-NOTICES.md" />
+  </ItemGroup>
+</Project>

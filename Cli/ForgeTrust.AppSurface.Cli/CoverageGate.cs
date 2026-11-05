@@ -479,6 +479,9 @@ internal sealed record CoverageGateRequest(
 {
     /// <summary>Gets a compatible caller-owned output context for nested first-party Evidence evaluation.</summary>
     internal CoverageArtifactSession? ArtifactSession { get; init; }
+
+    /// <summary>Opens a retained immutable input snapshot for nested fan-in evaluation; callers own every returned stream.</summary>
+    internal Func<Stream>? CoverageStreamFactory { get; init; }
     /// <summary>
     /// Supports existing first-party request construction while intentionally discarding CLI-only summary options.
     /// </summary>
@@ -515,6 +518,8 @@ internal sealed partial record CoveragePatchRequest(
 
 internal sealed partial record CoveragePatchRequest
 {
+    /// <summary>Opens the same immutable Cobertura snapshot used by aggregate evaluation.</summary>
+    internal Func<Stream>? CoverageStreamFactory { get; init; }
     public CoveragePatchRequest(
         string RepositoryRoot,
         string DiffBase,
@@ -900,7 +905,7 @@ internal static class CoverageGateEvaluator
 
         try
         {
-            await using var stream = File.OpenRead(request.CoveragePath);
+            await using var stream = request.CoverageStreamFactory?.Invoke() ?? File.OpenRead(request.CoveragePath);
             using var reader = XmlReader.Create(stream, ReaderSettings);
             while (true)
             {
@@ -1004,7 +1009,7 @@ internal static class CoverageGateEvaluator
             throw new CommandException("ASCOV001 --coverage must point to a Cobertura XML file.");
         }
 
-        if (!File.Exists(request.CoveragePath))
+        if (request.CoverageStreamFactory is null && !File.Exists(request.CoveragePath))
         {
             throw new CommandException($"ASCOV001 Cobertura file not found: {request.CoveragePath}");
         }
@@ -1263,7 +1268,7 @@ internal static class PatchCoverageEvaluator
         }
 
         var changedLines = parseResult.ChangedLines;
-        var lineHits = await ReadLineCoverageMapAsync(coveragePath, request.RepositoryRoot, cancellationToken);
+        var lineHits = await ReadLineCoverageMapAsync(coveragePath, request.RepositoryRoot, cancellationToken, request.CoverageStreamFactory);
         var lines = new List<PatchCoverageLine>();
         foreach (var (file, changedFileLines) in changedLines.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
@@ -1765,13 +1770,14 @@ internal static class PatchCoverageEvaluator
     private static async Task<Dictionary<string, Dictionary<int, PatchLineCoverageData>>> ReadLineCoverageMapAsync(
         string coveragePath,
         string repositoryRoot,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<Stream>? coverageStreamFactory = null)
     {
         var lineHits = new Dictionary<string, Dictionary<int, PatchLineCoverageData>>(StringComparer.Ordinal);
 
         try
         {
-            await using var stream = File.OpenRead(coveragePath);
+            await using var stream = coverageStreamFactory?.Invoke() ?? File.OpenRead(coveragePath);
             using var reader = XmlReader.Create(stream, ReaderSettings);
             string? currentFile = null;
 

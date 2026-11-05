@@ -14,6 +14,11 @@ This is the living release note for the next coordinated AppSurface version afte
 
 - Add release-facing changes here as they land.
 
+### Portable coverage fan-in
+
+- Add the public [Coverage package](../Coverage/ForgeTrust.AppSurface.Coverage/README.md) and installed [fan-in commands](../guides/coverage-fan-in.md) for explicit collection, capture/import, conservative composition, aggregate/patch acceptance, and independent verification. The private engine carries its pinned normalization runtime; direct library consumers do not require Aspire or the CLI.
+- AppSurface's CI supplies its complete source/run/native inventory through the [dogfood adapter](../tools/ForgeTrust.AppSurface.Coverage.Dogfood/README.md). Existing coverage thresholds, tolerance, instrumentation and primary-solution execution remain authoritative. Schema v2 uses fresh local custody; historical v1 evidence retains read-only compatibility and is never recertified as new execution.
+
 <!-- appsurface:unreleased-entries section="included" -->
 
 ## Migration watch

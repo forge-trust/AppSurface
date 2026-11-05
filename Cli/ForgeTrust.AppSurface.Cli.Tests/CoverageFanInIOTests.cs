@@ -1,0 +1,160 @@
+using System.Text;
+using ForgeTrust.AppSurface.Evidence.Coverage;
+
+namespace ForgeTrust.AppSurface.Cli.Tests;
+
+public sealed class CoverageFanInIOTests
+{
+    private static CoverageFanInBounds Bounds(long xml = 10000, long json = 1000, long total = 100000,
+        int depth = 20, int lines = 20, int elements = 100, int attributes = 10, int token = 1000,
+        int branches = 20, int records = 40) => new(xml, json, total, depth, lines, elements, attributes, token, branches, records);
+
+    [Fact]
+    public void ReaderUsesRetainedNativeFilesAndEnforcesExactByteBoundaries()
+    {
+        using var temp = TestDirectory.Create();
+        var directory = temp.CreateDirectory("input");
+        File.WriteAllText(Path.Join(directory, "exact.json"), "0123456789");
+        File.WriteAllText(Path.Join(directory, "second.json"), "0123456789");
+        using var io = new CoverageFanInIO(Bounds(json: 10, total: 19), CancellationToken.None);
+        io.Acquire([(directory, false)], requireCoordination: false);
+        Assert.Equal("0123456789", Encoding.UTF8.GetString(io.Read(Path.Join(directory, "exact.json"))));
+        Assert.Equal("0123456789", Encoding.UTF8.GetString(io.Read(Path.Join(directory, "exact.json"))));
+        Assert.Throws<InvalidDataException>(() => io.Read(Path.Join(directory, "second.json")));
+        Assert.Throws<InvalidOperationException>(() => io.Read(Path.Join(temp.Path, "outside.json")));
+        io.VerifyBindings();
+    }
+
+    [Theory]
+    [InlineData("<a><b><c /></b></a>", 1, 20, 100, 10, 1000, 20, 40)]
+    [InlineData("<a><line/><line/></a>", 20, 1, 100, 10, 1000, 20, 40)]
+    [InlineData("<a><b/><c/></a>", 20, 20, 2, 10, 1000, 20, 40)]
+    [InlineData("<a x='1' y='2'/>", 20, 20, 100, 1, 1000, 20, 40)]
+    [InlineData("<a x='1234'/>", 20, 20, 100, 10, 3, 20, 40)]
+    [InlineData("<a><condition/><condition/></a>", 20, 20, 100, 10, 1000, 1, 40)]
+    [InlineData("<a><line/><condition/></a>", 20, 20, 100, 10, 1000, 20, 1)]
+    public void XmlAdmissionRejectsStructureBeforeMaterializing(string xml, int depth, int lines, int elements,
+        int attributes, int token, int branches, int records)
+    {
+        using var io = new CoverageFanInIO(Bounds(depth: depth, lines: lines, elements: elements,
+            attributes: attributes, token: token, branches: branches, records: records), CancellationToken.None);
+        Assert.Throws<InvalidDataException>(() => io.Xml(Encoding.UTF8.GetBytes(xml)));
+    }
+
+    [Fact]
+    public void XmlWireRejectsDtdAndControlledNormalizationRejectsInternalEntities()
+    {
+        using var io = new CoverageFanInIO(Bounds(), CancellationToken.None);
+        Assert.Throws<System.Xml.XmlException>(() => io.Xml(Encoding.UTF8.GetBytes(
+            "<!DOCTYPE coverage SYSTEM 'http://cobertura.sourceforge.net/xml/coverage-04.dtd'><coverage/>")));
+        Assert.Throws<InvalidDataException>(() => io.Xml(Encoding.UTF8.GetBytes(
+            "<!DOCTYPE coverage [<!ENTITY x 'x'>]><coverage/>"), allowInertGeneratorDoctype: true));
+        Assert.Throws<InvalidDataException>(() => io.Xml(Encoding.UTF8.GetBytes(
+            "<!DOCTYPE coverage SYSTEM 'https://untrusted.invalid/arbitrary.dtd'><coverage/>"), allowInertGeneratorDoctype: true));
+        Assert.Null(io.Xml(Encoding.UTF8.GetBytes(
+            "<!DOCTYPE coverage SYSTEM 'http://cobertura.sourceforge.net/xml/coverage-04.dtd'><coverage/>"),
+            allowInertGeneratorDoctype: true).DocumentType);
+    }
+
+    [Fact]
+    public void ReaderRefusesLinkedFilesWithoutFollowingThem()
+    {
+        if (OperatingSystem.IsWindows()) return; // Privileged symlink creation is exercised in native Windows lanes.
+        using var temp = TestDirectory.Create();
+        var input = temp.CreateDirectory("input");
+        var outside = Path.Join(temp.Path, "outside.json"); File.WriteAllText(outside, "secret");
+        File.CreateSymbolicLink(Path.Join(input, "linked.json"), outside);
+        using var io = new CoverageFanInIO(Bounds(), CancellationToken.None);
+        io.Acquire([(input, false)], requireCoordination: false);
+        Assert.Throws<IOException>(() => io.Read(Path.Join(input, "linked.json")));
+        Assert.Equal("secret", File.ReadAllText(outside));
+    }
+
+    [Fact]
+    public void ReadOnlyLeasesContendWithWritersAndReleaseAfterCancellation()
+    {
+        using var temp = TestDirectory.Create();
+        var root = temp.CreateDirectory("owned");
+        // Writer provisions coordination on Windows; read-only IO must never create it.
+        using (var writer = CoverageArtifactOperationLease.Acquire(root, true)) { }
+        using (var io = new CoverageFanInIO(Bounds(), CancellationToken.None))
+        {
+            io.Acquire([(root, false)]);
+            Assert.Throws<CoverageExecutionException>(() => CoverageArtifactOperationLease.Acquire(root, true));
+        }
+        using var next = CoverageArtifactOperationLease.Acquire(root, true);
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        using var cancelled = new CoverageFanInIO(Bounds(), cancellation.Token);
+        Assert.Throws<OperationCanceledException>(() => cancelled.Acquire([(root, false)]));
+    }
+
+    [Fact]
+    public void MetadataAndStagingShareTheAlreadyAdmittedInputBudget()
+    {
+        using var temp = TestDirectory.Create();
+        var root = temp.CreateDirectory("input");
+        File.WriteAllText(Path.Join(root, "input.json"), "1234");
+        using var io = new CoverageFanInIO(Bounds(total: 10), CancellationToken.None);
+        io.Acquire([(root, false)], requireCoordination: false);
+        _ = io.Read(Path.Join(root, "input.json"));
+        io.AdmitOutput([new byte[5]]);
+        io.AdmitMetadata(1);
+        Assert.Throws<InvalidDataException>(() => io.AdmitMetadata(1));
+    }
+
+    [Fact]
+    public void XmlOutputChecksExactByteBoundaryRemainingInvocationBudgetAndCancellation()
+    {
+        var document = System.Xml.Linq.XDocument.Parse("<coverage><packages/></coverage>");
+        byte[] expected;
+        using (var normal = new CoverageFanInIO(Bounds(), CancellationToken.None))
+            expected = normal.EncodeXml(document);
+        using (var exact = new CoverageFanInIO(Bounds(xml: expected.Length), CancellationToken.None))
+            Assert.Equal(expected, exact.EncodeXml(document));
+        using (var over = new CoverageFanInIO(Bounds(xml: expected.Length - 1), CancellationToken.None))
+            Assert.Throws<InvalidDataException>(() => over.EncodeXml(document));
+        using (var total = new CoverageFanInIO(Bounds(total: expected.Length), CancellationToken.None))
+        {
+            total.AdmitMetadata(1);
+            Assert.Throws<InvalidDataException>(() => total.EncodeXml(document));
+        }
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var cancelled = new CoverageFanInIO(Bounds(), cancellation.Token);
+        Assert.Throws<OperationCanceledException>(() => cancelled.EncodeXml(document));
+    }
+
+    [Fact]
+    public void XmlOutputMustFitTheSameStructureAndOperationRecordLimitsAsInputs()
+    {
+        var document = System.Xml.Linq.XDocument.Parse("<coverage><line/><line/></coverage>");
+        using var limited = new CoverageFanInIO(Bounds(lines: 1), CancellationToken.None);
+        Assert.Throws<InvalidDataException>(() => limited.EncodeXml(document));
+        using var exact = new CoverageFanInIO(Bounds(lines: 2, records: 2), CancellationToken.None);
+        var bytes = exact.EncodeXml(document);
+        Assert.Same(exact.Xml(bytes), exact.Xml(bytes));
+        Assert.Throws<InvalidDataException>(() => exact.EncodeXml(document));
+    }
+
+    [Fact]
+    public void RetainedInputReplacementOrSameObjectModificationFailsFinalBindingChecks()
+    {
+        using var temp = TestDirectory.Create();
+        var root = temp.CreateDirectory("input");
+        var path = Path.Join(root, "input.json"); File.WriteAllText(path, "original");
+        using var io = new CoverageFanInIO(Bounds(), CancellationToken.None);
+        io.Acquire([(root, false)], requireCoordination: false);
+        _ = io.Read(path);
+        if (OperatingSystem.IsWindows())
+        {
+            // The native reader disallows write sharing. A foreign writer cannot modify this retained file.
+            Assert.Throws<IOException>(() => File.WriteAllText(path, "modified"));
+            io.VerifyBindings();
+        }
+        else
+        {
+            File.WriteAllText(path, "modified");
+            Assert.Throws<IOException>(io.VerifyBindings);
+        }
+    }
+}

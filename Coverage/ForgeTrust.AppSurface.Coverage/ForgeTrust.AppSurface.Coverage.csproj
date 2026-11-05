@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageDescription>Portable coverage capture, conservative composition, acceptance and independent verification for consumer-owned .NET solutions.</PackageDescription>
+    <PackageTags>appsurface;coverage;fanin;testing</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
+  </ItemGroup>
+</Project>

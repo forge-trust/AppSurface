@@ -545,6 +545,9 @@ internal sealed record CoverageRunRequest(
     /// <summary>Gets current-invocation duplicate retention; no-clean preservation takes precedence.</summary>
     internal string ArtifactRetention { get; init; } = "managed";
 
+    /// <summary>Explicit nested consumer working directory; avoids changing process-wide current directory.</summary>
+    internal string? WorkingDirectory { get; init; }
+
     /// <summary>Gets the explicitly scoped output context shared by nested first-party Evidence operations.</summary>
     internal CoverageArtifactSession? ArtifactSession { get; init; }
 
@@ -839,7 +842,7 @@ internal sealed class CoverageRunWorkflow
             request = request with { TestResults = CoverageRunTestResultFormat.Junit };
         }
 
-        var currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
+        var currentDirectory = Path.GetFullPath(request.WorkingDirectory ?? Directory.GetCurrentDirectory());
         var outputDirectory = ResolveUserPath(request.OutputDirectory, currentDirectory);
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             request.WatchdogMode,

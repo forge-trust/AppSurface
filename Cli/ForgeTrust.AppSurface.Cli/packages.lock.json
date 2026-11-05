@@ -461,6 +461,12 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.deployment": {
         "type": "Project"
       },

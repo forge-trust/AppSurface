@@ -12,9 +12,12 @@
 
   <PropertyGroup>
     <DefineConstants>$(DefineConstants);EVIDENCE_COVERAGE_CORE</DefineConstants>
+    <AppSurfaceCoverageReportGeneratorSourceBuild>true</AppSurfaceCoverageReportGeneratorSourceBuild>
+    <AppSurfaceCoverageReportGeneratorRuntimeOwner>true</AppSurfaceCoverageReportGeneratorRuntimeOwner>
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Coverage" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
@@ -23,6 +26,14 @@
 
   <ItemGroup>
     <PackageReference Include="CliWrap" />
+    <PackageReference Include="ReportGenerator" GeneratePathProperty="true">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="reportgenerator-runtime-manifest.json"
+                      LogicalName="ForgeTrust.AppSurface.Evidence.Coverage.reportgenerator-runtime-manifest.json" />
   </ItemGroup>
 
   <ItemGroup>
@@ -53,5 +64,7 @@
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunSlowTestDiagnostics.cs" Link="CoverageRunSlowTestDiagnostics.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageFileSystemInterop.cs" Link="CoverageFileSystemInterop.cs" />
   </ItemGroup>
+
+  <Import Project="buildTransitive/ForgeTrust.AppSurface.Evidence.Coverage.ReportGenerator.targets" />
 
 </Project>
