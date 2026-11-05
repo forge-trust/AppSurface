@@ -1,5 +1,8 @@
+extern alias TailwindTasks;
+
 using System.Runtime.InteropServices;
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
+using TaskInternal = TailwindTasks::ForgeTrust.AppSurface.Web.Tailwind.Internal;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
@@ -31,19 +34,28 @@ public sealed class TailwindProcessRunnerTests : IDisposable
     [InlineData("Done in 34ms", (int)TailwindOutputLevel.Information)]
     [InlineData("\u001b[3m\u001b[1m\u001b[34m≈ tailwindcss v4.1.18\u001b[0m", (int)TailwindOutputLevel.Information)]
     [InlineData("\u001b[32mDone in \u001b[1m34ms\u001b[m", (int)TailwindOutputLevel.Information)]
+    [InlineData("\u001b[1;32mDone in 34ms\u001b[0m", (int)TailwindOutputLevel.Information)]
     [InlineData("\u001b[38:2::34:56:78m≈ tailwindcss v4.1.18\u001b[0m", (int)TailwindOutputLevel.Information)]
     [InlineData("\u001b[33mWarning: unexpected input\u001b[0m", (int)TailwindOutputLevel.Error)]
     [InlineData("\u001b[31mError: boom\u001b[0m", (int)TailwindOutputLevel.Error)]
     [InlineData("unrecognized message", (int)TailwindOutputLevel.Error)]
     [InlineData("\u001b[31≈ tailwindcss v4.1.18", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b[/mDone in 34ms", (int)TailwindOutputLevel.Error)]
     [InlineData("Done in 34ms\u001b[31", (int)TailwindOutputLevel.Error)]
     [InlineData("\u001b[2K≈ tailwindcss v4.1.18", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b[", (int)TailwindOutputLevel.Error)]
     [InlineData("Done in 34ms\u001b[2K", (int)TailwindOutputLevel.Error)]
     [InlineData("\u001b]0;title\u0007Done in 34ms", (int)TailwindOutputLevel.Error)]
     [InlineData("\u001b[0m \u001b[m", (int)TailwindOutputLevel.Debug)]
     public void Classify_IgnoresOnlyCompleteSgrStyling(string line, int expected)
     {
+        // Value: protects=runtime and MSBuild copies classify identical stderr messages;
+        // fails_when=SGR parsing changes severity or either compiled host copy diverges;
+        // why_new=the classifier source is linked into two production assemblies; seam=none;
+        // no_claim=classification does not establish Tailwind package or native-host acceptance.
         Assert.Equal((TailwindOutputLevel)expected, TailwindStderrClassifier.Classify(line));
+        Assert.Equal((TaskInternal.TailwindOutputLevel)expected, TaskInternal.TailwindStderrClassifier.Classify(line));
     }
 
     [Fact]
