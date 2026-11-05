@@ -2,10 +2,40 @@ using System.Globalization;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
+[Collection(nameof(NativeSmokeEnvironmentCollection))]
 public sealed class DurableTemplateNativeSmokeCommandTests
 {
     private const string CleanupMarker = "[native-cleanup] elapsed-ms=250";
     private const string SmokeMarker = "[native-smoke] read-only ordinary startup passed";
+
+    [Fact]
+    public async Task UnixSmokeIgnoresAnOverlongUserTemporaryDirectory()
+    {
+        // Value: protects=native smoke uses a short Unix root despite a long TMPDIR;
+        // fails_when=Linux selects Path.GetTempPath for its cluster;
+        // why_new=normal runner temporary directories can already be short; seam=none;
+        // no_claim=the command runner and PostgreSQL runtime are fixtures.
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var fixture = new NativeSmokeFixture();
+        var longTemporary = Path.Join(fixture.Root, new string('t', 120));
+        Directory.CreateDirectory(longTemporary);
+        var previousTemporary = Environment.GetEnvironmentVariable("TMPDIR");
+        try
+        {
+            Environment.SetEnvironmentVariable("TMPDIR", longTemporary);
+            Assert.True(System.Text.Encoding.UTF8.GetByteCount(Path.GetTempPath()) > 103);
+            await RunSmokeAsync(fixture, CreateEnvironment());
+            AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TMPDIR", previousTemporary);
+        }
+    }
 
     [Fact]
     public async Task RunsSmokeWithPrivateClusterEnvironmentAndCleansClusterOnSuccess()
@@ -211,6 +241,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         NativeSmokeFixture fixture,
         DurableTemplateNativePostgreSql cluster)
     {
+        Assert.Equal(fixture.IncomingOwnedRoot, cluster.OwnedRoot);
         Assert.Contains(fixture.Runner.Requests, request => Path.GetFileNameWithoutExtension(request.FileName) == "pg_ctl"
             && request.Arguments.LastOrDefault() == "stop");
         Assert.False(Directory.Exists(cluster.OwnedRoot));
@@ -219,11 +250,22 @@ public sealed class DurableTemplateNativeSmokeCommandTests
 
     private sealed class NativeSmokeFixture : IDisposable
     {
-        private readonly string _root = Path.Join(Path.GetTempPath(), "appsurface-native-smoke-command-" + Guid.NewGuid().ToString("N"));
+        private readonly string _root = Path.Join(TemporaryRoot, "pgsmoke-" + Guid.NewGuid().ToString("N"));
 
         internal NativeSmokeFixture()
         {
             Root = _root;
+            if (Directory.Exists(Root))
+            {
+                throw new IOException("The private smoke-test root already exists.");
+            }
+
+            Directory.CreateDirectory(Root);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
             BinDirectory = Path.Join(Root, "bin");
             Directory.CreateDirectory(BinDirectory);
             foreach (var tool in new[] { "initdb", "postgres", "pg_ctl", "psql" })
@@ -235,6 +277,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         }
 
         internal string Root { get; }
+        internal string? IncomingOwnedRoot { get; private set; }
         internal string BinDirectory { get; }
         internal FakeRuntime Runtime { get; } = new();
         internal FakeCommandRunner Runner { get; }
@@ -245,6 +288,9 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         internal DurableTemplateNativePostgreSql? StartedCluster { get; private set; }
         internal NativePostgreSqlToolIdentity? ReceivedIdentity { get; set; }
         internal List<int> CleanupBudgets { get; } = [];
+
+        private static string TemporaryRoot => Path.GetFullPath(OperatingSystem.IsLinux() ? "/tmp" :
+            OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath());
 
         internal async ValueTask DisposeClusterAsync(DurableTemplateNativePostgreSql cluster, int remainingMilliseconds)
         {
@@ -262,6 +308,13 @@ public sealed class DurableTemplateNativeSmokeCommandTests
             CancellationToken cancellationToken)
         {
             Assert.Same(Runner, runner);
+            IncomingOwnedRoot = ownedRoot;
+            Assert.Equal(TemporaryRoot, Path.GetDirectoryName(Path.GetFullPath(ownedRoot)));
+            const string ownedRootPrefix = "appsurface-native-template-";
+            var ownedRootName = Path.GetFileName(ownedRoot);
+            Assert.StartsWith(ownedRootPrefix, ownedRootName, StringComparison.Ordinal);
+            Assert.True(Guid.TryParseExact(ownedRootName[ownedRootPrefix.Length..], "N", out _));
+            Assert.False(Directory.Exists(ownedRoot));
             StartedCluster = await DurableTemplateNativePostgreSql.StartAsync(
                 ownedRoot,
                 runner,
@@ -379,4 +432,9 @@ public sealed class DurableTemplateNativeSmokeCommandTests
             => ServerRunning ? ProcessIdentity : null;
         public bool IsSameProcessAlive(NativePostgreSqlProcessIdentity identity, string postgresPath) => ServerRunning;
     }
+}
+
+[CollectionDefinition(nameof(NativeSmokeEnvironmentCollection), DisableParallelization = true)]
+public sealed class NativeSmokeEnvironmentCollection
+{
 }
