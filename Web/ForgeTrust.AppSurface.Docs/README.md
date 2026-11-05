@@ -3467,6 +3467,24 @@ The docs-owned outline client keeps only the AppSurface Docs chrome around that 
 
 If JavaScript is unavailable, the server-rendered outline remains a normal list of hash links. If `IntersectionObserver` is unavailable, AppSurface Docs keeps static and hash-based behavior rather than adding a scroll polling fallback.
 
+### Main-pane scroll restoration
+
+The shared docs layout restores `#main-content` after a `turbo:frame-load` for
+`doc-content`: it reveals and scrolls to the current hash target, or resets to the
+top when there is no target. It repeats the correction after two animation frames
+and at 80 ms and 240 ms to account for frame rendering and disclosure layout.
+Each load has its own internal restoration generation, so callbacks queued by an
+older load cannot move a newer frame.
+
+Reader input inside the main pane cancels queued corrections: `wheel`,
+`touchstart`, `pointerdown`, and the scrolling keys Arrow Up/Down, Page Up/Down,
+Home, End, and Space. This lets the reader take control while rendering finishes.
+Programmatic `scroll` events do not cancel restoration because the correction
+itself emits them. Keep this distinction when changing the layout; otherwise
+late corrections can pull the reader away from a section or stop working after
+their first attempt. The [wayfinding browser tests](../ForgeTrust.RazorWire.IntegrationTests/AppSurfaceDocsWayfindingPlaywrightTests.cs)
+exercise normal restoration and corrections queued before reader input.
+
 ### Sequence contract
 
 Use `sequence_key` together with `order` when a set of pages should behave like one proof path:

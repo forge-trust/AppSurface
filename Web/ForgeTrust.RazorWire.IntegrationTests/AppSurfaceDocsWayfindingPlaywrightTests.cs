@@ -790,6 +790,118 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         Assert.InRange(scrollState.DocumentScrollTop, 0, 1);
     }
 
+    [Theory]
+    [InlineData("wheel")]
+    [InlineData("touchstart")]
+    [InlineData("pointerdown")]
+    [InlineData("keydown")]
+    [InlineData("none")]
+    public async Task DetailsFrameNavigation_PreservesUserScroll_WhenDelayedRestoreRuns(string inputEvent)
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+        await page.AddInitScriptAsync(
+            """
+            (() => {
+              window.__rwHeldFrameScrollRestores = [];
+              const setTimeout = window.setTimeout.bind(window);
+              window.setTimeout = (callback, delay, ...args) => {
+                if (typeof callback === "function"
+                    && callback.name === "restoreFrameHashAndMainScrollPosition"
+                    && [80, 240].includes(delay)) {
+                  return setTimeout(
+                    () => window.__rwHeldFrameScrollRestores.push(() => callback.apply(window, args)),
+                    0);
+                }
+
+                return setTimeout(callback, delay, ...args);
+              };
+            })();
+            """);
+
+        await AppSurfaceDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.EvaluateAsync("() => { window.__rwFrameNavigationSentinel = 'alive'; }");
+
+        await page.EvaluateAsync(
+            """
+            () => document
+              .querySelector("#docs-sidebar a[href='/docs/Namespaces/ForgeTrust.AppSurface.Aspire.html']")
+              ?.click()
+            """);
+        await page.WaitForFunctionAsync(
+            """
+            () => window.__rwFrameNavigationSentinel === 'alive'
+              && window.location.pathname === '/docs/Namespaces/ForgeTrust.AppSurface.Aspire.html'
+              && document.querySelector('#doc-content h1')?.textContent?.trim() === 'Aspire'
+              && (window.__rwHeldFrameScrollRestores?.length ?? 0) >= 2
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        var scrollStates = await page.EvaluateAsync<FrameNavigationScrollState>(
+            """
+            eventName => {
+              const main = document.getElementById('main-content');
+              const readState = () => ({
+                scrollTop: Math.round(main?.scrollTop ?? Number.MAX_SAFE_INTEGER),
+                maxScrollTop: Math.round(Math.max(0, (main?.scrollHeight ?? 0) - (main?.clientHeight ?? 0))),
+                documentScrollTop: Math.round(document.scrollingElement?.scrollTop ?? window.scrollY)
+              });
+
+              if (eventName !== 'none') {
+                const event = eventName === 'keydown'
+                  ? new KeyboardEvent(eventName, { key: 'ArrowDown', bubbles: true })
+                  : eventName === 'wheel'
+                    ? new WheelEvent(eventName, { deltaY: 20000, bubbles: true, cancelable: true })
+                    : eventName === 'pointerdown'
+                      ? new PointerEvent(eventName, { bubbles: true, cancelable: true })
+                      : new Event(eventName, { bubbles: true, cancelable: true });
+                main?.dispatchEvent(event);
+              }
+
+              if (main) {
+                main.scrollTop = main.scrollHeight;
+              }
+
+              const before = readState();
+              window.__rwHeldFrameScrollRestores.splice(0).forEach(restore => restore());
+              return { before, after: readState() };
+            }
+            """,
+            inputEvent);
+        var beforeRestore = scrollStates.Before;
+        var afterRestore = scrollStates.After;
+        Assert.True(beforeRestore.ScrollTop > 8);
+        Assert.InRange(beforeRestore.MaxScrollTop - beforeRestore.ScrollTop, 0, 8);
+
+        if (inputEvent != "none")
+        {
+            Assert.InRange(afterRestore.ScrollTop, beforeRestore.ScrollTop - 8, beforeRestore.ScrollTop + 8);
+        }
+        else
+        {
+            Assert.InRange(afterRestore.ScrollTop, 0, 8);
+        }
+
+        Assert.InRange(afterRestore.DocumentScrollTop, 0, 1);
+    }
+
     [Fact]
     public async Task OutlineClient_IgnoresStaleHeadingTargets_ForHashAndClickActiveState()
     {
@@ -1458,6 +1570,13 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         public int MaxScrollTop { get; init; }
 
         public int DocumentScrollTop { get; init; }
+    }
+
+    private sealed class FrameNavigationScrollState
+    {
+        public DetailsScrollState Before { get; init; } = new();
+
+        public DetailsScrollState After { get; init; } = new();
     }
 
     private sealed class MobileOutlineContextState
