@@ -2,7 +2,7 @@
 
 Design: [Preserve the guide concept when switching versions](issue-183-concept-preserving-version-switching.md)
 Case: [#183](https://github.com/forge-trust/AppSurface/issues/183)
-Wireframe: [image](issue-183-version-switch-wireframe.png) · [HTML](issue-183-version-switch-wireframe.html)
+Wireframe: [image](https://github.com/forge-trust/AppSurface/blob/1bdac5ca3c6e0f99c9f3dd1b3d5eaaf31c948cb0/docs/designs/issue-183-version-switch-wireframe.png) · [HTML](https://github.com/forge-trust/AppSurface/blob/1bdac5ca3c6e0f99c9f3dd1b3d5eaaf31c948cb0/docs/designs/issue-183-version-switch-wireframe.html)
 
 ## Decisions
 
@@ -12,8 +12,8 @@ The user selected stable concept IDs for new guides with explicit mappings for l
 
 The requested `combo/sub` model was unavailable on five attempts. Following the user's fallback policy, the independent review ran with `gpt-6-luna`. The first round reviewed the whole draft; the second reviewed the locale clarification and prior findings. Original evidence is retained beside the private design:
 
-- [Round 1 verdict](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-design-20261027-230354-issue183.md.review.yK1g2K/round-1.json)
-- [Round 2 verdict](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-design-20261027-230354-issue183.md.review.yK1g2K/round-2.json)
+- Round 1 verdict (`/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-design-20261027-230354-issue183.md.review.yK1g2K/round-1.json`)
+- Round 2 verdict (`/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-design-20261027-230354-issue183.md.review.yK1g2K/round-2.json`)
 
 The review helper validated both sealed receipts and installed the authoritative findings in the design. Local relative-link checks and whitespace validation passed. The accepted sketch was rendered and visually checked. No implementation tests ran because this session produced planning artifacts only.
 

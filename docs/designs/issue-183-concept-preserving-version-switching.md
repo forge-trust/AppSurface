@@ -3,7 +3,7 @@
 None.
 
 <!-- /autoplan restore point: "/Users/andrew/Projects/forge-trust/runnable__mercury/.gstack/tmp/autoplan/main-autoplan-restore-20261030-002606.md" -->
-Current QA plan: [andrew-main-eng-review-test-plan-20261030-213607.md](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261030-213607.md). Current task aggregation: [aggregated-tasks.md](/Users/andrew/Projects/forge-trust/runnable__mercury/.gstack/tmp/autoplan/aggregated-tasks.md). Artifact links in the retained baseline task section identify earlier review artifacts; these current links include the accepted owner decisions and engineering refresh.
+Current QA plan: andrew-main-eng-review-test-plan-20261030-213607.md (`/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261030-213607.md`). Current task aggregation: aggregated-tasks.md (`/Users/andrew/Projects/forge-trust/runnable__mercury/.gstack/tmp/autoplan/aggregated-tasks.md`). Artifact links in the retained baseline task section identify earlier review artifacts; these current links include the accepted owner decisions and engineering refresh.
 
 ## Implementation plan
 # Design: Preserve the guide concept when switching versions
@@ -100,7 +100,7 @@ Static release assembly consumes the same resolver and generates the plan, choic
 
 Engineering D8/A requires static publication to fail with an operator diagnostic before docs-asset or Pages uploads when a new switch artifact exceeds the approved limit. Preserve original verification inputs and previously published content; do not publish a partial serving inventory or replace affected static surfaces with degraded recovery outputs. Maintain the current rejection of invalid authored metadata and digest failures. Maintainers must reduce the artifact or deliberately adjust the existing option within its unchanged supported range before retrying. Verify the failure gate and document the correction path; this review does not run a publication or upload.
 
-Accepted wireframe: [repository image](issue-183-version-switch-wireframe.png). The full local preview is `/Users/andrew/.codex/visualizations/2026/10/24/01a16cc8-0b72-79a2-8ec6-fae615ab3144/issue-183-wireframe.png`. It is a layout sketch; its example versions and guide text are illustrative.
+Accepted wireframe: [repository image](https://github.com/forge-trust/AppSurface/blob/1bdac5ca3c6e0f99c9f3dd1b3d5eaaf31c948cb0/docs/designs/issue-183-version-switch-wireframe.png). The full local preview is `/Users/andrew/.codex/visualizations/2026/10/24/01a16cc8-0b72-79a2-8ec6-fae615ab3144/issue-183-wireframe.png`. It is a layout sketch; its example versions and guide text are illustrative.
 
 ## Success Criteria and Verification
 
@@ -325,7 +325,7 @@ Lane A owns S4A; Lane B owns S4B. Launch A + B after S3, merge both, then run S5
 
 Synthesized from this review's findings. These are planned tasks, not dispatched implementation. Checkbox as they ship; no product code has been written in this review.
 
-Machine-readable task artifact: [six engineering tasks](/Users/andrew/.gstack/projects/forge-trust-Runnable/tasks-eng-review-20261029-043901.jsonl), serialized with one `jq -nc` invocation per task. The [QA artifact](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261028-014657.md) contains the corresponding planned assertions.
+Machine-readable task artifact: six engineering tasks (`/Users/andrew/.gstack/projects/forge-trust-Runnable/tasks-eng-review-20261029-043901.jsonl`), serialized with one `jq -nc` invocation per task. The QA artifact (`/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261028-014657.md`) contains the corresponding planned assertions.
 
 - [ ] **T1 (P1, human: 1–2 days / CC+gstack: 4–8 hours)** — ReleaseContracts — Implement the internal combined identity index, pure resolver and encoded markup projection.
   - Surfaced by: ER2; R2-1; ER3; Test G2–G5.
@@ -658,7 +658,7 @@ Static release assembly consumes the same resolver and generates the plan, choic
 
 Engineering D8/A requires static publication to fail with an operator diagnostic before docs-asset or Pages uploads when a new switch artifact exceeds the approved limit. Preserve original verification inputs and previously published content; do not publish a partial serving inventory or replace affected static surfaces with degraded recovery outputs. Maintain the current rejection of invalid authored metadata and digest failures. Maintainers must reduce the artifact or deliberately adjust the existing option within its unchanged supported range before retrying. Verify the failure gate and document the correction path; this review does not run a publication or upload.
 
-Accepted wireframe: [repository image](issue-183-version-switch-wireframe.png). The full local preview is `/Users/andrew/.codex/visualizations/2026/10/24/01a16cc8-0b72-79a2-8ec6-fae615ab3144/issue-183-wireframe.png`. It is a layout sketch; its example versions and guide text are illustrative.
+Accepted wireframe: [repository image](https://github.com/forge-trust/AppSurface/blob/1bdac5ca3c6e0f99c9f3dd1b3d5eaaf31c948cb0/docs/designs/issue-183-version-switch-wireframe.png). The full local preview is `/Users/andrew/.codex/visualizations/2026/10/24/01a16cc8-0b72-79a2-8ec6-fae615ab3144/issue-183-wireframe.png`. It is a layout sketch; its example versions and guide text are illustrative.
 
 ## Success Criteria and Verification
 
@@ -889,7 +889,7 @@ PLANNED CODE PATHS                                      USER FLOWS
 
 Coverage: **9 planned gap families** are identified, not nine executable branches. All new behavior is unimplemented; executable branch coverage is unknown, and no feature-test percentage is claimed. Existing strong assertions should be extended rather than copied into existence-only tests.
 
-QA artifact: [issue #183 test plan](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261028-014657.md), containing seven critical paths and fourteen edge-case families, each with a value card. The assertions carry the exact approved contracts, including archive/alias/canonical/locale regression, CSP negatives, fallback rules, static parity, packed dependency proof, D6/A byte-budget classification, D7/A hosted recovery, D8/A static overflow gating and D9/A standalone 503 recovery. No LLM/prompt/eval scope is involved. No tests are proposed for retirement.
+QA artifact: issue #183 test plan (`/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261028-014657.md`), containing seven critical paths and fourteen edge-case families, each with a value card. The assertions carry the exact approved contracts, including archive/alias/canonical/locale regression, CSP negatives, fallback rules, static parity, packed dependency proof, D6/A byte-budget classification, D7/A hosted recovery, D8/A static overflow gating and D9/A standalone 503 recovery. No LLM/prompt/eval scope is involved. No tests are proposed for retirement.
 
 Dispositions: G1–G9 are required implementation proof under the product approval and D3/A–D5/A, not additional feature choices. Engineering D6/A additionally approves exact/over-limit UTF-8 classification tests for the reused artifact budget; D7/A approves hosted guide recovery and omission-when-unfittable proof; D8/A approves static overflow stopping before uploads, immutable verification inputs and no published partial inventory; D9/A approves complete bounded choice-page recovery with HTTP 503 and an empty 503 when recovery cannot fit. No test-policy decision remains open. Test suites were not run because this is planning-only work.
 
@@ -1201,7 +1201,7 @@ D7 — Show recovery when hosted switch data exceeds the limit?
 Project: AppSurface #183 on main, performance finding ER4-H.
 Reply with A or B.
 
-An otherwise valid guide can have version-switch metadata or added presentation that exceeds the approved byte limit. The existing HTML/search-input rejection returns an empty 404 ([AppSurfaceDocsPublishedTreeHandler.cs](/Users/andrew/Projects/forge-trust/runnable__mercury/Web/ForgeTrust.AppSurface.Docs/Services/AppSurfaceDocsPublishedTreeHandler.cs:952)); applying that to optional switch data would hide a readable guide. The remaining hosted choice is whether to explain the disabled switching or simply omit its control.
+An otherwise valid guide can have version-switch metadata or added presentation that exceeds the approved byte limit. The existing HTML/search-input rejection returns an empty 404 (AppSurfaceDocsPublishedTreeHandler.cs (`/Users/andrew/Projects/forge-trust/runnable__mercury/Web/ForgeTrust.AppSurface.Docs/Services/AppSurfaceDocsPublishedTreeHandler.cs:952`)); applying that to optional switch data would hide a readable guide. The remaining hosted choice is whether to explain the disabled switching or simply omit its control.
 
 Recommendation: A because a bounded explanation and safe recovery actions best preserve the approved reader experience.
 
@@ -1272,7 +1272,7 @@ D8 — Stop static publication when switch artifacts overflow?
 Project: AppSurface #183 on main, performance finding ER4-P.
 Reply with A or B.
 
-Static publication must generate the serving copies and choice pages that make switching work without a hosted endpoint. The current workflow verifies staged archives before uploads ([release-publish.yml](/Users/andrew/Projects/forge-trust/runnable__mercury/.github/workflows/release-publish.yml:313)), but it has no switch-artifact overflow policy yet. We need to choose whether size overflow stops publication or permits complete bounded recovery outputs.
+Static publication must generate the serving copies and choice pages that make switching work without a hosted endpoint. The current workflow verifies staged archives before uploads (release-publish.yml (`/Users/andrew/Projects/forge-trust/runnable__mercury/.github/workflows/release-publish.yml:313`)), but it has no switch-artifact overflow policy yet. We need to choose whether size overflow stops publication or permits complete bounded recovery outputs.
 
 Recommendation: A because a failed publication gives maintainers a clear correction point before incomplete switching reaches readers.
 
@@ -1345,7 +1345,7 @@ D9 — How should an oversized hosted choice page recover?
 Project: AppSurface #183 on main, performance finding ER4-C.
 Reply with A or B.
 
-The plain-link choice page is a separate request, so it cannot use the guide rule of simply omitting optional UI. For a verified, still-readable source guide, its choice-page output can exceed the limit even when the guide itself is fine. The new route needs an explicit response; the current empty 404 applies to existing HTML/search inputs ([AppSurfaceDocsPublishedTreeHandler.cs](/Users/andrew/Projects/forge-trust/runnable__mercury/Web/ForgeTrust.AppSurface.Docs/Services/AppSurfaceDocsPublishedTreeHandler.cs:952)).
+The plain-link choice page is a separate request, so it cannot use the guide rule of simply omitting optional UI. For a verified, still-readable source guide, its choice-page output can exceed the limit even when the guide itself is fine. The new route needs an explicit response; the current empty 404 applies to existing HTML/search inputs (AppSurfaceDocsPublishedTreeHandler.cs (`/Users/andrew/Projects/forge-trust/runnable__mercury/Web/ForgeTrust.AppSurface.Docs/Services/AppSurfaceDocsPublishedTreeHandler.cs:952`)).
 
 Recommendation: A because an unavailable explanation with safe recovery links makes the failed switch understandable while keeping the original guide accessible.
 
@@ -1449,7 +1449,7 @@ Lane A owns S4A; Lane B owns S4B. Launch A + B after S3, merge both, then run S5
 
 Synthesized from this review's findings. These are planned tasks, not dispatched implementation. Checkbox as they ship; no product code has been written in this review.
 
-Machine-readable task artifact: [six engineering tasks](/Users/andrew/.gstack/projects/forge-trust-Runnable/tasks-eng-review-20261029-043901.jsonl), serialized with one `jq -nc` invocation per task. The [QA artifact](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261028-014657.md) contains the corresponding planned assertions.
+Machine-readable task artifact: six engineering tasks (`/Users/andrew/.gstack/projects/forge-trust-Runnable/tasks-eng-review-20261029-043901.jsonl`), serialized with one `jq -nc` invocation per task. The QA artifact (`/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261028-014657.md`) contains the corresponding planned assertions.
 
 - [ ] **T1 (P1, human: 1–2 days / CC+gstack: 4–8 hours)** — ReleaseContracts — Implement the internal combined identity index, pure resolver and encoded markup projection.
   - Surfaced by: ER2; R2-1; ER3; Test G2–G5.
@@ -2443,7 +2443,7 @@ Step0 scope accepted as-is. Reality7/7, unverified factual premises0; capacity/u
 
 Decision count: 15 automatic decisions including 2 provisional Taste (A2/C1 and Dsg1); 13 Mechanical. Plus one pending factual User Challenge UC1. Dsg3/ENG3 repeat exact prior approvals and are not counted again.
 
-Current engineering QA artifact: [andrew-main-eng-review-test-plan-20261030-020439.md](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261030-020439.md). Current task refinements: [tasks-eng-review-20261030-020439.jsonl](/Users/andrew/.gstack/projects/forge-trust-Runnable/tasks-eng-review-20261030-020439.jsonl).
+Current engineering QA artifact: andrew-main-eng-review-test-plan-20261030-020439.md (`/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261030-020439.md`). Current task refinements: tasks-eng-review-20261030-020439.jsonl (`/Users/andrew/.gstack/projects/forge-trust-Runnable/tasks-eng-review-20261030-020439.jsonl`).
 
 ## Owner gate1 answer and engineering refresh invocation2
 

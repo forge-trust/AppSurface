@@ -160,8 +160,7 @@ internal static class DocConceptSchema
                 var anchors = GetRequiredStringArray(element, "anchorIds");
                 ValidateAnchors(anchors);
                 var landing = element.TryGetProperty("sectionLanding", out var landingElement)
-                    ? GetBoolean(landingElement, "sectionLanding")
-                    : false;
+                    && GetBoolean(landingElement, "sectionLanding");
 
                 var page = new DocConceptCanonicalPage(
                     routePath,

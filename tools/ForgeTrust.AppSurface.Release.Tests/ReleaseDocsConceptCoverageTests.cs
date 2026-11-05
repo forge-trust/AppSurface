@@ -915,9 +915,8 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
             var tree = TestPathUtils.PathUnder(root, "releases", release.Version);
             Directory.CreateDirectory(tree);
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
-            foreach (var page in release.Pages)
+            foreach (var page in release.Pages.Where(page => page.WriteArtifact))
             {
-                if (!page.WriteArtifact) continue;
                 AddFile(tree, files, page.ArtifactPath, page.Html);
             }
             foreach (var (path, content) in release.AdditionalFiles ?? new Dictionary<string, string>(StringComparer.Ordinal))

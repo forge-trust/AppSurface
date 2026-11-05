@@ -20,9 +20,8 @@ public sealed partial class AppSurfaceDocsVersionCatalogService
             ReadOnlyMemory<byte>? indexBytes = null;
             if (archive is not null && version.ExactTreePath is not null)
             {
-                foreach (var route in archive.FrozenRouteManifest.CanonicalRoutePaths)
+                foreach (var logicalRoute in archive.FrozenRouteManifest.CanonicalRoutePaths.Select(route => route.Split('#')[0]))
                 {
-                    var logicalRoute = route.Split('#')[0];
                     var path = ResolveConceptArtifact(archive, logicalRoute);
                     if (path is not null && AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
                             version.ExactTreePath, path.Split('#')[0], out _, out _))

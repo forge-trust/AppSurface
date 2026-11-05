@@ -420,9 +420,9 @@ public sealed class DocConceptCoreTests
             && issue.Detail == "A bridge conflicts with a published concept identifier.");
         Assert.True(startup.Index.TryGetPageIdentity("1", firstPin, "guide/first", out var firstIdentity));
         Assert.True(startup.Index.TryGetPageIdentity("3", secondPin, "guide/second", out var secondIdentity));
-        foreach (var source in new[] { firstIdentity!, secondIdentity! })
+        foreach (var recovery in new[] { firstIdentity!, secondIdentity! }
+                     .Select(source => startup.Index.Resolve(source, "2", legacyPin)))
         {
-            var recovery = startup.Index.Resolve(source, "2", legacyPin);
             Assert.Equal(DocConceptResolutionReason.Ambiguous, recovery.Reason);
             Assert.Null(recovery.TargetPage);
         }

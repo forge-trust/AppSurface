@@ -331,7 +331,7 @@ internal static class ReleaseDocsStaticConceptPublication
             var exact = String(entry, "exactTreePath");
             var pin = String(entry, "releaseManifestSha256");
             var isPublic = IsPublicRelease(entry);
-            if (version is null || exact is null || pin is null) continue;
+            if (exact is null || pin is null) continue;
             var tree = ResolveCatalogTree(root, exact);
             if (!Directory.Exists(tree))
             {
@@ -581,14 +581,14 @@ internal static class ReleaseDocsStaticConceptPublication
             return Join(prefix, value);
         }
         foreach (var name in new[] { "href", "src", "action" })
-            foreach (var element in document.QuerySelectorAll("[" + name + "]"))
+            foreach (var element in document.QuerySelectorAll("[" + name + "]")
+                         .Where(element => element.LocalName != "link" || element.GetAttribute("rel") != "canonical"))
             {
-                if (element.LocalName == "link" && element.GetAttribute("rel") == "canonical") continue;
                 element.SetAttribute(name, Rebase(element.GetAttribute(name)!, mount));
             }
-        foreach (var refresh in document.QuerySelectorAll("meta[http-equiv]"))
+        foreach (var refresh in document.QuerySelectorAll("meta[http-equiv]")
+                     .Where(refresh => string.Equals(refresh.GetAttribute("http-equiv"), "refresh", StringComparison.OrdinalIgnoreCase)))
         {
-            if (!string.Equals(refresh.GetAttribute("http-equiv"), "refresh", StringComparison.OrdinalIgnoreCase)) continue;
             var content = refresh.GetAttribute("content") ?? string.Empty;
             var position = content.IndexOf("url=", StringComparison.OrdinalIgnoreCase);
             if (position >= 0) refresh.SetAttribute("content", content[..(position + 4)] + Rebase(content[(position + 4)..].Trim(), mount));
@@ -665,9 +665,9 @@ internal static class ReleaseDocsStaticConceptPublication
         {
             var document = new HtmlParser().ParseDocument(File.ReadAllText(SafeCombine(stagingRoot, record.Path)));
             var scope = record.Kind == "choice-page" ? document.QuerySelector("main") : document.QuerySelector("[data-docs-version-switch]");
-            foreach (var link in scope?.QuerySelectorAll("a[href]").AsEnumerable() ?? Enumerable.Empty<IElement>())
+            foreach (var href in scope?.QuerySelectorAll("a[href]").AsEnumerable()
+                         .Select(link => link.GetAttribute("href")!) ?? Enumerable.Empty<string>())
             {
-                var href = link.GetAttribute("href")!;
                 var path = href.Split('?', '#')[0];
                 if (path == Join(routeRoot, "versions")) continue;
                 if (!path.StartsWith(routeRoot.TrimEnd('/') + "/", StringComparison.Ordinal))

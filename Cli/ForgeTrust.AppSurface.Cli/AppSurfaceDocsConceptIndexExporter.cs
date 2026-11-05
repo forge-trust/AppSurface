@@ -240,9 +240,8 @@ internal static class AppSurfaceDocsConceptIndexExporter
         var document = new HtmlParser().ParseDocument(html);
         var ids = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var element in document.QuerySelectorAll("[id]"))
+        foreach (var id in document.QuerySelectorAll("[id]").Select(element => element.GetAttribute("id") ?? string.Empty))
         {
-            var id = element.GetAttribute("id") ?? string.Empty;
             if (string.IsNullOrWhiteSpace(id)
                 || id.Any(character => char.IsControl(character) || char.IsWhiteSpace(character) || character == '#')
                 || !seen.Add(id))
