@@ -329,6 +329,38 @@ public sealed class CoverageFanInNativeCollectionTests
             collection, [Fixture.Projects[0]], DiscoveryExpected(), CancellationToken.None));
     }
 
+    [Fact]
+    public void AttachmentDiscoverySharesTheEntryBudgetAcrossProjectsBeforeReportingSelectedHashes()
+    {
+        using var temp = TestDirectory.Create();
+        var collection = temp.CreateDirectory("collection");
+        var projects = new JsonArray();
+        for (var projectIndex = 0; projectIndex < Fixture.Projects.Length; projectIndex++)
+        {
+            var invocation = $"projects/project-{projectIndex}/collector-results/invocation";
+            var attachment = temp.CreateDirectory("collection/" + invocation + "/attachment");
+            for (var index = 0; index < 5999; index++)
+                File.WriteAllBytes(Path.Join(attachment, "diagnostic-" + index), []);
+            File.WriteAllText(Path.Join(attachment, "coverage.cobertura.xml"), Fixture.Report);
+            projects.Add(new JsonObject
+            {
+                ["project"] = Fixture.Projects[projectIndex],
+                ["exitCode"] = 0,
+                ["executionStatus"] = "completed",
+                ["coverageArtifactStatus"] = "produced",
+                ["invocationDirectory"] = invocation
+            });
+        }
+        WriteDiscoveryTimings(collection, projects, 2);
+        var observations = new List<IReadOnlyDictionary<string, string>>();
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInEngine.FindNativeReports(
+            collection, Fixture.Projects, DiscoveryExpected(), CancellationToken.None,
+            observeReportHashes: observations.Add));
+
+        Assert.Empty(observations);
+    }
+
     private static void WriteDiscoveryTimings(string collection, JsonArray projects, int count = 1) =>
         File.WriteAllText(Path.Join(collection, "timings.json"), new JsonObject
         {

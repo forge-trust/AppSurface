@@ -98,6 +98,7 @@ internal static partial class CoverageFanInEngine
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
         long totalBytes = bytes.LongLength;
+        var count = 0;
         foreach (var project in projects)
         {
             var invocation = entries[project].GetProperty("invocationDirectory").GetString()
@@ -109,7 +110,6 @@ internal static partial class CoverageFanInEngine
             var pending = new Stack<(string Path, int Depth)>();
             pending.Push((Path.Join(collection, Path.Join(components)), 0));
             var matches = new List<string>();
-            var count = 0;
             while (pending.TryPop(out var current))
             {
                 token.ThrowIfCancellationRequested();
