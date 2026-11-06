@@ -96,7 +96,7 @@ public sealed record CoverageCaptureRequest(CoverageFanInPolicy Policy, string R
 /// <summary>Collect the complete explicit inventory or declared native filter through the existing supervised engine.</summary>
 /// <remarks>Observed collection rebuilds before testing. <c>NoBuild</c> must be false.
 /// Declared test projects must be regular tracked files in the pinned Git source, including pinned submodules.
-/// Ignored files are rejected except conventional <c>bin/</c> and <c>obj/</c> directories beside tracked .NET projects.
+/// Ignored files are rejected except conventional <c>bin/</c> and <c>obj/</c> directories beside tracked .NET projects with no ancestor project directory.
 /// <c>NoRestore</c> may be true when trusted restore has already completed; this does not skip the rebuild.</remarks>
 public sealed record CoverageCollectRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string OutputDirectory, string CollectionDirectory, string ProducerId, int DeadlineSeconds,

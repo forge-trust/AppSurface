@@ -112,6 +112,30 @@ public sealed class CoverageFanInNativeWorkflowTests
         Assert.True(File.Exists(TestPathUtils.PathUnder(fixture.Repository, path)));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CollectRejectsIgnoredDirectoriesThatCanMasqueradeAsBuildOutput(bool leadingSpace)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var path = await fixture.AddBuildOutputAliasAsync(leadingSpace);
+        var policy = await fixture.PolicyAsync();
+        if (leadingSpace)
+            policy = policy with { TestProjects = ["Root.Tests.csproj", .. policy.TestProjects] };
+        using var progress = new StringWriter();
+
+        var result = await CoverageFanIn.CollectAndCaptureAsync(new CoverageCollectRequest(
+            policy, fixture.Repository, fixture.NativeCapture, fixture.NativeCollection, "native", 180,
+            NoRestore: true), progress: progress);
+
+        Assert.Empty(progress.ToString());
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.Null(result.Observation);
+        Assert.False(Directory.Exists(fixture.NativeCollection));
+        Assert.False(Directory.Exists(fixture.NativeCapture));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(fixture.Repository, path)));
+    }
+
     [Fact]
     public async Task CollectDoesNotCertifyOldBinariesForTheCurrentCommit()
     {
@@ -426,8 +450,20 @@ public sealed class CoverageFanInNativeWorkflowTests
             await File.AppendAllTextAsync(TestPathUtils.PathUnder(Repository, ".gitignore"), $"/{path}\n");
             await Command(Repository, "git", "add", ".gitignore");
             await Command(Repository, "git", "commit", "-m", "ignore an SDK default compile item");
-            Assert.Equal(path, await Command(Repository, "git", "check-ignore", "--", path));
+            await Command(Repository, "git", "check-ignore", "--quiet", "--", path);
             Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
+        }
+
+        internal async Task<string> AddBuildOutputAliasAsync(bool leadingSpace)
+        {
+            var project = leadingSpace ? "Root.Tests.csproj" : "Consumer.Alpha.Tests/nested/Marker.csproj";
+            var projectPath = TestPathUtils.PathUnder(Repository, project);
+            Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+            await File.WriteAllTextAsync(projectPath, """<Project Sdk="Microsoft.NET.Sdk" />""");
+            await Command(Repository, "git", "add", "--", project);
+            var path = leadingSpace ? " bin/IgnoredTests.cs" : "Consumer.Alpha.Tests/nested/bin/IgnoredTests.cs";
+            await AddIgnoredFailingTestAsync(path);
+            return path;
         }
 
         internal async Task PinFirstTestProjectAsSubmoduleAsync()

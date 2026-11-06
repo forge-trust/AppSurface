@@ -226,6 +226,8 @@ internal static partial class CoverageFanInEngine
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(r.Expected.Limits.GetProperty("identitySeconds").GetInt32()));
         var unseenProjects = new HashSet<string>(projects, StringComparer.Ordinal);
+        var projectDirectories = collecting ? new HashSet<string>(StringComparer.Ordinal) : null;
+        var ignoredInventories = new List<(string Prefix, string Entries)>();
         var pending = new Queue<(string Path, string Prefix, string? Commit)>();
         pending.Enqueue((root, string.Empty, null));
         var checkouts = 1;
@@ -240,8 +242,7 @@ internal static partial class CoverageFanInEngine
                         r, deadline.Token, checkout.Path).ConfigureAwait(false)).Length != 0))
                 throw new InvalidDataException("Pinned submodule source or clean state differs.");
             var entries = await IdentityAsync("git", ["ls-files", "--stage", "-v", "-z"], r, deadline.Token, checkout.Path).ConfigureAwait(false);
-            var buildOutputs = collecting ? new HashSet<string>(StringComparer.Ordinal) : null;
-            foreach (var (path, commit) in ReadSourceIndex(entries, checkout.Prefix, unseenProjects, buildOutputs))
+            foreach (var (path, commit) in ReadSourceIndex(entries, checkout.Prefix, unseenProjects, projectDirectories))
             {
                 if (++checkouts > maximumCheckouts)
                     throw new InvalidDataException("Source checkout inventory exceeds the limit.");
@@ -251,34 +252,52 @@ internal static partial class CoverageFanInEngine
                     throw new InvalidDataException("Pinned submodule path escapes its checkout.");
                 pending.Enqueue((child, checkout.Prefix + path + "/", commit));
             }
-            if (buildOutputs is not null)
+            if (collecting)
             {
                 var ignored = await IdentityAsync("git", ["ls-files", "--others", "--ignored", "--exclude-standard",
                     "--directory", "--no-empty-directory", "-z"], r, deadline.Token, checkout.Path).ConfigureAwait(false);
-                ValidateCollectionIgnoredFiles(ignored, buildOutputs);
+                ignoredInventories.Add((checkout.Prefix, ignored));
             }
             directory.VerifyArtifactBinding();
         }
         if (unseenProjects.Count != 0)
             throw new InvalidDataException("Declared test projects must be tracked regular files in the pinned source.");
+        if (projectDirectories is not null)
+            ValidateCollectionIgnoredFiles(ignoredInventories, projectDirectories);
     }
 
-    // An unrelated directory called bin/obj is still a possible SDK input. Git includes a trailing
-    // slash for ignored directory entries; a symlink with the same name is not an output directory.
-    private static void ValidateCollectionIgnoredFiles(string entries, HashSet<string> buildOutputs)
+    // A default SDK glob can see nested projects' outputs, including across a Git submodule.
+    // Allow ordinary output only for outermost project directories, preserving exact Git path spelling.
+    private static void ValidateCollectionIgnoredFiles(List<(string Prefix, string Entries)> inventories,
+        HashSet<string> projectDirectories)
     {
-        var lookup = buildOutputs.GetAlternateLookup<ReadOnlySpan<char>>();
-        foreach (var entry in entries.AsSpan().Split('\0'))
+        var exact = projectDirectories.GetAlternateLookup<ReadOnlySpan<char>>();
+        var caseFolded = new HashSet<string>(projectDirectories, StringComparer.OrdinalIgnoreCase).GetAlternateLookup<ReadOnlySpan<char>>();
+        foreach (var (prefix, entries) in inventories)
         {
-            var path = entries.AsSpan()[entry];
-            if (!path.IsEmpty && !lookup.Contains(path))
-                throw new InvalidDataException("Ignored files outside conventional build output can change observed coverage inputs.");
+            foreach (var entry in entries.AsSpan().Split('\0'))
+            {
+                var path = entries.AsSpan()[entry];
+                if (path.IsEmpty) continue;
+                if (!(path.SequenceEqual("bin/") || path.SequenceEqual("obj/")
+                    || path.EndsWith("/bin/", StringComparison.Ordinal) || path.EndsWith("/obj/", StringComparison.Ordinal)))
+                    throw new InvalidDataException("Ignored files outside conventional build output can change observed coverage inputs.");
+                var project = string.Concat(prefix, path[..^4]).AsSpan();
+                if (!exact.Contains(project))
+                    throw new InvalidDataException("Ignored output does not belong to a tracked project directory.");
+                while (!project.IsEmpty)
+                {
+                    project = project[..(project[..^1].LastIndexOf('/') + 1)];
+                    if (caseFolded.Contains(project))
+                        throw new InvalidDataException("Ignored nested output can be a build input for an ancestor project.");
+                }
+            }
         }
     }
 
     // Git lowers the tag for assume-unchanged; S means skip-worktree. NUL separates filenames.
     private static List<(string Path, string Commit)> ReadSourceIndex(string entries, string prefix,
-        HashSet<string> unseenProjects, HashSet<string>? buildOutputs)
+        HashSet<string> unseenProjects, HashSet<string>? projectDirectories)
     {
         var links = new List<(string, string)>();
         var projectLookup = unseenProjects.GetAlternateLookup<ReadOnlySpan<char>>();
@@ -302,13 +321,9 @@ internal static partial class CoverageFanInEngine
             }
             if (prefix.Length == 0) projectLookup.Remove(path);
             else if (unseenProjects.Count != 0) unseenProjects.Remove(string.Concat(prefix, path));
-            if (buildOutputs is not null && (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            if (projectDirectories is not null && (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
                 || path.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".vbproj", StringComparison.OrdinalIgnoreCase)))
-            {
-                var parent = path[..(path.LastIndexOf('/') + 1)];
-                buildOutputs.Add(string.Concat(parent, "bin/"));
-                buildOutputs.Add(string.Concat(parent, "obj/"));
-            }
+                projectDirectories.Add(string.Concat(prefix, path[..(path.LastIndexOf('/') + 1)]));
         }
         return links;
     }
@@ -323,7 +338,10 @@ internal static partial class CoverageFanInEngine
         var result = await runner.RunAsync(new(file, safeArguments, workingDirectory ?? Full(r.RepositoryRoot), null, null,
             CoverageRunProcessLease.Detached()), deadline.Token).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.OutputTruncated) throw new InvalidDataException("Identity command failed.");
-        return (result.StandardOutput ?? result.Output).Trim();
+        var output = result.StandardOutput ?? result.Output;
+        if (file != "git" || !arguments.Contains("-z", StringComparer.Ordinal)) return output.TrimEnd('\r', '\n');
+        if (output.Contains('\uFFFD')) throw new InvalidDataException("Git path output contains invalid or ambiguous UTF-8.");
+        return output;
     }
 
     private static byte[] Serialize(object value) => JsonSerializer.SerializeToUtf8Bytes(value, Json);
