@@ -2069,6 +2069,7 @@ internal static class GitDiffReader
             UseShellExecute = false,
         };
         startInfo.ArgumentList.Add("--no-pager");
+        startInfo.ArgumentList.Add("--no-replace-objects");
         startInfo.ArgumentList.Add("diff");
         startInfo.ArgumentList.Add("--unified=0");
         startInfo.ArgumentList.Add("--no-ext-diff");

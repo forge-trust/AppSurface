@@ -29,7 +29,7 @@ For the [Coverage EvidenceHost producer](../ForgeTrust.AppSurface.Evidence.Aspir
 Generate the planning patch from the repository root with the same path prefixes and options as the coverage gate. Use the same `DIFF_BASE` in the acceptance policy:
 
 ```sh
-git --no-pager diff --unified=0 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --relative "${DIFF_BASE}...HEAD" -- > "$PATCH_FILE"
+git --no-pager --no-replace-objects diff --unified=0 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --relative "${DIFF_BASE}...HEAD" -- > "$PATCH_FILE"
 ```
 
 Choose a patch output path outside the checkout so the source remains clean. Pass the file's exact bytes to `ResolvePatch` or `--diff-file`.

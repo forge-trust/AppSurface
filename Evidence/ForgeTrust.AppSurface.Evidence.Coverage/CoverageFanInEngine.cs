@@ -269,8 +269,8 @@ internal static partial class CoverageFanInEngine
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(r.Expected.Limits.GetProperty("identitySeconds").GetInt32()));
         var runner = r.IdentityRunner ?? new CliWrapCoverageRunProcessRunner();
-        // Identity validation must not execute a repository-configured fsmonitor hook.
-        var safeArguments = file == "git" ? new[] { "-c", "core.fsmonitor=false" }.Concat(arguments).ToArray() : arguments;
+        // Inspect the pinned objects without replacement refs or a repository-configured fsmonitor hook.
+        var safeArguments = file == "git" ? new[] { "--no-replace-objects", "-c", "core.fsmonitor=false" }.Concat(arguments).ToArray() : arguments;
         var result = await runner.RunAsync(new(file, safeArguments, workingDirectory ?? Full(r.RepositoryRoot), null, null,
             CoverageRunProcessLease.Detached()), deadline.Token).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.OutputTruncated) throw new InvalidDataException("Identity command failed.");

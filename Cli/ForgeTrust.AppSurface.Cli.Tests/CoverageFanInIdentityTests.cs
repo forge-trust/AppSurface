@@ -48,12 +48,12 @@ public sealed class CoverageFanInIdentityTests
         };
         var expectedCommands = new (string FileName, string Arguments)[]
         {
-            ("git", "-c core.fsmonitor=false rev-parse --show-toplevel"),
-            ("git", "-c core.fsmonitor=false rev-parse HEAD"),
-            ("git", "-c core.fsmonitor=false rev-parse HEAD^{tree}"),
+            ("git", "--no-replace-objects -c core.fsmonitor=false rev-parse --show-toplevel"),
+            ("git", "--no-replace-objects -c core.fsmonitor=false rev-parse HEAD"),
+            ("git", "--no-replace-objects -c core.fsmonitor=false rev-parse HEAD^{tree}"),
             ("dotnet", "--version"),
-            ("git", "-c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none"),
-            ("git", "-c core.fsmonitor=false ls-files --stage -v -z")
+            ("git", "--no-replace-objects -c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none"),
+            ("git", "--no-replace-objects -c core.fsmonitor=false ls-files --stage -v -z")
         };
         var commands = new List<CoverageRunProcessRequest>();
         var calls = 0;

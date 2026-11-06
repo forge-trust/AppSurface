@@ -274,6 +274,26 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task GitDiffReader_UsesOriginalPinnedCommitWhenLocalReplacementExists()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-replace-");
+        var source = Path.Join(temp.Path, "Decision.cs");
+        await File.WriteAllTextAsync(source, "baseline\n");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        await File.AppendAllTextAsync(source, "changed\n");
+        await RunGitAsync(temp.Path, "commit", "-am", "change");
+        await RunGitAsync(temp.Path, "replace", "HEAD", "HEAD~1");
+
+        var patch = await GitDiffReader.ReadDiffAsync(temp.Path, "HEAD~1", CancellationToken.None);
+
+        Assert.Contains("+changed", patch, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ThrowsDiagnostic_WhenGateFails_AfterWritingReports()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");

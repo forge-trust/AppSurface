@@ -15,11 +15,12 @@ public sealed class CoverageFanInNativeWorkflowTests
     [InlineData("ignored-submodule")]
     [InlineData("hidden-edit-in-submodule")]
     [InlineData("hidden-edit-in-inactive-submodule")]
+    [InlineData("replaced-submodule-tree")]
     [InlineData("clean-inactive-submodule")]
     public async Task CollectChecksSourceEvenWhenGitHidesChanges(string setting)
     {
         using var fixture = await Fixture.CreateAsync();
-        if (setting is "ignored-submodule" or "hidden-edit-in-submodule" or "hidden-edit-in-inactive-submodule" or "clean-inactive-submodule")
+        if (setting is "ignored-submodule" or "hidden-edit-in-submodule" or "hidden-edit-in-inactive-submodule" or "clean-inactive-submodule" or "replaced-submodule-tree")
             await fixture.PrepareSubmoduleAsync(setting);
         else
             await fixture.HideTrackedEditAsync(setting);
@@ -345,7 +346,8 @@ public sealed class CoverageFanInNativeWorkflowTests
             await Command(remote, "git", "add", ".");
             await Command(remote, "git", "commit", "-m", "pinned dependency");
             var pinned = await Command(remote, "git", "rev-parse", "HEAD");
-            await Command(remote, "git", "commit", "--allow-empty", "-m", "different dependency");
+            await File.WriteAllTextAsync(Path.Join(remote, "dependency.txt"), "replacement source");
+            await Command(remote, "git", "commit", "-am", "different dependency");
             var different = await Command(remote, "git", "rev-parse", "HEAD");
             await Command(Repository, "git", "-c", "protocol.file.allow=always", "submodule", "add", "--name", "dependency", "--", remote, "dependency");
             var submodule = Path.Join(Repository, "dependency");
@@ -361,6 +363,14 @@ public sealed class CoverageFanInNativeWorkflowTests
                 await Command(submodule, "git", "update-index", "--assume-unchanged", "--", "dependency.txt");
                 await File.WriteAllTextAsync(Path.Join(submodule, "dependency.txt"), "changed source");
                 Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--ignore-submodules=none"));
+            }
+            else if (setting == "replaced-submodule-tree")
+            {
+                await Command(submodule, "git", "replace", pinned, different);
+                await Command(submodule, "git", "read-tree", "--reset", "-u", "HEAD");
+                Assert.Equal(pinned, await Command(submodule, "git", "rev-parse", "HEAD"));
+                Assert.Equal(string.Empty, await Command(submodule, "git", "status", "--porcelain"));
+                Assert.NotEmpty(await Command(submodule, "git", "--no-replace-objects", "status", "--porcelain"));
             }
             else if (setting == "ignored-submodule")
             {
