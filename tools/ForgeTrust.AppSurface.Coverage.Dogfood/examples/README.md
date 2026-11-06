@@ -30,7 +30,7 @@ dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood `
 if ($LASTEXITCODE -ne 0) { throw "Installed package proof failed with exit code $LASTEXITCODE" }
 ```
 
-`proof.json` and per-stage logs are written beneath `$proofOutput`. A successful run validates this packed, headless package path on the machine where it ran. It does not establish that required native evidence passed on Linux, Windows, or macOS.
+`proof.json` and per-stage logs are written beneath `$proofOutput`. The fixture uses `net10.0-windows` on Windows and `net10.0` on Linux and macOS. Both build and publish must retain the [pinned ReportGenerator payload](../../../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/README.md#reportgenerator-runtime-payload). A successful run validates the packed, headless package path on the host where it ran; the native CI matrix supplies the other platform results.
 
 The carrier installs the candidate CLI into its isolated tool directory automatically and keeps the direct PackageReference graph independent of that tool.
 

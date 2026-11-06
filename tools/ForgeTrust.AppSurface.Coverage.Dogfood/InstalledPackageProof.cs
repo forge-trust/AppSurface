@@ -62,6 +62,7 @@ internal static class InstalledPackageProof
                 new XElement("fallbackPackageFolders", new XElement("clear"))));
             config.Save(Path.Join(output, "nuget.config"));
             var stages = new List<object>();
+            var fixtureTargetFramework = OperatingSystem.IsWindows() ? "net10.0-windows" : "net10.0";
             async Task Run(string stage, params string[] command)
             {
                 using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(5));
@@ -102,8 +103,10 @@ internal static class InstalledPackageProof
                     || !libraries.Contains("ForgeTrust.AppSurface.Coverage/" + version) || !libraries.Contains("ForgeTrust.AppSurface.Evidence.Coverage/" + version)) throw new InvalidDataException();
             }
             await Run("build", "build", Path.Join(app, "Fixture.csproj"), "--no-restore", "--configuration", "Release", "-warnaserror");
+            RequireReportGeneratorPayload(Path.Join(app, "bin", "Release", fixtureTargetFramework));
             await Run("run", "run", "--project", Path.Join(app, "Fixture.csproj"), "--no-build", "--configuration", "Release", "--", Path.Join(output, "direct"), installedCommand);
             await Run("publish", "publish", Path.Join(app, "Fixture.csproj"), "--no-restore", "--configuration", "Release", "--output", Path.Join(output, "published"), "-warnaserror");
+            RequireReportGeneratorPayload(Path.Join(output, "published"));
             await Run("published-run", Path.Join(output, "published", "Fixture.dll"), Path.Join(output, "published-proof"), installedCommand);
             await File.WriteAllBytesAsync(Path.Join(output, "proof.json"), JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1, version, packages = hashes, stages, passed = true }));
             Console.WriteLine("Packed coverage baseline and tamper proof passed."); return 0;
@@ -117,5 +120,12 @@ internal static class InstalledPackageProof
         while ((read = await reader.ReadAsync(buffer.AsMemory(), token)) != 0)
         { if (text.Length + read > 1048576) throw new InvalidDataException(); text.Append(buffer, 0, read); }
         return text.ToString();
+    }
+
+    private static void RequireReportGeneratorPayload(string outputRoot)
+    {
+        var payloadRoot = Path.Join(outputRoot, "appsurface-coverage-runtime", "reportgenerator", "5.5.10", "net10.0");
+        foreach (var file in new[] { "runtime-manifest.json", "ReportGenerator.dll", "ReportGenerator.deps.json", "ReportGenerator.runtimeconfig.json" })
+            if (!File.Exists(Path.Join(payloadRoot, file))) throw new InvalidDataException();
     }
 }

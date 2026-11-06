@@ -1,10 +1,11 @@
 <Project>
   <PropertyGroup>
     <_AppSurfaceCoverageReportGeneratorOutputRoot>appsurface-coverage-runtime/reportgenerator/5.5.10/net10.0</_AppSurfaceCoverageReportGeneratorOutputRoot>
-    <_AppSurfaceCoverageReportGeneratorPackageRoot>tools/$(TargetFramework)/any/reportgenerator/5.5.10/net10.0</_AppSurfaceCoverageReportGeneratorPackageRoot>
+    <_AppSurfaceCoverageReportGeneratorPackageTargetFramework>net10.0</_AppSurfaceCoverageReportGeneratorPackageTargetFramework>
+    <_AppSurfaceCoverageReportGeneratorPackageRoot>tools/$(_AppSurfaceCoverageReportGeneratorPackageTargetFramework)/any/reportgenerator/5.5.10/net10.0</_AppSurfaceCoverageReportGeneratorPackageRoot>
     <_AppSurfaceCoverageReportGeneratorSourceRoot Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' == 'true'">$(PkgReportGenerator)/tools/net10.0</_AppSurfaceCoverageReportGeneratorSourceRoot>
     <_AppSurfaceCoverageReportGeneratorManifestSource Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' == 'true'">$(MSBuildThisFileDirectory)../reportgenerator-runtime-manifest.json</_AppSurfaceCoverageReportGeneratorManifestSource>
-    <_AppSurfaceCoverageReportGeneratorSourceRoot Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' != 'true'">$(MSBuildThisFileDirectory)../tools/$(TargetFramework)/any/reportgenerator/5.5.10/net10.0</_AppSurfaceCoverageReportGeneratorSourceRoot>
+    <_AppSurfaceCoverageReportGeneratorSourceRoot Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' != 'true'">$(MSBuildThisFileDirectory)../$(_AppSurfaceCoverageReportGeneratorPackageRoot)</_AppSurfaceCoverageReportGeneratorSourceRoot>
     <_AppSurfaceCoverageReportGeneratorManifestSource Condition="'$(AppSurfaceCoverageReportGeneratorSourceBuild)' != 'true'">$(_AppSurfaceCoverageReportGeneratorSourceRoot)/runtime-manifest.json</_AppSurfaceCoverageReportGeneratorManifestSource>
   </PropertyGroup>
 
