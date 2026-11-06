@@ -26,6 +26,29 @@ public sealed class CoverageFanInIOTests
     }
 
     [Theory]
+    [InlineData("diff.patch", 20 * 1024 * 1024, 21 * 1024 * 1024, true)]
+    [InlineData("diff.patch", 20 * 1024 * 1024 + 1, 21 * 1024 * 1024, false)]
+    [InlineData("diff.patch", 1024 * 1024 + 1, 1024 * 1024, false)]
+    [InlineData("other.patch", 1024 * 1024 + 1, 21 * 1024 * 1024, false)]
+    public void RetainedDiffUsesExactGitByteLimitAndStillChargesTotalBudget(string name, int length,
+        int total, bool accepted)
+    {
+        using var temp = TestDirectory.Create();
+        var input = temp.CreateDirectory("input");
+        var path = Path.Join(input, name);
+        using (var file = File.Create(path)) file.SetLength(length);
+        using var io = new CoverageFanInIO(Bounds(json: 1024 * 1024, total: total), CancellationToken.None);
+        io.Acquire([(input, false)], requireCoordination: false);
+
+        if (accepted)
+        {
+            Assert.Equal(length, io.Read(path).Length);
+            io.VerifyBindings();
+        }
+        else Assert.Throws<InvalidDataException>(() => io.Read(path));
+    }
+
+    [Theory]
     [InlineData("<a><b><c /></b></a>", 1, 20, 100, 10, 1000, 20, 40)]
     [InlineData("<a><line/><line/></a>", 20, 1, 100, 10, 1000, 20, 40)]
     [InlineData("<a><b/><c/></a>", 20, 20, 2, 10, 1000, 20, 40)]

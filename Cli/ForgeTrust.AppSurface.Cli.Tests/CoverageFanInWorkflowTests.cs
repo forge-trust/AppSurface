@@ -244,6 +244,37 @@ public sealed class CoverageFanInWorkflowTests
     }
 
     [Fact]
+    public async Task SourceIdentityDoesNotExecuteRepositoryConfiguredFsmonitor()
+    {
+        using var fixture = await Fixture.Create();
+        var marker = await fixture.ConfigureFsmonitor();
+        Assert.True(File.Exists(marker)); // Prove this Git installation invokes the configured test hook.
+        File.Delete(marker);
+
+        var result = await CoverageFanIn.CaptureAsync(fixture.Capture());
+
+        Assert.Equal(CoverageOperationOutcome.Succeeded, result.Outcome);
+        Assert.False(File.Exists(marker));
+    }
+
+    [Fact]
+    public async Task PatchLargerThanJsonBudgetCanBeAcceptedVerifiedAndReplaced()
+    {
+        using var fixture = await Fixture.Create();
+        await fixture.SelectPatch("public class Example { /*" + new string('x', 1024 * 1024) + "*/ }\n");
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.AcceptAsync(fixture.Accept())).Outcome);
+        Assert.True(new FileInfo(Path.Join(fixture.Accepted, "diff.patch")).Length > new CoverageOperationLimits().JsonBytes);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.VerifyAsync(fixture.Verify())).Outcome);
+
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.AcceptAsync(fixture.Accept() with { OutputMode = CoverageOutputMode.ReplaceOwned })).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.VerifyAsync(fixture.Verify())).Outcome);
+    }
+
+    [Fact]
     public async Task NumericFailureRetainsRejectedGateReportsWithoutAnAcceptanceReceipt()
     {
         using var fixture = await Fixture.Create();
@@ -733,9 +764,21 @@ public sealed class CoverageFanInWorkflowTests
         internal CoverageComposeRequest Compose() => new(Policy, Repository, Captured, [], Composed);
         internal CoverageAcceptRequest Accept() => new(Policy, Repository, Captured, [], Composed, Accepted);
         internal CoverageVerifyRequest Verify() => new(Policy, Repository, Captured, [], Composed, Accepted);
-        internal async Task SelectPatch()
+        internal async Task<string> ConfigureFsmonitor()
         {
-            Temp.WriteFile("repo/src/Example.cs", "public class Example { }\n");
+            var windows = OperatingSystem.IsWindows();
+            var hook = windows ? "appsurface-test-fsmonitor.cmd" : "appsurface-test-fsmonitor";
+            File.WriteAllText(Path.Join(Repository, ".git", "hooks", hook), windows
+                ? "@echo off\r\necho ran > .git\\appsurface-fsmonitor-ran\r\nexit /b 0\r\n"
+                : "#!/bin/sh\nprintf ran > .git/appsurface-fsmonitor-ran\nprintf 'test-token\\0/\\0'\n");
+            await Command(Repository, "git", "config", "core.fsmonitor",
+                (windows ? "cmd /c " : "sh ") + ".git/hooks/" + hook);
+            await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all");
+            return Path.Join(Repository, ".git", "appsurface-fsmonitor-ran");
+        }
+        internal async Task SelectPatch(string source = "public class Example { }\n")
+        {
+            Temp.WriteFile("repo/src/Example.cs", source);
             await Command(Repository, "git", "add", ".");
             await Command(Repository, "git", "commit", "-m", "measurable source");
             Policy = Policy with

@@ -136,7 +136,6 @@ jobs:
       COVERAGE_RUN_SCOPE: ${{ github.repository }}
       COVERAGE_RUN_ID: ${{ github.run_id }}
       COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}
-      COVERAGE_DOGFOOD_OUTPUT: ${{ runner.temp }}/coverage-dogfood-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout code
@@ -221,7 +220,10 @@ jobs:
           DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.IntegrationTests]*"
 
       - name: Attest successful native coverage evidence
+        id: capture-native-coverage
         shell: pwsh
+        env:
+          COVERAGE_DOGFOOD_OUTPUT: ${{ runner.temp }}/coverage-dogfood-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           $reports = @(Get-ChildItem -Path "${{ runner.temp }}/coverage-native-results" -Recurse -Filter coverage.cobertura.xml)
           if ($reports.Count -ne 1) { throw "Expected exactly one fresh native coverage report" }
@@ -235,12 +237,13 @@ jobs:
           if ($env:COVERAGE_GATE_DIFF_BASE) { $adapter += @('--diff-base', $env:COVERAGE_GATE_DIFF_BASE) }
           dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release --no-restore -- @adapter
           if ($LASTEXITCODE -ne 0) { throw "Native coverage capture failed" }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "capture-path=$(Join-Path $env:COVERAGE_DOGFOOD_OUTPUT 'capture')"
 
       - name: Upload attested native coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-native-${{ matrix.os }}
-          path: ${{ env.COVERAGE_DOGFOOD_OUTPUT }}/capture
+          path: ${{ steps.capture-native-coverage.outputs.capture-path }}
           if-no-files-found: error
           retention-days: 7
 

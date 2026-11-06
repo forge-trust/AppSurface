@@ -79,6 +79,34 @@ public sealed class CoverageFanInPublicationTests
     }
 
     [Theory]
+    [InlineData("diff.patch", 20 * 1024 * 1024, 64 * 1024 * 1024, true)]
+    [InlineData("diff.patch", 20 * 1024 * 1024 + 1, 64 * 1024 * 1024, false)]
+    [InlineData("diff.patch", 1024 * 1024 + 1, 1024 * 1024, false)]
+    [InlineData("other.patch", 1024 * 1024 + 1, 64 * 1024 * 1024, false)]
+    public async Task PublicationDiffBudgetMatchesGitReaderWithoutExemptingTotalBytes(string name,
+        int length, int total, bool accepted)
+    {
+        using var fixture = new Fixture();
+        var bytes = new byte[length];
+        var publish = () => CoverageFanInPublication.PublishAsync(fixture.Output, fixture.Repository,
+            "acceptance", Guid.NewGuid().ToString("N"), PolicyDigest,
+            new Dictionary<string, byte[]> { [name] = bytes }, false,
+            Bounds with { TotalBytes = total }, CancellationToken.None);
+
+        if (accepted)
+        {
+            await publish();
+            Assert.Equal(bytes, File.ReadAllBytes(Path.Join(fixture.Output, name)));
+            Assert.True(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(publish);
+            Assert.False(Directory.Exists(fixture.Output));
+        }
+    }
+
+    [Theory]
     [InlineData("unknown-stage")]
     [InlineData("invalid-operation-id")]
     [InlineData("invalid-policy-digest")]
@@ -147,6 +175,27 @@ public sealed class CoverageFanInPublicationTests
         Assert.False(Directory.Exists(fixture.Output));
         using var store = CoverageArtifactStore.OpenReadOnly();
         Assert.Null(store.GetCurrentRun(fixture.Output));
+    }
+
+    [Fact]
+    public async Task ReplacementRejectsPriorTotalAboveCurrentBudgetBeforeChangingItsGeneration()
+    {
+        using var fixture = new Fixture();
+        await fixture.PublishAsync(files: new Dictionary<string, byte[]>
+        {
+            ["first.json"] = new byte[8000],
+            ["second.json"] = new byte[8000]
+        });
+        var before = Directory.EnumerateFiles(fixture.Output)
+            .ToDictionary(path => Path.GetFileName(path), File.ReadAllBytes);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => CoverageFanInPublication.PublishAsync(
+            fixture.Output, fixture.Repository, CaptureStage, Guid.NewGuid().ToString("N"), PolicyDigest,
+            Payloads(), true, Bounds with { TotalBytes = 12000 }, CancellationToken.None));
+
+        Assert.Equal(before.Keys.Order(StringComparer.Ordinal),
+            Directory.EnumerateFiles(fixture.Output).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        foreach (var (name, bytes) in before) Assert.Equal(bytes, File.ReadAllBytes(Path.Join(fixture.Output, name)));
     }
 
     [Fact]

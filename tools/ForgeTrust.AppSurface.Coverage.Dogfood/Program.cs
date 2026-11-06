@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Coverage;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
 // This adapter supplies only AppSurface's checked-in policy and exact paths. All capture,
 // composition, ownership, gate and verification behavior belongs to installed native commands.
@@ -53,6 +54,8 @@ internal static class CoverageDogfood
                 options.TryGetValue("diff-base", out var diff) && !string.IsNullOrWhiteSpace(diff)
                     ? new(CoverageGateMode.AggregateAndPatch, DiffBase: diff) : new(CoverageGateMode.AggregateOnly),
                 Limits: new CoverageOperationLimits(TotalRecords: 4_000_000));
+            var nativeInputs = Required("operation") == "fanin"
+                ? CoverageFanInNativeInputs.Discover(Required("native-inputs"), policy.Supplements.Select(x => x.Id)) : null;
             Directory.CreateDirectory(output);
             async Task Invoke(string operation, object request, string suffix, bool collect = false)
             {
@@ -77,13 +80,10 @@ internal static class CoverageDogfood
                 var imported = new List<string>();
                 foreach (var supplement in policy.Supplements)
                 {
-                    var inputs = Directory.GetFiles(Required("native-inputs"), "manifest.json", SearchOption.AllDirectories)
-                        .Where(path => JsonDocument.Parse(File.ReadAllBytes(path)).RootElement.GetProperty("producerId").GetString() == supplement.Id).Take(2).ToArray();
-                    if (inputs.Length != 1) throw new InvalidDataException();
-                    using var manifest = JsonDocument.Parse(File.ReadAllBytes(inputs[0]));
+                    var input = nativeInputs![supplement.Id];
                     var destination = Path.Join(output, "native-" + supplement.Id);
                     await Invoke("capture", new CoverageCaptureRequest(policy, root, destination, supplement.Id,
-                        ImportDirectory: Path.GetDirectoryName(inputs[0]), OriginalSourceRoot: manifest.RootElement.GetProperty("sourceRoot").GetString()), supplement.Id);
+                        ImportDirectory: input.Directory, OriginalSourceRoot: input.SourceRoot), supplement.Id);
                     imported.Add(destination);
                 }
                 var composed = Path.Join(output, "composed"); var accepted = Path.Join(output, "accepted");
@@ -95,7 +95,7 @@ internal static class CoverageDogfood
             return 0;
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or JsonException
-            or InvalidOperationException or FormatException or OverflowException)
+            or InvalidOperationException or FormatException or OverflowException or KeyNotFoundException or UnauthorizedAccessException)
         { Console.Error.WriteLine("ASCOV311 Dogfood failed. Inspect retained native command result files and correct the explicit repository policy/configuration; preserve partial output."); return 1; }
     }
     private static async Task<string> Command(string root, string executable, string[] arguments)

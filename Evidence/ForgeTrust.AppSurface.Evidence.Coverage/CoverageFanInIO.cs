@@ -7,7 +7,12 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
 /// <summary>Streaming admission bounds shared as substrate, never coverage semantics.</summary>
 internal sealed record CoverageFanInBounds(long XmlBytes, long JsonBytes, long TotalBytes, int Depth,
-    int Lines, int Elements, int Attributes, int TokenCharacters, int Branches, int TotalRecords);
+    int Lines, int Elements, int Attributes, int TokenCharacters, int Branches, int TotalRecords)
+{
+    /// <summary>Uses the Git reader's fixed UTF-8 limit for retained patch diffs; other text uses the JSON budget.</summary>
+    internal long FileBytes(string name) => name == "diff.patch" ? GitDiffReader.DefaultMaximumDiffBytes
+        : name.EndsWith(".xml", StringComparison.Ordinal) ? XmlBytes : JsonBytes;
+}
 
 /// <summary>One invocation's bounded native IO and deterministic reader/writer custody.</summary>
 internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationToken token) : IDisposable
@@ -70,7 +75,7 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
         var stream = root.OpenArtifactFile(Path.GetFileName(absolute), false, false);
         try
         {
-            var limit = xml ? bounds.XmlBytes : bounds.JsonBytes;
+            var limit = xml ? bounds.XmlBytes : bounds.FileBytes(Path.GetFileName(absolute));
             if (stream.Length > limit) throw new InvalidDataException("Fan-in input exceeds byte budget.");
             using var memory = new MemoryStream();
             var buffer = new byte[81920];

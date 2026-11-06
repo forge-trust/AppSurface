@@ -131,10 +131,10 @@ public sealed class CoverageFanInApiValidationTests
                 0,
                 command.FileName == "dotnet" ? source.Sdk : string.Join(" ", command.Arguments) switch
                 {
-                    "rev-parse --show-toplevel" => temp.Path,
-                    "rev-parse HEAD" => source.Commit,
-                    "rev-parse HEAD^{tree}" => source.Tree,
-                    "status --porcelain --untracked-files=all" => string.Empty,
+                    "-c core.fsmonitor=false rev-parse --show-toplevel" => temp.Path,
+                    "-c core.fsmonitor=false rev-parse HEAD" => source.Commit,
+                    "-c core.fsmonitor=false rev-parse HEAD^{tree}" => source.Tree,
+                    "-c core.fsmonitor=false status --porcelain --untracked-files=all" => string.Empty,
                     _ => throw new InvalidOperationException("Unexpected source identity command.")
                 })))
         };

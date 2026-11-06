@@ -62,6 +62,8 @@ public sealed record CoverageGatePolicy(CoverageGateMode Mode, decimal MinLine =
     decimal MinPatchLine = 95, decimal MinPatchBranch = 85, decimal Tolerance = 0.5m,
     string PatchLineMode = "codecov", string? DiffBase = null);
 /// <summary>Admitted per-operation budgets. Collection additionally requires its own overall deadline.</summary>
+/// <remarks>Retained patch diffs use the Git reader's fixed 20 MiB UTF-8 limit instead of JsonBytes.
+/// They still count against TotalBytes during reading and publication.</remarks>
 public sealed record CoverageOperationLimits(long XmlBytes = 536870912, long JsonBytes = 1048576,
     long TotalBytes = 4294967296, int Depth = 64, int LineRecordsPerReport = 1000000,
     int InputBundles = 32, int XmlElementsPerReport = 8000000, int AttributesPerElement = 32,

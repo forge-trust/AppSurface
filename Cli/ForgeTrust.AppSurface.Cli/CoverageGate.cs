@@ -2031,7 +2031,7 @@ internal static class GitDiffReader
     internal const long DefaultMaximumDiffBytes = 20 * 1024 * 1024;
 
     /// <summary>
-    /// Reads a zero-context diff between <paramref name="diffBase"/> and <c>HEAD</c>.
+    /// Reads a zero-context diff between <paramref name="diffBase"/> and <c>HEAD</c> without running external diff drivers or text converters.
     /// </summary>
     /// <param name="repositoryRoot">Repository root where git should run.</param>
     /// <param name="diffBase">Nonempty Git ref or commit compared with HEAD. Option-like values beginning with '-' are rejected before Git runs.</param>
@@ -2061,6 +2061,7 @@ internal static class GitDiffReader
         startInfo.ArgumentList.Add("diff");
         startInfo.ArgumentList.Add("--unified=0");
         startInfo.ArgumentList.Add("--no-ext-diff");
+        startInfo.ArgumentList.Add("--no-textconv");
         startInfo.ArgumentList.Add("--relative");
         startInfo.ArgumentList.Add($"{diffBase}...HEAD");
         startInfo.ArgumentList.Add("--");

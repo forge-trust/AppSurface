@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Coverage" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Coverage.Dogfood" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />

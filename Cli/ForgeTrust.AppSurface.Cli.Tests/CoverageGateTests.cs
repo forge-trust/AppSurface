@@ -3354,6 +3354,34 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ReadDiffAsync_UsesCommittedTextWithoutRunningConfiguredTextConverter()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-git-textconv-");
+        var sample = Path.Join(temp.Path, "Sample.cs");
+        var marker = Path.Join(temp.Path, "converter-called");
+        File.WriteAllText(Path.Join(temp.Path, ".gitattributes"), "*.cs diff=fixture\n");
+        File.WriteAllText(sample, "// before\n");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "config", "diff.fixture.textconv", "echo invoked > converter-called #");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        await File.WriteAllTextAsync(sample, "// after\n");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "change");
+
+        var diff = await GitDiffReader.ReadDiffAsync(temp.Path, "HEAD^1", CancellationToken.None);
+
+        Assert.False(File.Exists(marker));
+        Assert.Contains("-// before", diff, StringComparison.Ordinal);
+        Assert.Contains("+// after", diff, StringComparison.Ordinal);
+
+        await RunGitAsync(temp.Path, "diff", "--textconv", "HEAD^1...HEAD", "--");
+        Assert.True(File.Exists(marker));
+    }
+
+    [Fact]
     public async Task ReadDiffAsync_ThrowsDiagnostic_WhenDiffExceedsConfiguredLimit()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");

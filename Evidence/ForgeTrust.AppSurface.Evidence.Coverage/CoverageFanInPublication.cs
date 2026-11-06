@@ -34,7 +34,7 @@ internal static class CoverageFanInPublication
         {
             CoverageRunOutputLease.ValidateArtifactComponent(name);
             if (name == CoverageFanInIO.CompletionName || name.StartsWith('.')) throw new ArgumentException("Reserved output name.");
-            if (bytes.LongLength > (name.EndsWith(".xml", StringComparison.Ordinal) ? bounds.XmlBytes : bounds.JsonBytes))
+            if (bytes.LongLength > bounds.FileBytes(name))
                 throw new InvalidDataException("Publication exceeds per-file budget.");
             admitted = checked(admitted + bytes.LongLength);
             if (admitted > bounds.TotalBytes) throw new InvalidDataException("Publication exceeds total byte budget.");
@@ -180,11 +180,16 @@ internal static class CoverageFanInPublication
         if (entries.Any(x => !expected.Contains(x.Name) || x.IsDirectory && x.Name != admittedStage)
             || run.Inventory.Any(x => !entries.Any(e => e.Name == x.Path)))
             throw new InvalidDataException("Unknown or incomplete owned output must be preserved.");
+        long priorBytes = 0;
+        foreach (var item in run.Inventory)
+        {
+            priorBytes = checked(priorBytes + item.Length);
+            if (priorBytes > bounds.TotalBytes || item.Length > bounds.FileBytes(item.Path))
+                throw new InvalidDataException("Prior output exceeds declared budget.");
+        }
         foreach (var item in run.Inventory)
         {
             token.ThrowIfCancellationRequested();
-            if (item.Length > (item.Path.EndsWith(".xml", StringComparison.Ordinal) ? bounds.XmlBytes : bounds.JsonBytes))
-                throw new InvalidDataException("Prior output exceeds declared budget.");
             using var file = root.OpenArtifactFile(item.Path, false);
             if (file.Length != item.Length || CoverageFanInIO.HashStream(file, item.Length, token) != item.Sha256)
                 throw new InvalidDataException("Modified output must be preserved.");
