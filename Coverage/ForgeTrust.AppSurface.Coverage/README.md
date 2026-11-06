@@ -53,7 +53,7 @@ This example deliberately takes the policy, repository and fresh destinations as
 
 | Contract | Meaning and constraints |
 | --- | --- |
-| `CoverageSourceIdentity` | Exact lowercase Git commit/tree object IDs (40 or 64 hex characters), selected SDK version and explicit configuration. The local source must match and be clean, including untracked source files. |
+| `CoverageSourceIdentity` | Exact lowercase Git commit/tree object IDs (40 or 64 hex characters), selected SDK version and explicit configuration. The local source must match and be clean, including untracked source files. Declared primary and supplementary projects must be tracked regular files in the pinned repository or its pinned submodules. |
 | `CoverageRunIdentity` | Explicit producer system, run scope, run ID and positive attempt. Text fields are bounded to 256 characters, exclude controls/format characters, and must contain no credentials. |
 | `CoverageSupplement` | Unique bounded portable ID, actual platform and explicit test filter (up to 4096 characters); optional nonempty test-project set selects the supplementary collector inventory. Omission uses the complete intended primary inventory. |
 | `CoverageInstrumentation` | Supported collector/cobertura normalization identity. Include defaults to null; exclude defaults to `[*.Tests]*,[*.IntegrationTests]*`. Filter values are bounded to 4096 characters. These are consumer settings, not authority to change AppSurface's configured scope. |

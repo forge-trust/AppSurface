@@ -45,6 +45,50 @@ public sealed class CoverageFanInNativeWorkflowTests
         Assert.False(Directory.Exists(fixture.PrimaryCapture));
     }
 
+    [Theory]
+    [InlineData("primary")]
+    [InlineData("native")]
+    public async Task CollectRejectsIgnoredProjectOutsidePinnedSource(string producerId)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var ignored = fixture.TestProjects[0];
+        await fixture.IgnoreTestProjectAsync(ignored);
+        var policy = await fixture.PolicyAsync();
+        if (producerId == "native")
+            policy = policy with { TestProjects = [fixture.TestProjects[1]] };
+        using var progress = new StringWriter();
+
+        var result = await CoverageFanIn.CollectAndCaptureAsync(new CoverageCollectRequest(
+            policy, fixture.Repository, fixture.PrimaryCapture, fixture.PrimaryCollection, producerId, 180,
+            NoRestore: true), progress: progress);
+
+        Assert.Empty(progress.ToString());
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.Null(result.Observation);
+        Assert.False(result.Effects.GenerationCommitted);
+        Assert.False(Directory.Exists(fixture.PrimaryCollection));
+        Assert.False(Directory.Exists(fixture.PrimaryCapture));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(fixture.Repository, ignored)));
+    }
+
+    [Fact]
+    public async Task CollectAcceptsProjectTrackedByAPinnedSubmodule()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.PinFirstTestProjectAsSubmoduleAsync();
+        var policy = await fixture.PolicyAsync();
+        using var progress = new StringWriter();
+
+        var result = await CoverageFanIn.CollectAndCaptureAsync(new CoverageCollectRequest(
+            policy, fixture.Repository, fixture.NativeCapture, fixture.NativeCollection, "native", 180,
+            NoRestore: true), progress: progress);
+
+        Assert.True(result.Outcome == CoverageOperationOutcome.Succeeded,
+            JsonSerializer.Serialize(result) + Environment.NewLine + progress);
+        Assert.Equal(CoverageObservation.CollectedExecution, result.Observation);
+        Assert.True(result.Effects.GenerationCommitted);
+    }
+
     [Fact]
     public async Task CollectDoesNotCertifyOldBinariesForTheCurrentCommit()
     {
@@ -332,6 +376,36 @@ public sealed class CoverageFanInNativeWorkflowTests
             const string source = "Consumer.Alpha/AlphaDecision.cs";
             await Command(Repository, "git", "update-index", flag, "--", source);
             await File.AppendAllTextAsync(TestPathUtils.PathUnder(Repository, source), "\n// hidden edit\n");
+            Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
+        }
+
+        internal async Task IgnoreTestProjectAsync(string project)
+        {
+            await File.AppendAllTextAsync(TestPathUtils.PathUnder(Repository, ".gitignore"), $"/{project}\n");
+            await Command(Repository, "git", "rm", "--cached", "--", project);
+            await Command(Repository, "git", "add", ".gitignore");
+            await Command(Repository, "git", "commit", "-m", "leave local project outside pinned tree");
+            Assert.Equal(project, await Command(Repository, "git", "check-ignore", "--", project));
+            Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
+        }
+
+        internal async Task PinFirstTestProjectAsSubmoduleAsync()
+        {
+            const string projectDirectory = "Consumer.Alpha.Tests";
+            var source = TestPathUtils.PathUnder(Repository, projectDirectory);
+            var remote = TestPathUtils.PathUnder(_temp.Path, "test-project-submodule");
+            CopyDirectory(source, remote);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(remote, ".gitignore"), "bin/\nobj/\nTestResults/\n");
+            await Command(remote, "git", "init");
+            await Command(remote, "git", "config", "user.email", "coverage-tests@example.invalid");
+            await Command(remote, "git", "config", "user.name", "Coverage workflow tests");
+            await Command(remote, "git", "add", ".");
+            await Command(remote, "git", "commit", "-m", "track first coverage test project");
+            await Command(Repository, "git", "rm", "-r", "--", projectDirectory);
+            Directory.Delete(source, recursive: true); // Only the fixture's ignored build output remains.
+            await Command(Repository, "git", "-c", "protocol.file.allow=always", "submodule", "add", "--", remote, projectDirectory);
+            await Command(Repository, "git", "commit", "-m", "pin first coverage test project");
+            await Command(Repository, "dotnet", "restore", TestProjects[0], "--ignore-failed-sources");
             Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
         }
 

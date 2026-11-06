@@ -134,7 +134,7 @@ public sealed class CoverageFanInApiValidationTests
                     "--no-replace-objects -c core.fsmonitor=false rev-parse --show-toplevel" => temp.Path,
                     "--no-replace-objects -c core.fsmonitor=false rev-parse HEAD" => source.Commit,
                     "--no-replace-objects -c core.fsmonitor=false rev-parse HEAD^{tree}" => source.Tree,
-                    "--no-replace-objects -c core.fsmonitor=false ls-files --stage -v -z" => "H 100644 0123456789abcdef0123456789abcdef01234567 0\tTests.csproj\0",
+                    "--no-replace-objects -c core.fsmonitor=false ls-files --stage -v -z" => "H 100644 0123456789abcdef0123456789abcdef01234567 0\ttests/A.Tests.csproj\0",
                     "--no-replace-objects -c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none" => string.Empty,
                     _ => throw new InvalidOperationException("Unexpected source identity command.")
                 })))

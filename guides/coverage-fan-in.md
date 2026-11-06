@@ -27,6 +27,8 @@ Requests snapshot caller collections before mutation; subsequent caller edits do
 
 Use a clean, complete checkout without Git index entries marked `assume-unchanged` or `skip-worktree`. Fan-in checks every pinned submodule, including those marked inactive, and rejects missing checkouts, mismatched commits, hidden index flags, or dirty files. Source and patch checks ignore replacement refs and use the original objects behind the pinned Git IDs. The index walk allows at most 32 checkouts including the root and shares the identity deadline. Each Git probe has a 1 MiB output limit per stream; an incomplete index listing is rejected.
 
+Commit every declared primary and supplementary test project in the pinned repository or a pinned submodule. A project file present only on disk, such as an ignored local project, is rejected even if Git reports a clean worktree.
+
 `CoverageGateMode.AggregateOnly` is an explicit baseline with `PatchNotRequested`. It creates no patch-pass artifact and cannot satisfy a patch-required obligation. `AggregateAndPatch` requires the declared Git revision (option-like bases beginning with `-` are rejected), the identical frozen diff for primary/composed analysis, nonempty measurable changed lines and line/branch denominators no smaller than the primary reference. The [Git patch reader](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) disables external diff drivers and text converters so the patch describes committed source. This choice never silently follows from an absent diff. AppSurface's configured thresholds/tolerance, Codecov mode, complete primary and native requirements remain authoritative.
 
 ### Installed commands and request schema

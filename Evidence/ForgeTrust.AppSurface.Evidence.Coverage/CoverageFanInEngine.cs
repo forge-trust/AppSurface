@@ -200,8 +200,14 @@ internal static partial class CoverageFanInEngine
             || await IdentityAsync("dotnet", ["--version"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("sdk").GetString()
             || (await IdentityAsync("git", ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"], r, token).ConfigureAwait(false)).Length != 0)
             throw new InvalidDataException("Source, SDK or clean state differs from trusted expectations.");
-        await VerifySourceIndexesAsync(root, r, token).ConfigureAwait(false);
-        foreach (var project in r.Expected.TestProjects)
+        var projects = new HashSet<string>(r.Expected.TestProjects, StringComparer.Ordinal);
+        foreach (var producer in r.Expected.Supplements)
+        {
+            if (producer.TryGetProperty("testProjects", out var inventory) && inventory.ValueKind == JsonValueKind.Array)
+                projects.UnionWith(inventory.EnumerateArray().Select(project => project.GetString()!));
+        }
+        await VerifySourceIndexesAsync(root, projects, r, token).ConfigureAwait(false);
+        foreach (var project in projects)
         {
             var path = Path.Join(root, project);
             using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(path)!, false, false)
@@ -211,14 +217,17 @@ internal static partial class CoverageFanInEngine
         directory.VerifyArtifactBinding();
     }
 
-    // Git's active-submodule configuration cannot determine which pinned source checkouts we inspect.
-    private static async Task VerifySourceIndexesAsync(string root, CoverageFanInEngineRequest r, CancellationToken token)
+    // Each clean checkout's index agrees with its pinned HEAD. Require regular stage-zero entries
+    // for the declared projects; status alone does not report an ignored project that is absent from Git.
+    private static async Task VerifySourceIndexesAsync(string root, IReadOnlySet<string> projects,
+        CoverageFanInEngineRequest r, CancellationToken token)
     {
         const int maximumCheckouts = 32;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(r.Expected.Limits.GetProperty("identitySeconds").GetInt32()));
-        var pending = new Queue<(string Path, string? Commit)>();
-        pending.Enqueue((root, null));
+        var unseenProjects = new HashSet<string>(projects, StringComparer.Ordinal);
+        var pending = new Queue<(string Path, string Prefix, string? Commit)>();
+        pending.Enqueue((root, string.Empty, null));
         var checkouts = 1;
         while (pending.TryDequeue(out var checkout))
         {
@@ -231,7 +240,7 @@ internal static partial class CoverageFanInEngine
                         r, deadline.Token, checkout.Path).ConfigureAwait(false)).Length != 0))
                 throw new InvalidDataException("Pinned submodule source or clean state differs.");
             var entries = await IdentityAsync("git", ["ls-files", "--stage", "-v", "-z"], r, deadline.Token, checkout.Path).ConfigureAwait(false);
-            foreach (var (path, commit) in ReadSourceIndex(entries))
+            foreach (var (path, commit) in ReadSourceIndex(entries, checkout.Prefix, unseenProjects))
             {
                 if (++checkouts > maximumCheckouts)
                     throw new InvalidDataException("Source checkout inventory exceeds the limit.");
@@ -239,27 +248,35 @@ internal static partial class CoverageFanInEngine
                 if (child == checkout.Path || !child.StartsWith(Path.TrimEndingDirectorySeparator(checkout.Path) + Path.DirectorySeparatorChar,
                     StringComparison.Ordinal))
                     throw new InvalidDataException("Pinned submodule path escapes its checkout.");
-                pending.Enqueue((child, commit));
+                pending.Enqueue((child, checkout.Prefix + path + "/", commit));
             }
             directory.VerifyArtifactBinding();
         }
+        if (unseenProjects.Count != 0)
+            throw new InvalidDataException("Declared test projects must be tracked regular files in the pinned source.");
     }
 
     // Git lowers the tag for assume-unchanged; S means skip-worktree. NUL separates filenames.
-    private static List<(string Path, string Commit)> ReadSourceIndex(string entries)
+    private static List<(string Path, string Commit)> ReadSourceIndex(string entries, string prefix, HashSet<string> unseenProjects)
     {
         var links = new List<(string, string)>();
+        var projectLookup = unseenProjects.GetAlternateLookup<ReadOnlySpan<char>>();
         foreach (var entry in entries.AsSpan().Split('\0'))
         {
             var record = entries.AsSpan()[entry];
             if (record.IsEmpty) continue;
             if (record[0] == 'S' || char.IsAsciiLetterLower(record[0]))
                 throw new InvalidDataException("Source index suppresses tracked changes.");
-            if (!record.StartsWith("H 160000 ", StringComparison.Ordinal)) continue;
+            var gitlink = record.StartsWith("H 160000 ", StringComparison.Ordinal);
+            if (!gitlink && !record.StartsWith("H 100644 ", StringComparison.Ordinal)
+                && !record.StartsWith("H 100755 ", StringComparison.Ordinal)) continue;
             var tab = record.IndexOf('\t');
             if (tab <= 11 || tab == record.Length - 1 || !record[..tab].EndsWith(" 0", StringComparison.Ordinal))
-                throw new InvalidDataException("Pinned submodule index entry is invalid.");
-            links.Add((record[(tab + 1)..].ToString(), record[9..(tab - 2)].ToString()));
+                throw new InvalidDataException("Pinned source index entry is invalid.");
+            var path = record[(tab + 1)..];
+            if (gitlink) links.Add((path.ToString(), record[9..(tab - 2)].ToString()));
+            else if (prefix.Length == 0) projectLookup.Remove(path);
+            else if (unseenProjects.Count != 0) unseenProjects.Remove(string.Concat(prefix, path));
         }
         return links;
     }
