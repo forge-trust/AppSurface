@@ -595,8 +595,9 @@ public sealed class CoverageFanInIndependentVerifierTests
     {
         var coverage = AggregateCoverage();
         coverage.Descendants("class").Single().SetAttributeValue("filename", filename);
+        // Raw string headers can already use CRLF on a Windows checkout, while the hunk uses literal LF.
         var diff = FileDiff(quotedPath, "@@ -1,2 +1,2 @@\n-old\n+new\n context")
-            .Replace("\n", "\r\n", StringComparison.Ordinal);
+            .ReplaceLineEndings("\r\n");
         using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
         using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
         using var policy = PatchPolicy();

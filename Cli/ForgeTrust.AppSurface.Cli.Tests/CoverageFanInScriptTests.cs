@@ -8,7 +8,7 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Executable contract checks for the optional Unix invocation wrapper.</summary>
 public sealed class CoverageFanInScriptTests
 {
-    [Theory]
+    [CoverageUnixTheory]
     [InlineData("accepted", "HEAD~1", 0, 2)]
     [InlineData("rejected", "HEAD~1", 1, 2)]
     [InlineData("aggregate-rejected", "HEAD~1", 1, 2)]
@@ -19,7 +19,7 @@ public sealed class CoverageFanInScriptTests
         string outcome, string diffBase, int expectedExitCode, int expectedGateCalls)
     {
         if (OperatingSystem.IsWindows())
-            throw Xunit.Sdk.SkipException.ForSkip("The optional Bash wrapper is Unix-only; the installed API/CLI have native Windows tests.");
+            throw new PlatformNotSupportedException("This Bash fixture must be skipped during discovery on Windows.");
         using var temp = TestDirectory.Create();
         var root = temp.CreateDirectory("repository");
         var scripts = temp.CreateDirectory("repository/scripts");
