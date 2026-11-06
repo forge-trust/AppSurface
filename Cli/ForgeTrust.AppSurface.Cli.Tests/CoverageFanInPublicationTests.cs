@@ -60,15 +60,20 @@ public sealed class CoverageFanInPublicationTests
     }
 
     [Fact]
-    public async Task PublicationAcceptsMaximumNativeInventoryPayloadAndRejectsTheNextFile()
+    public async Task PublicationAdmitsMaximumPayloadCountBeforeStagingAndRejectsTheNextFile()
     {
         using var fixture = new Fixture();
         var maximumPayloadFiles = CoverageArtifactLimits.MaximumFiles - 1;
         var maximum = Enumerable.Range(0, maximumPayloadFiles)
             .ToDictionary(index => $"artifact-{index:D4}.json", index => new[] { (byte)index });
-        await CoverageFanInPublication.PublishAsync(fixture.Output, fixture.Repository, CaptureStage,
-            Guid.NewGuid().ToString("N"), PolicyDigest, maximum, false,
-            Bounds with { JsonBytes = 2 * 1024 * 1024 }, CancellationToken.None);
+
+        // Test the exact admission boundary without creating and flushing thousands of files.
+        // The native publication tests cover staging, registration, and the marker with real files.
+        var admitted = new IOException("Reached output creation after payload admission.");
+        var stopped = await Assert.ThrowsAsync<IOException>(() => fixture.PublishAsync(
+            files: maximum, onCreated: () => throw admitted));
+        Assert.Same(admitted, stopped);
+        Assert.False(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
 
         var otherOutput = Path.Join(fixture.OutputParent, "too-many");
         var tooMany = Enumerable.Range(0, maximumPayloadFiles + 1)
