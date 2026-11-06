@@ -52,7 +52,7 @@ public sealed class CoverageFanInIdentityTests
             ("git", "-c core.fsmonitor=false rev-parse HEAD"),
             ("git", "-c core.fsmonitor=false rev-parse HEAD^{tree}"),
             ("dotnet", "--version"),
-            ("git", "-c core.fsmonitor=false ls-files -v -z"),
+            ("git", "-c core.fsmonitor=false ls-files --recurse-submodules -v -z"),
             ("git", "-c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none")
         };
         var commands = new List<CoverageRunProcessRequest>();

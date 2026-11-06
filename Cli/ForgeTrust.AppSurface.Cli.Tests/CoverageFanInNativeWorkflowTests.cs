@@ -13,11 +13,12 @@ public sealed class CoverageFanInNativeWorkflowTests
     [InlineData("--assume-unchanged")]
     [InlineData("--skip-worktree")]
     [InlineData("ignored-submodule")]
+    [InlineData("hidden-edit-in-submodule")]
     public async Task CollectRejectsSourceChangesHiddenByGitSettings(string setting)
     {
         using var fixture = await Fixture.CreateAsync();
-        if (setting == "ignored-submodule")
-            await fixture.HideSubmoduleChangeAsync();
+        if (setting is "ignored-submodule" or "hidden-edit-in-submodule")
+            await fixture.HideSubmoduleChangeAsync(editTrackedSource: setting == "hidden-edit-in-submodule");
         else
             await fixture.HideTrackedEditAsync(setting);
         var policy = await fixture.PolicyAsync();
@@ -324,14 +325,16 @@ public sealed class CoverageFanInNativeWorkflowTests
             Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
         }
 
-        internal async Task HideSubmoduleChangeAsync()
+        internal async Task HideSubmoduleChangeAsync(bool editTrackedSource)
         {
             var remote = Path.Join(_temp.Path, "submodule-source");
             Directory.CreateDirectory(remote);
             await Command(remote, "git", "init");
             await Command(remote, "git", "config", "user.email", "coverage-tests@example.invalid");
             await Command(remote, "git", "config", "user.name", "Coverage workflow tests");
-            await Command(remote, "git", "commit", "--allow-empty", "-m", "pinned dependency");
+            await File.WriteAllTextAsync(Path.Join(remote, "dependency.txt"), "pinned source");
+            await Command(remote, "git", "add", ".");
+            await Command(remote, "git", "commit", "-m", "pinned dependency");
             var pinned = await Command(remote, "git", "rev-parse", "HEAD");
             await Command(remote, "git", "commit", "--allow-empty", "-m", "different dependency");
             var different = await Command(remote, "git", "rev-parse", "HEAD");
@@ -342,10 +345,19 @@ public sealed class CoverageFanInNativeWorkflowTests
             await Command(Repository, "git", "add", ".gitmodules");
             await Command(Repository, "git", "update-index", "--cacheinfo", $"160000,{pinned},dependency");
             await Command(Repository, "git", "commit", "-m", "pin dependency and ignore submodule changes");
-            await Command(submodule, "git", "checkout", "--detach", different);
+            if (editTrackedSource)
+            {
+                await Command(submodule, "git", "update-index", "--assume-unchanged", "--", "dependency.txt");
+                await File.WriteAllTextAsync(Path.Join(submodule, "dependency.txt"), "changed source");
+                Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--ignore-submodules=none"));
+            }
+            else
+            {
+                await Command(submodule, "git", "checkout", "--detach", different);
+                Assert.Contains("dependency", await Command(Repository, "git", "status", "--porcelain", "--ignore-submodules=none"),
+                    StringComparison.Ordinal);
+            }
             Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
-            Assert.Contains("dependency", await Command(Repository, "git", "status", "--porcelain", "--ignore-submodules=none"),
-                StringComparison.Ordinal);
         }
 
         internal Task<string> BuildAsync() =>

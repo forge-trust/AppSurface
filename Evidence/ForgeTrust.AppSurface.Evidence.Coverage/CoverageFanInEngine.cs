@@ -198,7 +198,7 @@ internal static partial class CoverageFanInEngine
             || await IdentityAsync("git", ["rev-parse", "HEAD"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("commit").GetString()
             || await IdentityAsync("git", ["rev-parse", "HEAD^{tree}"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("tree").GetString()
             || await IdentityAsync("dotnet", ["--version"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("sdk").GetString()
-            || HasSuppressedIndexEntries(await IdentityAsync("git", ["ls-files", "-v", "-z"], r, token).ConfigureAwait(false))
+            || HasSuppressedIndexEntries(await IdentityAsync("git", ["ls-files", "--recurse-submodules", "-v", "-z"], r, token).ConfigureAwait(false))
             || (await IdentityAsync("git", ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"], r, token).ConfigureAwait(false)).Length != 0)
             throw new InvalidDataException("Source, SDK or clean state differs from trusted expectations.");
         foreach (var project in r.Expected.TestProjects)
