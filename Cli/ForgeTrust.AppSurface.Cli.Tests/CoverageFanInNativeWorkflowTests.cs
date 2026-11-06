@@ -418,6 +418,7 @@ public sealed class CoverageFanInNativeWorkflowTests
             Directory.CreateDirectory(Path.GetDirectoryName(localTest)!);
             await File.WriteAllTextAsync(localTest, """
                 using Xunit;
+                namespace Consumer.Alpha.Tests;
                 public class AlphaDecisionTestsIgnored {
                     [Fact] public void MustNotRun() => Assert.Fail("ignored input was compiled");
                 }
