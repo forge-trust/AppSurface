@@ -135,7 +135,7 @@ public sealed class CoverageFanInApiValidationTests
                     "-c core.fsmonitor=false rev-parse HEAD" => source.Commit,
                     "-c core.fsmonitor=false rev-parse HEAD^{tree}" => source.Tree,
                     "-c core.fsmonitor=false ls-files -v -z" => "H Tests.csproj\0",
-                    "-c core.fsmonitor=false status --porcelain --untracked-files=all" => string.Empty,
+                    "-c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none" => string.Empty,
                     _ => throw new InvalidOperationException("Unexpected source identity command.")
                 })))
         };
