@@ -306,7 +306,8 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         await page.GotoAsync(new Uri(new Uri(host.BaseUrl), fallbackHref).AbsoluteUri);
         await AssertChoicePageFocusAndTargetsAsync(page, "main.docs-version-choice h1");
         await page.ReloadAsync();
-        await AssertChoicePageFocusAndTargetsAsync(page, "main.docs-version-choice h1");
+        await AssertHostedChoicePageReloadKeyboardAsync(page).WaitAsync(TimeSpan.FromSeconds(5));
+        await AssertChoicePageTargetsAsync(page);
         await AssertChoicePageResponsiveLayoutAsync(page);
 
         await page.GotoAsync(new Uri(new Uri(host.BaseUrl), selectedReasonHref).AbsoluteUri);
@@ -871,6 +872,23 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
             expectedHeadingSelector);
         Assert.True(unexpectedFocus.Length == 0,
             $"Expected focus on {expectedHeadingSelector}; active element: {unexpectedFocus}");
+        await AssertChoicePageTargetsAsync(page);
+    }
+
+    private static async Task AssertHostedChoicePageReloadKeyboardAsync(IPage page)
+    {
+        Assert.Equal(0, await page.Locator("script").CountAsync());
+        // Reload may restore scroll history without focusing the heading. The URL target
+        // must still identify the heading, and the next native Tab must reach recovery.
+        Assert.True(await page.Locator("main.docs-version-choice h1#docs-switch-choices[tabindex='-1']:target")
+            .IsVisibleAsync());
+        await page.Keyboard.PressAsync("Tab");
+        Assert.True(await page.EvaluateAsync<bool>(
+            "() => document.activeElement === document.querySelector('main.docs-version-choice a')"));
+    }
+
+    private static async Task AssertChoicePageTargetsAsync(IPage page)
+    {
         Assert.True(await page.EvaluateAsync<bool>("""
             () => {
                 const links = Array.from(document.querySelectorAll('main.docs-version-choice a'));
