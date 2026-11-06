@@ -43,8 +43,8 @@ public sealed class CoverageFanInIdentityTests
             source.Commit,
             source.Tree,
             source.Sdk,
-            "H Tests.csproj\0",
-            string.Empty
+            string.Empty,
+            "H 100644 0123456789abcdef0123456789abcdef01234567 0\tTests.csproj\0"
         };
         var expectedCommands = new (string FileName, string Arguments)[]
         {
@@ -52,8 +52,8 @@ public sealed class CoverageFanInIdentityTests
             ("git", "-c core.fsmonitor=false rev-parse HEAD"),
             ("git", "-c core.fsmonitor=false rev-parse HEAD^{tree}"),
             ("dotnet", "--version"),
-            ("git", "-c core.fsmonitor=false ls-files --recurse-submodules -v -z"),
-            ("git", "-c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none")
+            ("git", "-c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none"),
+            ("git", "-c core.fsmonitor=false ls-files --stage -v -z")
         };
         var commands = new List<CoverageRunProcessRequest>();
         var calls = 0;

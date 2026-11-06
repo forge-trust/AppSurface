@@ -14,11 +14,13 @@ public sealed class CoverageFanInNativeWorkflowTests
     [InlineData("--skip-worktree")]
     [InlineData("ignored-submodule")]
     [InlineData("hidden-edit-in-submodule")]
-    public async Task CollectRejectsSourceChangesHiddenByGitSettings(string setting)
+    [InlineData("hidden-edit-in-inactive-submodule")]
+    [InlineData("clean-inactive-submodule")]
+    public async Task CollectChecksSourceEvenWhenGitHidesChanges(string setting)
     {
         using var fixture = await Fixture.CreateAsync();
-        if (setting is "ignored-submodule" or "hidden-edit-in-submodule")
-            await fixture.HideSubmoduleChangeAsync(editTrackedSource: setting == "hidden-edit-in-submodule");
+        if (setting is "ignored-submodule" or "hidden-edit-in-submodule" or "hidden-edit-in-inactive-submodule" or "clean-inactive-submodule")
+            await fixture.PrepareSubmoduleAsync(setting);
         else
             await fixture.HideTrackedEditAsync(setting);
         var policy = await fixture.PolicyAsync();
@@ -27,6 +29,13 @@ public sealed class CoverageFanInNativeWorkflowTests
         var result = await CoverageFanIn.CollectAndCaptureAsync(new CoverageCollectRequest(
             policy, fixture.Repository, fixture.PrimaryCapture, fixture.PrimaryCollection, "primary", 180,
             NoRestore: true), progress: progress);
+
+        if (setting == "clean-inactive-submodule")
+        {
+            Assert.Equal(CoverageOperationOutcome.Succeeded, result.Outcome);
+            Assert.Equal(CoverageObservation.CollectedExecution, result.Observation);
+            return;
+        }
 
         Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
         Assert.Null(result.Observation);
@@ -325,7 +334,7 @@ public sealed class CoverageFanInNativeWorkflowTests
             Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
         }
 
-        internal async Task HideSubmoduleChangeAsync(bool editTrackedSource)
+        internal async Task PrepareSubmoduleAsync(string setting)
         {
             var remote = Path.Join(_temp.Path, "submodule-source");
             Directory.CreateDirectory(remote);
@@ -345,13 +354,15 @@ public sealed class CoverageFanInNativeWorkflowTests
             await Command(Repository, "git", "add", ".gitmodules");
             await Command(Repository, "git", "update-index", "--cacheinfo", $"160000,{pinned},dependency");
             await Command(Repository, "git", "commit", "-m", "pin dependency and ignore submodule changes");
-            if (editTrackedSource)
+            if (setting is "hidden-edit-in-inactive-submodule" or "clean-inactive-submodule")
+                await Command(Repository, "git", "config", "submodule.dependency.active", "false");
+            if (setting is "hidden-edit-in-submodule" or "hidden-edit-in-inactive-submodule")
             {
                 await Command(submodule, "git", "update-index", "--assume-unchanged", "--", "dependency.txt");
                 await File.WriteAllTextAsync(Path.Join(submodule, "dependency.txt"), "changed source");
                 Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--ignore-submodules=none"));
             }
-            else
+            else if (setting == "ignored-submodule")
             {
                 await Command(submodule, "git", "checkout", "--detach", different);
                 Assert.Contains("dependency", await Command(Repository, "git", "status", "--porcelain", "--ignore-submodules=none"),

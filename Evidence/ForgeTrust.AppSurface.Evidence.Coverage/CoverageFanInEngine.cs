@@ -198,9 +198,9 @@ internal static partial class CoverageFanInEngine
             || await IdentityAsync("git", ["rev-parse", "HEAD"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("commit").GetString()
             || await IdentityAsync("git", ["rev-parse", "HEAD^{tree}"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("tree").GetString()
             || await IdentityAsync("dotnet", ["--version"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("sdk").GetString()
-            || HasSuppressedIndexEntries(await IdentityAsync("git", ["ls-files", "--recurse-submodules", "-v", "-z"], r, token).ConfigureAwait(false))
             || (await IdentityAsync("git", ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"], r, token).ConfigureAwait(false)).Length != 0)
             throw new InvalidDataException("Source, SDK or clean state differs from trusted expectations.");
+        await VerifySourceIndexesAsync(root, r, token).ConfigureAwait(false);
         foreach (var project in r.Expected.TestProjects)
         {
             var path = Path.Join(root, project);
@@ -211,26 +211,67 @@ internal static partial class CoverageFanInEngine
         directory.VerifyArtifactBinding();
     }
 
-    // Git's -v lowers the tag for assume-unchanged; -t's S tag means skip-worktree.
-    // NUL delimiting prevents a filename from introducing or hiding a record tag.
-    private static bool HasSuppressedIndexEntries(string entries)
+    // Git's active-submodule configuration cannot determine which pinned source checkouts we inspect.
+    private static async Task VerifySourceIndexesAsync(string root, CoverageFanInEngineRequest r, CancellationToken token)
     {
+        const int maximumCheckouts = 32;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(r.Expected.Limits.GetProperty("identitySeconds").GetInt32()));
+        var pending = new Queue<(string Path, string? Commit)>();
+        pending.Enqueue((root, null));
+        var checkouts = 1;
+        while (pending.TryDequeue(out var checkout))
+        {
+            using var directory = CoverageRunOutputLease.AcquireArtifactDirectory(checkout.Path, false, false)
+                ?? throw new IOException("Pinned source checkout is unavailable.");
+            if (checkout.Commit is not null
+                && (Full(await IdentityAsync("git", ["rev-parse", "--show-toplevel"], r, deadline.Token, checkout.Path).ConfigureAwait(false)) != checkout.Path
+                    || await IdentityAsync("git", ["rev-parse", "HEAD"], r, deadline.Token, checkout.Path).ConfigureAwait(false) != checkout.Commit
+                    || (await IdentityAsync("git", ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"],
+                        r, deadline.Token, checkout.Path).ConfigureAwait(false)).Length != 0))
+                throw new InvalidDataException("Pinned submodule source or clean state differs.");
+            var entries = await IdentityAsync("git", ["ls-files", "--stage", "-v", "-z"], r, deadline.Token, checkout.Path).ConfigureAwait(false);
+            foreach (var (path, commit) in ReadSourceIndex(entries))
+            {
+                if (++checkouts > maximumCheckouts)
+                    throw new InvalidDataException("Source checkout inventory exceeds the limit.");
+                var child = Full(Path.Join(checkout.Path, path));
+                if (child == checkout.Path || !child.StartsWith(Path.TrimEndingDirectorySeparator(checkout.Path) + Path.DirectorySeparatorChar,
+                    StringComparison.Ordinal))
+                    throw new InvalidDataException("Pinned submodule path escapes its checkout.");
+                pending.Enqueue((child, commit));
+            }
+            directory.VerifyArtifactBinding();
+        }
+    }
+
+    // Git lowers the tag for assume-unchanged; S means skip-worktree. NUL separates filenames.
+    private static List<(string Path, string Commit)> ReadSourceIndex(string entries)
+    {
+        var links = new List<(string, string)>();
         foreach (var entry in entries.AsSpan().Split('\0'))
         {
             var record = entries.AsSpan()[entry];
-            if (!record.IsEmpty && (record[0] == 'S' || char.IsAsciiLetterLower(record[0])))
-                return true;
+            if (record.IsEmpty) continue;
+            if (record[0] == 'S' || char.IsAsciiLetterLower(record[0]))
+                throw new InvalidDataException("Source index suppresses tracked changes.");
+            if (!record.StartsWith("H 160000 ", StringComparison.Ordinal)) continue;
+            var tab = record.IndexOf('\t');
+            if (tab <= 11 || tab == record.Length - 1 || !record[..tab].EndsWith(" 0", StringComparison.Ordinal))
+                throw new InvalidDataException("Pinned submodule index entry is invalid.");
+            links.Add((record[(tab + 1)..].ToString(), record[9..(tab - 2)].ToString()));
         }
-        return false;
+        return links;
     }
-    private static async Task<string> IdentityAsync(string file, string[] arguments, CoverageFanInEngineRequest r, CancellationToken token)
+    private static async Task<string> IdentityAsync(string file, string[] arguments, CoverageFanInEngineRequest r,
+        CancellationToken token, string? workingDirectory = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(r.Expected.Limits.GetProperty("identitySeconds").GetInt32()));
         var runner = r.IdentityRunner ?? new CliWrapCoverageRunProcessRunner();
         // Identity validation must not execute a repository-configured fsmonitor hook.
         var safeArguments = file == "git" ? new[] { "-c", "core.fsmonitor=false" }.Concat(arguments).ToArray() : arguments;
-        var result = await runner.RunAsync(new(file, safeArguments, Full(r.RepositoryRoot), null, null,
+        var result = await runner.RunAsync(new(file, safeArguments, workingDirectory ?? Full(r.RepositoryRoot), null, null,
             CoverageRunProcessLease.Detached()), deadline.Token).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.OutputTruncated) throw new InvalidDataException("Identity command failed.");
         return (result.StandardOutput ?? result.Output).Trim();
