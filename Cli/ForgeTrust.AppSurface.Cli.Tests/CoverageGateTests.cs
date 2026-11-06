@@ -6,6 +6,7 @@ using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -162,7 +163,7 @@ public sealed class CoverageGateTests
     public async Task ExecuteAsync_MeasuresPatchForRealGitPath(string fileName, bool quoted)
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-path-");
-        var sourcePath = Path.Join(temp.Path, "src", fileName);
+        var sourcePath = TestPathUtils.PathUnder(temp.Path, "src", fileName);
         Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
         await File.WriteAllTextAsync(sourcePath, "base\n");
         await RunGitAsync(temp.Path, "init");
