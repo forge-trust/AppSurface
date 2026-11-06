@@ -89,6 +89,29 @@ public sealed class CoverageFanInNativeWorkflowTests
         Assert.True(result.Effects.GenerationCommitted);
     }
 
+    [Theory]
+    [InlineData("Consumer.Alpha.Tests/IgnoredTests.cs")]
+    [InlineData("Consumer.Alpha.Tests/nested/bin/IgnoredTests.cs")]
+    public async Task CollectRejectsIgnoredInputsThatTheSdkWouldCompile(string path)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.AddIgnoredFailingTestAsync(path);
+        var policy = await fixture.PolicyAsync();
+        using var progress = new StringWriter();
+
+        var result = await CoverageFanIn.CollectAndCaptureAsync(new CoverageCollectRequest(
+            policy, fixture.Repository, fixture.NativeCapture, fixture.NativeCollection, "native", 180,
+            NoRestore: true), progress: progress);
+
+        Assert.Empty(progress.ToString());
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.Null(result.Observation);
+        Assert.False(result.Effects.GenerationCommitted);
+        Assert.False(Directory.Exists(fixture.NativeCollection));
+        Assert.False(Directory.Exists(fixture.NativeCapture));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(fixture.Repository, path)));
+    }
+
     [Fact]
     public async Task CollectDoesNotCertifyOldBinariesForTheCurrentCommit()
     {
@@ -386,6 +409,23 @@ public sealed class CoverageFanInNativeWorkflowTests
             await Command(Repository, "git", "add", ".gitignore");
             await Command(Repository, "git", "commit", "-m", "leave local project outside pinned tree");
             Assert.Equal(project, await Command(Repository, "git", "check-ignore", "--", project));
+            Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
+        }
+
+        internal async Task AddIgnoredFailingTestAsync(string path)
+        {
+            var localTest = TestPathUtils.PathUnder(Repository, path);
+            Directory.CreateDirectory(Path.GetDirectoryName(localTest)!);
+            await File.WriteAllTextAsync(localTest, """
+                using Xunit;
+                public class AlphaDecisionTestsIgnored {
+                    [Fact] public void MustNotRun() => Assert.Fail("ignored input was compiled");
+                }
+                """);
+            await File.AppendAllTextAsync(TestPathUtils.PathUnder(Repository, ".gitignore"), $"/{path}\n");
+            await Command(Repository, "git", "add", ".gitignore");
+            await Command(Repository, "git", "commit", "-m", "ignore an SDK default compile item");
+            Assert.Equal(path, await Command(Repository, "git", "check-ignore", "--", path));
             Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
         }
 

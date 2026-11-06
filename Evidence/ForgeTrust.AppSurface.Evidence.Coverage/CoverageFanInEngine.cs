@@ -40,7 +40,7 @@ internal static partial class CoverageFanInEngine
                 return state.Failure("Rejected", "ASCOV301", "noBuild",
                     "Observed collection requires a rebuild; omit noBuild or set it to false.");
             deadline.Token.ThrowIfCancellationRequested();
-            await VerifySourceAsync(request, deadline.Token).ConfigureAwait(false);
+            await VerifySourceAsync(request, deadline.Token, collecting: operation == "collect").ConfigureAwait(false);
             if (operation == "collect") return await CollectAsync(request, writers, state, deadline.Token).ConfigureAwait(false);
             using var io = new CoverageFanInIO(request.Expected.Bounds, deadline.Token);
             var inputs = InputDirectories(operation, request);
@@ -189,7 +189,7 @@ internal static partial class CoverageFanInEngine
         }
     }
 
-    private static async Task VerifySourceAsync(CoverageFanInEngineRequest r, CancellationToken token)
+    private static async Task VerifySourceAsync(CoverageFanInEngineRequest r, CancellationToken token, bool collecting = false)
     {
         var root = Full(r.RepositoryRoot);
         using var directory = CoverageRunOutputLease.AcquireArtifactDirectory(root, false, false)
@@ -206,7 +206,7 @@ internal static partial class CoverageFanInEngine
             if (producer.TryGetProperty("testProjects", out var inventory) && inventory.ValueKind == JsonValueKind.Array)
                 projects.UnionWith(inventory.EnumerateArray().Select(project => project.GetString()!));
         }
-        await VerifySourceIndexesAsync(root, projects, r, token).ConfigureAwait(false);
+        await VerifySourceIndexesAsync(root, projects, r, token, collecting).ConfigureAwait(false);
         foreach (var project in projects)
         {
             var path = Path.Join(root, project);
@@ -220,7 +220,7 @@ internal static partial class CoverageFanInEngine
     // Each clean checkout's index agrees with its pinned HEAD. Require regular stage-zero entries
     // for the declared projects; status alone does not report an ignored project that is absent from Git.
     private static async Task VerifySourceIndexesAsync(string root, IReadOnlySet<string> projects,
-        CoverageFanInEngineRequest r, CancellationToken token)
+        CoverageFanInEngineRequest r, CancellationToken token, bool collecting)
     {
         const int maximumCheckouts = 32;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -240,7 +240,8 @@ internal static partial class CoverageFanInEngine
                         r, deadline.Token, checkout.Path).ConfigureAwait(false)).Length != 0))
                 throw new InvalidDataException("Pinned submodule source or clean state differs.");
             var entries = await IdentityAsync("git", ["ls-files", "--stage", "-v", "-z"], r, deadline.Token, checkout.Path).ConfigureAwait(false);
-            foreach (var (path, commit) in ReadSourceIndex(entries, checkout.Prefix, unseenProjects))
+            var buildOutputs = collecting ? new HashSet<string>(StringComparer.Ordinal) : null;
+            foreach (var (path, commit) in ReadSourceIndex(entries, checkout.Prefix, unseenProjects, buildOutputs))
             {
                 if (++checkouts > maximumCheckouts)
                     throw new InvalidDataException("Source checkout inventory exceeds the limit.");
@@ -250,14 +251,34 @@ internal static partial class CoverageFanInEngine
                     throw new InvalidDataException("Pinned submodule path escapes its checkout.");
                 pending.Enqueue((child, checkout.Prefix + path + "/", commit));
             }
+            if (buildOutputs is not null)
+            {
+                var ignored = await IdentityAsync("git", ["ls-files", "--others", "--ignored", "--exclude-standard",
+                    "--directory", "--no-empty-directory", "-z"], r, deadline.Token, checkout.Path).ConfigureAwait(false);
+                ValidateCollectionIgnoredFiles(ignored, buildOutputs);
+            }
             directory.VerifyArtifactBinding();
         }
         if (unseenProjects.Count != 0)
             throw new InvalidDataException("Declared test projects must be tracked regular files in the pinned source.");
     }
 
+    // An unrelated directory called bin/obj is still a possible SDK input. Git includes a trailing
+    // slash for ignored directory entries; a symlink with the same name is not an output directory.
+    private static void ValidateCollectionIgnoredFiles(string entries, HashSet<string> buildOutputs)
+    {
+        var lookup = buildOutputs.GetAlternateLookup<ReadOnlySpan<char>>();
+        foreach (var entry in entries.AsSpan().Split('\0'))
+        {
+            var path = entries.AsSpan()[entry];
+            if (!path.IsEmpty && !lookup.Contains(path))
+                throw new InvalidDataException("Ignored files outside conventional build output can change observed coverage inputs.");
+        }
+    }
+
     // Git lowers the tag for assume-unchanged; S means skip-worktree. NUL separates filenames.
-    private static List<(string Path, string Commit)> ReadSourceIndex(string entries, string prefix, HashSet<string> unseenProjects)
+    private static List<(string Path, string Commit)> ReadSourceIndex(string entries, string prefix,
+        HashSet<string> unseenProjects, HashSet<string>? buildOutputs)
     {
         var links = new List<(string, string)>();
         var projectLookup = unseenProjects.GetAlternateLookup<ReadOnlySpan<char>>();
@@ -274,9 +295,20 @@ internal static partial class CoverageFanInEngine
             if (tab <= 11 || tab == record.Length - 1 || !record[..tab].EndsWith(" 0", StringComparison.Ordinal))
                 throw new InvalidDataException("Pinned source index entry is invalid.");
             var path = record[(tab + 1)..];
-            if (gitlink) links.Add((path.ToString(), record[9..(tab - 2)].ToString()));
-            else if (prefix.Length == 0) projectLookup.Remove(path);
+            if (gitlink)
+            {
+                links.Add((path.ToString(), record[9..(tab - 2)].ToString()));
+                continue;
+            }
+            if (prefix.Length == 0) projectLookup.Remove(path);
             else if (unseenProjects.Count != 0) unseenProjects.Remove(string.Concat(prefix, path));
+            if (buildOutputs is not null && (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".vbproj", StringComparison.OrdinalIgnoreCase)))
+            {
+                var parent = path[..(path.LastIndexOf('/') + 1)];
+                buildOutputs.Add(string.Concat(parent, "bin/"));
+                buildOutputs.Add(string.Concat(parent, "obj/"));
+            }
         }
         return links;
     }

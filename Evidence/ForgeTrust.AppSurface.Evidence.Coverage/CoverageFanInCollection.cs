@@ -40,7 +40,7 @@ internal static partial class CoverageFanInEngine
         finally { state.EffectsStarted |= Directory.Exists(collection); }
         if (!result.Success) throw new InvalidDataException("Required collection did not complete.");
         await writers.Output.WriteLineAsync("Coverage collection completed; validating retained producer evidence.").ConfigureAwait(false);
-        await VerifySourceAsync(r, token).ConfigureAwait(false);
+        await VerifySourceAsync(r, token, collecting: true).ConfigureAwait(false);
         string? raw = null;
         string? timingsHash = null;
         IReadOnlyDictionary<string, string>? reportHashes = null;
