@@ -554,7 +554,7 @@ public sealed class EvidenceCoverageFanInProducerTests
             {
                 Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", InitialArtifactHome);
                 Environment.SetEnvironmentVariable("PATH", InitialPath);
-                Directory.Delete(tempPath, recursive: true);
+                DeleteFixture(tempPath);
                 throw;
             }
         }
@@ -592,7 +592,25 @@ public sealed class EvidenceCoverageFanInProducerTests
                 Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", _priorArtifactHome);
                 Environment.SetEnvironmentVariable("PATH", _priorPath);
             }
-            if (Directory.Exists(TempPath)) Directory.Delete(TempPath, recursive: true);
+            DeleteFixture(TempPath);
+        }
+
+        private static void DeleteFixture(string root)
+        {
+            if (!Directory.Exists(root)) return;
+            var gitObjects = Path.Join(root, "repo", ".git", "objects");
+            if (OperatingSystem.IsWindows() && Directory.Exists(gitObjects))
+            {
+                // Git writes read-only objects. Only clear that flag in this test's own repository.
+                foreach (var file in Directory.EnumerateFiles(gitObjects, "*", new EnumerationOptions
+                { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }))
+                {
+                    var attributes = File.GetAttributes(file);
+                    if ((attributes & FileAttributes.ReadOnly) != 0)
+                        File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
+                }
+            }
+            Directory.Delete(root, recursive: true);
         }
 
         private static void Write(string root, string relative, string contents)
