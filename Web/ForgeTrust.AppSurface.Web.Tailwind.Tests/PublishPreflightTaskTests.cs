@@ -84,7 +84,7 @@ public sealed class PublishPreflightTaskTests : IDisposable
         AssertCode(engine, "ASPUB003");
     }
 
-    [Theory]
+    [UnixTheory]
     [InlineData("0644", true)]
     [InlineData("0755", true)]
     [InlineData("0666", false)]
@@ -94,7 +94,6 @@ public sealed class PublishPreflightTaskTests : IDisposable
     [InlineData("1000", false)]
     public void Permissions_ValidatesFileModes(string mode, bool expected)
     {
-        SkipWindows();
         var directory = NewPublishDirectory("mode");
         var script = CreateFindStub("d\0755\0\0f\0" + mode + "\0asset.bin\0");
         var engine = new RecordingBuildEngine();
@@ -118,10 +117,9 @@ public sealed class PublishPreflightTaskTests : IDisposable
         AssertCode(engine, "ASPUB003");
     }
 
-    [Fact]
+    [UnixFact]
     public void Permissions_ReportsAspub003WhenPublishDirectoryDoesNotExist()
     {
-        SkipWindows();
         var engine = new RecordingBuildEngine();
         var task = CreateTask(engine, "permissions", CreateFindStub(""));
         task.PublishDirectory = Path.Join(_root, "absent");
@@ -130,10 +128,9 @@ public sealed class PublishPreflightTaskTests : IDisposable
         AssertCode(engine, "ASPUB003");
     }
 
-    [Fact]
+    [UnixFact]
     public void Permissions_RejectsASymlinkAsTheOutputRoot()
     {
-        SkipWindows();
         var realDirectory = NewPublishDirectory("real-root");
         var linkedDirectory = Path.Join(_root, "linked-root");
         Directory.CreateSymbolicLink(linkedDirectory, realDirectory);
@@ -145,10 +142,9 @@ public sealed class PublishPreflightTaskTests : IDisposable
         AssertCode(engine, "ASPUB003");
     }
 
-    [Fact]
+    [UnixFact]
     public void Permissions_RejectsNestedSymlinkRecord()
     {
-        SkipWindows();
         var directory = NewPublishDirectory("nested-link");
         File.CreateSymbolicLink(Path.Join(directory, "link"), "missing-target");
         var engine = new RecordingBuildEngine();
@@ -160,14 +156,13 @@ public sealed class PublishPreflightTaskTests : IDisposable
         Assert.Contains(engine.Errors, error => error.Message?.Contains("unexpected file type", StringComparison.Ordinal) is true);
     }
 
-    [Theory]
+    [UnixTheory]
     [InlineData("d\0755\0\0f\0888\0bad\0", "invalid mode")]
     [InlineData("d\0755\0\0f\0644\0", "incomplete record")]
     [InlineData("d\0755\0\0", "no files")]
     [InlineData("f\0755\0root\0f\0644\0asset\0", "missing root record")]
     public void Permissions_ReportsAspub003ForInvalidOrIncompleteFindOutput(string output, string _)
     {
-        SkipWindows();
         var directory = NewPublishDirectory("bad-output");
         var engine = new RecordingBuildEngine();
         var task = CreateTask(engine, "permissions", CreateFindStub(output));
@@ -177,10 +172,9 @@ public sealed class PublishPreflightTaskTests : IDisposable
         AssertCode(engine, "ASPUB003");
     }
 
-    [Fact]
+    [UnixFact]
     public void Permissions_ReportsAspub003WhenFindExitsUnsuccessfully()
     {
-        SkipWindows();
         var directory = NewPublishDirectory("find-exit");
         var engine = new RecordingBuildEngine();
         var task = CreateTask(engine, "permissions", CreateFindStub("d\0755\0\0f\0644\0asset\0", exitCode: 2));
@@ -190,10 +184,9 @@ public sealed class PublishPreflightTaskTests : IDisposable
         AssertCode(engine, "ASPUB003");
     }
 
-    [Fact]
+    [UnixFact]
     public void Permissions_ReportsAspub003WhenFindWritesStderr()
     {
-        SkipWindows();
         var directory = NewPublishDirectory("find-stderr");
         var engine = new RecordingBuildEngine();
         var task = CreateTask(engine, "permissions", CreateFindStub("d\0755\0\0f\0644\0asset\0", stderr: "synthetic failure"));
@@ -203,10 +196,9 @@ public sealed class PublishPreflightTaskTests : IDisposable
         AssertCode(engine, "ASPUB003");
     }
 
-    [Fact]
+    [UnixFact]
     public void Permissions_ReportsAspub003WhenFindCannotStart()
     {
-        SkipWindows();
         var directory = NewPublishDirectory("find-missing");
         var engine = new RecordingBuildEngine();
         var task = CreateTask(engine, "permissions", Path.Join(_root, "missing-find"));
@@ -255,10 +247,23 @@ public sealed class PublishPreflightTaskTests : IDisposable
     private static void AssertCode(RecordingBuildEngine engine, string code) =>
         Assert.Contains(engine.Errors, error => error.Code == code);
 
-    private static void SkipWindows()
+    // xUnit v2 discovers Skip on the attribute; it does not support exception-based skips.
+    public sealed class UnixFactAttribute : FactAttribute
     {
-        if (OperatingSystem.IsWindows())
-            throw Xunit.Sdk.SkipException.ForSkip("The synthetic executable uses a Unix shell; path validation remains platform independent.");
+        public UnixFactAttribute()
+        {
+            if (OperatingSystem.IsWindows())
+                Skip = "Requires a Unix shell or symbolic links.";
+        }
+    }
+
+    public sealed class UnixTheoryAttribute : TheoryAttribute
+    {
+        public UnixTheoryAttribute()
+        {
+            if (OperatingSystem.IsWindows())
+                Skip = "Requires a Unix shell.";
+        }
     }
 
     private sealed class RecordingBuildEngine : IBuildEngine
