@@ -137,7 +137,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
 
         var diagnostic = Assert.Single(exception.Diagnostics);
         Assert.Contains("exceeds the configured rewrite input budget", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("/", diagnostic.Route);
+        Assert.Equal("/docs/guide", diagnostic.Route);
         Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
     }
 
@@ -347,7 +347,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
     {
         internal TemporaryDirectory()
         {
-            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "appsurface-concept-index-tests-" + Guid.NewGuid().ToString("N"));
+            Path = System.IO.Path.Join(System.IO.Path.GetTempPath(), "appsurface-concept-index-tests-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Path);
         }
 

@@ -221,7 +221,7 @@ internal static class ReleaseDocsStaticConceptPublication
                         if (!File.Exists(physicalPath)) throw Invalid("A validated canonical page artifact is missing from the exact tree.");
                         var originalBytes = await ReadBoundedAsync(physicalPath, limit, cancellationToken);
                         var originalHtml = new UTF8Encoding(false, true).GetString(originalBytes);
-                        var rewritten = RewriteGuide(originalHtml, page, identity, index, allPages, releases, switchUrl, archiveUrl,
+                        var rewritten = RewriteGuide(originalHtml, page, identity, index, releases, switchUrl, archiveUrl,
                             root, configuration, limit);
                         await WriteDerivedAsync(stagingRoot,
                             ServingMember(root, "v/" + identity.Version + "/" + memberPath),
@@ -483,8 +483,7 @@ internal static class ReleaseDocsStaticConceptPublication
     }
 
     private static string RewriteGuide(string html, DocConceptCanonicalPage sourcePage, DocConceptPageIdentity sourceIdentity,
-        DocConceptIdentityIndex index, IReadOnlyList<(DocConceptPageIdentity Identity, DocConceptCanonicalPage Page)> allPages,
-        IReadOnlyList<StaticRelease> releases, string choiceUrl, string archiveUrl, string root,
+        DocConceptIdentityIndex index, IReadOnlyList<StaticRelease> releases, string choiceUrl, string archiveUrl, string root,
         DocsStaticServingConfiguration config, int limit)
     {
         var parser = new HtmlParser();
@@ -513,8 +512,7 @@ internal static class ReleaseDocsStaticConceptPublication
 
         var identity = new DocConceptDestination(config.InstanceId, sourceIdentity.Version, sourceIdentity.ReleaseManifestSha256,
             sourceIdentity.Locale, sourceIdentity.RoutePath);
-        var incoming = index.GetIncoming(sourceIdentity,
-            allPages.Select(item => item.Identity), config.InstanceId)
+        var incoming = index.GetIncomingIndexed(sourceIdentity, config.InstanceId)
             .Select(row => new DocConceptIncomingView(row.SourceKey, row.Reason.ToString(),
                 TransitionNotice(row.Reason, sourceIdentity.Version),
                 VersionPageUrl(root, row.SourceIdentity.Version, row.SourcePage), row.SourceIdentity.Version,

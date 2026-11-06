@@ -16,15 +16,12 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 internal sealed class AppSurfaceDocsVersionSwitchStaticHost : IAsyncDisposable
 {
     private readonly WebApplication _application;
-    private readonly PhysicalFileProvider _fileProvider;
 
     private AppSurfaceDocsVersionSwitchStaticHost(
         WebApplication application,
-        PhysicalFileProvider fileProvider,
         string baseUrl)
     {
         _application = application;
-        _fileProvider = fileProvider;
         BaseUrl = baseUrl;
     }
 
@@ -48,15 +45,15 @@ internal sealed class AppSurfaceDocsVersionSwitchStaticHost : IAsyncDisposable
             EnvironmentName = Environments.Production
         });
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        // The container owns the provider for the whole host lifetime, including startup failure.
+        builder.Services.AddSingleton(_ => new PhysicalFileProvider(root));
         var application = builder.Build();
-        var fileProvider = new PhysicalFileProvider(root);
-        application.UseStaticFiles(new StaticFileOptions
-        {
-            FileProvider = fileProvider
-        });
-
         try
         {
+            application.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = application.Services.GetRequiredService<PhysicalFileProvider>()
+            });
             await application.StartAsync();
             var addresses = application.Services.GetRequiredService<IServer>()
                 .Features.Get<IServerAddressesFeature>()?.Addresses;
@@ -66,11 +63,10 @@ internal sealed class AppSurfaceDocsVersionSwitchStaticHost : IAsyncDisposable
                     $"The static Docs fixture expected one loopback address; found {addresses?.Count ?? 0}.");
             }
 
-            return new AppSurfaceDocsVersionSwitchStaticHost(application, fileProvider, addresses.Single());
+            return new AppSurfaceDocsVersionSwitchStaticHost(application, addresses.Single());
         }
         catch
         {
-            fileProvider.Dispose();
             await application.DisposeAsync();
             throw;
         }
@@ -85,7 +81,6 @@ internal sealed class AppSurfaceDocsVersionSwitchStaticHost : IAsyncDisposable
         }
         finally
         {
-            _fileProvider.Dispose();
             await _application.DisposeAsync();
         }
     }

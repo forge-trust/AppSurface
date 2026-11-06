@@ -13,7 +13,7 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "docs-concepts-host-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(Path.GetTempPath(), "docs-concepts-host-" + Guid.NewGuid().ToString("N"));
     private const string Html = "<!doctype html><html><head><title>Guide</title></head><body><main><h1>Guide</h1><p>Readable guide content.</p></main></body></html>";
     private static readonly string SourcePin = new('a', 64);
     private static readonly string TargetPin = new('b', 64);
@@ -41,7 +41,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
             Assert.Empty(Body(missing));
         }
 
-        File.WriteAllText(Path.Combine(_root, "1/export/old.html"), Html + "tampered");
+        File.WriteAllText(Path.Join(_root, "1", "export", "old.html"), Html + "tampered");
         var changed = Context("/docs/versions/switch/" + key + ".html");
         await fixture.Adapter.TryHandleAsync(changed, NullLogger.Instance);
         Assert.Equal(404, changed.Response.StatusCode);
@@ -132,7 +132,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
     {
         var fixture = Create();
         var key = DocConceptIdentityIndex.CreateSourceKey("Default", Source());
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
         var context = Context("/docs/v/2/export/new.html", "/base");
         context.Request.QueryString = new QueryString("?docsFrom=" + key);
@@ -164,7 +164,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
     {
         var fixture = Create();
         var key = DocConceptIdentityIndex.CreateSourceKey("Default", Source());
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
         var context = Context(requestedMount + "/export/new.html", pathBase);
         context.Request.QueryString = new QueryString("?docsFrom=" + key);
@@ -213,7 +213,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         await fixture.Adapter.TryHandleAsync(context, NullLogger.Instance);
         Assert.Equal(200, context.Response.StatusCode);
         Assert.Contains("/docs/v/2/export/new.html?docsFrom=" + key + "#intro", Body(context));
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
         var html = fixture.Adapter.RewriteGuide(Context("/docs/v/2/export/new.html"), mount, "export/new.html", Html, NullLogger.Instance);
         Assert.Contains("data-docs-version-anchor-ids", html);
@@ -244,7 +244,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         Assert.Equal(200, context.Response.StatusCode);
         Assert.True(context.Response.ContentLength > 0);
         Assert.Empty(Body(context));
-        File.Delete(Path.Combine(_root, "1/export/old.html"));
+        File.Delete(Path.Join(_root, "1", "export", "old.html"));
         var missing = Context("/docs/versions/switch/" + key + ".html");
         await fixture.Adapter.TryHandleAsync(missing, NullLogger.Instance);
         Assert.Equal(404, missing.Response.StatusCode);
@@ -254,7 +254,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
     public async Task PublishedHandler_UsesExactRuntimeCspAndPreservesGuide()
     {
         var fixture = Create();
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var version = fixture.Versions[1];
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider, version.ExactTreePath,
             archiveVerificationState: AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
@@ -275,7 +275,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
     public async Task PublishedHandler_CaseInsensitiveMountKeepsReceivedSelfPathAndPathBase()
     {
         var fixture = Create();
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var version = fixture.Versions[1];
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider, version.ExactTreePath,
             archiveVerificationState: AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
@@ -303,7 +303,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
     public void UnsupportedShellAndUnrelatedMountKeepGuideReadable()
     {
         var fixture = Create();
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
         var collision = Html.Replace("<main>", "<main><span data-docs-version-switch>Existing shell</span>", StringComparison.Ordinal);
         var rejected = fixture.Adapter.RewriteGuide(Context("/docs/v/2/export/new.html"), mount, "export/new.html", collision, NullLogger.Instance);
@@ -318,7 +318,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
     public void UnexpectedQueryFeatureFailurePreservesGuideWithoutAuthorizingTheRuntime()
     {
         var fixture = Create();
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
         var context = Context("/docs/v/2/export/new.html");
         context.Features.Set<IQueryFeature>(new FailingQueryFeature());
@@ -414,13 +414,13 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         var fixture = Create();
         var html = Html.Replace("</head>", "<script data-docs-switch-runtime defer src=\"/docs/versions/switch/runtime.js\" integrity=\"" + DocConceptSwitchRuntime.RuntimeSubresourceIntegrity + "\"></script></head>", StringComparison.Ordinal);
         File.WriteAllText(Path.Combine(_root, "2/export/new.html"), html);
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var bytes = Encoding.UTF8.GetBytes(html);
         var archive = new AppSurfaceDocsVerifiedReleaseArchive(new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>
         {
             ["export/new.html"] = new("export/new.html", bytes.Length, "text/html", Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant())
         }, AppSurfaceDocsFrozenRouteManifest.Empty);
-        var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider, Path.Combine(_root, "2"),
+        var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider, Path.Join(_root, "2"),
             archiveVerificationState: AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified, verifiedReleaseArchive: archive);
         var handler = new AppSurfaceDocsPublishedTreeHandler([mount], "/docs/next", conceptSwitching: fixture.Adapter);
         var context = Context("/docs/v/2/export/new.html");
@@ -438,7 +438,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
     public void IncomingProjection_IsReEnumeratedFromSnapshotAndUnknownKeysNeverCreateCachedRows()
     {
         var fixture = Create();
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
         for (var index = 0; index < 5; index++)
         {
@@ -467,7 +467,7 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         await fixture.Adapter.TryHandleAsync(context, NullLogger.Instance);
         Assert.Contains(expected, Body(context));
         if (expected == "No documented counterpart") Assert.Contains("does not establish whether the feature exists", Body(context));
-        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        using var provider = new PhysicalFileProvider(Path.Join(_root, "2"));
         var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
         var destination = Context("/docs/v/2/export/new.html");
         destination.Request.QueryString = new QueryString("?docsFrom=" + key);

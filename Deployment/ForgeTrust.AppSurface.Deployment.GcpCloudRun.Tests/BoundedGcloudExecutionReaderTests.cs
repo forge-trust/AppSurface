@@ -311,6 +311,44 @@ public sealed class BoundedGcloudExecutionReaderTests
     }
 
     [Fact]
+    public async Task NativeReaderCancellationWhileOutputIsStreamingPropagatesAfterBoundedCleanup()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        // Pace one-byte writes so cancellation, rather than the output cap, wins this test.
+        using var fixture = NativeFixture.Create("""
+            printf x
+            sleep 0.02
+            printf x
+            : > "$0.streaming"
+            while :; do
+                printf x
+                sleep 0.02
+            done
+            """);
+        var streamingMarker = fixture.Path + ".streaming";
+        using var cancellation = new CancellationTokenSource();
+        var read = new BoundedGcloudExecutionReader(fixture.Path, TimeProvider.System)
+            .ReadAsync(Resource(), TimeSpan.FromSeconds(3), cancellation.Token);
+        try
+        {
+            while (!read.IsCompleted && !File.Exists(streamingMarker))
+                await Task.WhenAny(read, Task.Delay(TimeSpan.FromMilliseconds(20)));
+
+            Assert.True(File.Exists(streamingMarker), "The fixture never began writing paced output.");
+            Assert.False(read.IsCompleted, "The read settled before streaming cancellation.");
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try { await read; }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            File.Delete(streamingMarker);
+        }
+    }
+
+    [Fact]
     public async Task NativeReaderDoesNotPublishSuccessWhenRootExitsButDescendantHoldsPipe()
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return; // protects Unix native fixture; no Windows/other OS process claim.

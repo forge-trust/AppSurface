@@ -1014,6 +1014,73 @@ public sealed class DocConceptCoreTests
     }
 
     [Fact]
+    public void IndexedIncomingShortlistMatchesExhaustiveResolverForExactRenamedMovedAndUnrelatedPages()
+    {
+        var exactSourcePin = Pin('a');
+        var renamedSourcePin = Pin('b');
+        var movedSourcePin = Pin('c');
+        var unrelatedSourcePin = Pin('d');
+        var conflictingRouteSourcePin = Pin('9');
+        var caseSourcePin = Pin('e');
+        var bridgeSourcePin = Pin('f');
+        var targetPin = Pin('0');
+        var releases = new[]
+        {
+            Release("exact-source", exactSourcePin,
+                [new Page("guide/exact", "en", "exact", "Exact title", [])]),
+            Release("renamed-source", renamedSourcePin,
+                [new Page("guide/renamed", "en", "renamed", "Old title", [])]),
+            Release("moved-source", movedSourcePin,
+                [new Page("guide/old-move", "en", "moved", "Moved title", [])]),
+            Release("unrelated-source", unrelatedSourcePin,
+                [new Page("guide/unrelated", "en", "unrelated", "Unrelated title", [])]),
+            Release("conflicting-route-source", conflictingRouteSourcePin,
+                [new Page("guide/destination-only", "en", "old-destination-only", "Old destination", [])]),
+            Release("case-source", caseSourcePin,
+                [new Page("Guide/Case", "en", null, "Case title", [])], complete: false),
+            Legacy("bridge-source", bridgeSourcePin, "guide/old-bridge"),
+            Release("target", targetPin,
+                [new Page("guide/exact", "en", "exact", "Exact title", []),
+                 new Page("guide/renamed", "en", "renamed", "New title", []),
+                 new Page("guide/new-move", "en", "moved", "Moved title", []),
+                 new Page("guide/destination-only", "en", "destination-only", "Destination", []),
+                 new Page("guide/case", "en", null, "Case title", []),
+                 new Page("guide/new-bridge", "en", null, "Bridge title", [])], complete: false)
+        };
+        var bridge = Bridge(
+            new Membership("bridge-source", bridgeSourcePin, "en", "page", "guide/old-bridge") { ConceptId = "bridge" },
+            new Membership("target", targetPin, "en", "page", "guide/new-bridge") { ConceptId = "bridge" });
+        var index = Build(releases, [bridge]).Index;
+        var targets = index.EnumeratePublicPages().Where(row => row.Identity.Version == "target").ToArray();
+        var expectedByTargetRoute = new Dictionary<string, (string Source, DocConceptResolutionReason Reason)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["guide/exact"] = ("exact-source", DocConceptResolutionReason.SamePage),
+            ["guide/renamed"] = ("renamed-source", DocConceptResolutionReason.RenamedPage),
+            ["guide/new-move"] = ("moved-source", DocConceptResolutionReason.MovedPage),
+            ["guide/case"] = ("case-source", DocConceptResolutionReason.SamePage),
+            ["guide/new-bridge"] = ("bridge-source", DocConceptResolutionReason.MovedPage)
+        };
+
+        foreach (var target in targets)
+        {
+            var exhaustive = index.GetIncoming(target.Identity,
+                index.EnumeratePublicPages().Select(row => row.Identity), "instance-a").ToArray();
+            var indexed = index.GetIncomingIndexed(target.Identity, "instance-a").ToArray();
+
+            Assert.Equal(exhaustive, indexed);
+            if (!expectedByTargetRoute.TryGetValue(target.Identity.RoutePath, out var expected))
+            {
+                Assert.Empty(indexed);
+                continue;
+            }
+
+            var incoming = Assert.Single(indexed);
+            Assert.Equal(expected.Source, incoming.SourceIdentity.Version);
+            Assert.Equal(expected.Reason, incoming.Reason);
+        }
+    }
+
+    [Fact]
     public void CombinedLoaderRejectsInvalidReleasePinsAndQuarantinesUnsafeOrUnservableRouteFacts()
     {
         var validPin = Pin('5');

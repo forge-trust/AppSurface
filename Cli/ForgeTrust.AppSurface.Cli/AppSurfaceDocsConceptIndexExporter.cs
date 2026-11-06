@@ -146,7 +146,7 @@ internal static class AppSurfaceDocsConceptIndexExporter
             byte[] htmlBytes;
             try
             {
-                htmlBytes = await ReadBoundedHtmlAsync(htmlPath, maximumArtifactBytes, cancellationToken);
+                htmlBytes = await ReadBoundedHtmlAsync(htmlPath, BuildDiagnosticRoute(route.RoutePath), maximumArtifactBytes, cancellationToken);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -220,16 +220,16 @@ internal static class AppSurfaceDocsConceptIndexExporter
     }
 
     /// <summary>Rejects a complete source HTML artifact above the existing coupled budget, including growth during reading.</summary>
-    private static async Task<byte[]> ReadBoundedHtmlAsync(string path, int maximumBytes, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadBoundedHtmlAsync(string path, string diagnosticRoute, int maximumBytes, CancellationToken cancellationToken)
     {
         await using var stream = File.OpenRead(path);
-        if (stream.Length > maximumBytes) throw CreateFailure("A canonical HTML artifact exceeds the configured rewrite input budget.", "/");
+        if (stream.Length > maximumBytes) throw CreateFailure("A canonical HTML artifact exceeds the configured rewrite input budget.", diagnosticRoute);
         using var buffer = new MemoryStream();
         var chunk = new byte[8192];
         int count;
         while ((count = await stream.ReadAsync(chunk, cancellationToken)) != 0)
         {
-            if (buffer.Length + count > maximumBytes) throw CreateFailure("A canonical HTML artifact grew beyond the configured rewrite input budget.", "/");
+            if (buffer.Length + count > maximumBytes) throw CreateFailure("A canonical HTML artifact grew beyond the configured rewrite input budget.", diagnosticRoute);
             buffer.Write(chunk, 0, count);
         }
         return buffer.ToArray();

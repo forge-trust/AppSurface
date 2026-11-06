@@ -48,9 +48,9 @@ public sealed class AppSurfaceDocsConceptFileReaderTests : IDisposable
     [Fact]
     public void Read_RejectsSymlinksEvenWhenBytesAndPinMatch()
     {
-        var target = Path.Combine(_root, "target.json");
+        var target = Path.Join(_root, "target.json");
         File.WriteAllText(target, "data");
-        var link = Path.Combine(_root, "link.json");
+        var link = Path.Join(_root, "link.json");
         File.CreateSymbolicLink(link, target);
         var pin = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(target)));
         Assert.Throws<InvalidDataException>(() => AppSurfaceDocsConceptFileReader.Read(_root, "link.json", pin, 100));

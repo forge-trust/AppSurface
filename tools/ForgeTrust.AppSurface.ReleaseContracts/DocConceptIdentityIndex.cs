@@ -18,6 +18,11 @@ internal sealed class DocConceptIdentityIndex
     private readonly IReadOnlyDictionary<ReleaseKey, DocConceptReleaseSnapshot> _releaseByKey;
     private readonly IReadOnlyDictionary<PageKey, DocConceptCanonicalPage> _pageByKey;
     private readonly IReadOnlyDictionary<ConceptMembershipKey, MembershipFact> _membershipByConcept;
+    private readonly IReadOnlySet<ReleaseLocaleKey> _serveableLocales;
+    private readonly IReadOnlySet<ReleaseKey> _releasesWithServeableUnknownLocale;
+    private readonly IReadOnlyDictionary<IncomingRouteKey, IReadOnlyList<int>> _incomingCandidatesByRoute;
+    private readonly IReadOnlyDictionary<IncomingConceptKey, IReadOnlyList<int>> _incomingCandidatesByConcept;
+    private readonly IReadOnlyList<DocConceptPageIdentity> _incomingCandidatePages;
     private readonly IReadOnlyList<DocConceptReleaseSnapshot> _releases;
     private readonly IReadOnlyList<DocConceptReleaseSnapshot> _publicAvailableReleases;
     private readonly HashSet<string> _quarantinedConceptIds;
@@ -40,6 +45,52 @@ internal sealed class DocConceptIdentityIndex
         _quarantinedConceptIds = new HashSet<string>(quarantinedConceptIds, StringComparer.Ordinal);
         _quarantinedPages = new HashSet<PageKey>(quarantinedPages, PageKeyComparer.Instance);
         _hasUntrustedMapData = hasUntrustedMapData;
+
+        var serveableLocales = new HashSet<ReleaseLocaleKey>();
+        var releasesWithServeableUnknownLocale = new HashSet<ReleaseKey>(ReleaseKeyComparer.Instance);
+        var incomingCandidatesByRoute = new Dictionary<IncomingRouteKey, List<int>>(IncomingRouteKeyComparer.Instance);
+        var incomingCandidatesByConcept = new Dictionary<IncomingConceptKey, List<int>>();
+        var incomingCandidatePages = new List<DocConceptPageIdentity>();
+        foreach (var release in _publicAvailableReleases)
+        {
+            var releaseKey = new ReleaseKey(release.Version, release.ReleaseManifestSha256.ToLowerInvariant());
+            foreach (var page in release.Pages)
+            {
+                if (!page.IsServeable)
+                {
+                    continue;
+                }
+
+                var identity = new DocConceptPageIdentity(
+                    release.Version,
+                    release.ReleaseManifestSha256,
+                    page.RoutePath,
+                    page.Locale,
+                    page.LocaleIsKnown);
+                var pageOrdinal = incomingCandidatePages.Count;
+                incomingCandidatePages.Add(identity);
+                if (!page.LocaleIsKnown)
+                {
+                    releasesWithServeableUnknownLocale.Add(releaseKey);
+                    continue;
+                }
+
+                var localeKey = new ReleaseLocaleKey(releaseKey, page.Locale);
+                serveableLocales.Add(localeKey);
+
+                AddIncomingCandidate(incomingCandidatesByRoute, new IncomingRouteKey(page.Locale, page.RoutePath), pageOrdinal);
+                if (page.ConceptId is { } conceptId)
+                {
+                    AddIncomingCandidate(incomingCandidatesByConcept, new IncomingConceptKey(page.Locale, conceptId), pageOrdinal);
+                }
+            }
+        }
+
+        _serveableLocales = serveableLocales;
+        _releasesWithServeableUnknownLocale = releasesWithServeableUnknownLocale;
+        _incomingCandidatesByRoute = ToReadOnlyCandidateBuckets(incomingCandidatesByRoute);
+        _incomingCandidatesByConcept = ToReadOnlyCandidateBuckets(incomingCandidatesByConcept);
+        _incomingCandidatePages = Array.AsReadOnly(incomingCandidatePages.ToArray());
     }
 
     /// <summary>Gets all exact releases in supplied catalog order, including hidden and unavailable descriptors.</summary>
@@ -440,10 +491,8 @@ internal sealed class DocConceptIdentityIndex
             return CreateRecovery(DocConceptResolutionReason.Ambiguous, sourceIdentity, sourcePage, targetRelease, null, allowLocalActions: true);
         }
 
-        var selectedLocalePages = targetRelease.Pages
-            .Where(page => page.IsServeable && page.LocaleIsKnown && LocaleEquals(page.Locale, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown))
-            .ToArray();
-        if (selectedLocalePages.Length == 0)
+        var targetReleaseKey = new ReleaseKey(targetRelease.Version, targetRelease.ReleaseManifestSha256.ToLowerInvariant());
+        if (!HasSelectedLocalePages(targetRelease, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown))
         {
             if (_hasUntrustedMapData)
             {
@@ -462,7 +511,7 @@ internal sealed class DocConceptIdentityIndex
                 return CreateResolution(DocConceptResolutionReason.KnownAbsent, sourceIdentity, sourcePage, targetRelease, null, null, false, null);
             }
 
-            var targetHasUnknownLocale = targetRelease.Pages.Any(page => page.IsServeable && !page.LocaleIsKnown);
+            var targetHasUnknownLocale = _releasesWithServeableUnknownLocale.Contains(targetReleaseKey);
             var reason = targetHasUnknownLocale && targetRelease.IdentityState != DocConceptIdentityState.ValidComplete
                 ? DocConceptResolutionReason.Unknown
                 : DocConceptResolutionReason.NoSelectedLocaleDocs;
@@ -504,7 +553,10 @@ internal sealed class DocConceptIdentityIndex
             }
         }
 
-        var targetRoute = selectedLocalePages.FirstOrDefault(page => string.Equals(page.RoutePath, sourcePage.RoutePath, StringComparison.OrdinalIgnoreCase));
+        var targetRoute = TryGetPageByRoute(targetRelease, sourceIdentity.Locale, sourcePage.RoutePath, out var indexedRoute)
+            && indexedRoute.IsServeable
+                ? indexedRoute
+                : null;
         if (targetRoute is not null)
         {
             var targetRouteKey = PageKey.From(targetRelease, targetRoute.Locale, targetRoute.LocaleIsKnown, targetRoute.RoutePath);
@@ -543,10 +595,11 @@ internal sealed class DocConceptIdentityIndex
     /// <summary>
     /// Lazily enumerates destination-bound source contexts. Only validated source pages whose exact resolver result lands
     /// on the destination as a counterpart are returned; unknown, stale, unrelated, and browsing-fallback outcomes are
-    /// omitted. The caller binds the returned rows to this exact destination page in its inert page-local projection.
+    /// omitted. This exhaustive overload preserves the supplied source sequence and is useful when callers already have
+    /// a bounded candidate list. The caller binds returned rows to this exact destination page in its inert projection.
     /// </summary>
     /// <param name="destinationIdentity">Exact canonical destination page for the current served document.</param>
-    /// <param name="sourceIdentities">Candidate verified public source pages from the immutable catalog snapshot.</param>
+    /// <param name="sourceIdentities">Verified public source pages from the immutable catalog snapshot.</param>
     /// <param name="instanceId">Stable public Docs instance identifier included in each source key.</param>
     /// <returns>Lazy incoming source contexts; no lookup result cache is retained.</returns>
     public IEnumerable<DocConceptIncomingSource> GetIncoming(
@@ -590,6 +643,47 @@ internal sealed class DocConceptIdentityIndex
                 sourceIdentity,
                 sourcePage,
                 resolution.Reason);
+        }
+    }
+
+    /// <summary>
+    /// Enumerates candidate sources using canonical route and verified concept/locale facts, then applies the exhaustive
+    /// incoming resolver to each candidate. Candidate order follows the public catalog order.
+    /// </summary>
+    /// <param name="destinationIdentity">Exact canonical destination page for the current served document.</param>
+    /// <param name="instanceId">Stable public Docs instance identifier included in each source key.</param>
+    /// <returns>Only candidates that the ordinary resolver verifies as landing on this exact destination.</returns>
+    public IEnumerable<DocConceptIncomingSource> GetIncomingIndexed(
+        DocConceptPageIdentity destinationIdentity,
+        string instanceId)
+    {
+        ArgumentNullException.ThrowIfNull(destinationIdentity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
+
+        var destinationPage = GetPage(destinationIdentity);
+        if (destinationPage is null || !destinationIdentity.LocaleIsKnown)
+        {
+            yield break;
+        }
+
+        var candidateOrdinals = new SortedSet<int>();
+        if (_incomingCandidatesByRoute.TryGetValue(
+                new IncomingRouteKey(destinationIdentity.Locale, destinationPage.RoutePath), out var routeCandidates))
+        {
+            candidateOrdinals.UnionWith(routeCandidates);
+        }
+
+        if (destinationPage.ConceptId is { } conceptId
+            && _incomingCandidatesByConcept.TryGetValue(
+                new IncomingConceptKey(destinationIdentity.Locale, conceptId), out var conceptCandidates))
+        {
+            candidateOrdinals.UnionWith(conceptCandidates);
+        }
+
+        var candidates = candidateOrdinals.Select(ordinal => _incomingCandidatePages[ordinal]);
+        foreach (var incoming in GetIncoming(destinationIdentity, candidates, instanceId))
+        {
+            yield return incoming;
         }
     }
 
@@ -655,36 +749,41 @@ internal sealed class DocConceptIdentityIndex
         DocConceptCanonicalPage? section = null;
         if (targetMembership?.FallbackSectionRoute is { } authoredRoute)
         {
-            section = targetRelease.Pages.FirstOrDefault(page =>
-                page.IsServeable
-                && page.LocaleIsKnown
-                && LocaleEquals(page.Locale, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown)
-                && !IsPageQuarantined(targetRelease, page)
-                && string.Equals(page.RoutePath, authoredRoute, StringComparison.OrdinalIgnoreCase));
+            if (TryGetPageByRoute(targetRelease, sourceIdentity.Locale, authoredRoute, out var authoredPage)
+                && authoredPage.IsServeable
+                && !IsPageQuarantined(targetRelease, authoredPage))
+            {
+                section = authoredPage;
+            }
         }
 
         if (section is null && sourcePage is not null)
         {
-            section = targetRelease.Pages
-                .Where(page => page.IsServeable
+            var ancestorEnd = sourcePage.RoutePath.LastIndexOf('/');
+            while (ancestorEnd > 0)
+            {
+                var ancestor = sourcePage.RoutePath[..ancestorEnd];
+                if (TryGetPageByRoute(targetRelease, sourceIdentity.Locale, ancestor, out var page)
+                    && page.IsServeable
                     && page.Landing
-                    && page.LocaleIsKnown
-                    && LocaleEquals(page.Locale, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown)
-                    && !IsPageQuarantined(targetRelease, page)
-                    && IsStrictNonRootAncestor(page.RoutePath, sourcePage.RoutePath))
-                .OrderByDescending(page => SegmentCount(page.RoutePath))
-                .FirstOrDefault();
+                    && !IsPageQuarantined(targetRelease, page))
+                {
+                    section = page;
+                    break;
+                }
+
+                ancestorEnd = ancestor.LastIndexOf('/');
+            }
         }
 
         var hasLocalDocs = HasSelectedLocalePages(targetRelease, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown);
         var searchAvailable = hasLocalDocs && targetRelease.HasSearchIndex;
         var homePage = hasLocalDocs && targetRelease.HomeRoutePath is { } candidateHome
-            ? targetRelease.Pages.FirstOrDefault(page => page.IsServeable
-                && page.LocaleIsKnown
-                && LocaleEquals(page.Locale, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown)
-                && !IsPageQuarantined(targetRelease, page)
-                && string.Equals(page.RoutePath, candidateHome, StringComparison.OrdinalIgnoreCase))
-            : null;
+            && TryGetPageByRoute(targetRelease, sourceIdentity.Locale, candidateHome, out var indexedHome)
+            && indexedHome.IsServeable
+            && !IsPageQuarantined(targetRelease, indexedHome)
+                ? indexedHome
+                : null;
         return CreateResolution(reason, sourceIdentity, sourcePage, targetRelease, null, section, searchAvailable, homePage?.RoutePath);
     }
 
@@ -719,8 +818,17 @@ internal sealed class DocConceptIdentityIndex
     }
 
     /// <summary>Checks whether a release contains at least one canonical page in the selected known locale.</summary>
-    private static bool HasSelectedLocalePages(DocConceptReleaseSnapshot release, string? locale, bool localeIsKnown) =>
-        localeIsKnown && release.Pages.Any(page => page.IsServeable && page.LocaleIsKnown && LocaleEquals(page.Locale, locale, true));
+    private bool HasSelectedLocalePages(DocConceptReleaseSnapshot release, string? locale, bool localeIsKnown) =>
+        localeIsKnown && _serveableLocales.Contains(new ReleaseLocaleKey(
+            new ReleaseKey(release.Version, release.ReleaseManifestSha256.ToLowerInvariant()), locale));
+
+    private bool TryGetPageByRoute(
+        DocConceptReleaseSnapshot release,
+        string? locale,
+        string routePath,
+        out DocConceptCanonicalPage page) =>
+        _pageByKey.TryGetValue(new PageKey(
+            new ReleaseKey(release.Version, release.ReleaseManifestSha256.ToLowerInvariant()), locale, true, routePath), out page!);
 
     /// <summary>Returns whether a page belongs to a quarantined concept or a quarantined canonical conflict.</summary>
     private bool IsPageQuarantined(DocConceptReleaseSnapshot release, DocConceptCanonicalPage page) =>
@@ -738,21 +846,25 @@ internal sealed class DocConceptIdentityIndex
         && LocaleEquals(left.Locale, right.Locale, true)
         && string.Equals(left.RoutePath, right.RoutePath, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Returns whether a candidate route is a strict path-segment ancestor, excluding the docs root.</summary>
-    private static bool IsStrictNonRootAncestor(string ancestor, string route)
+    private static void AddIncomingCandidate<TKey>(IDictionary<TKey, List<int>> buckets, TKey key, int ordinal)
+        where TKey : notnull
     {
-        if (ancestor.Length == 0 || string.Equals(ancestor, route, StringComparison.OrdinalIgnoreCase))
+        if (!buckets.TryGetValue(key, out var bucket))
         {
-            return false;
+            bucket = [];
+            buckets.Add(key, bucket);
         }
 
-        return route.Length > ancestor.Length
-            && route.StartsWith(ancestor, StringComparison.OrdinalIgnoreCase)
-            && route[ancestor.Length] == '/';
+        bucket.Add(ordinal);
     }
 
-    /// <summary>Counts route segments for the deepest verified section-landing selection.</summary>
-    private static int SegmentCount(string routePath) => routePath.Length == 0 ? 0 : routePath.Count(character => character == '/') + 1;
+    private static IReadOnlyDictionary<TKey, IReadOnlyList<int>> ToReadOnlyCandidateBuckets<TKey>(
+        Dictionary<TKey, List<int>> buckets)
+        where TKey : notnull =>
+        new ReadOnlyDictionary<TKey, IReadOnlyList<int>>(buckets.ToDictionary(
+            entry => entry.Key,
+            entry => (IReadOnlyList<int>)Array.AsReadOnly(entry.Value.ToArray()),
+            buckets.Comparer));
 
     /// <summary>Validates canonical facts before the loader uses them as a route-authority boundary.</summary>
     private static bool TryValidateCanonicalRouteFacts(
@@ -1009,6 +1121,15 @@ internal sealed class DocConceptIdentityIndex
     /// <summary>Normalizes exact digest spelling into a release key without changing the version identifier.</summary>
     private readonly record struct ReleaseKey(string Version, string ManifestSha256);
 
+    /// <summary>Identifies one release locale for constant-time selected-locale fact checks.</summary>
+    private readonly record struct ReleaseLocaleKey(ReleaseKey Release, string? Locale);
+
+    /// <summary>Identifies candidate pages whose route could continue into a destination under route semantics.</summary>
+    private readonly record struct IncomingRouteKey(string? Locale, string RoutePath);
+
+    /// <summary>Identifies candidate pages whose verified concept membership could resolve to a destination.</summary>
+    private readonly record struct IncomingConceptKey(string? Locale, string ConceptId);
+
     /// <summary>Identifies one route/locale membership in an exact release.</summary>
     private readonly record struct PageKey(ReleaseKey Release, string? Locale, bool LocaleIsKnown, string RoutePath)
     {
@@ -1125,6 +1246,18 @@ internal sealed class DocConceptIdentityIndex
         public bool Equals(ReleaseKey left, ReleaseKey right) => string.Equals(left.Version, right.Version, StringComparison.Ordinal)
             && string.Equals(left.ManifestSha256, right.ManifestSha256, StringComparison.OrdinalIgnoreCase);
         public int GetHashCode(ReleaseKey value) => HashCode.Combine(StringComparer.Ordinal.GetHashCode(value.Version), StringComparer.OrdinalIgnoreCase.GetHashCode(value.ManifestSha256));
+    }
+
+    /// <summary>Compares route candidate keys using exact locale and case-insensitive logical routes.</summary>
+    private sealed class IncomingRouteKeyComparer : IEqualityComparer<IncomingRouteKey>
+    {
+        public static IncomingRouteKeyComparer Instance { get; } = new();
+        public bool Equals(IncomingRouteKey left, IncomingRouteKey right) =>
+            string.Equals(left.Locale, right.Locale, StringComparison.Ordinal)
+            && string.Equals(left.RoutePath, right.RoutePath, StringComparison.OrdinalIgnoreCase);
+        public int GetHashCode(IncomingRouteKey value) => HashCode.Combine(
+            value.Locale is null ? 0 : StringComparer.Ordinal.GetHashCode(value.Locale),
+            StringComparer.OrdinalIgnoreCase.GetHashCode(value.RoutePath));
     }
 
     /// <summary>Comparer that applies exact locale identity and case-insensitive canonical route identity.</summary>

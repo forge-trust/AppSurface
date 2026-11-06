@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text;
 using AngleSharp;
 using AngleSharp.Dom;
@@ -22,6 +23,7 @@ internal sealed class AppSurfaceDocsConceptSwitching
     private readonly DocsUrlBuilder _urls;
     private readonly string _instance;
     private readonly int _limit;
+    private readonly IReadOnlyDictionary<string, (DocConceptReleaseSnapshot Release, DocConceptCanonicalPage Page)> _sourceByKey;
 
     internal AppSurfaceDocsConceptSwitching(DocConceptIdentityIndex index,
         IReadOnlyList<AppSurfaceDocsResolvedVersion> versions, DocsUrlBuilder urls, string instance, int limit)
@@ -31,6 +33,7 @@ internal sealed class AppSurfaceDocsConceptSwitching
         _urls = urls;
         _instance = instance;
         _limit = limit;
+        _sourceByKey = CreateSourceLookup(index, instance);
     }
 
     /// <summary>Serves package assets and a verified source's bounded no-script choice or 503 recovery page.</summary>
@@ -159,7 +162,7 @@ internal sealed class AppSurfaceDocsConceptSwitching
             choices.Add(new DocConceptChoiceLink(version.Version, version.Label, href, resolution.TargetPage?.Anchors));
         }
         var destination = Destination(release, page);
-        var incoming = _index.GetIncoming(identity, _index.EnumeratePublicPages().Select(item => item.Identity), _instance).Select(row =>
+        var incoming = _index.GetIncomingIndexed(identity, _instance).Select(row =>
         {
             var sourceRelease = _index.PublicAvailableReleases.Single(item => item.Version == row.SourceIdentity.Version
                 && item.ReleaseManifestSha256 == row.SourceIdentity.ReleaseManifestSha256);
@@ -203,10 +206,29 @@ internal sealed class AppSurfaceDocsConceptSwitching
     private (DocConceptReleaseSnapshot Release, DocConceptCanonicalPage Page)? FindSource(string key)
     {
         if (key.Length != 64 || !key.All(character => char.IsAsciiDigit(character) || character is >= 'a' and <= 'f')) return null;
-        foreach (var release in _index.PublicAvailableReleases.Where(release => release.IsPublic && release.IsAvailable))
-            foreach (var page in release.Pages.Where(page => page.IsServeable))
-                if (string.Equals(DocConceptIdentityIndex.CreateSourceKey(_instance, Identity(release, page)), key, StringComparison.Ordinal)) return (release, page);
-        return null;
+        return _sourceByKey.TryGetValue(key, out var source) ? source : null;
+    }
+
+    private static IReadOnlyDictionary<string, (DocConceptReleaseSnapshot Release, DocConceptCanonicalPage Page)> CreateSourceLookup(
+        DocConceptIdentityIndex index,
+        string instance)
+    {
+        var sources = new Dictionary<string, (DocConceptReleaseSnapshot Release, DocConceptCanonicalPage Page)>(StringComparer.Ordinal);
+        foreach (var release in index.PublicAvailableReleases)
+        {
+            foreach (var page in release.Pages)
+            {
+                if (!page.IsServeable)
+                {
+                    continue;
+                }
+
+                var identity = Identity(release, page);
+                sources.TryAdd(DocConceptIdentityIndex.CreateSourceKey(instance, identity), (release, page));
+            }
+        }
+
+        return new ReadOnlyDictionary<string, (DocConceptReleaseSnapshot Release, DocConceptCanonicalPage Page)>(sources);
     }
 
     private bool SourceIsReadable(DocConceptReleaseSnapshot release, DocConceptCanonicalPage page)
