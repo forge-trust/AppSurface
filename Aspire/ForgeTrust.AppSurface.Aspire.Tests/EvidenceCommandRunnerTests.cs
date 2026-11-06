@@ -36,8 +36,14 @@ public sealed class EvidenceCommandRunnerTests
         {
             cancellation.Cancel();
             try { await running; }
-            catch (OperationCanceledException) { }
-            catch (EvidenceCommandException) { }
+            catch (OperationCanceledException)
+            {
+                // The test cancels the fixture before draining its task here.
+            }
+            catch (EvidenceCommandException)
+            {
+                // Teardown observes runner failures without masking an earlier assertion.
+            }
             Directory.Delete(parent, recursive: true);
         }
     }
