@@ -3405,6 +3405,86 @@ public sealed class CoverageGateTests
     }
 
     [Theory]
+    [InlineData("0000..e69d", true)]
+    [InlineData("0000..e69de2", true)]
+    [InlineData("0000000..e69de29", true)]
+    [InlineData("e69de29..0000000", true)]
+    [InlineData("0000..473a", true)]
+    [InlineData("0000..473a0", true)]
+    [InlineData("473a0f4..0000000", true)]
+    [InlineData("000..e69d", false)]
+    [InlineData("000..473a", false)]
+    [InlineData("0000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c53910", false)]
+    [InlineData("0000000..473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a3037218130", false)]
+    [InlineData("0000000000000000000000000000000000000000000..e69de29", false)]
+    [InlineData("00000000000000000000000000000000000000000000000000000000000000000..473a0f4", false)]
+    [InlineData("0000000..aaaaaaaa", false)]
+    [InlineData("0000000..1111111", false)]
+    [InlineData("1111111..0000000", false)]
+    public void ParseChangedLinesDetailed_RecognizesOnlyValidEmptyBlobIndexAbbreviations(
+        string indexRange,
+        bool isEmptyBlobIndex)
+    {
+        var result = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
+            diff --git a/src/Empty.cs b/src/Empty.cs
+            new file mode 100644
+            index {indexRange}
+            """);
+
+        Assert.Equal(
+            isEmptyBlobIndex ? PatchDiffParseStatus.ValidNoAddedLines : PatchDiffParseStatus.Malformed,
+            result.Status);
+        Assert.Empty(result.ChangedLines);
+    }
+
+    [Fact]
+    public void ParseChangedLinesDetailed_RecognizesFullSha1AndSha256EmptyBlobIds()
+    {
+        const string emptyBlobSha1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+        const string emptyBlobSha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
+
+        var sha1 = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
+            diff --git a/src/Empty.cs b/src/Empty.cs
+            new file mode 100644
+            index {new string('0', emptyBlobSha1.Length)}..{emptyBlobSha1}
+            """);
+        var sha256 = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
+            diff --git a/src/Empty.cs b/src/Empty.cs
+            new file mode 100644
+            index {new string('0', emptyBlobSha256.Length)}..{emptyBlobSha256}
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.ValidNoAddedLines, sha1.Status);
+        Assert.Empty(sha1.ChangedLines);
+        Assert.Equal(PatchDiffParseStatus.ValidNoAddedLines, sha256.Status);
+        Assert.Empty(sha256.ChangedLines);
+    }
+
+    [Fact]
+    public void ParseChangedLinesDetailed_ContinuesAfterSha256EmptyFileEntriesToCoveredHunk()
+    {
+        var result = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/EmptyAdded.cs b/src/EmptyAdded.cs
+            new file mode 100644
+            index 0000000..473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813
+            diff --git a/src/EmptyDeleted.cs b/src/EmptyDeleted.cs
+            deleted file mode 100644
+            index 473a0f4..0000000
+            diff --git a/src/Changed.cs b/src/Changed.cs
+            index 1111111..2222222 100644
+            --- a/src/Changed.cs
+            +++ b/src/Changed.cs
+            @@ -1,1 +1,2 @@
+             existing
+            +covered
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.ValidWithAddedLines, result.Status);
+        Assert.Single(result.ChangedLines);
+        Assert.Contains(2, result.ChangedLines["src/Changed.cs"]);
+    }
+
+    [Theory]
     [InlineData("/etc/passwd")]
     [InlineData("C:\\\\outside\\\\Foo.cs")]
     [InlineData("./")]

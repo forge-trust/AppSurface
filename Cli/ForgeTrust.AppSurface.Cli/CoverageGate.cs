@@ -1741,7 +1741,8 @@ internal static class PatchCoverageEvaluator
 
     private static bool IsEmptyFileIndexLine(string line)
     {
-        const string emptyBlobSha = "e69de29";
+        const string emptyBlobSha1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+        const string emptyBlobSha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
         var text = line["index ".Length..].Trim();
         var rangeEnd = text.IndexOf(' ', StringComparison.Ordinal);
         var range = rangeEnd < 0 ? text : text[..rangeEnd];
@@ -1753,12 +1754,25 @@ internal static class PatchCoverageEvaluator
 
         var before = range[..separator];
         var after = range[(separator + 2)..];
-        return (IsAllZeroAbbreviatedSha(before) && after.StartsWith(emptyBlobSha, StringComparison.Ordinal))
-            || (before.StartsWith(emptyBlobSha, StringComparison.Ordinal) && IsAllZeroAbbreviatedSha(after));
+        return IsEmptyFileObjectIdPair(before, after, emptyBlobSha1)
+            || IsEmptyFileObjectIdPair(after, before, emptyBlobSha1)
+            || IsEmptyFileObjectIdPair(before, after, emptyBlobSha256)
+            || IsEmptyFileObjectIdPair(after, before, emptyBlobSha256);
+
+        static bool IsEmptyFileObjectIdPair(string zeroId, string emptyBlobId, string fullEmptyBlobId)
+            => IsAllZeroAbbreviatedSha(zeroId, fullEmptyBlobId.Length)
+                && IsValidObjectIdAbbreviation(emptyBlobId, fullEmptyBlobId);
+
+        static bool IsValidObjectIdAbbreviation(string value, string objectId)
+            => value.Length >= 4
+                && value.Length <= objectId.Length
+                && objectId.StartsWith(value, StringComparison.Ordinal);
     }
 
-    private static bool IsAllZeroAbbreviatedSha(string value)
-        => value.Length >= 7 && value.All(ch => ch == '0');
+    private static bool IsAllZeroAbbreviatedSha(string value, int maximumLength)
+        => value.Length is >= 4
+            && value.Length <= maximumLength
+            && value.All(ch => ch == '0');
 
     private static string GetDiffSourceDisplay(PatchDiffSource source) => source.Kind switch
     {
