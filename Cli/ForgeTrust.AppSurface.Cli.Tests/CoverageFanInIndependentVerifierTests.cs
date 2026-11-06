@@ -684,6 +684,48 @@ public sealed class CoverageFanInIndependentVerifierTests
     }
 
     [Fact]
+    public void VerifyGates_AcceptsGitTabDelimitedUnquotedPathWithSpaces()
+    {
+        const string filename = "src/Widget File.cs";
+        var coverage = AggregateCoverage();
+        coverage.Descendants("class").Single().SetAttributeValue("filename", filename);
+        var diff = """
+            diff --git a/src/Widget File.cs b/src/Widget File.cs
+            --- a/src/Widget File.cs{TAB}
+            +++ b/src/Widget File.cs{TAB}
+            @@ -1 +1 @@
+            -old
+            +new
+            """.Replace("{TAB}", "\t", StringComparison.Ordinal);
+        using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
+        using var policy = PatchPolicy();
+
+        CoverageFanInIndependentVerifier.VerifyGates(primaryGate.RootElement, composedGate.RootElement,
+            policy.RootElement, coverage, coverage, diff);
+    }
+
+    [Fact]
+    public void VerifyGates_RejectsNonTabSuffixAfterQuotedPathHeader()
+    {
+        var coverage = AggregateCoverage();
+        var diff = """
+            diff --git "a/src/Widget.cs" "b/src/Widget.cs"
+            --- "a/src/Widget.cs"
+            +++ "b/src/Widget.cs" suffix
+            @@ -1 +1 @@
+            -old
+            +new
+            """;
+        using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
+        using var policy = PatchPolicy();
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, composedGate.RootElement, policy.RootElement, coverage, coverage, diff));
+    }
+
+    [Fact]
     public void VerifyGates_AcceptsAddedSourceLineBeginningWithFileHeaderPrefix()
     {
         var coverage = AggregateCoverage();

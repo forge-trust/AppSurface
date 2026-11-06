@@ -468,6 +468,53 @@ public sealed class EvidencePlannerTests
         Assert.Throws<EvidencePlanningException>(() => planner.ResolvePatch(policy, ReadOnlyMemory<byte>.Empty));
     }
 
+    [Theory]
+    [InlineData("\"b/src/Caf\\303\\251.cs\"", "src/Café.cs")]
+    [InlineData("b/src/My File.cs\t", "src/My File.cs")]
+    [InlineData("\"b/src/Caf\\303\\251.cs\"\t", "src/Café.cs")]
+    public void ResolvePatch_UsesDecodedGitPathForPolicySelection(string header, string expectedPath)
+    {
+        var policy = CreatePolicy();
+        var patch = System.Text.Encoding.UTF8.GetBytes($"diff --git a/src/Old.cs {header}\n--- a/src/Old.cs\n+++ {header}\n@@ -1 +1 @@\n-a\n+b\n");
+        var planner = new EvidencePlanner();
+
+        var plan = planner.ResolvePatch(policy, patch);
+
+        Assert.Equal(planner.Resolve(policy, [new NormalizedDiffPath(expectedPath)]).Profile.Id, plan.Profile.Id);
+        Assert.Equal(expectedPath, Assert.Single(plan.ChangedPaths).Path);
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(patch)), plan.PatchSha256);
+    }
+
+    [Theory]
+    [InlineData("\"b/src/NoClosingQuote.cs")]
+    [InlineData("\"b/src/Invalid\\q.cs\"")]
+    [InlineData("\"b/src/Invalid\\400.cs\"")]
+    [InlineData("\"b/src/Invalid\\377.cs\"")]
+    [InlineData("\"b/src/File.cs\"junk")]
+    public void ResolvePatch_RejectsMalformedGitPath(string header)
+    {
+        var patch = System.Text.Encoding.UTF8.GetBytes($"--- a/src/File.cs\n+++ {header}\n");
+
+        AssertPlanningCode(() => new EvidencePlanner().ResolvePatch(CreatePolicy(), patch), "ASEVD133");
+    }
+
+    [Fact]
+    public void ResolvePatch_KeepsLiteralDirectoryPrefixesInRenameMetadata()
+    {
+        var patch = """
+            diff --git a/a/old.cs b/b/new.cs
+            similarity index 100%
+            rename from a/old.cs
+            rename to b/new.cs
+            """u8.ToArray();
+
+        var plan = new EvidencePlanner().ResolvePatch(CreatePolicy(), patch);
+
+        var changed = Assert.Single(plan.ChangedPaths);
+        Assert.Equal("b/new.cs", changed.Path);
+        Assert.Equal("a/old.cs", changed.PreviousPath);
+    }
+
     [Fact]
     public async Task CliWorkflow_ShouldRejectAnOversizedDiffWhileStreamingIt()
     {

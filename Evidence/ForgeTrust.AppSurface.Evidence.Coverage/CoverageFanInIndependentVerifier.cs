@@ -352,7 +352,7 @@ internal static class CoverageFanInIndependentVerifier
             }
             if (!hunk && line.StartsWith("+++ ", StringComparison.Ordinal))
             {
-                var name = DecodeGitPath(line[4..]);
+                var name = DecodeGitPathHeader(line[4..]);
                 file = name == "/dev/null" ? null : NormalizeRelative(name.StartsWith("b/", StringComparison.Ordinal) ? name[2..] : name);
                 continue;
             }
@@ -404,6 +404,35 @@ internal static class CoverageFanInIndependentVerifier
 
     private static int RangeCount(Group group) => group.Success && group.Value.Length > 0
         ? int.Parse(group.Value, CultureInfo.InvariantCulture) : 1;
+
+    private static string DecodeGitPathHeader(string value)
+    {
+        if (!value.StartsWith('"'))
+        {
+            var delimiter = value.IndexOf('\t', StringComparison.Ordinal);
+            return DecodeGitPath(delimiter < 0 ? value : value[..delimiter]);
+        }
+
+        var closingQuote = -1;
+        for (var i = 1; i < value.Length; i++)
+        {
+            if (value[i] == '\\')
+            {
+                i++;
+                continue;
+            }
+
+            if (value[i] == '"')
+            {
+                closingQuote = i;
+                break;
+            }
+        }
+
+        Require(closingQuote > 0, GateError);
+        Require(closingQuote == value.Length - 1 || value[closingQuote + 1] == '\t', GateError);
+        return DecodeGitPath(value[..(closingQuote + 1)]);
+    }
 
     private static string DecodeGitPath(string value)
     {

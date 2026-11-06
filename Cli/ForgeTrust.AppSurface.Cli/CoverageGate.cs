@@ -1505,7 +1505,12 @@ internal static class PatchCoverageEvaluator
                 state.CurrentDiffStarted = true;
                 sawFileMarker = true;
                 state.CurrentDiffHasNewFileMarker = true;
-                state.CurrentFile = NormalizeDiffPath(line["+++ ".Length..]);
+                if (!TryNormalizeDiffPath(line["+++ ".Length..], out var currentFile))
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                state.CurrentFile = currentFile;
                 state.CurrentNewLine = null;
                 continue;
             }
@@ -1876,12 +1881,17 @@ internal static class PatchCoverageEvaluator
         }
     }
 
-    private static string? NormalizeDiffPath(string value)
+    private static bool TryNormalizeDiffPath(string value, out string? normalizedPath)
     {
-        var path = value.Trim();
+        normalizedPath = null;
+        if (!GitPatchPathHeader.TryDecode(value, out var path))
+        {
+            return false;
+        }
+
         if (string.Equals(path, "/dev/null", StringComparison.Ordinal))
         {
-            return null;
+            return true;
         }
 
         if (path.StartsWith("b/", StringComparison.Ordinal) || path.StartsWith("a/", StringComparison.Ordinal))
@@ -1889,7 +1899,8 @@ internal static class PatchCoverageEvaluator
             path = path[2..];
         }
 
-        return NormalizeRelativePath(path);
+        normalizedPath = NormalizeRelativePath(path);
+        return normalizedPath is not null;
     }
 
     private static string? NormalizeCoveragePath(string? value, string repositoryRoot)

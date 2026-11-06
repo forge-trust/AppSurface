@@ -487,13 +487,13 @@ public static class EvidenceUnifiedDiffReader
 
             if (line.StartsWith("rename from ", StringComparison.Ordinal))
             {
-                renamedFrom = ReadDiffPath(line[12..]);
+                renamedFrom = ReadDiffPath(line[12..], stripGitPrefix: false);
                 continue;
             }
 
             if (line.StartsWith("rename to ", StringComparison.Ordinal))
             {
-                var renamedTo = ReadDiffPath(line[10..]);
+                var renamedTo = ReadDiffPath(line[10..], stripGitPrefix: false);
                 if (renamedFrom is not null && renamedTo is not null)
                 {
                     paths.Add(new NormalizedDiffPath(renamedTo, "renamed", renamedFrom));
@@ -506,7 +506,7 @@ public static class EvidenceUnifiedDiffReader
 
             if (!suppressHeaderPair && line.StartsWith("--- ", StringComparison.Ordinal))
             {
-                oldPath = ReadDiffPath(line[4..]);
+                oldPath = ReadDiffPath(line[4..], stripGitPrefix: true);
                 continue;
             }
 
@@ -515,7 +515,7 @@ public static class EvidenceUnifiedDiffReader
                 continue;
             }
 
-            var newPath = ReadDiffPath(line[4..]);
+            var newPath = ReadDiffPath(line[4..], stripGitPrefix: true);
             if (oldPath is null && newPath is null)
             {
                 continue;
@@ -541,15 +541,17 @@ public static class EvidenceUnifiedDiffReader
             .ToArray();
     }
 
-    private static string? ReadDiffPath(string value)
+    private static string? ReadDiffPath(string value, bool stripGitPrefix)
     {
-        var path = value.Split('\t', 2)[0].Trim();
+        if (!GitPatchPathHeader.TryDecode(value.TrimEnd('\r'), out var path))
+            throw new EvidencePlanningException("ASEVD133", "A Git patch path header is invalid.",
+                "Supply an unmodified Git unified patch with UTF-8 paths.");
         if (path == "/dev/null")
         {
             return null;
         }
 
-        if (path.StartsWith("a/", StringComparison.Ordinal) || path.StartsWith("b/", StringComparison.Ordinal))
+        if (stripGitPrefix && (path.StartsWith("a/", StringComparison.Ordinal) || path.StartsWith("b/", StringComparison.Ordinal)))
         {
             path = path[2..];
         }

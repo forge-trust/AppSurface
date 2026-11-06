@@ -156,6 +156,63 @@ public sealed class CoverageGateTests
         }
     }
 
+    [Theory]
+    [InlineData("Café.cs", true)]
+    [InlineData("Widget File.cs", false)]
+    public async Task ExecuteAsync_MeasuresPatchForRealGitPath(string fileName, bool quoted)
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-path-");
+        var sourcePath = Path.Join(temp.Path, "src", fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
+        await File.WriteAllTextAsync(sourcePath, "base\n");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "config", "core.quotePath", quoted ? "true" : "false");
+        await RunGitAsync(temp.Path, "config", "core.precomposeUnicode", "true");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        await File.AppendAllTextAsync(sourcePath, "changed\n");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "change");
+
+        var diff = await GitDiffReader.ReadDiffAsync(temp.Path, "HEAD~1", CancellationToken.None);
+        Assert.Contains(quoted ? "+++ \"b/src/Caf\\303\\251.cs\"" : $"+++ b/src/{fileName}\t",
+            diff, StringComparison.Ordinal);
+        var coverage = temp.WriteCoverage($"""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="2" branches-valid="2">
+              <packages><package name="Example"><classes>
+                <class name="Example.Subject" filename="src/{fileName}"><lines>
+                  <line number="2" hits="1" branch="true" condition-coverage="100% (2/2)" />
+                </lines></class>
+              </classes></package></packages>
+            </coverage>
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            MinLine = 0,
+            MinBranch = 0,
+            DiffBase = "HEAD~1",
+            MinPatchLine = 100,
+            MinPatchBranch = 100,
+            RepositoryRoot = temp.Path,
+            NoGithubSummary = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        using var report = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json")));
+        Assert.Equal(1, report.RootElement.GetProperty("patchLine").GetProperty("changed").GetInt32());
+        Assert.Equal(1, report.RootElement.GetProperty("patchLine").GetProperty("measurable").GetInt32());
+        Assert.Equal(1, report.RootElement.GetProperty("patchBranch").GetProperty("changed").GetInt32());
+        Assert.Equal(2, report.RootElement.GetProperty("patchBranch").GetProperty("measurable").GetInt32());
+        Assert.Equal(100m, report.RootElement.GetProperty("patchLine").GetProperty("percent").GetDecimal());
+        Assert.Equal(100m, report.RootElement.GetProperty("patchBranch").GetProperty("percent").GetDecimal());
+    }
+
     [Fact]
     public async Task ExecuteAsync_ParsesMixedCaseMeasurablePatchLineMode_WhenDiffBaseIsConfigured()
     {
