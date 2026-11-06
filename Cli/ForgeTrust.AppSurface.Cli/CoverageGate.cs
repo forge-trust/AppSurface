@@ -1261,10 +1261,12 @@ internal static class PatchCoverageEvaluator
         ValidateLineMode(request.LineMode);
 
         var parseResult = ParseChangedLinesDetailed(artifact.Text);
-        if (request.DiffSource.IsExternalArtifact && parseResult.Status == PatchDiffParseStatus.Malformed)
+        if (parseResult.Status == PatchDiffParseStatus.Malformed)
         {
-            throw new CommandException(
-                $"ASCOV015 The patch diff from {GetDiffSourceDisplay(request.DiffSource)} could not be parsed as unified diff text. Download a unified diff artifact or use --diff-base for local git history.");
+            var diagnostic = request.DiffSource.IsExternalArtifact
+                ? $"ASCOV015 The patch diff from {GetDiffSourceDisplay(request.DiffSource)} could not be parsed as unified diff text. Download a unified diff artifact or use --diff-base for local git history."
+                : $"ASCOV015 The patch diff from {GetDiffSourceDisplay(request.DiffSource)} could not be parsed completely as unified diff text. It may contain a path that cannot be represented safely; use portable repository-relative paths and inspect the Git diff.";
+            throw new CommandException(diagnostic);
         }
 
         var changedLines = parseResult.ChangedLines;
@@ -1885,6 +1887,11 @@ internal static class PatchCoverageEvaluator
     {
         normalizedPath = null;
         if (!GitPatchPathHeader.TryDecode(value, out var path))
+        {
+            return false;
+        }
+
+        if (path.Contains('\\'))
         {
             return false;
         }

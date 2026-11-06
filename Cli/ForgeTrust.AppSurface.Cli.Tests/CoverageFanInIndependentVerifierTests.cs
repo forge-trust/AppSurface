@@ -589,7 +589,6 @@ public sealed class CoverageFanInIndependentVerifierTests
     [InlineData("src/New\nWidget.cs", "\"b/src/New\\nWidget.cs\"")]
     [InlineData("src/Return\rWidget.cs", "\"b/src/Return\\rWidget.cs\"")]
     [InlineData("src/Quote\"Widget.cs", "\"b/src/Quote\\\"Widget.cs\"")]
-    [InlineData("src/Widget.cs", "\"b/src\\\\Widget.cs\"")]
     [InlineData("src/😀Widget.cs", "\"b/src/😀Widget.cs\"")]
     public void VerifyGates_AcceptsEscapedGitPathsAndContextWithoutCountingContextAsChanged(
         string filename, string quotedPath)
@@ -713,6 +712,26 @@ public sealed class CoverageFanInIndependentVerifierTests
             diff --git "a/src/Widget.cs" "b/src/Widget.cs"
             --- "a/src/Widget.cs"
             +++ "b/src/Widget.cs" suffix
+            @@ -1 +1 @@
+            -old
+            +new
+            """;
+        using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
+        using var policy = PatchPolicy();
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, composedGate.RootElement, policy.RootElement, coverage, coverage, diff));
+    }
+
+    [Fact]
+    public void VerifyGates_RejectsLiteralBackslashThatAliasesCoveredFile()
+    {
+        var coverage = AggregateCoverage();
+        const string diff = """
+            diff --git "a/src\\Widget.cs" "b/src\\Widget.cs"
+            --- "a/src\\Widget.cs"
+            +++ "b/src\\Widget.cs"
             @@ -1 +1 @@
             -old
             +new

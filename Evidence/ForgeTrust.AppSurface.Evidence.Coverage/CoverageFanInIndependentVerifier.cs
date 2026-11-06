@@ -353,6 +353,9 @@ internal static class CoverageFanInIndependentVerifier
             if (!hunk && line.StartsWith("+++ ", StringComparison.Ordinal))
             {
                 var name = DecodeGitPathHeader(line[4..]);
+                // Git separates segments with '/', so a decoded backslash is a literal name character.
+                // Reject it before portable coverage-path normalization can alias a different file.
+                Require(!name.Contains('\\'), GateError);
                 file = name == "/dev/null" ? null : NormalizeRelative(name.StartsWith("b/", StringComparison.Ordinal) ? name[2..] : name);
                 continue;
             }

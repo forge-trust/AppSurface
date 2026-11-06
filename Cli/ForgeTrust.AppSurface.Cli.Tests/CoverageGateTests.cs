@@ -2524,6 +2524,60 @@ public sealed class CoverageGateTests
         Assert.Contains("--diff-base 'origin/main'", exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(@"a/\\..\\Unrepresentable.cs", @"b/\\..\\Unrepresentable.cs")]
+    [InlineData(@"a/\\Leading.cs", @"b/\\Leading.cs")]
+    [InlineData(@"a/Prefix\\Interior.cs", @"b/Prefix\\Interior.cs")]
+    public async Task CoverageGateEvaluator_RejectsGitPathsWithLiteralBackslash_WithDiagnostic(
+        string oldDiffPath,
+        string newDiffPath)
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-malformed-git-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages><package name="Example"><classes>
+                <class name="Example.Z" filename="src/Z.cs"><lines>
+                  <line number="1" hits="0" />
+                </lines></class>
+              </classes></package></packages>
+            </coverage>
+            """);
+        var diff = $$"""
+            diff --git "{{oldDiffPath}}" "{{newDiffPath}}"
+            index 0000000..1111111 100644
+            --- "{{oldDiffPath}}"
+            +++ "{{newDiffPath}}"
+            @@ -0,0 +1,1 @@
+            +unrepresentable
+            diff --git a/src/Z.cs b/src/Z.cs
+            index 0000000..1111111 100644
+            --- a/src/Z.cs
+            +++ b/src/Z.cs
+            @@ -0,0 +1,1 @@
+            +uncovered
+            """;
+        var parsed = PatchCoverageEvaluator.ParseChangedLinesDetailed(diff);
+        Assert.Equal(PatchDiffParseStatus.Malformed, parsed.Status);
+        Assert.Empty(parsed.ChangedLines);
+        Assert.DoesNotContain("src/Z.cs", parsed.ChangedLines.Keys);
+
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(temp.Path, "origin/main", 100, _ => Task.FromResult(diff)));
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None));
+
+        Assert.Contains("ASCOV015", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--diff-base 'origin/main'", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("path that cannot be represented safely", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ExecuteAsync_RejectsMultipleDiffSources_WithDiagnostic()
     {
