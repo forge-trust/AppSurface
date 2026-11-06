@@ -158,13 +158,10 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
         {
-            try
-            {
-                await context.Artifacts.WriteAsync("transcript", "proof/transcript.json", JsonSerializer.SerializeToUtf8Bytes(proof), CancellationToken.None);
-                await context.Artifacts.WriteAsync("result", "proof/result.json", JsonSerializer.SerializeToUtf8Bytes(new { completed = false, stage, failure = exception.GetType().Name, commands = proof }), CancellationToken.None);
-            }
-            catch (Exception artifactException) when (artifactException is InvalidOperationException or IOException) { }
-            return Failed($"Solution coverage failed during {stage}.");
+            var artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
+                [("transcript", JsonSerializer.SerializeToUtf8Bytes(proof)),
+                    ("result", JsonSerializer.SerializeToUtf8Bytes(new { completed = false, stage, failure = exception.GetType().Name, commands = proof }))]).ConfigureAwait(false);
+            return Failed($"Solution coverage failed during {stage}." + artifactDiagnostic);
         }
     }
 

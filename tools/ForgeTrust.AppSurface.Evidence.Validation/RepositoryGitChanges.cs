@@ -16,10 +16,18 @@ internal sealed class RepositoryGitChanges
     private const int MaximumErrorBytes = 64 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
+    /// <summary>
+    /// Binds committed, staged, unstaged and nonignored untracked changes to a local source digest.
+    /// Git observes executable bits on Unix and uses its configured file-mode behavior on Windows.
+    /// </summary>
     internal async Task<RepositoryChangeSet> CollectLocalAsync(string repository, string baseRevision, CancellationToken ct)
     {
         ValidateBaseRevision(baseRevision);
         var root = Path.GetFullPath(repository);
+        // These flags can make diff/status omit tracked bytes that a local build still reads.
+        var indexEntries = ParseFields(await GitBytes(root, ct, "ls-files", "-v", "-z"));
+        if (indexEntries.Any(entry => entry.Length > 0 && (char.IsAsciiLetterLower(entry[0]) || entry[0] == 'S')))
+            throw new InvalidOperationException("Local evidence cannot bind tracked source with assume-unchanged or skip-worktree flags. Clear those flags explicitly before collecting evidence.");
         var head = await GitText(root, ct, "rev-parse", "--verify", "HEAD^{commit}");
         var baseSha = await GitText(root, ct, "rev-parse", "--verify", baseRevision + "^{commit}");
         var merge = await GitText(root, ct, "merge-base", baseSha, head);
@@ -104,7 +112,7 @@ internal sealed class RepositoryGitChanges
         return Canonicalize(result);
     }
 
-    /// <summary>Writes a bounded patch of current tracked and untracked content for local changed-line gating.</summary>
+    /// <summary>Writes a bounded patch with fixed a/ and b/ prefixes for local changed-line gating.</summary>
     internal async Task WriteLocalPatchAsync(string repository, string baseCommit, IReadOnlyList<NormalizedDiffPath> paths,
         string output, CancellationToken cancellationToken)
     {
@@ -284,6 +292,22 @@ internal sealed class RepositoryGitChanges
                 CreateNoWindow = true,
             },
         };
+        // Machine-readable evidence must not inherit presentation or fsmonitor settings from dotfiles.
+        foreach (var setting in new[]
+        {
+            "core.fsmonitor=false", "color.diff=false",
+            "diff.mnemonicPrefix=false", "diff.noprefix=false", "diff.srcPrefix=a/", "diff.dstPrefix=b/",
+        })
+        {
+            process.StartInfo.ArgumentList.Add("-c");
+            process.StartInfo.ArgumentList.Add(setting);
+        }
+        if (!OperatingSystem.IsWindows() && args is ["diff", ..])
+        {
+            // Honor the actual executable bit on Unix; Windows does not expose Unix modes.
+            process.StartInfo.ArgumentList.Add("-c");
+            process.StartInfo.ArgumentList.Add("core.filemode=true");
+        }
         foreach (var arg in args) process.StartInfo.ArgumentList.Add(arg);
         process.StartInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
         if (!process.Start()) throw new InvalidOperationException("Could not start Git.");
@@ -307,13 +331,20 @@ internal sealed class RepositoryGitChanges
             if (!process.HasExited)
             {
                 try { process.Kill(entireProcessTree: true); }
-                catch (InvalidOperationException) when (process.HasExited) { }
+                catch (InvalidOperationException) when (process.HasExited)
+                {
+                    // The owned process exited between HasExited and Kill; no process remains to terminate.
+                }
             }
             await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
             // Observe both readers even if one exceeded its budget. The original capture failure
             // takes precedence over the cancellation used to terminate the owned Git process.
             try { await Task.WhenAll(output, error).WaitAsync(TimeSpan.FromSeconds(5)); }
-            catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException) { }
+            catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
+            {
+                // WhenAll observes both readers. Below, surface their original faults or the capture
+                // deadline rather than replacing that failure with the cancellation used for cleanup.
+            }
             ct.ThrowIfCancellationRequested();
             if (output.IsFaulted) await output;
             if (error.IsFaulted) await error;

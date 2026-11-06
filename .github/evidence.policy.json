@@ -939,6 +939,12 @@
       "precedence": 0
     },
     {
+      "id": "durable-template-tests",
+      "pattern": "Durable/ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/**",
+      "profileId": "code",
+      "precedence": 30
+    },
+    {
       "id": "unit-tests",
       "pattern": "**/*.Tests/**",
       "profileId": "coverage",

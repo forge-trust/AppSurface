@@ -32,6 +32,8 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
         { ["Web/Example.Tests/README.md"], "coverage", ["solution-coverage"] },
         { ["Web/Example/README.md"], "packages", ["package-checks"] },
         { ["Web/Example/Example.cs"], "code", ["solution-coverage", "package-checks"] },
+        { ["Durable/ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/FirstDurableWorkTests.cs"], "code", ["solution-coverage", "package-checks"] },
+        { ["Durable/ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/AppSurfaceDurableWorker.Tests.csproj"], "code", ["solution-coverage", "package-checks"] },
     };
 
     [Theory]

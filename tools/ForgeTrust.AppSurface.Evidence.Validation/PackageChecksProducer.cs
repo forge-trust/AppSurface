@@ -57,7 +57,8 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
             var project = Path.Join(_settings.RepositoryRoot, "tools", "ForgeTrust.AppSurface.PackageIndex", "ForgeTrust.AppSurface.PackageIndex.csproj");
 
             stage = "gate";
-            await RunAsync("gate", ["run", "--project", project, "--configuration", "Release", "--", "gate"], environment, commands, cancellationToken).ConfigureAwait(false);
+            await RunAsync("gate", ["run", "--project", project, "--configuration", "Release",
+                "--property:RestoreConfigFile=" + Path.Join(_settings.RepositoryRoot, "NuGet.package-gate.config"), "--", "gate"], environment, commands, cancellationToken).ConfigureAwait(false);
             stage = "verify";
             await RunAsync("verify", ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", "verify"], environment, commands, cancellationToken).ConfigureAwait(false);
             stage = "verify-packages";
@@ -83,22 +84,21 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
                 commands,
                 assertions = AssertionIds,
             });
-            await context.Artifacts.WriteAsync("result", "proof/result.json", resultBytes, cancellationToken).ConfigureAwait(false);
             await context.Artifacts.WriteAsync("transcript", "proof/transcript.json", JsonSerializer.SerializeToUtf8Bytes(commands), cancellationToken).ConfigureAwait(false);
+            await context.Artifacts.WriteAsync("result", "proof/result.json", resultBytes, cancellationToken).ConfigureAwait(false);
             return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, AssertionIds);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
         {
+            var artifactDiagnostic = string.Empty;
             if (context.Artifacts is not null)
             {
                 var bytes = JsonSerializer.SerializeToUtf8Bytes(new { completed = false, stage, commands, failure = exception.GetType().Name });
-                try { await context.Artifacts.WriteAsync("result", "proof/result.json", bytes, CancellationToken.None).ConfigureAwait(false); }
-                catch (InvalidOperationException) { }
-                try { await context.Artifacts.WriteAsync("transcript", "proof/transcript.json", JsonSerializer.SerializeToUtf8Bytes(commands), CancellationToken.None).ConfigureAwait(false); }
-                catch (InvalidOperationException) { }
+                artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
+                    [("result", bytes), ("transcript", JsonSerializer.SerializeToUtf8Bytes(commands))]).ConfigureAwait(false);
             }
-            return Failure($"Package checks failed at {stage}.");
+            return Failure($"Package checks failed at {stage}." + artifactDiagnostic);
         }
     }
 

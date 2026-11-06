@@ -84,6 +84,62 @@ public sealed class SolutionCoverageProducerTests
     }
 
     [Theory]
+    [InlineData("result")]
+    [InlineData("transcript")]
+    [InlineData("both")]
+    [InlineData("io")]
+    public async Task ProduceAsync_ReportsUnavailableFailureArtifactsAndStillAttemptsEachSlot(string blocked)
+    {
+        using var fixture = new Fixture();
+        var proof = Path.Join(fixture.Root, "artifacts", "proof");
+        if (blocked == "io")
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(proof)!);
+            await File.WriteAllTextAsync(proof, "caller-owned");
+        }
+        else
+            foreach (var name in new[] { "result", "transcript" }.Where(name => blocked == "both" || blocked == name))
+                await fixture.Writer.WriteAsync(name, $"proof/{name}.json", System.Text.Encoding.UTF8.GetBytes("existing " + name));
+        var producer = fixture.Create((_, _) => Task.FromResult(new EvidenceCommandResult(1, "", "private failure detail", 1)));
+
+        var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Contains("failed during collection", result.Diagnostic);
+        Assert.Contains("Failure artifacts unavailable:", result.Diagnostic);
+        Assert.DoesNotContain(fixture.Root, result.Diagnostic);
+        Assert.DoesNotContain("private failure detail", result.Diagnostic);
+        if (blocked == "io")
+        {
+            Assert.Contains("result (IOException)", result.Diagnostic);
+            Assert.Contains("transcript (IOException)", result.Diagnostic);
+            Assert.Empty(fixture.Writer.WrittenArtifacts);
+            Assert.Equal("caller-owned", await File.ReadAllTextAsync(proof));
+        }
+        else
+        {
+            Assert.Equal(2, fixture.Writer.WrittenArtifacts.Count);
+            foreach (var name in new[] { "result", "transcript" })
+            {
+                var contents = await File.ReadAllTextAsync(Path.Join(proof, name + ".json"));
+                if (blocked == "both" || blocked == name)
+                {
+                    Assert.Contains(name + " (InvalidOperationException)", result.Diagnostic);
+                    Assert.Equal("existing " + name, contents);
+                }
+                else
+                {
+                    Assert.DoesNotContain(name + " (", result.Diagnostic);
+                    using var document = JsonDocument.Parse(contents);
+                    if (name == "result") Assert.False(document.RootElement.GetProperty("completed").GetBoolean());
+                    else Assert.NotEmpty(document.RootElement.EnumerateArray());
+                }
+            }
+        }
+    }
+
+    [Theory]
     [InlineData("missing-solution")]
     [InlineData("empty-inventory")]
     public async Task ProduceAsync_RejectsMissingOrEmptySolutionInventory(string defect)

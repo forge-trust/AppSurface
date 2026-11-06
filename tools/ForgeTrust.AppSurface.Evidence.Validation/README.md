@@ -26,12 +26,25 @@ merge conflicts first. Nothing needs to be committed to select evidence. The col
 once without fetching; fetch explicitly when an updated remote comparison is needed. Missing base history
 fails with no claim. An empty local inventory exits successfully without creating an evidence manifest;
 this is distinct from a reviewed documentation change selecting `NoEvidenceRequired`.
+Local collection rejects tracked `assume-unchanged` or `skip-worktree` index flags, even when those files
+currently match HEAD: Git may otherwise conceal source bytes used by a build. Clear the flags explicitly
+before running evidence; the collector never changes them. The local digest binds the documented Git
+inventory, not every possible MSBuild input. Ignored files remain outside that inventory, so keep
+unintended ignored source out of compiler inputs when assessing local evidence.
+Git subprocesses disable configured fsmonitor shortcuts and colored diff output, and use fixed
+`a/` and `b/` patch prefixes. On Unix, local collection also observes the filesystem's executable
+bit even when Git is configured to ignore it. On Windows, stage executable-bit changes with
+`git update-index --chmod=+x` or `--chmod=-x` so Git can record them. The caller's Git configuration
+is left intact.
 
 Planning happens before the CLI candidate build, full solution coverage and package validation.
 Reviewed documentation-only changes avoid all four producers. Test-only changes collect full solution
 coverage and use its direct Codecov-mode patch gate without native fan-in. Ordinary source changes collect
 coverage and package checks; on CI pull requests this producer union also selects the native coverage
 supplement. Package metadata changes collect package checks.
+The Durable template's packaged test directory selects both coverage and package checks: repository
+coverage checks template contracts, while the installed package proof executes the generated tests.
+The template-specific rule takes precedence over ordinary test-only selection, including test project files.
 Native CLI and shared infrastructure changes select the conservative set of all four producers.
 `local` creates a fresh package only when required, using locked restore, then calls the same
 [`RepositoryEvidenceWorkflow`](./RepositoryEvidenceWorkflow.cs) and producers as CI. Optional
@@ -112,6 +125,9 @@ use `--operation local` to collect and verify a dirty working tree.
 `gate`, `verify` and `verify-packages` commands, using a fresh exact version and an isolated NuGet cache.
 The last command already restores, builds, packs and exercises installed consumers; the adapter avoids
 the old duplicate solution restore/build and reuses the PackageIndex driver after the first command.
+The driver's initial implicit restore explicitly selects [NuGet.package-gate.config](https://github.com/forge-trust/AppSurface/blob/main/NuGet.package-gate.config); the package workflow
+also restores its solution with that source policy. Installed-consumer restores retain their own mapped
+feeds rather than inheriting a global restore override.
 It verifies the archive inventory and SHA-512 hashes before
 closing its assertions, and retains the manifest, report and command transcript. Package consumer
 proofs require their normal SDK, pnpm/Node and applicable platform prerequisites; missing capabilities
@@ -129,6 +145,13 @@ application configuration defaults. The [PackageIndex proof reference](../ForgeT
 explains the phase receipt and its limits; missing test results never authorize a successful claim.
 Both repository producers propagate the selected `--dotnet` host through `DOTNET_HOST_PATH` and the
 child process search path, so nested SDK commands resolve the same host.
+If either repository producer fails, it attempts its failure result and command transcript independently.
+An occupied artifact slot or filesystem write failure leaves the original failed stage and empty assertion
+set intact. The returned diagnostic names unavailable artifact slots and exception types; it never adds
+raw exception messages, paths or child streams to the manifest. Existing artifacts are preserved, and a
+failed diagnostic write cannot turn the producer outcome into a successful claim.
+The successful package result is written only after its transcript, so a transcript failure cannot leave
+a retained `completed: true` result beside a failed manifest.
 
 The [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) plans coverage before native collection and emits
 a verified empty-lane manifest when coverage is unselected. The

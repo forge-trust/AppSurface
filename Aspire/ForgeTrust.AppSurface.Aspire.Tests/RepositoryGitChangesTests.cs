@@ -65,6 +65,100 @@ public sealed class RepositoryGitChangesTests : IDisposable
         Assert.DoesNotContain("@@ -0,0 +1,1 @@\n+\n", patch);
     }
 
+    [Theory]
+    [InlineData("--assume-unchanged", false)]
+    [InlineData("--assume-unchanged", true)]
+    [InlineData("--skip-worktree", false)]
+    [InlineData("--skip-worktree", true)]
+    public async Task CollectLocalAsync_RejectsIndexFlagsThatCanHideTrackedSource(string flag, bool modified)
+    {
+        Initialize();
+        Write("tracked.cs", "baseline source\n");
+        var baseline = CommitAll("baseline");
+        Git("update-index", flag, "--", "tracked.cs");
+        if (modified) Write("tracked.cs", "hidden source edit\n");
+        Assert.Empty(Git("diff", "--name-only"));
+        var indexState = Git("ls-files", "-v", "--", "tracked.cs");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _collector.CollectLocalAsync(_root, baseline, CancellationToken.None));
+
+        Assert.Contains("assume-unchanged or skip-worktree", exception.Message);
+        Assert.Equal(indexState, Git("ls-files", "-v", "--", "tracked.cs"));
+        Assert.Equal(modified ? "hidden source edit\n" : "baseline source\n", await File.ReadAllTextAsync(Path.Join(_root, "tracked.cs")));
+        Git("update-index", flag == "--assume-unchanged" ? "--no-assume-unchanged" : "--no-skip-worktree", "--", "tracked.cs");
+        var collected = await _collector.CollectLocalAsync(_root, baseline, CancellationToken.None);
+        Assert.Equal(modified, collected.Paths.Any(path => path.Path == "tracked.cs"));
+    }
+
+    [Theory]
+    [InlineData("diff.mnemonicPrefix", "true")]
+    [InlineData("diff.noprefix", "true")]
+    [InlineData("diff.srcPrefix", "before/")]
+    [InlineData("diff.dstPrefix", "after/")]
+    [InlineData("color.diff", "always")]
+    public async Task WriteLocalPatchAsync_IgnoresUserDiffPresentationSettings(string setting, string value)
+    {
+        Initialize();
+        Write("tracked.cs", "baseline\n");
+        var baseline = CommitAll("baseline");
+        Write("tracked.cs", "current tracked content\n");
+        Write("new.cs", "current untracked content\n");
+        var before = await _collector.CollectLocalAsync(_root, baseline, CancellationToken.None);
+        Git("config", setting, value);
+        var changes = await _collector.CollectLocalAsync(_root, baseline, CancellationToken.None);
+        var output = Path.Join(_root, "local.patch");
+
+        await _collector.WriteLocalPatchAsync(_root, baseline, changes.Paths, output, CancellationToken.None);
+
+        var patch = await File.ReadAllTextAsync(output);
+        Assert.Contains("--- a/tracked.cs\n+++ b/tracked.cs\n", patch);
+        Assert.Contains("+current tracked content\n", patch);
+        Assert.Contains("+++ b/new.cs\n", patch);
+        Assert.DoesNotContain("\u001b", patch, StringComparison.Ordinal);
+        Assert.Equal(before.SourceDigest, changes.SourceDigest);
+        Assert.Equal(value, Git("config", "--get", setting));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CollectLocalAsync_BindsExecutableBitChangesEvenWhenGitIgnoresThem(bool initiallyExecutable)
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        Initialize();
+        const string relativePath = "tool.sh";
+        const string contents = "#!/bin/sh\nexit 0\n";
+        Write(relativePath, contents);
+        var path = TestPathUtils.PathUnder(_root, relativePath);
+        var initialMode = File.GetUnixFileMode(path) & ~UnixFileMode.UserExecute;
+        if (initiallyExecutable) initialMode |= UnixFileMode.UserExecute;
+        File.SetUnixFileMode(path, initialMode);
+        Git("add", "--", relativePath);
+        Git("update-index", initiallyExecutable ? "--chmod=+x" : "--chmod=-x", "--", relativePath);
+        Git("commit", "-qm", "baseline");
+        var baseline = Git("rev-parse", "HEAD");
+        var before = await _collector.CollectLocalAsync(_root, baseline, CancellationToken.None);
+        Assert.Empty(before.Paths);
+
+        File.SetUnixFileMode(path, initialMode ^ UnixFileMode.UserExecute);
+        Assert.Empty(Git("diff", "--name-only", "--", relativePath));
+        var after = await _collector.CollectLocalAsync(_root, baseline, CancellationToken.None);
+        var change = Assert.Single(after.Paths);
+        Assert.Equal(relativePath, change.Path);
+        Assert.Equal("modified", change.Kind);
+        Assert.NotEqual(before.SourceDigest, after.SourceDigest);
+
+        var output = Path.Join(_root, "mode.patch");
+        await _collector.WriteLocalPatchAsync(_root, baseline, after.Paths, output, CancellationToken.None);
+        var patch = await File.ReadAllTextAsync(output);
+        Assert.Contains(initiallyExecutable ? "old mode 100755\nnew mode 100644" : "old mode 100644\nnew mode 100755", patch);
+        Assert.DoesNotContain("@@", patch, StringComparison.Ordinal);
+        Assert.Equal(contents, await File.ReadAllTextAsync(path));
+        Assert.Equal("false", Git("config", "--get", "core.filemode"));
+    }
+
     [Fact]
     public async Task WriteLocalPatchAsync_DescribesBinaryUntrackedFilesAndSkipsUntrackedSymlinks()
     {

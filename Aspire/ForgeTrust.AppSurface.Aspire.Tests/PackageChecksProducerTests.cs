@@ -66,12 +66,48 @@ public sealed class PackageChecksProducerTests
         var version = ValueAfter(requests[2].Arguments, "--package-version");
         Assert.Matches("^0\\.0\\.0-evidence\\.[0-9a-f]{32}$", version);
         Assert.Contains("--configuration", requests[0].Arguments);
+        Assert.Contains("--property:RestoreConfigFile=" + Path.Join(root.FullName, "NuGet.package-gate.config"), requests[0].Arguments);
         Assert.Equal("Release", ValueAfter(requests[0].Arguments, "--configuration"));
         Assert.Contains(artifacts.WrittenArtifacts, a => a.LogicalName == "package-manifest");
         Assert.Contains(artifacts.WrittenArtifacts, a => a.LogicalName == "package-report");
         using var proof = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, "proof", "result.json")));
         Assert.Equal(version, proof.RootElement.GetProperty("packageVersion").GetString());
         Assert.DoesNotContain("bounded stdout", await File.ReadAllTextAsync(TestPathUtils.PathUnder(output, "proof", "transcript.json")));
+    }
+
+    [Fact]
+    public async Task ProduceAsync_WithholdsCompletedResultUntilTranscriptIsRetained()
+    {
+        using var root = new TemporaryDirectory("package-checks-completion-");
+        var output = TestPathUtils.PathUnder(root.FullName, "evidence");
+        Directory.CreateDirectory(output);
+        var (context, writer) = Context(output);
+        await writer.WriteAsync("transcript", "proof/transcript.json", "existing transcript"u8.ToArray());
+        var producer = new PackageChecksProducer(Settings(root.FullName, output), async (request, _) =>
+        {
+            if (request.Arguments.Contains("verify-packages", StringComparer.Ordinal))
+            {
+                var version = ValueAfter(request.Arguments, "--package-version");
+                var artifacts = ValueAfter(request.Arguments, "--artifacts-output");
+                var archiveBytes = new byte[] { 1, 2, 3 };
+                const string archiveName = "Example.nupkg";
+                await File.WriteAllBytesAsync(Path.Join(artifacts, archiveName), archiveBytes);
+                var sha512 = Convert.ToHexString(System.Security.Cryptography.SHA512.HashData(archiveBytes)).ToLowerInvariant();
+                await File.WriteAllTextAsync(Path.Join(artifacts, "package-artifact-manifest.json"),
+                    JsonSerializer.Serialize(new { package_version = version, entries = new[] { new { artifact_file_name = archiveName, sha512 } } }));
+                await File.WriteAllTextAsync(Path.Join(artifacts, "package-validation-report.md"), $"# Package validation\nVersion: {version}\nAll packages passed.\n");
+            }
+            return new EvidenceCommandResult(0, "", "", 1);
+        });
+
+        var result = await producer.ProduceAsync(context, CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        using var proof = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(output, "proof", "result.json")));
+        Assert.False(proof.RootElement.GetProperty("completed").GetBoolean());
+        Assert.Contains("transcript (InvalidOperationException)", result.Diagnostic);
+        Assert.Equal("existing transcript", await File.ReadAllTextAsync(Path.Join(output, "proof", "transcript.json")));
     }
 
     [Fact]
@@ -134,25 +170,59 @@ public sealed class PackageChecksProducerTests
         Assert.Empty(result.SatisfiedAssertionIds);
     }
 
-    [Fact]
-    public async Task ProduceAsync_SwallowsUndeclaredFailureProofWrites()
+    [Theory]
+    [InlineData("result")]
+    [InlineData("transcript")]
+    [InlineData("both")]
+    [InlineData("io")]
+    public async Task ProduceAsync_ReportsUnavailableFailureArtifactsWithoutLosingThePrimaryFailure(string blocked)
     {
         using var root = new TemporaryDirectory("package-checks-failure-writer-");
         var output = TestPathUtils.PathUnder(root.FullName, "evidence");
         Directory.CreateDirectory(output);
         var (context, writer) = Context(output);
-        await writer.WriteAsync("result", "proof/result.json", "existing result"u8.ToArray());
-        await writer.WriteAsync("transcript", "proof/transcript.json", "existing transcript"u8.ToArray());
+        if (blocked == "io") await File.WriteAllTextAsync(Path.Join(output, "proof"), "caller-owned");
+        else
+            foreach (var name in new[] { "result", "transcript" }.Where(name => blocked == "both" || blocked == name))
+                await writer.WriteAsync(name, $"proof/{name}.json", Encoding.UTF8.GetBytes("existing " + name));
         var producer = new PackageChecksProducer(Settings(root.FullName, output), (_, _) =>
-            Task.FromResult(new EvidenceCommandResult(1, "", "gate failed", 1)));
+            Task.FromResult(new EvidenceCommandResult(1, "", "private failure detail", 1)));
 
         var result = await producer.ProduceAsync(context, CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
         Assert.Contains("failed at gate", result.Diagnostic, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(2, writer.WrittenArtifacts.Count);
-        Assert.Equal("existing result", await File.ReadAllTextAsync(TestPathUtils.PathUnder(output, "proof", "result.json")));
-        Assert.Equal("existing transcript", await File.ReadAllTextAsync(TestPathUtils.PathUnder(output, "proof", "transcript.json")));
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Contains("Failure artifacts unavailable:", result.Diagnostic);
+        Assert.DoesNotContain(root.FullName, result.Diagnostic);
+        Assert.DoesNotContain("private failure detail", result.Diagnostic);
+        if (blocked == "io")
+        {
+            Assert.Contains("result (IOException)", result.Diagnostic);
+            Assert.Contains("transcript (IOException)", result.Diagnostic);
+            Assert.Empty(writer.WrittenArtifacts);
+            Assert.Equal("caller-owned", await File.ReadAllTextAsync(Path.Join(output, "proof")));
+        }
+        else
+        {
+            Assert.Equal(2, writer.WrittenArtifacts.Count);
+            foreach (var name in new[] { "result", "transcript" })
+            {
+                var contents = await File.ReadAllTextAsync(Path.Join(output, "proof", name + ".json"));
+                if (blocked == "both" || blocked == name)
+                {
+                    Assert.Contains(name + " (InvalidOperationException)", result.Diagnostic);
+                    Assert.Equal("existing " + name, contents);
+                }
+                else
+                {
+                    Assert.DoesNotContain(name + " (", result.Diagnostic);
+                    using var document = JsonDocument.Parse(contents);
+                    if (name == "result") Assert.False(document.RootElement.GetProperty("completed").GetBoolean());
+                    else Assert.Single(document.RootElement.EnumerateArray());
+                }
+            }
+        }
     }
 
     [Theory]
