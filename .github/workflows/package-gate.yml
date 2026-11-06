@@ -98,6 +98,7 @@ jobs:
             ${{ runner.temp }}/package-gate-artifacts/package-validation-report.md
             ${{ runner.temp }}/package-gate-artifacts/durable-template-consumer-proof.json
             ${{ runner.temp }}/package-gate-artifacts/tailwind-package-consumer-proof.md
+            ${{ runner.temp }}/package-gate-artifacts/cloudtasks-package-consumer-proof.md
             ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof.md
             ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof.evidence.json
             ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/NuGet.tool.config
