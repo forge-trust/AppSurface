@@ -668,7 +668,7 @@ class CoverageFaninTests(unittest.TestCase):
 
 
 class CoverageFaninHelperTests(unittest.TestCase):
-    """Execute the real shell helper and provenance verifier with a guarded CLI fixture."""
+    """Exercise the current shell helper at its native adapter and installed CLI boundaries."""
 
     def setUp(self) -> None:
         self.fixture = CoverageFaninTests()
@@ -689,12 +689,22 @@ class CoverageFaninHelperTests(unittest.TestCase):
         self.composed = self.fixture.base / "coverage-fanin"
         fanin.merge(self.root, self.coverage / "fanin-primary", self.native,
                     self.composed, CONFIGURATION)
-        (self.fixture.commands / "dotnet").write_text(GUARDED_DOTNET, encoding="utf-8")
+        self.dogfood = self.fixture.base / "coverage-dogfood"
+        self.composed_digest = hashlib.sha256((self.composed / "coverage.cobertura.xml").read_bytes()).hexdigest()
+        for name, program in (("dotnet", GUARDED_ADAPTER), ("appsurface", GUARDED_CLI)):
+            command = self.fixture.commands / name
+            command.write_text(program, encoding="utf-8")
+            command.chmod(0o755)
 
     def run_helper(self, *, status: int = 0, diff_base: str = "origin/main") -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env.update(COVERAGE_DIRECTORY=str(self.coverage), COVERAGE_FANIN_NATIVE=str(self.native),
                    BUILD_CONFIGURATION=CONFIGURATION, BUILD_NO_RESTORE="true",
+                   COVERAGE_CLI_PATH=str(self.fixture.commands / "appsurface"),
+                   COVERAGE_DOGFOOD_OUTPUT=str(self.dogfood),
+                   COVERAGE_RUN_SCOPE=RUN["GITHUB_REPOSITORY"], COVERAGE_RUN_ID=RUN["GITHUB_RUN_ID"],
+                   COVERAGE_RUN_ATTEMPT=RUN["GITHUB_RUN_ATTEMPT"],
+                   FIXTURE_COMPOSED=str(self.composed), FIXTURE_COMPOSED_SHA256=self.composed_digest,
                    COVERAGE_GATE_DIFF_BASE=diff_base, FAKE_PATCH_STATUS=str(status))
         return subprocess.run(["bash", "scripts/coverage-gate-fanin.sh"], cwd=self.root,
                               env=env, capture_output=True, text=True)
@@ -708,7 +718,7 @@ class CoverageFaninHelperTests(unittest.TestCase):
         self.assertTrue((self.coverage / "aggregate-gate/coverage-gate.json").is_file())
         calls = [json.loads(line) for line in (self.fixture.base / "gate-calls.jsonl").read_text().splitlines()]
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[1]["coverage"], str((self.composed / "coverage.cobertura.xml").resolve()))
+        self.assertEqual(calls[1]["coverage"], str((self.dogfood / "composed" / "coverage.cobertura.xml").resolve()))
         self.assertEqual(calls[1]["output"], str(self.coverage.resolve()))
 
     def test_failed_patch_gate_returns_failure_and_keeps_failure_reports(self) -> None:
@@ -732,13 +742,36 @@ class CoverageFaninHelperTests(unittest.TestCase):
         self.assertFalse((self.fixture.base / "gate-calls.jsonl").exists())
 
 
-GUARDED_DOTNET = r'''#!/usr/bin/env python3
-import json, os, pathlib, sys
+GUARDED_ADAPTER = r'''#!/usr/bin/env python3
+import hashlib, json, os, pathlib, shutil, sys
 args = sys.argv[1:]
 if args == ["--version"]:
     print("10.0.100")
     raise SystemExit(0)
-if "gate" not in args:
+def option(name):
+    return args[args.index(name) + 1]
+if not args or args[0] != "run" or option("--operation") != "fanin":
+    raise SystemExit("Unexpected adapter invocation")
+if (option("--run-scope"), option("--run-id"), option("--attempt")) != ("example/coverage", "42", "1"):
+    raise SystemExit("Unexpected adapter run identity")
+source = pathlib.Path(os.environ["FIXTURE_COMPOSED"])
+if hashlib.sha256((source / "coverage.cobertura.xml").read_bytes()).hexdigest() != os.environ["FIXTURE_COMPOSED_SHA256"]:
+    raise SystemExit("Composition was changed before acceptance")
+output = pathlib.Path(option("--output"))
+shutil.copytree(source, output / "composed")
+status = int(os.environ["FAKE_PATCH_STATUS"])
+if status:
+    rejected = output / "accepted" / "rejection.json"
+    rejected.parent.mkdir()
+    rejected.write_text(json.dumps({"passed": False}))
+raise SystemExit(status)
+'''
+
+
+GUARDED_CLI = r'''#!/usr/bin/env python3
+import json, os, pathlib, sys
+args = sys.argv[1:]
+if args[:2] != ["coverage", "gate"]:
     raise SystemExit("Unexpected CLI invocation")
 def option(name):
     return args[args.index(name) + 1]
