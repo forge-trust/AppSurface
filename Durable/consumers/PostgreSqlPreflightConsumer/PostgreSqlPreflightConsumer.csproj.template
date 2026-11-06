@@ -1,3 +1,4 @@
+<!-- Materialized by verify-preflight-artifacts.sh only after the exact package bundle is verified. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>

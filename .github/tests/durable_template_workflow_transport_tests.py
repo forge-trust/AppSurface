@@ -20,6 +20,7 @@ class DurableTemplateTransportTests(unittest.TestCase):
                 upload = source.split('      - name: Upload package validation diagnostics\n', 1)[1]
                 upload = upload.split('      - name:', 1)[0]
                 paths = upload.split('          path: |\n', 1)[1].split('          if-no-files-found:', 1)[0]
+                self.assertIn('${{ runner.temp }}/' + directory + '/cloudtasks-package-consumer-proof.md', paths)
                 durable_paths = [line.strip() for line in paths.splitlines() if 'durable-template' in line]
                 self.assertEqual(durable_paths,
                                  ['${{ runner.temp }}/' + directory + '/durable-template-consumer-proof.json'])
@@ -61,6 +62,7 @@ class DurableTemplateTransportTests(unittest.TestCase):
         self.assertIn('docker rm --force --volumes "$id"',source)
         for name in ['nuget-prerelease-publish.yml','nuget-stable-publish.yml']:
             publisher=(WORKFLOW.parent/name).read_text()
+            self.assertIn('${{ runner.temp }}/package-artifacts/cloudtasks-package-consumer-proof.md', publisher.split('      - name: Upload package validation diagnostics\n', 1)[1])
             self.assertIn('artifact-ids: ${{ needs.durable-template-evidence.outputs.receipt_artifact_ids }}',publisher)
             self.assertLess(publisher.index('verify-durable-template-evidence'),publisher.index('publish-'+('prerelease' if 'prerelease' in name else 'stable')+' --durable-template-evidence'))
 
