@@ -24,7 +24,7 @@ public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
     /// <param name="assertionId">Declared assertion satisfied only after complete acceptance and delivery.</param>
     /// <param name="artifactSlot">Declared Evidence artifact slot for the bounded terminal result.</param>
     /// <param name="requirePatch">Whether aggregate-only results are insufficient. Defaults to true.</param>
-    /// <param name="requireObservedPrimary">Whether the primary must originate in supervised collection. Defaults to false.</param>
+    /// <param name="requireObservedPrimary">Whether the primary must come from supervised local collection rather than import. Defaults to false.</param>
     public EvidenceCoverageFanInProducer(string id, CoverageAcceptRequest request, string assertionId,
         string artifactSlot = "result", bool requirePatch = true, bool requireObservedPrimary = false)
     {
@@ -77,6 +77,7 @@ public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
                 result.Verified,
                 result.PatchOutcome,
                 result.Observation,
+                result.PrimaryImported,
                 result.EvaluationIntent,
                 artifacts = result.Artifacts.Select(x => new { x.Role, x.Length, x.Sha256 }).ToArray(),
                 result.Diagnostics
@@ -93,7 +94,7 @@ public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
             || !result.Effects.GenerationCommitted || !result.Effects.CleanupComplete
             || result.EvaluationIntent != CoverageEvaluationIntent.CurrentTrustedRun
             || _requirePatch && result.PatchOutcome != "PatchAccepted"
-            || _requireObservedPrimary && result.Observation != CoverageObservation.CollectedExecution)
+            || _requireObservedPrimary && (result.PrimaryImported || result.Observation != CoverageObservation.CollectedExecution))
             return new(Id, result.Outcome switch
             {
                 CoverageOperationOutcome.TimedOut => EvidenceProducerOutcome.TimedOut,

@@ -135,11 +135,12 @@ public sealed class CoverageFanInResult
         string? policyDigest, CoverageOperationEffects effects, IReadOnlyList<CoverageArtifactReference> artifacts,
         IReadOnlyList<CoverageDiagnostic> diagnostics, bool accepted = false, bool verified = false,
         string patchOutcome = "NotEvaluated", CoverageObservation? observation = null,
-        CoverageEvaluationIntent intent = CoverageEvaluationIntent.CurrentTrustedRun)
+        CoverageEvaluationIntent intent = CoverageEvaluationIntent.CurrentTrustedRun, bool primaryImported = false)
     {
         Operation = operation; Outcome = outcome; OperationId = operationId; PolicyDigest = policyDigest;
         Effects = effects; Artifacts = artifacts; Diagnostics = diagnostics; Accepted = accepted;
         Verified = verified; PatchOutcome = patchOutcome; Observation = observation; EvaluationIntent = intent;
+        PrimaryImported = primaryImported;
     }
     /// <summary>Requested operation.</summary>
     public string Operation { get; }
@@ -163,6 +164,9 @@ public sealed class CoverageFanInResult
     public string PatchOutcome { get; }
     /// <summary>Original producer observation, preserved by import.</summary>
     public CoverageObservation? Observation { get; }
+    /// <summary>Whether the primary was materialized from transport rather than captured locally.</summary>
+    /// <remarks>Applies to operations that consume a primary capture: compose, accept, and verify.</remarks>
+    public bool PrimaryImported { get; }
     /// <summary>Current trusted run versus historical replay; import does not change it.</summary>
     public CoverageEvaluationIntent EvaluationIntent { get; }
 }

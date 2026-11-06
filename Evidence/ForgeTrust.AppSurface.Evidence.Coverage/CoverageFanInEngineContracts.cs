@@ -45,7 +45,7 @@ internal sealed record CoverageFanInEngineResult(string Operation, string Outcom
     bool Created, bool Committed, bool CleanupComplete, bool Imported, string? Generation,
     IReadOnlyList<CoverageFanInEngineArtifact> Artifacts, IReadOnlyList<CoverageFanInEngineDiagnostic> Diagnostics,
     bool Accepted = false, bool Verified = false, string PatchOutcome = "NotEvaluated", string? Observation = null,
-    bool HistoricalReplay = false);
+    bool HistoricalReplay = false, bool PrimaryImported = false);
 /// <summary>Validated retained capture bytes. No semantic oracle is shared by composer and verifier.</summary>
 internal sealed record CoverageFanInBundle(string Directory, JsonElement Manifest, string ManifestHash,
     XDocument Document, byte[] CoverageBytes, IReadOnlyDictionary<string, byte[]> AuxiliaryFiles);

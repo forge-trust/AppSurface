@@ -387,14 +387,14 @@ internal sealed record CoverageFanInCliEnvelope(int SchemaVersion, string Operat
 internal sealed record CoverageFanInCliResult(string Operation, CoverageOperationOutcome Outcome, string OperationId,
     string? PolicyDigest, CoverageOperationEffects Effects, IReadOnlyList<CoverageFanInCliArtifact> Artifacts,
     IReadOnlyList<CoverageDiagnostic> Diagnostics, bool Accepted, bool Verified, string PatchOutcome,
-    CoverageObservation? Observation, CoverageEvaluationIntent EvaluationIntent)
+    CoverageObservation? Observation, CoverageEvaluationIntent EvaluationIntent, bool PrimaryImported)
 {
     internal static CoverageFanInCliResult From(CoverageFanInResult result) => new(
         result.Operation, result.Outcome, result.OperationId, result.PolicyDigest, result.Effects,
         result.Artifacts.Select(artifact => new CoverageFanInCliArtifact(
             SafeRole(artifact.Role), artifact.Length, artifact.Sha256)).ToArray(),
         result.Diagnostics, result.Accepted, result.Verified, result.PatchOutcome, result.Observation,
-        result.EvaluationIntent);
+        result.EvaluationIntent, result.PrimaryImported);
 
     private static string SafeRole(string role) => role switch
     {

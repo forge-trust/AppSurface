@@ -191,10 +191,15 @@ public sealed class CoverageFanInNativeWorkflowTests
             Assert.True(accepted.Outcome == CoverageOperationOutcome.Succeeded, JsonSerializer.Serialize(accepted));
             Assert.True(accepted.Accepted);
             Assert.True(accepted.Verified);
+            Assert.True(accepted.Effects.Imported);
+            Assert.False(accepted.PrimaryImported);
+            Assert.Equal(CoverageObservation.CollectedExecution, accepted.Observation);
             var verified = await CoverageFanIn.VerifyAsync(new(
                 policy, fixture.Repository, fixture.PrimaryCapture, [importedPath], importedComposition, acceptedPath));
             Assert.Equal(CoverageOperationOutcome.Succeeded, verified.Outcome);
             Assert.True(verified.Verified);
+            Assert.True(verified.Effects.Imported);
+            Assert.False(verified.PrimaryImported);
             return;
         }
         var rawPath = Assert.Single(attachments);

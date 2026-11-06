@@ -54,8 +54,11 @@ internal static partial class CoverageFanInEngine
             {
                 var bundles = LoadSet(request, io);
                 state.Observation = bundles[0].Manifest.GetProperty("observation").GetString();
-                state.Imported = bundles.Any(bundle => Parse(io.Read(Path.Join(bundle.Directory, CoverageFanInIO.CompletionName)))
-                    .GetProperty("materialization").GetString() == "imported");
+                state.PrimaryImported = IsImported(bundles[0]);
+                state.Imported = state.PrimaryImported || bundles.Skip(1).Any(IsImported);
+                bool IsImported(CoverageFanInBundle bundle) =>
+                    Parse(io.Read(Path.Join(bundle.Directory, CoverageFanInIO.CompletionName)))
+                        .GetProperty("materialization").GetString() == "imported";
                 if (operation == "compose") files = Compose(request, io, bundles);
                 else if (operation == "accept")
                 {
@@ -108,14 +111,15 @@ internal static partial class CoverageFanInEngine
 
     private sealed class InvocationState(string operation, string id, string digest, bool historical)
     {
-        internal bool Created, EffectsStarted, Committed, Imported, Accepted, Verified;
+        internal bool Created, EffectsStarted, Committed, Imported, PrimaryImported, Accepted, Verified;
         internal string? Observation;
         internal string Patch = "NotEvaluated";
         internal string? Generation;
         internal readonly List<CoverageFanInEngineArtifact> Artifacts = [];
         internal CoverageFanInEngineResult Result(string outcome, IReadOnlyList<CoverageFanInEngineDiagnostic>? diagnostics = null) =>
             new(operation, outcome, id, digest, Created, Committed, !EffectsStarted || Committed, Imported, Generation,
-                Artifacts.ToArray(), diagnostics ?? [], Accepted, Verified, Patch, Observation, historical);
+                Artifacts.ToArray(), diagnostics ?? [], Accepted, Verified, Patch, Observation, historical,
+                PrimaryImported);
         internal CoverageFanInEngineResult Failure(string outcome, string code, string field, string recovery) =>
             Result(outcome, [new(code, operation, field, recovery)]);
     }

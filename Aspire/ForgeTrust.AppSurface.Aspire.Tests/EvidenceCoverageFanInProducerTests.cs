@@ -280,19 +280,29 @@ public sealed class EvidenceCoverageFanInProducerTests
         Assert.True(delivered.RootElement.GetProperty("effects").GetProperty("generationCommitted").GetBoolean());
     }
 
-    [Fact]
-    public async Task ImportedTrustedProducerAcceptanceIsDeliveredButCannotMeetObservedPrimaryRequirement()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ImportedPrimaryAcceptanceIsDeliveredButCannotMeetObservedPrimaryRequirement(bool claimsObserved)
     {
         using var fixture = await Fixture.CreateAsync();
         await fixture.PrepareInputsAsync();
-        using var manifest = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(fixture.Captured, "manifest.json")));
+        var manifestPath = Path.Join(fixture.Captured, "manifest.json");
+        var manifestText = await File.ReadAllTextAsync(manifestPath);
+        if (claimsObserved)
+        {
+            var claimed = manifestText.Replace("\"TrustedProducer\"", "\"CollectedExecution\"", StringComparison.Ordinal);
+            Assert.NotEqual(manifestText, claimed);
+            await File.WriteAllTextAsync(manifestPath, claimed);
+        }
+        using var manifest = JsonDocument.Parse(manifestText);
         var importedPath = Path.Join(fixture.TempPath, "imported-primary");
         var imported = await CoverageFanIn.CaptureAsync(new CoverageCaptureRequest(
             fixture.Policy, fixture.Repository, importedPath, "primary", ImportDirectory: fixture.Captured,
             OriginalSourceRoot: manifest.RootElement.GetProperty("sourceRoot").GetString()));
         Assert.Equal(CoverageOperationOutcome.Succeeded, imported.Outcome);
         Assert.True(imported.Effects.Imported);
-        Assert.Equal(CoverageObservation.TrustedProducer, imported.Observation);
+        Assert.Equal(claimsObserved ? CoverageObservation.CollectedExecution : CoverageObservation.TrustedProducer, imported.Observation);
         var composedPath = Path.Join(fixture.TempPath, "imported-composed");
         var composed = await CoverageFanIn.ComposeAsync(new CoverageComposeRequest(
             fixture.Policy, fixture.Repository, importedPath, [], composedPath));
@@ -313,7 +323,8 @@ public sealed class EvidenceCoverageFanInProducerTests
         Assert.Single(writer.WrittenArtifacts);
         using var delivered = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(artifactRoot, SlotPath)));
         Assert.Equal("succeeded", delivered.RootElement.GetProperty("outcome").GetString());
-        Assert.Equal("trustedProducer", delivered.RootElement.GetProperty("observation").GetString());
+        Assert.Equal(claimsObserved ? "collectedExecution" : "trustedProducer", delivered.RootElement.GetProperty("observation").GetString());
+        Assert.True(delivered.RootElement.GetProperty("primaryImported").GetBoolean());
         Assert.True(delivered.RootElement.GetProperty("accepted").GetBoolean());
         Assert.True(delivered.RootElement.GetProperty("verified").GetBoolean());
         var effects = delivered.RootElement.GetProperty("effects");

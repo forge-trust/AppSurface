@@ -97,6 +97,7 @@ public static class CoverageFanIn
             result.Diagnostics.Select(x => new CoverageDiagnostic(x.Code, x.Stage, x.Field, x.Recovery)).ToArray(),
             result.Accepted, result.Verified, result.PatchOutcome,
             result.Observation is null ? null : Enum.Parse<CoverageObservation>(result.Observation),
-            result.HistoricalReplay ? CoverageEvaluationIntent.HistoricalReplay : CoverageEvaluationIntent.CurrentTrustedRun);
+            result.HistoricalReplay ? CoverageEvaluationIntent.HistoricalReplay : CoverageEvaluationIntent.CurrentTrustedRun,
+            result.PrimaryImported);
     }
 }
