@@ -52,7 +52,7 @@ internal static class InstalledPackageProof
                 new XElement("fallbackPackageFolders", new XElement("clear"))));
             var toolConfigPath = Path.Join(output, "tool.nuget.config"); toolConfig.Save(toolConfigPath);
             var fixture = Path.Join(AppContext.BaseDirectory, "fixtures", "headless");
-            await File.WriteAllTextAsync(Path.Join(app, "Fixture.csproj"), (await File.ReadAllTextAsync(Path.Join(fixture, "Fixture.csproj"))).Replace("CANDIDATE_VERSION", version, StringComparison.Ordinal));
+            await File.WriteAllTextAsync(Path.Join(app, "Fixture.csproj"), (await File.ReadAllTextAsync(Path.Join(fixture, "Fixture.csproj.template"))).Replace("CANDIDATE_VERSION", version, StringComparison.Ordinal));
             File.Copy(Path.Join(fixture, "Program.cs"), Path.Join(app, "Program.cs"));
             File.Copy(Path.Join(AppContext.BaseDirectory, "examples", "CoverageFanInApiExample.cs"),
                 Path.Join(app, "CoverageFanInApiExample.cs"));

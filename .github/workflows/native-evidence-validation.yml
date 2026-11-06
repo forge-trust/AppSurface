@@ -113,6 +113,9 @@ jobs:
           name: native-evidence-${{ matrix.os }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/native-evidence-proof
-            ${{ runner.temp }}/native-coverage-library-proof
+            ${{ runner.temp }}/native-coverage-library-proof/proof.json
+            ${{ runner.temp }}/native-coverage-library-proof/*.log
+            ${{ runner.temp }}/native-coverage-library-proof/direct/runs/**
+            ${{ runner.temp }}/native-coverage-library-proof/published-proof/runs/**
           if-no-files-found: warn
           retention-days: 7
