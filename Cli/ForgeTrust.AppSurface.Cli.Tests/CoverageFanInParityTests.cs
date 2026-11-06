@@ -200,8 +200,6 @@ public sealed class CoverageFanInParityTests
     [Fact]
     public async Task LinkedOutputAncestorIsRejectedAndOutsideSentinelIsPreserved()
     {
-        if (OperatingSystem.IsWindows())
-            throw Xunit.Sdk.SkipException.ForSkip("Directory symlink creation is exercised in native Windows lanes.");
         using var fixture = await Fixture.CreateAsync();
         var outside = fixture.Temp.CreateDirectory("outside");
         var sentinel = Path.Join(outside, "sentinel.txt");

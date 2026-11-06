@@ -766,13 +766,11 @@ public sealed class CoverageFanInWorkflowTests
         internal CoverageVerifyRequest Verify() => new(Policy, Repository, Captured, [], Composed, Accepted);
         internal async Task<string> ConfigureFsmonitor()
         {
-            var windows = OperatingSystem.IsWindows();
-            var hook = windows ? "appsurface-test-fsmonitor.cmd" : "appsurface-test-fsmonitor";
-            File.WriteAllText(Path.Join(Repository, ".git", "hooks", hook), windows
-                ? "@echo off\r\necho ran > .git\\appsurface-fsmonitor-ran\r\nexit /b 0\r\n"
-                : "#!/bin/sh\nprintf ran > .git/appsurface-fsmonitor-ran\nprintf 'test-token\\0/\\0'\n");
-            await Command(Repository, "git", "config", "core.fsmonitor",
-                (windows ? "cmd /c " : "sh ") + ".git/hooks/" + hook);
+            const string hook = "appsurface-test-fsmonitor";
+            File.WriteAllText(Path.Join(Repository, ".git", "hooks", hook),
+                "#!/bin/sh\nprintf ran > .git/appsurface-fsmonitor-ran\nprintf 'test-token\\0/\\0'\n");
+            // Git evaluates the hook with its POSIX shell, including on Git for Windows.
+            await Command(Repository, "git", "config", "core.fsmonitor", ". .git/hooks/" + hook);
             await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all");
             return Path.Join(Repository, ".git", "appsurface-fsmonitor-ran");
         }
