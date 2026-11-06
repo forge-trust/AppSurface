@@ -2,6 +2,24 @@
 
 This sample is the concrete proof behind the RazorWire package README. It shows how returned Razor fragments, islands, and SSE fit into a normal ASP.NET Core MVC app without a separate client rendering stack.
 
+## Check publish output before full coverage
+
+From the repository root on Linux, with .NET 10, Bash, and GNU find installed, run:
+
+```bash
+./scripts/publish-preflight.sh && ./scripts/coverage-solution.sh
+```
+
+The preflight builds a repository-only MSBuild task, then restores and builds this sample's normal framework-dependent Release publish, including [Tailwind asset generation](../../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md). The first run may need NuGet and Tailwind downloads. It uses a fresh scratch output and removes it on exit. The preflight does not start the app or run coverage itself. Use the same checkout sequentially for publish and coverage; a separate output directory does not isolate their build intermediates. An ordinary `dotnet publish` does not run this opt-in check.
+
+| Diagnostic | What to do |
+| --- | --- |
+| `ASPUB001` | Two ordinary or static SDK copy destinations conflict. Change the item destination paths to be distinct even when compared without case; check the reported source items and both path spellings. |
+| `ASPUB002` | A published regular file has group/other write permission or setuid, setgid, or sticky bits. Inspect the source mode and build environment (including umask), fix the cause and publish again. The preflight never rewrites modes. |
+| `ASPUB003` | A required check could not complete. Check the SDK, GNU find, or the reported input/output error, then retry. |
+
+The path check uses the ordinary and static SDK copy lists before either writer copies a payload. Direct SDK transforms such as `web.config` are outside that path check; the permissions check walks the finished output without following symbolic links. These checks cover this sample invocation only. The existing coverage and final release checks are still required for their respective workflows.
+
 ## Start Here: Return Razor Fragments
 
 1. Run the application from the repository root:
