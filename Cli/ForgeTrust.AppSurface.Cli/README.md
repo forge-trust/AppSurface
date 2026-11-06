@@ -1157,7 +1157,7 @@ Options:
 - `--min-line`: Minimum line coverage percentage from `0` through `100`. Defaults to `0`.
 - `--min-branch`: Minimum branch coverage percentage from `0` through `100`. Defaults to `0`.
 - `--tolerance`: Grace margin from `0` through `100` subtracted from every configured overall and patch threshold before evaluation. Defaults to `0.5`.
-- `--diff-base`: Git ref or commit compared with `HEAD` for patch coverage. When set, the command runs `git diff --unified=0 --no-ext-diff --no-textconv --relative <base>...HEAD --` from the repository root. Git does not invoke configured external diff drivers or text converters, so patch line numbers refer to the committed source.
+- `--diff-base`: Git ref or commit compared with `HEAD` for patch coverage. When set, the command runs `git --no-pager diff --unified=0 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --relative <base>...HEAD --` from the repository root. It uses standard path prefixes and disables external diff drivers and text converters so the gate measures the committed source.
 - `--diff-file`: Unified diff file for patch coverage. Use this for CI systems that can download a pull request or compare diff without fetching full repository history.
 - `--diff-stdin`: Read unified diff text from stdin. Use this with pipes or redirected input; interactive stdin fails fast so local terminals do not appear hung.
 - `--diff-label`: Optional display label for the selected patch source in JSON, Markdown, and GitHub summaries.
@@ -1325,7 +1325,7 @@ For repositories with an existing coverage producer, replace the `coverage run` 
 Use `--diff-base origin/main` for local development or simple CI jobs that already fetched the base ref. Use `--diff-file` when CI already produced a unified diff artifact, and use `--diff-stdin` when another command streams unified diff text:
 
 ```bash
-git diff --unified=0 --no-ext-diff --relative origin/main...HEAD -- \
+git --no-pager diff --unified=0 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --relative origin/main...HEAD -- \
   | appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --diff-stdin --diff-label origin/main...HEAD --min-patch-line 95
 ```
 
