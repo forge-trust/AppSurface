@@ -124,7 +124,9 @@ jobs:
     name: Coverage security contracts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: [coverage-cli-candidate]
-    timeout-minutes: 10
+    # Leave time for the native suite, candidate installation, and evidence upload.
+    # The test command still uses a separate two-minute hang detector.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
