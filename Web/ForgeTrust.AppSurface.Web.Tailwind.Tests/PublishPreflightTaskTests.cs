@@ -25,7 +25,7 @@ public sealed class PublishPreflightTaskTests : IDisposable
     public void Paths_AllowsDistinctDestinationsAndSameSourceDuplicate()
     {
         var engine = new RecordingBuildEngine();
-        var task = CreateTask(engine, "paths");
+        var task = new AppSurfacePublishPreflightTask { BuildEngine = engine, Phase = "paths" };
         task.OrdinaryFiles = [Item("src/a.css", "wwwroot/a.css"), Item("src/a.css", "wwwroot/a.css")];
         task.StaticFiles = [Item("src/b.css", "wwwroot/b.css", "TargetPath")];
 
@@ -72,6 +72,30 @@ public sealed class PublishPreflightTaskTests : IDisposable
 
         Assert.False(task.Execute());
         AssertCode(engine, "ASPUB001");
+    }
+
+    [Fact]
+    public void Paths_ReportsRelativeSourcesAndRedactsExternalPathsAndControlCharacters()
+    {
+        var engine = new RecordingBuildEngine();
+        var repository = Path.Join(_root, "checkout");
+        var external = Path.Join(_root, "external", "sensitive-fixture.txt");
+        var task = CreateTask(engine, "paths");
+        task.RepositoryDirectory = repository;
+        task.ProjectDirectory = Path.Join(repository, "sample");
+        task.OrdinaryFiles =
+        [
+            Item(Path.Join(repository, "fixture-inputs", "first.txt"), "content/Badge\t1.txt"),
+            Item(external, "Content/badge\t1.txt")
+        ];
+
+        Assert.False(task.Execute());
+        var error = Assert.Single(engine.Errors);
+        Assert.Equal("ASPUB001", error.Code);
+        Assert.Contains("'content/Badge?1.txt' ('fixture-inputs/first.txt')", error.Message, StringComparison.Ordinal);
+        Assert.Contains("'Content/badge?1.txt' (SDK input outside the project)", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("sensitive-fixture.txt", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\t", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -158,6 +182,10 @@ public sealed class PublishPreflightTaskTests : IDisposable
 
     [UnixTheory]
     [InlineData("d\0755\0\0f\0888\0bad\0", "invalid mode")]
+    [InlineData("d\0755\0\0f\0/644\0bad\0", "invalid octal digit")]
+    [InlineData("d\0755\0\0f\0\0bad\0", "missing mode")]
+    [InlineData("d\0755\0\0f\000644\0bad\0", "oversized mode")]
+    [InlineData("d\0755\0\0f\0", "truncated mode")]
     [InlineData("d\0755\0\0f\0644\0", "incomplete record")]
     [InlineData("d\0755\0\0", "no files")]
     [InlineData("f\0755\0root\0f\0644\0asset\0", "missing root record")]
