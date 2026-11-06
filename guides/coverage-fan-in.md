@@ -31,7 +31,7 @@ Requests snapshot caller collections before mutation; subsequent caller edits do
 
 The four parser-registered commands are `appsurface coverage fan-in capture`, `compose`, `accept`, and `verify`. The `capture` command has a `--collect` selector for the fifth facade operation, collection-and-capture. Each takes `--request <file>`; writing commands require `--result <new-file>` in an existing safe directory. Add `--json` for exactly one bounded terminal document on stdout; progress and diagnostics use stderr. Verify's result destination is optional and only records adapter delivery; it does not authorize modification of evidence. Every requested result file must be fresh.
 
-Collection uses a strict-v2 request whose envelope has `operation: "collect"` and whose `request` is a complete `CoverageCollectRequest` (including policy, clean repository root, fresh capture and collection destinations, producer ID, and deadline). The exact parser invocation is:
+Collection uses a strict-v2 request whose envelope has `operation: "collect"` and whose `request` is a complete `CoverageCollectRequest` (including policy, clean repository root, fresh capture and collection destinations, producer ID, and deadline). Observed collection rebuilds before testing. Omit `noBuild` or set it to `false`; a true value is rejected before execution. Set `noRestore` only if you have already restored the inputs. The exact parser invocation is:
 
 ```sh
 "$APPSURFACE_CLI" coverage fan-in capture \

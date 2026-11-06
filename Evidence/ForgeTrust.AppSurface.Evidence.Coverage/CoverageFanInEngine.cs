@@ -36,6 +36,9 @@ internal static partial class CoverageFanInEngine
         try
         {
             ValidateRequest(operation, request);
+            if (operation == "collect" && request.NoBuild)
+                return state.Failure("Rejected", "ASCOV301", "noBuild",
+                    "Observed collection requires a rebuild; omit noBuild or set it to false.");
             deadline.Token.ThrowIfCancellationRequested();
             await VerifySourceAsync(request, deadline.Token).ConfigureAwait(false);
             if (operation == "collect") return await CollectAsync(request, writers, state, deadline.Token).ConfigureAwait(false);

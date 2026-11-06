@@ -9,6 +9,34 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageFanInNativeWorkflowTests
 {
+    [Fact]
+    public async Task CollectDoesNotCertifyOldBinariesForTheCurrentCommit()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.BuildAsync();
+        await fixture.AddFailingNativeTestAsync();
+        var policy = await fixture.PolicyAsync(useAllNative: true);
+        var request = new CoverageCollectRequest(policy, fixture.Repository, fixture.NativeCapture,
+            fixture.NativeCollection, "native", 180, SolutionPath: fixture.Solution, NoRestore: true, NoBuild: true);
+
+        var skippedBuild = await CoverageFanIn.CollectAndCaptureAsync(request);
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, skippedBuild.Outcome);
+        Assert.Equal("noBuild", Assert.Single(skippedBuild.Diagnostics).Field);
+        Assert.Null(skippedBuild.Observation);
+        Assert.False(Directory.Exists(fixture.NativeCollection));
+        Assert.False(Directory.Exists(fixture.NativeCapture));
+
+        var rebuilt = await CoverageFanIn.CollectAndCaptureAsync(request with { NoBuild = false });
+
+        Assert.Equal(CoverageOperationOutcome.Incomplete, rebuilt.Outcome);
+        Assert.Null(rebuilt.Observation);
+        Assert.False(Directory.Exists(fixture.NativeCapture));
+        using var timings = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(fixture.NativeCollection, "timings.json")));
+        Assert.Contains(timings.RootElement.GetProperty("projects").EnumerateArray(),
+            project => project.GetProperty("exitCode").GetInt32() != 0);
+    }
+
     [Theory]
     [InlineData("foreign-platform")]
     [InlineData("populated-collection")]
@@ -257,6 +285,9 @@ public sealed class CoverageFanInNativeWorkflowTests
                     useAllNative ? TestProjects : ["Consumer.Alpha.Tests/Consumer.Alpha.Tests.csproj"])],
                 new CoverageGatePolicy(CoverageGateMode.AggregateOnly));
         }
+
+        internal Task<string> BuildAsync() =>
+            Command(Repository, "dotnet", "build", "Consumer.slnx", "--configuration", "Release", "--no-restore");
 
         internal async Task AddFailingNativeTestAsync()
         {

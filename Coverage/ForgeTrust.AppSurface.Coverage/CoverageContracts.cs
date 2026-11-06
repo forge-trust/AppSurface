@@ -94,6 +94,8 @@ public sealed record CoverageCaptureRequest(CoverageFanInPolicy Policy, string R
     CoverageOutputMode OutputMode = CoverageOutputMode.Fresh,
     IReadOnlyDictionary<string, string>? RawCoveragePaths = null);
 /// <summary>Collect the complete explicit inventory or declared native filter through the existing supervised engine.</summary>
+/// <remarks>Observed collection rebuilds before testing. <c>NoBuild</c> must be false.
+/// <c>NoRestore</c> may be true when restore has already completed; this does not skip the rebuild.</remarks>
 public sealed record CoverageCollectRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string OutputDirectory, string CollectionDirectory, string ProducerId, int DeadlineSeconds,
     string? SolutionPath = null, int Parallelism = 1, bool NoRestore = false, bool NoBuild = false);

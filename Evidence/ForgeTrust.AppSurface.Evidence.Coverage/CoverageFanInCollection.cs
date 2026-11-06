@@ -21,13 +21,13 @@ internal static partial class CoverageFanInEngine
             ? inventory.EnumerateArray().Select(x => x.GetString()!).ToArray() : r.Expected.TestProjects;
         var filter = producer?.GetProperty("filter").GetString();
         var request = new CoverageRunRequest(r.SolutionPath, projects, [], collection, r.Expected.Configuration,
-            r.Parallelism, CoverageRunScheduleMode.InputOrder, null, [], r.NoRestore, !r.NoBuild, r.NoBuild,
+            r.Parallelism, CoverageRunScheduleMode.InputOrder, null, [], r.NoRestore, Build: true, NoBuild: false,
             r.Expected.Instrumentation.GetProperty("include").GetString(), r.Expected.Instrumentation.GetProperty("exclude").GetString()!,
             false, false, [], ["console;verbosity=normal"], filter is null ? [] : ["--filter", filter],
             CoverageRunTestResultFormat.Junit, false, true, "normal", TimeSpan.FromSeconds(30),
             TimeSpan.FromMinutes(5), CoverageRunWatchdogMode.Fail, CoverageRunDriver.Collector, false,
             new(TimeProvider.System, TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(r.DeadlineSeconds)))
-        { ArtifactRetention = "full", WorkingDirectory = Full(r.RepositoryRoot) };
+        { ArtifactRetention = "full", WorkingDirectory = Full(r.RepositoryRoot), RequireRebuild = true };
         CoverageRunResult result;
         await writers.Output.WriteLineAsync("Coverage collection started for the declared inventory.").ConfigureAwait(false);
         // Child logs can contain arbitrary test output and host paths. Keep them in the
