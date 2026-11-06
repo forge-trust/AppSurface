@@ -40,7 +40,10 @@ internal static class TailwindStderrClassifier
         return TailwindOutputLevel.Error;
     }
 
-    /// <summary>Removes only complete ESC [ numeric-parameter m SGR sequences from a classification copy.</summary>
+    /// <summary>
+    /// Removes only complete ESC [ SGR parameters m sequences from a classification copy.
+    /// Parameters may be empty or contain ASCII digits, semicolons and colons.
+    /// </summary>
     private static string StripAnsiSgr(string line)
     {
         var firstEscape = line.IndexOf('\u001b');

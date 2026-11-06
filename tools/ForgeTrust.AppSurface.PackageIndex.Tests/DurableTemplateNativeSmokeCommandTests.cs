@@ -289,8 +289,8 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         internal NativePostgreSqlToolIdentity? ReceivedIdentity { get; set; }
         internal List<int> CleanupBudgets { get; } = [];
 
-        private static string TemporaryRoot => Path.GetFullPath(OperatingSystem.IsLinux() ? "/tmp" :
-            OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath());
+        private static string TemporaryRoot => Path.TrimEndingDirectorySeparator(Path.GetFullPath(
+            OperatingSystem.IsLinux() ? "/tmp" : OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath()));
 
         internal async ValueTask DisposeClusterAsync(DurableTemplateNativePostgreSql cluster, int remainingMilliseconds)
         {

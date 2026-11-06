@@ -76,6 +76,8 @@ ownedMemo.Dispose();
 
 The host owns disposal of an instance supplied to dependency injection this way. Consumers with a custom `IMemo` implementation retain that implementation's lifecycle contract.
 
+### General notes
+
 - The package builds on `Microsoft.Extensions.Caching.Memory`, so it works well for in-process application caching.
 - `CachePolicy.AbsoluteWithStaleWhileRevalidate` returns the stale value immediately during the stale window and starts one background refresh for that cache key. If the background refresh fails, the stale value remains available until the stale window ends.
 - Stale-while-revalidate is supported for absolute-expiration policies. Sliding expiration does not have a stable revalidation moment, so use `CachePolicy.AbsoluteWithStaleWhileRevalidate(...)` or `CachePolicy.Absolute(...).WithStaleWhileRevalidate(...)`.

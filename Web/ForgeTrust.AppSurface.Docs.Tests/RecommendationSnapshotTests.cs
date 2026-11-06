@@ -15,7 +15,7 @@ public sealed class RecommendationSnapshotTests
 {
     private sealed class CacheClock : TimeProvider, ISystemClock
     {
-        private long _ticks = DateTimeOffset.UtcNow.Ticks;
+        private long _ticks = DateTimeOffset.UnixEpoch.Ticks;
         public DateTimeOffset UtcNow => GetUtcNow();
         public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
         public void Advance(TimeSpan duration)
@@ -319,6 +319,7 @@ public sealed class RecommendationSnapshotTests
         Assert.NotNull(first);
         clock.Advance(TimeSpan.FromMilliseconds(expireBeforeRefresh ? 2200 : 1100));
         var second = aggregator.GetDocDetailsAsync("source");
+        InvalidOperationException? cleanupFailure = null;
         try
         {
             await refreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -359,9 +360,14 @@ public sealed class RecommendationSnapshotTests
         {
             refreshRelease.TrySetResult([Page("Source", "source.md", "guide")]);
             try { await second.WaitAsync(TimeSpan.FromSeconds(5)); }
-            catch (InvalidOperationException) when (expireBeforeRefresh) { }
+            catch (InvalidOperationException exception) when (expireBeforeRefresh)
+            {
+                cleanupFailure = exception;
+            }
             finally { await memo.DrainBackgroundRefreshesAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
         }
+        if (expireBeforeRefresh)
+            Assert.Equal("Controlled snapshot failure", Assert.IsType<InvalidOperationException>(cleanupFailure).Message);
     }
 
     [Theory]
