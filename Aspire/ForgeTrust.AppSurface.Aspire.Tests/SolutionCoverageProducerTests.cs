@@ -56,7 +56,10 @@ public sealed class SolutionCoverageProducerTests
             Assert.Contains("--no-build", command.Arguments);
             Assert.Contains("--no-restore", command.Arguments);
         });
-        Assert.Equal(8, run.Arguments.Count(argument => argument == "--exclusive-test-project"));
+        var exclusiveProjects = run.Arguments.Zip(run.Arguments.Skip(1))
+            .Where(pair => pair.First == "--exclusive-test-project").Select(pair => pair.Second).ToArray();
+        Assert.Equal(9, exclusiveProjects.Length);
+        Assert.Contains("ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj", exclusiveProjects);
         Assert.Contains("--parallelism", run.Arguments);
         Assert.Contains("--require-non-sandbox", run.Arguments);
         Assert.Equal("proof/aggregate-gate.json", Assert.Single(fixture.Writer.WrittenArtifacts, x => x.LogicalName == "aggregate-gate").RelativePath);

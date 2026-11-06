@@ -79,6 +79,7 @@ dotnet_run_args+=(
   --exclusive-test-project ForgeTrust.AppSurface.Aspire.Tests.csproj
   --exclusive-test-project AuthAspNetCoreDevAuthExample.Tests.csproj
   --exclusive-test-project AuthWebRazorWireProofExample.Tests.csproj
+  --exclusive-test-project ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj
   --exclusive-test-project ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj
   --exclusive-test-project ForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj
   --exclusive-test-project ForgeTrust.RazorWire.Cli.Tests.csproj

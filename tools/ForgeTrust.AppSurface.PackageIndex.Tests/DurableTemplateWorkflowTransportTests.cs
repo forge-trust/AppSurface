@@ -19,23 +19,29 @@ public sealed class DurableTemplateWorkflowTransportTests
     private readonly string _repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
 
     [Fact]
-    public void PackageDiagnosticsUpload_KeepDurableReceiptAtItsBoundedPath()
+    public void PackageDiagnosticsUpload_KeepDurableAndCloudTasksProofsAtTheirBoundedPaths()
     {
-        var expectedPaths = new Dictionary<string, string>(StringComparer.Ordinal)
+        var workflows = new (string Workflow, string Job, string Artifacts)[]
         {
-            ["package-artifacts.yml"] = "${{ runner.temp }}/package-artifacts/durable-template-consumer-proof.json",
-            ["package-gate.yml"] = "${{ runner.temp }}/package-evidence-*/package-checks/artifacts/durable-template-consumer-proof.json"
+            ("package-artifacts.yml", "package-artifacts", "${{ runner.temp }}/package-artifacts"),
+            ("package-gate.yml", "package-gate", "${{ runner.temp }}/package-evidence-*/package-checks/artifacts"),
+            ("nuget-prerelease-publish.yml", "pack-and-verify", "${{ runner.temp }}/package-artifacts"),
+            ("nuget-stable-publish.yml", "pack-and-verify", "${{ runner.temp }}/package-artifacts"),
         };
 
-        foreach (var (workflowName, expectedPath) in expectedPaths)
+        foreach (var (workflowName, jobName, artifacts) in workflows)
         {
             var workflow = ReadWorkflow(WorkflowPath(workflowName));
-            var jobName = workflowName == "package-artifacts.yml" ? "package-artifacts" : "package-gate";
             var step = FindStep(workflow, jobName, "Upload package validation diagnostics");
 
             var paths = ReadPathLines(step);
-            var durablePaths = paths.Where(path => path.Contains("durable-template", StringComparison.Ordinal)).ToArray();
-            Assert.Equal(new[] { expectedPath }, durablePaths);
+            if (jobName != "pack-and-verify")
+            {
+                Assert.Equal([artifacts + "/durable-template-consumer-proof.json"],
+                    paths.Where(path => path.Contains("durable-template", StringComparison.Ordinal)));
+            }
+            Assert.Equal([artifacts + "/cloudtasks-package-consumer-proof.md"],
+                paths.Where(path => path.Contains("cloudtasks", StringComparison.Ordinal)));
 
             if (workflowName == "package-gate.yml")
             {

@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
+          fetch-depth: 0 # Packed Cloud Tasks isolation proof archives the pinned baseline commit.
           persist-credentials: false
 
       - name: Setup .NET SDK
@@ -102,6 +102,7 @@ jobs:
             ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/package-validation-report.md
             ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/durable-template-consumer-proof.json
             ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/tailwind-package-consumer-proof.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/cloudtasks-package-consumer-proof.md
             ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof.md
             ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof.evidence.json
             ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/NuGet.tool.config

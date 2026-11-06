@@ -100,7 +100,9 @@ New exceptions deserve the same review as test exemptions. Packaged README chang
 documentation verification; the root README and explicitly listed authored guides are exempt.
 
 `solution-coverage` invokes the existing collector over every solution test project, then reuses the built
-CLI for its gates. It verifies the complete
+CLI for its gates. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md)
+exclusively, matching the [compatibility coverage command](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) so their
+timing and transport fixtures do not compete with another test project. It verifies the complete
 successful timing inventory, and requires 95% line / 85% branch coverage with 0.5-point tolerance. Applicable
 patch gates retain 95/85 and Codecov mode. The [CLI patch gate](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
 documents that a patch metric with no measurable changed lines or branches reports 100%. Native fan-in
@@ -128,6 +130,12 @@ the old duplicate solution restore/build and reuses the PackageIndex driver afte
 The driver's initial implicit restore explicitly selects [NuGet.package-gate.config](https://github.com/forge-trust/AppSurface/blob/main/NuGet.package-gate.config); the package workflow
 also restores its solution with that source policy. Installed-consumer restores retain their own mapped
 feeds rather than inheriting a global restore override.
+When the package plan includes [Cloud Tasks](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md),
+the installed consumer check also compares the neutral package closure with a committed source snapshot.
+Commit edits to that closure or its shared build inputs before collecting package evidence; the check
+rejects differences between the committed baseline and those working-tree inputs.
+The [package gate workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml)
+retains full Git history for this proof and uploads its bounded Markdown report alongside the Durable template receipt.
 It verifies the archive inventory and SHA-512 hashes before
 closing its assertions, and retains the manifest, report and command transcript. Package consumer
 proofs require their normal SDK, pnpm/Node and applicable platform prerequisites; missing capabilities

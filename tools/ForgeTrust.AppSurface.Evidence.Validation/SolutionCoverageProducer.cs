@@ -16,6 +16,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     [
         "ForgeTrust.AppSurface.Config.Tests.csproj", "ForgeTrust.AppSurface.Aspire.Tests.csproj",
         "AuthAspNetCoreDevAuthExample.Tests.csproj", "AuthWebRazorWireProofExample.Tests.csproj",
+        "ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj",
         "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj", "ForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj",
         "ForgeTrust.RazorWire.Cli.Tests.csproj", "ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
     ];
