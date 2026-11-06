@@ -88,6 +88,71 @@ public sealed class DurableTemplateFirstWorkDiagnosticTests
     }
 
     [Theory]
+    [InlineData("<RequireDockerAsync>d__49.MoveNext", "docker-prerequisite")]
+    [InlineData("<AcquirePinnedImageAsync>d__50.MoveNext", "pinned-image-acquisition")]
+    [InlineData("<StartDockerAsync>d__31.MoveNext", "owned-fixture-setup")]
+    [InlineData("ExceptionDispatchInfo.Throw-><RequireDockerAsync>d__0.MoveNext->TaskAwaiter.ThrowForNonSuccess", "docker-prerequisite")]
+    [InlineData("<RequireDockerAsync>d__49.MoveNext-><RequireDockerAsync>d__49.MoveNext", "docker-prerequisite")]
+    [InlineData("<RequireDockerAsync>d__49.MoveNext-><StartDockerAsync>d__31.MoveNext", "docker-prerequisite")]
+    [InlineData("<StartDockerAsync>d__31.MoveNext-><AcquirePinnedImageAsync>d__50.MoveNext", "pinned-image-acquisition")]
+    public void Setup_failure_serialization_projects_a_closed_operation_without_retaining_frames(string location, string expected)
+    {
+        var output = Marker(phase: "postgresql-fixture-setup", code: "InvalidOperationException",
+            location: location, cause: Secret, retry: Secret);
+        var result = Assert.IsType<DurableTemplateFirstWorkDiagnostic>(DurableTemplateFirstWorkDiagnostic.Read(output));
+        var json = JsonSerializer.Serialize(result);
+        using var document = JsonDocument.Parse(json);
+
+        Assert.True(document.RootElement.TryGetProperty("SetupOperation", out var operation));
+        Assert.Equal(expected, operation.GetString());
+        Assert.DoesNotContain(location, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(Secret, json, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("<RequireDockerAsync>d__.MoveNext")]
+    [InlineData("<RequireDockerAsync>d__1x.MoveNext")]
+    [InlineData("<RequireDockerAsync>d__１.MoveNext")]
+    [InlineData("Prefix<RequireDockerAsync>d__49.MoveNext")]
+    [InlineData("<RequireDockerAsync>d__49.MoveNextSuffix")]
+    [InlineData("<UnreviewedAsync>d__49.MoveNext")]
+    [InlineData("<RequireDockerAsync>d__49.MoveNext-><AcquirePinnedImageAsync>d__50.MoveNext")]
+    [InlineData("a->b->c->d-><RequireDockerAsync>d__49.MoveNext")]
+    [InlineData(Secret)]
+    public void Unknown_ambiguous_or_unbounded_setup_locations_are_not_retained(string location)
+    {
+        var result = Assert.IsType<DurableTemplateFirstWorkDiagnostic>(DurableTemplateFirstWorkDiagnostic.Read(
+            Marker(phase: "postgresql-fixture-setup", location: location)));
+        var json = JsonSerializer.Serialize(result);
+        using var document = JsonDocument.Parse(json);
+
+        Assert.False(document.RootElement.TryGetProperty("SetupOperation", out _));
+        Assert.Equal(3, document.RootElement.EnumerateObject().Count());
+        Assert.DoesNotContain(location, json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_setup_frame_cannot_label_a_different_failure_phase()
+    {
+        var result = Assert.IsType<DurableTemplateFirstWorkDiagnostic>(DurableTemplateFirstWorkDiagnostic.Read(
+            Marker(location: "<RequireDockerAsync>d__49.MoveNext")));
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(result));
+        Assert.False(document.RootElement.TryGetProperty("SetupOperation", out _));
+    }
+
+    [Fact]
+    public void An_oversized_frame_withholds_the_label_even_when_another_frame_is_known()
+    {
+        var location = new string('x', 257) + "-><RequireDockerAsync>d__49.MoveNext";
+        var result = Assert.IsType<DurableTemplateFirstWorkDiagnostic>(DurableTemplateFirstWorkDiagnostic.Read(
+            Marker(phase: "postgresql-fixture-setup", location: location)));
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(result));
+        Assert.False(document.RootElement.TryGetProperty("SetupOperation", out _));
+    }
+
+    [Theory]
     [InlineData("timeoutException")]
     [InlineData("System.TimeoutException")]
     [InlineData("TimeoutException-with-private-data")]
