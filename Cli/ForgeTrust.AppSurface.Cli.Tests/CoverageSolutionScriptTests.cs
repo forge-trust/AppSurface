@@ -61,6 +61,29 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("steps.solution-coverage.outcome == 'success'", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void BothCoverageLanesRequireAnIsolatedFeedAndCheckTheInstalledArchiveBeforeExecution()
+    {
+        var yaml = new YamlStream();
+        using var reader = new StringReader(ReadWorkflow());
+        yaml.Load(reader);
+        var jobs = (YamlMappingNode)((YamlMappingNode)yaml.Documents.Single().RootNode)["jobs"];
+        foreach (var name in new[] { "build", "coverage-security-platform" })
+        {
+            var job = (YamlMappingNode)jobs[name];
+            var steps = ((YamlSequenceNode)job["steps"]).OfType<YamlMappingNode>();
+            var install = Assert.Single(steps, step => step.Children.TryGetValue("name", out var title)
+                && title is YamlScalarNode { Value: "Verify and install candidate CLI" });
+            var command = Assert.IsType<YamlScalarNode>(install["run"]).Value!;
+            Assert.DoesNotContain("--add-source", command, StringComparison.Ordinal);
+            Assert.Contains("<packageSources><clear />", command, StringComparison.Ordinal);
+            Assert.Contains("--configfile $toolConfig", command, StringComparison.Ordinal);
+            var check = command.IndexOf("Get-FileHash -LiteralPath $installedArchives[0].FullName", StringComparison.Ordinal);
+            var publish = command.IndexOf("COVERAGE_CLI_PATH=$command", StringComparison.Ordinal);
+            Assert.True(check >= 0 && publish > check);
+        }
+    }
+
     [Theory]
     [MemberData(nameof(RetiredWrapperInputs))]
     public async Task Script_ShouldRejectRetiredInputsBeforeStartingDotnetOrCreatingOutput(

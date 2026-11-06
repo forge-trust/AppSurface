@@ -33,6 +33,8 @@ internal sealed record CoverageFanInEngineRequest(CoverageFanInExpected Expected
     internal ICoverageRunProcessRunner? IdentityRunner { get; init; }
     /// <summary>Exact native project-to-original-report mapping, with complete successful timings.</summary>
     internal IReadOnlyDictionary<string, string>? RawCoveragePaths { get; init; }
+    /// <summary>Optional lowercase SHA-256 that the exact patch used by acceptance must match.</summary>
+    internal string? ExpectedPatchSha256 { get; init; }
 }
 /// <summary>Private safe terminal diagnostic, without dependency exception data.</summary>
 internal sealed record CoverageFanInEngineDiagnostic(string Code, string Stage, string Field, string Recovery);

@@ -47,7 +47,7 @@ public static class EvidenceCoverageFanInProducerExample
             requirePatch: true,
             requireObservedPrimary: true);
 
-    // Register only after resolving a plan whose selected profile contains Declaration.
+    // Resolve with the exact patch SHA-256 and a profile containing Declaration before registration.
     public static EvidenceHostBootstrap CreateHost(
         EvidencePlan resolvedPlan,
         CoverageAcceptRequest currentRunRequest) =>
@@ -57,4 +57,4 @@ public static class EvidenceCoverageFanInProducerExample
 }
 ```
 
-The patch-required adapter accepts only the current trusted run, an observed primary collection, completed independent acceptance, and successful result delivery. A trusted-producer primary or historical replay leaves the obligation unsatisfied. Keep the declaration's thresholds and patch mode aligned with the accepted request policy.
+The patch-required adapter accepts only the exact patch bound in the [resolved plan](../../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#minimal-use), the current trusted run, an observed primary collection, completed independent acceptance, and successful result delivery. A path-only plan, a trusted-producer primary, or historical replay leaves the obligation unsatisfied. Keep the declaration's thresholds and patch mode aligned with the accepted request policy.

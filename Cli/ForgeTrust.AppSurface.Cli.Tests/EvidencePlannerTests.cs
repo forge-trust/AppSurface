@@ -427,8 +427,16 @@ public sealed class EvidencePlannerTests
         Assert.Contains("docs/New.md", snapshot.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("src/Replaced.cs", snapshot.Text, StringComparison.Ordinal);
         Assert.Equal("docs/New.md", Assert.Single(resolution.Plan.ChangedPaths).Path);
+        Assert.Equal(snapshot.Sha256.ToLowerInvariant(), resolution.Plan.PatchSha256);
+        var boundOutput = Path.Join(directory.Path, "patch-output");
+        await workflow.WritePlanAsync(resolution.Plan, boundOutput, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(resolution.Plan, []), boundOutput, CancellationToken.None);
+        var verifiedPatch = await workflow.VerifyAsync(Path.Join(boundOutput, "evidence-plan.json"),
+            Path.Join(boundOutput, "evidence-manifest.json"), CancellationToken.None);
+        Assert.Equal(resolution.Plan.PlanDigest, verifiedPatch.Plan.PlanDigest);
 
         var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
+        Assert.Null(plan.PatchSha256);
         var output = Path.Join(directory.Path, "output");
         await workflow.WritePlanAsync(plan, output, CancellationToken.None);
         await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, []), output, CancellationToken.None);
@@ -439,6 +447,25 @@ public sealed class EvidencePlannerTests
 
         var missingEvidenceException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "missing-plan.json"), Path.Join(output, "missing-manifest.json"), CancellationToken.None));
         Assert.Contains("ASEVD208", missingEvidenceException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExactPatchIdentityChangesThePlanWithoutChangingPathSelection()
+    {
+        var planner = new EvidencePlanner();
+        var policy = CreatePolicy();
+        NormalizedDiffPath[] paths = [new("src/Feature.cs")];
+        var pathOnly = planner.Resolve(policy, paths);
+        var first = planner.ResolvePatch(policy, "diff --git a/src/Feature.cs b/src/Feature.cs\n--- a/src/Feature.cs\n+++ b/src/Feature.cs\n@@ -1 +1 @@\n-a\n+b\n"u8.ToArray());
+        var second = planner.ResolvePatch(policy, "diff --git a/src/Feature.cs b/src/Feature.cs\n--- a/src/Feature.cs\n+++ b/src/Feature.cs\n@@ -1 +1 @@\n-a\n+c\n"u8.ToArray());
+
+        Assert.Equal(pathOnly.DiffDigest, first.DiffDigest);
+        Assert.Equal(first.DiffDigest, second.DiffDigest);
+        Assert.NotEqual(first.PatchSha256, second.PatchSha256);
+        Assert.NotEqual(first.PlanDigest, second.PlanDigest);
+        Assert.True(EvidenceManifestBuilder.Verify(first, EvidenceManifestBuilder.Build(first, [])));
+        Assert.False(EvidenceManifestBuilder.Verify(first with { PatchSha256 = second.PatchSha256 }, EvidenceManifestBuilder.Build(first, [])));
+        Assert.Throws<EvidencePlanningException>(() => planner.ResolvePatch(policy, ReadOnlyMemory<byte>.Empty));
     }
 
     [Fact]

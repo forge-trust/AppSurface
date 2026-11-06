@@ -67,6 +67,9 @@ internal static partial class CoverageFanInEngine
         var patchRequired = r.Expected.Gate.GetProperty("mode").GetString() == "aggregateAndPatch";
         var diff = patchRequired ? await GitDiffReader.ReadDiffAsync(Full(r.RepositoryRoot),
             r.Expected.Gate.GetProperty("diffBase").GetString()!, token).ConfigureAwait(false) : null;
+        var diffHash = diff is null ? null : CoverageFanInIO.Hash(Encoding.UTF8.GetBytes(diff));
+        if (r.ExpectedPatchSha256 is { } expected && !string.Equals(diffHash, expected, StringComparison.Ordinal))
+            throw new InvalidDataException("Coverage patch differs from the planned patch.");
         var primary = await GateAsync(r, composed.Primary, PrimaryName, patch: patchRequired,
             requireAggregate: true, diff, token).ConfigureAwait(false);
         var patch = patchRequired ? await GateAsync(r, composed.Coverage, CoverageName, patch: true,
@@ -114,7 +117,7 @@ internal static partial class CoverageFanInEngine
                 patchOutcome = PatchOutcome(r),
                 primaryGateSha256 = CoverageFanInIO.Hash(primaryGate),
                 composedGateSha256 = patchRequired ? CoverageFanInIO.Hash(composedGate) : null,
-                diffSha256 = diff is null ? null : CoverageFanInIO.Hash(Encoding.UTF8.GetBytes(diff))
+                diffSha256 = diffHash
             })
         };
         if (patchRequired)

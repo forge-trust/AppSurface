@@ -189,9 +189,23 @@ jobs:
             throw "Candidate CLI package hash does not match its same-run manifest."
           }
           $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
+          $toolConfig = Join-Path $feed "candidate.nuget.config"
+          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
+          @"
+          <configuration>
+            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
+            <fallbackPackageFolders><clear /></fallbackPackageFolders>
+          </configuration>
+          "@ | Set-Content -LiteralPath $toolConfig
           dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
-            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --add-source $feed
+            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
           if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
+          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
+            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
+          if ($installedArchives.Count -ne 1 -or
+              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
+            throw "Installed CLI archive does not match the same-run candidate."
+          }
           $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
           if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
           Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
@@ -654,9 +668,23 @@ jobs:
             throw "Candidate CLI package hash does not match its same-run manifest."
           }
           $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
+          $toolConfig = Join-Path $feed "candidate.nuget.config"
+          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
+          @"
+          <configuration>
+            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
+            <fallbackPackageFolders><clear /></fallbackPackageFolders>
+          </configuration>
+          "@ | Set-Content -LiteralPath $toolConfig
           dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
-            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --add-source $feed
+            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
           if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
+          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
+            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
+          if ($installedArchives.Count -ne 1 -or
+              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
+            throw "Installed CLI archive does not match the same-run candidate."
+          }
           $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
           if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
           Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"

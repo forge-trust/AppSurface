@@ -120,11 +120,30 @@ public sealed class EvidenceCoverageFanInProducerTests
         var producer = new EvidenceCoverageFanInProducer(ProducerId, request, AssertionId, SlotId);
         var writer = new EvidenceArtifactWriter(declaration, Path.Join(fixture.TempPath, "evidence-artifacts"));
 
-        var result = await producer.ProduceAsync(Context(Plan(declaration), declaration, writer), CancellationToken.None);
+        var result = await producer.ProduceAsync(Context(Plan(declaration, request.ExpectedPatchSha256), declaration, writer), CancellationToken.None);
 
         AssertNoAssertion(result, EvidenceProducerOutcome.Invalid);
         Assert.False(Directory.Exists(fixture.Accepted));
         Assert.Empty(writer.WrittenArtifacts);
+    }
+
+    [Theory]
+    [InlineData(null, EvidenceProducerOutcome.Invalid, false)]
+    [InlineData("other-patch", EvidenceProducerOutcome.Failed, true)]
+    public async Task PatchObligationRequiresThePlannedPatch(string? planningInput, EvidenceProducerOutcome outcome, bool delivered)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.PrepareInputsAsync();
+        var request = fixture.AcceptRequest() with { ExpectedPatchSha256 = null };
+        var (producer, declaration, _) = CreateProducer(request);
+        var writer = new EvidenceArtifactWriter(declaration, Path.Join(fixture.TempPath, "evidence-artifacts"));
+        var plan = Plan(declaration, planningInput is null ? null : new string('f', 64));
+
+        var result = await producer.ProduceAsync(Context(plan, declaration, writer), CancellationToken.None);
+
+        AssertNoAssertion(result, outcome);
+        Assert.False(Directory.Exists(fixture.Accepted));
+        Assert.Equal(delivered ? 1 : 0, writer.WrittenArtifacts.Count);
     }
 
     [Fact]
@@ -443,7 +462,7 @@ public sealed class EvidenceCoverageFanInProducerTests
             {
                 CoverageGate = new EvidenceCoverageGateRequirements(95, 85, PatchLineMode: "codecov", TolerancePercent: 0.5m)
             };
-        return (producer, declaration, Plan(declaration));
+        return (producer, declaration, Plan(declaration, request.ExpectedPatchSha256));
     }
 
     private static EvidenceProducerDeclaration Declaration() => new(
@@ -456,7 +475,7 @@ public sealed class EvidenceCoverageFanInProducerTests
         300,
         new EvidenceCoverageGateRequirements(95, 85, 95, 85, "codecov", 0.5m));
 
-    private static EvidencePlan Plan(EvidenceProducerDeclaration declaration) => new(
+    private static EvidencePlan Plan(EvidenceProducerDeclaration declaration, string? patchSha256 = null) => new EvidencePlan(
         "1",
         "coverage-policy",
         new string('a', 64),
@@ -465,7 +484,8 @@ public sealed class EvidenceCoverageFanInProducerTests
             [new EvidenceObligation("coverage-obligation", "coverage", "Verify current coverage", [ProducerId], AssertionId)]),
         [],
         [],
-        new string('c', 64));
+        new string('c', 64))
+    { PatchSha256 = patchSha256 };
 
     private static void AssertNoAssertion(EvidenceProducerResult result, EvidenceProducerOutcome outcome)
     {
@@ -484,7 +504,7 @@ public sealed class EvidenceCoverageFanInProducerTests
         private bool _environmentCaptured;
 
         private Fixture(string tempPath, string baselineCommit, string commit, string tree, string sdk,
-            CoverageFanInPolicy policy)
+            CoverageFanInPolicy policy, string? patchSha256)
         {
             TempPath = tempPath;
             BaselineCommit = baselineCommit;
@@ -492,6 +512,7 @@ public sealed class EvidenceCoverageFanInProducerTests
             Tree = tree;
             Sdk = sdk;
             Policy = policy;
+            PatchSha256 = patchSha256;
         }
 
         internal string TempPath { get; }
@@ -506,6 +527,7 @@ public sealed class EvidenceCoverageFanInProducerTests
         internal string Tree { get; }
         internal string Sdk { get; }
         internal CoverageFanInPolicy Policy { get; }
+        internal string? PatchSha256 { get; }
         internal IReadOnlyList<string> SupplementaryCaptures { get; private set; } = [];
 
         internal static async Task<Fixture> CreateAsync(bool requirePatch = true,
@@ -543,7 +565,10 @@ public sealed class EvidenceCoverageFanInProducerTests
                     ["checks/Verification.csproj"],
                     supplements ?? [],
                     gate);
-                return new Fixture(tempPath, baselineCommit, commit, tree, sdk, policy)
+                var patchSha256 = requirePatch ? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(await CommandAsync(repository, "git", false, "--no-pager", "diff", "--unified=0",
+                        "--no-ext-diff", "--no-textconv", "--relative", baselineCommit + "...HEAD", "--")))) : null;
+                return new Fixture(tempPath, baselineCommit, commit, tree, sdk, policy, patchSha256)
                 {
                     _priorArtifactHome = InitialArtifactHome,
                     _priorPath = InitialPath,
@@ -583,7 +608,8 @@ public sealed class EvidenceCoverageFanInProducerTests
             Assert.Equal(CoverageOperationOutcome.Succeeded, compose.Outcome);
         }
 
-        internal CoverageAcceptRequest AcceptRequest() => new(Policy, Repository, Captured, SupplementaryCaptures, Composed, Accepted);
+        internal CoverageAcceptRequest AcceptRequest() => new(Policy, Repository, Captured, SupplementaryCaptures, Composed, Accepted)
+        { ExpectedPatchSha256 = PatchSha256 };
 
         public void Dispose()
         {
@@ -620,7 +646,10 @@ public sealed class EvidenceCoverageFanInProducerTests
             File.WriteAllText(path, contents);
         }
 
-        private static async Task<string> CommandAsync(string workingDirectory, string executable, params string[] arguments)
+        private static Task<string> CommandAsync(string workingDirectory, string executable, params string[] arguments)
+            => CommandAsync(workingDirectory, executable, true, arguments);
+
+        private static async Task<string> CommandAsync(string workingDirectory, string executable, bool trim, params string[] arguments)
         {
             using var process = new Process
             {
@@ -639,7 +668,8 @@ public sealed class EvidenceCoverageFanInProducerTests
             await process.WaitForExitAsync();
             var error = await stderr;
             Assert.True(process.ExitCode == 0, error);
-            return (await stdout).Trim();
+            var output = await stdout;
+            return trim ? output.Trim() : output;
         }
     }
 }

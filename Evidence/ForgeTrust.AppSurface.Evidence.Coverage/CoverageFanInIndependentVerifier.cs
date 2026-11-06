@@ -218,9 +218,9 @@ internal static class CoverageFanInIndependentVerifier
         CheckDiffSource(Property(report, "patchDiffSource"), policy.DiffBase!, diffText!);
         var calculated = CalculatePatch(coverage, patch, policy.PatchLineMode);
         CheckPatchMetric(Property(report, "patchLine"), patch.LineChanged, calculated.LineCovered, calculated.LineMeasurable,
-            policy.DiffBase!, effective, "patchLine");
+            policy.DiffBase!, effective, "patchLine", requireMeasurable: true);
         CheckPatchMetric(Property(report, "patchBranch"), patch.LineChanged, calculated.BranchCovered, calculated.BranchMeasurable,
-            policy.DiffBase!, effective, "patchBranch");
+            policy.DiffBase!, effective, "patchBranch", requireMeasurable: false);
     }
 
     private static PatchMetrics CalculatePatch(XDocument coverage, PatchFacts patch, string lineMode)
@@ -320,11 +320,11 @@ internal static class CoverageFanInIndependentVerifier
     }
 
     private static void CheckPatchMetric(JsonElement metric, int changed, int covered, int measurable,
-        string diffBase, JsonElement effective, string effectiveName)
+        string diffBase, JsonElement effective, string effectiveName, bool requireMeasurable)
     {
         Require(String(metric, "diffBase") == diffBase && Int(metric, "changed") == changed
             && Int(metric, "covered") == covered && Int(metric, "measurable") == measurable
-            && measurable > 0, GateError);
+            && (!requireMeasurable || measurable > 0), GateError);
         var expectedPercent = RoundPercent(covered, measurable);
         var threshold = NullableDecimal(effective, effectiveName);
         Require(Decimal(metric, "percent") == expectedPercent
@@ -350,7 +350,7 @@ internal static class CoverageFanInIndependentVerifier
                 file = null;
                 continue;
             }
-            if (line.StartsWith("+++ ", StringComparison.Ordinal))
+            if (!hunk && line.StartsWith("+++ ", StringComparison.Ordinal))
             {
                 var name = DecodeGitPath(line[4..]);
                 file = name == "/dev/null" ? null : NormalizeRelative(name.StartsWith("b/", StringComparison.Ordinal) ? name[2..] : name);

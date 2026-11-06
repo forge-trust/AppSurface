@@ -24,6 +24,8 @@ var plan = planner.Resolve(policy, [new NormalizedDiffPath("src/Orders/SubmitOrd
 
 `Resolve` normalizes and sorts paths, applies the most-specific matching rules, and falls back to `ConservativeProfileId` for a path that has no rule. If equally specific rules choose different profiles, it throws `EvidencePlanningException` instead of silently taking a lower-risk route. `EvidenceUnifiedDiffReader.Read(...)` accepts a CI-provided Git-formatted unified diff when callers do not want to depend on a local Git checkout. Hunked diffs must include `diff --git` file headers; use explicit paths when only a non-Git diff is available.
 
+For the [Coverage EvidenceHost producer](../ForgeTrust.AppSurface.Evidence.Aspire/README.md#coverage-fan-in-producer), use `ResolvePatch(policy, patchBytes, additionalPaths)` with the exact UTF-8 patch captured for planning (up to 20 MiB). The planner copies the bytes, derives the patch paths, and records their patch SHA-256 separately from the normalized path digest. The Evidence CLI binds the snapshot automatically when you pass `--diff-file`. A path-only plan still resolves normally but cannot close a patch coverage obligation with this producer.
+
 ## Policy design
 
 Keep the policy small and explicit:

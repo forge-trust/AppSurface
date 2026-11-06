@@ -8,6 +8,7 @@ namespace ForgeTrust.AppSurface.Evidence.Aspire;
 /// <summary>Adapts native v2 coverage acceptance to an explicit EvidenceHost obligation.</summary>
 /// <remarks>Supplied captures are trusted-producer observations. Only independently accepted current-run evidence
 /// with completed cleanup and successful required result delivery may satisfy the declared assertion.
+/// Patch acceptance must match the exact patch SHA-256 recorded on the resolved plan.
 /// Historical replay and aggregate-only baselines cannot satisfy a patch-required obligation.</remarks>
 public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
 {
@@ -41,16 +42,24 @@ public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
     public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
+        var patch = _request.Policy.Gate?.Mode == CoverageGateMode.AggregateAndPatch;
+        var expectedPatch = patch ? context.Plan.PatchSha256 : null;
         if (context.Producer.Id != Id || !context.Producer.AssertionIds.Contains(_assertion, StringComparer.Ordinal)
             || !context.Producer.ArtifactSlots.Any(slot => slot.LogicalName == _artifactSlot)
             || !context.Plan.Profile.Producers.Any(producer => producer.Id == Id
                 && MatchesGate(producer.CoverageGate))
             || !MatchesGate(context.Producer.CoverageGate)
             || context.Artifacts is null || _request.EvaluationIntent != CoverageEvaluationIntent.CurrentTrustedRun
-            || _requirePatch && _request.Policy.Gate.Mode != CoverageGateMode.AggregateAndPatch)
+            || _requirePatch && !patch
+            || patch && (expectedPatch is null || expectedPatch.Length != 64 || !expectedPatch.All(char.IsAsciiHexDigit)
+                || _request.ExpectedPatchSha256 is { } requested && !string.Equals(requested, expectedPatch, StringComparison.OrdinalIgnoreCase)))
             return new(Id, EvidenceProducerOutcome.Invalid, [], "ASCOV310 Correct the declared current-run coverage obligation and result slot.");
         CoverageFanInResult result;
-        try { result = await CoverageFanIn.AcceptAsync(_request, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            result = await CoverageFanIn.AcceptAsync(patch ? _request with { ExpectedPatchSha256 = expectedPatch } : _request,
+                cancellationToken).ConfigureAwait(false);
+        }
         catch (OperationCanceledException)
         { return new(Id, cancellationToken.IsCancellationRequested ? EvidenceProducerOutcome.Cancelled : EvidenceProducerOutcome.TimedOut, [], "ASCOV306 Coverage acceptance was cancelled or timed out before completion."); }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
@@ -98,7 +107,7 @@ public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
     private bool MatchesGate(EvidenceCoverageGateRequirements? declared)
     {
         var gate = _request.Policy.Gate;
-        return declared is not null && gate.MinLine == declared.MinLinePercent
+        return declared is not null && gate is not null && gate.MinLine == declared.MinLinePercent
             && gate.MinBranch == declared.MinBranchPercent && gate.Tolerance == declared.TolerancePercent
             && string.Equals(gate.PatchLineMode, declared.PatchLineMode, StringComparison.OrdinalIgnoreCase)
             && (gate.Mode == CoverageGateMode.AggregateAndPatch

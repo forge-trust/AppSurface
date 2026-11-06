@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ForgeTrust.AppSurface.Coverage;
 
 /// <summary>Explicit gate intent. A baseline never implies patch acceptance.</summary>
@@ -104,7 +106,13 @@ public sealed record CoverageComposeRequest(CoverageFanInPolicy Policy, string R
 public sealed record CoverageAcceptRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string PrimaryCaptureDirectory, IReadOnlyList<string> SupplementaryCaptureDirectories,
     string ComposedOutputDirectory, string OutputDirectory, CoverageOutputMode OutputMode = CoverageOutputMode.Fresh,
-    CoverageEvaluationIntent EvaluationIntent = CoverageEvaluationIntent.CurrentTrustedRun);
+    CoverageEvaluationIntent EvaluationIntent = CoverageEvaluationIntent.CurrentTrustedRun)
+{
+    /// <summary>Optional SHA-256 of the exact unified Git patch to require before running either gate.</summary>
+    /// <remarks>Valid only for patch acceptance. A mismatch never publishes an accepted generation.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExpectedPatchSha256 { get; init; }
+}
 /// <summary>Read-only validation of an existing accepted generation; creates no coordination or reports.</summary>
 public sealed record CoverageVerifyRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string PrimaryCaptureDirectory, IReadOnlyList<string> SupplementaryCaptureDirectories,

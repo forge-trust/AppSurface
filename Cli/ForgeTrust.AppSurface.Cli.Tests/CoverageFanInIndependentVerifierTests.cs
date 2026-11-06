@@ -684,6 +684,19 @@ public sealed class CoverageFanInIndependentVerifierTests
     }
 
     [Fact]
+    public void VerifyGates_AcceptsAddedSourceLineBeginningWithFileHeaderPrefix()
+    {
+        var coverage = AggregateCoverage();
+        var diff = FileDiff("b/src/Widget.cs", "@@ -1 +1 @@\n-old\n+++ literal source text");
+        using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
+        using var policy = PatchPolicy();
+
+        CoverageFanInIndependentVerifier.VerifyGates(primaryGate.RootElement, composedGate.RootElement,
+            policy.RootElement, coverage, coverage, diff);
+    }
+
+    [Fact]
     public void VerifyGates_AcceptsRenameWithDeletedFileAndMeasurableDestination()
     {
         var coverage = AggregateCoverage();
@@ -870,6 +883,25 @@ public sealed class CoverageFanInIndependentVerifierTests
         using var lowerGate = Gate(lowerDenominator, isPrimary: false, patchBranchCovered: 1, patchBranchMeasurable: 1);
         Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
             primaryGate.RootElement, lowerGate.RootElement, policy.RootElement, primaryCoverage, lowerDenominator, Diff));
+    }
+
+    [Fact]
+    public void VerifyGates_AcceptsNonemptyPatchWithNoMeasurableBranchesAtOneHundredPercent()
+    {
+        var coverage = AggregateCoverage();
+        var diff = FileDiff("b/src/Widget.cs", "@@ -20 +20 @@\n-old\n+new");
+        using var primaryGate = Gate(coverage, isPrimary: true, patchBranchCovered: 0,
+            patchBranchMeasurable: 0, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, patchBranchCovered: 0,
+            patchBranchMeasurable: 0, diffText: diff);
+        using var policy = PatchPolicy();
+
+        CoverageFanInIndependentVerifier.VerifyGates(primaryGate.RootElement, composedGate.RootElement,
+            policy.RootElement, coverage, coverage, diff);
+
+        using var forged = WithJsonValue(composedGate, "patchBranch.percent", "0");
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, forged.RootElement, policy.RootElement, coverage, coverage, diff));
     }
 
     [Fact]
@@ -1363,7 +1395,7 @@ public sealed class CoverageFanInIndependentVerifierTests
         int patchBranchCovered = 2, int patchBranchMeasurable = 2, string? diffText = null)
     {
         var bytes = Encoding.UTF8.GetBytes(diffText ?? Diff);
-        var branchPercent = (decimal)patchBranchCovered * 100m / patchBranchMeasurable;
+        var branchPercent = patchBranchMeasurable == 0 ? 100m : (decimal)patchBranchCovered * 100m / patchBranchMeasurable;
         var lineThreshold = isPrimary ? 95m : 0m;
         var branchThreshold = isPrimary ? 85m : 0m;
         var patchLineThreshold = isPrimary ? (decimal?)null : 95m;

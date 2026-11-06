@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -15,6 +16,27 @@ public sealed class EvidencePlanner
     /// <param name="changedPaths">Explicit normalized changed paths.</param>
     /// <returns>A hash-bound evidence plan.</returns>
     public EvidencePlan Resolve(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths)
+        => ResolveCore(policy, changedPaths, null);
+
+    /// <summary>Resolves a plan that also binds the exact unified patch captured by the caller.</summary>
+    /// <param name="policy">Versioned consumer policy.</param>
+    /// <param name="patch">Exact UTF-8 unified patch bytes; copied before parsing and hashing. At most 20 MiB.</param>
+    /// <param name="additionalPaths">Optional normalized paths considered alongside paths read from the patch.</param>
+    /// <returns>A plan whose digest covers the patch identity as well as policy selection.</returns>
+    public EvidencePlan ResolvePatch(EvidencePolicy policy, ReadOnlyMemory<byte> patch,
+        IReadOnlyList<NormalizedDiffPath>? additionalPaths = null)
+    {
+        if (patch.IsEmpty || patch.Length > 20 * 1024 * 1024)
+            throw new EvidencePlanningException("ASEVD101", "Evidence planning requires a bounded, nonempty patch.",
+                "Provide a unified patch no larger than 20 MiB, or plan from explicit paths only.");
+        var snapshot = patch.ToArray();
+        var patchPaths = EvidenceUnifiedDiffReader.Read(Encoding.UTF8.GetString(snapshot));
+        return ResolveCore(policy, (additionalPaths ?? []).Concat(patchPaths).ToArray(),
+            Convert.ToHexStringLower(SHA256.HashData(snapshot)));
+    }
+
+    private static EvidencePlan ResolveCore(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths,
+        string? patchSha256)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(changedPaths);
@@ -75,7 +97,8 @@ public sealed class EvidencePlanner
                 .OrderBy(static id => id, StringComparer.Ordinal)
                 .ToArray(),
             PlanDigest: string.Empty,
-            PolicySnapshot: policy);
+            PolicySnapshot: policy)
+        { PatchSha256 = patchSha256 };
 
         return draft with { PlanDigest = EvidenceDigest.CanonicalSha256(draft) };
     }

@@ -49,12 +49,18 @@ public static class CoverageFanIn
     {
         ArgumentNullException.ThrowIfNull(request);
         ValidateModes(request.OutputMode, request.EvaluationIntent);
-        return Execute("accept", new(Expected(request.Policy), request.RepositoryRoot, request.OutputDirectory,
+        var expected = Expected(request.Policy);
+        var patchHash = request.ExpectedPatchSha256;
+        if (patchHash is not null && (request.Policy.Gate.Mode != CoverageGateMode.AggregateAndPatch
+            || patchHash.Length != 64 || !patchHash.All(char.IsAsciiHexDigit)))
+            throw CoveragePolicyEncoding.Invalid("expectedPatchSha256");
+        return Execute("accept", new(expected, request.RepositoryRoot, request.OutputDirectory,
             ReplaceOwned: request.OutputMode == CoverageOutputMode.ReplaceOwned,
             PrimaryCaptureDirectory: request.PrimaryCaptureDirectory,
             SupplementaryCaptureDirectories: Freeze(request.SupplementaryCaptureDirectories),
             ComposedOutputDirectory: request.ComposedOutputDirectory,
-            HistoricalReplay: request.EvaluationIntent == CoverageEvaluationIntent.HistoricalReplay), cancellationToken, progress, diagnostics);
+            HistoricalReplay: request.EvaluationIntent == CoverageEvaluationIntent.HistoricalReplay)
+        { ExpectedPatchSha256 = patchHash?.ToLowerInvariant() }, cancellationToken, progress, diagnostics);
     }
     /// <summary>Verifies existing accepted evidence read-only; cannot create custody or upgrade historical evidence.</summary>
     public static ValueTask<CoverageFanInResult> VerifyAsync(CoverageVerifyRequest request,
