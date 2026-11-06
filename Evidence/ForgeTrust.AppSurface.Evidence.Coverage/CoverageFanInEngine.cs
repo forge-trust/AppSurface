@@ -198,6 +198,7 @@ internal static partial class CoverageFanInEngine
             || await IdentityAsync("git", ["rev-parse", "HEAD"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("commit").GetString()
             || await IdentityAsync("git", ["rev-parse", "HEAD^{tree}"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("tree").GetString()
             || await IdentityAsync("dotnet", ["--version"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("sdk").GetString()
+            || HasSuppressedIndexEntries(await IdentityAsync("git", ["ls-files", "-v", "-z"], r, token).ConfigureAwait(false))
             || (await IdentityAsync("git", ["status", "--porcelain", "--untracked-files=all"], r, token).ConfigureAwait(false)).Length != 0)
             throw new InvalidDataException("Source, SDK or clean state differs from trusted expectations.");
         foreach (var project in r.Expected.TestProjects)
@@ -208,6 +209,19 @@ internal static partial class CoverageFanInEngine
             using var file = parent.OpenArtifactFile(Path.GetFileName(path), false, false);
         }
         directory.VerifyArtifactBinding();
+    }
+
+    // Git's -v lowers the tag for assume-unchanged; -t's S tag means skip-worktree.
+    // NUL delimiting prevents a filename from introducing or hiding a record tag.
+    private static bool HasSuppressedIndexEntries(string entries)
+    {
+        foreach (var entry in entries.AsSpan().Split('\0'))
+        {
+            var record = entries.AsSpan()[entry];
+            if (!record.IsEmpty && (record[0] == 'S' || char.IsAsciiLetterLower(record[0])))
+                return true;
+        }
+        return false;
     }
     private static async Task<string> IdentityAsync(string file, string[] arguments, CoverageFanInEngineRequest r, CancellationToken token)
     {

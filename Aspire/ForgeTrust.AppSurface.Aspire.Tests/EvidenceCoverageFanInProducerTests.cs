@@ -578,7 +578,7 @@ public sealed class EvidenceCoverageFanInProducerTests
                     gate);
                 var patchSha256 = requirePatch ? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
                     System.Text.Encoding.UTF8.GetBytes(await CommandAsync(repository, "git", false, "--no-pager", "diff", "--unified=0",
-                        "--no-ext-diff", "--no-textconv", "--relative", baselineCommit + "...HEAD", "--")))) : null;
+                        "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "--relative", baselineCommit + "...HEAD", "--")))) : null;
                 return new Fixture(tempPath, baselineCommit, commit, tree, sdk, policy, patchSha256)
                 {
                     _priorArtifactHome = InitialArtifactHome,

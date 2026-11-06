@@ -32,6 +32,7 @@ public sealed class CoverageFanInIdentityTests
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
+    [InlineData(5)]
     public async Task IdentityDeadlineCancelsAtEveryConcreteSourceCommandBeforeCapturePublication(int stallAt)
     {
         using var temp = TestDirectory.Create();
@@ -42,6 +43,7 @@ public sealed class CoverageFanInIdentityTests
             source.Commit,
             source.Tree,
             source.Sdk,
+            "H Tests.csproj\0",
             string.Empty
         };
         var expectedCommands = new (string FileName, string Arguments)[]
@@ -50,6 +52,7 @@ public sealed class CoverageFanInIdentityTests
             ("git", "-c core.fsmonitor=false rev-parse HEAD"),
             ("git", "-c core.fsmonitor=false rev-parse HEAD^{tree}"),
             ("dotnet", "--version"),
+            ("git", "-c core.fsmonitor=false ls-files -v -z"),
             ("git", "-c core.fsmonitor=false status --porcelain --untracked-files=all")
         };
         var commands = new List<CoverageRunProcessRequest>();

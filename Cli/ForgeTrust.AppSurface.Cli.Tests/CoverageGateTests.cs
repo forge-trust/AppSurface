@@ -163,7 +163,7 @@ public sealed class CoverageGateTests
     public async Task ExecuteAsync_MeasuresPatchForRealGitPath(string fileName, bool quoted)
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-path-");
-        var sourcePath = TestPathUtils.PathUnder(temp.Path, "src", fileName);
+        var sourcePath = TestPathUtils.PathUnder(temp.Path, "b", fileName);
         Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
         await File.WriteAllTextAsync(sourcePath, "base\n");
         await RunGitAsync(temp.Path, "init");
@@ -171,6 +171,7 @@ public sealed class CoverageGateTests
         await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
         await RunGitAsync(temp.Path, "config", "core.quotePath", quoted ? "true" : "false");
         await RunGitAsync(temp.Path, "config", "core.precomposeUnicode", "true");
+        await RunGitAsync(temp.Path, "config", "diff.noprefix", "true");
         await RunGitAsync(temp.Path, "add", ".");
         await RunGitAsync(temp.Path, "commit", "-m", "base");
         await File.AppendAllTextAsync(sourcePath, "changed\n");
@@ -178,12 +179,12 @@ public sealed class CoverageGateTests
         await RunGitAsync(temp.Path, "commit", "-m", "change");
 
         var diff = await GitDiffReader.ReadDiffAsync(temp.Path, "HEAD~1", CancellationToken.None);
-        Assert.Contains(quoted ? "+++ \"b/src/Caf\\303\\251.cs\"" : $"+++ b/src/{fileName}\t",
+        Assert.Contains(quoted ? "+++ \"b/b/Caf\\303\\251.cs\"" : $"+++ b/b/{fileName}\t",
             diff, StringComparison.Ordinal);
         var coverage = temp.WriteCoverage($"""
             <coverage lines-covered="1" lines-valid="1" branches-covered="2" branches-valid="2">
               <packages><package name="Example"><classes>
-                <class name="Example.Subject" filename="src/{fileName}"><lines>
+                <class name="Example.Subject" filename="b/{fileName}"><lines>
                   <line number="2" hits="1" branch="true" condition-coverage="100% (2/2)" />
                 </lines></class>
               </classes></package></packages>

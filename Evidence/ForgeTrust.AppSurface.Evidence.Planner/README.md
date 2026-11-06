@@ -26,6 +26,14 @@ var plan = planner.Resolve(policy, [new NormalizedDiffPath("src/Orders/SubmitOrd
 
 For the [Coverage EvidenceHost producer](../ForgeTrust.AppSurface.Evidence.Aspire/README.md#coverage-fan-in-producer), use `ResolvePatch(policy, patchBytes, additionalPaths)` with the exact UTF-8 patch captured for planning (up to 20 MiB). The planner copies the bytes, derives the patch paths, and records their patch SHA-256 separately from the normalized path digest. The Evidence CLI binds the snapshot automatically when you pass `--diff-file`. A path-only plan still resolves normally but cannot close a patch coverage obligation with this producer.
 
+Generate the planning patch from the repository root with the same path prefixes and options as the coverage gate. Use the same `DIFF_BASE` in the acceptance policy:
+
+```sh
+git --no-pager diff --unified=0 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --relative "${DIFF_BASE}...HEAD" -- > "$PATCH_FILE"
+```
+
+Choose a patch output path outside the checkout so the source remains clean. Pass the file's exact bytes to `ResolvePatch` or `--diff-file`.
+
 ## Policy design
 
 Keep the policy small and explicit:

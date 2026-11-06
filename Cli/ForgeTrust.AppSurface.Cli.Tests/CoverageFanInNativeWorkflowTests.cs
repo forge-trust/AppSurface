@@ -9,6 +9,27 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageFanInNativeWorkflowTests
 {
+    [Theory]
+    [InlineData("--assume-unchanged")]
+    [InlineData("--skip-worktree")]
+    public async Task CollectRejectsTrackedEditsHiddenByGitIndexFlags(string flag)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.HideTrackedEditAsync(flag);
+        var policy = await fixture.PolicyAsync();
+        using var progress = new StringWriter();
+
+        var result = await CoverageFanIn.CollectAndCaptureAsync(new CoverageCollectRequest(
+            policy, fixture.Repository, fixture.PrimaryCapture, fixture.PrimaryCollection, "primary", 180,
+            NoRestore: true), progress: progress);
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.Null(result.Observation);
+        Assert.Empty(progress.ToString());
+        Assert.False(Directory.Exists(fixture.PrimaryCollection));
+        Assert.False(Directory.Exists(fixture.PrimaryCapture));
+    }
+
     [Fact]
     public async Task CollectDoesNotCertifyOldBinariesForTheCurrentCommit()
     {
@@ -289,6 +310,14 @@ public sealed class CoverageFanInNativeWorkflowTests
                     useAllNative ? "FullyQualifiedName~Consumer." : "FullyQualifiedName~Consumer.Alpha.Tests.AlphaDecisionTests",
                     useAllNative ? TestProjects : ["Consumer.Alpha.Tests/Consumer.Alpha.Tests.csproj"])],
                 new CoverageGatePolicy(CoverageGateMode.AggregateOnly));
+        }
+
+        internal async Task HideTrackedEditAsync(string flag)
+        {
+            const string source = "Consumer.Alpha/AlphaDecision.cs";
+            await Command(Repository, "git", "update-index", flag, "--", source);
+            await File.AppendAllTextAsync(TestPathUtils.PathUnder(Repository, source), "\n// hidden edit\n");
+            Assert.Equal(string.Empty, await Command(Repository, "git", "status", "--porcelain", "--untracked-files=all"));
         }
 
         internal Task<string> BuildAsync() =>

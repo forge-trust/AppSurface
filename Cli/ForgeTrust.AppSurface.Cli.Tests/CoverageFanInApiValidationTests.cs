@@ -134,6 +134,7 @@ public sealed class CoverageFanInApiValidationTests
                     "-c core.fsmonitor=false rev-parse --show-toplevel" => temp.Path,
                     "-c core.fsmonitor=false rev-parse HEAD" => source.Commit,
                     "-c core.fsmonitor=false rev-parse HEAD^{tree}" => source.Tree,
+                    "-c core.fsmonitor=false ls-files -v -z" => "H Tests.csproj\0",
                     "-c core.fsmonitor=false status --porcelain --untracked-files=all" => string.Empty,
                     _ => throw new InvalidOperationException("Unexpected source identity command.")
                 })))
@@ -147,7 +148,7 @@ public sealed class CoverageFanInApiValidationTests
         Assert.Contains("unrecognized", Assert.Single(result.Diagnostics).Field);
         Assert.False(result.Created);
         Assert.False(result.Committed);
-        Assert.Equal(5, ((IdentityRunner)request.IdentityRunner).Calls);
+        Assert.Equal(6, ((IdentityRunner)request.IdentityRunner).Calls);
         Assert.False(Directory.Exists(request.OutputDirectory));
     }
 

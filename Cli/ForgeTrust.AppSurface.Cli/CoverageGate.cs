@@ -2073,6 +2073,8 @@ internal static class GitDiffReader
         startInfo.ArgumentList.Add("--unified=0");
         startInfo.ArgumentList.Add("--no-ext-diff");
         startInfo.ArgumentList.Add("--no-textconv");
+        startInfo.ArgumentList.Add("--src-prefix=a/");
+        startInfo.ArgumentList.Add("--dst-prefix=b/");
         startInfo.ArgumentList.Add("--relative");
         startInfo.ArgumentList.Add($"{diffBase}...HEAD");
         startInfo.ArgumentList.Add("--");
