@@ -418,6 +418,8 @@ For the intentional validation-failure shape, run `dotnet run --project examples
 
 The [RazorWire MVC example](./examples/razorwire-mvc/README.md#server-selected-dialogs) includes explicit [server-selected dialog responses](./Web/ForgeTrust.RazorWire/Docs/dialog-responses.md) at `/Reactivity/DialogResponses`, with status responses, follow-up forms, validation, and full HTML fallbacks.
 
+On Linux, the [RazorWire MVC publish preflight](./examples/razorwire-mvc/README.md#check-publish-output-before-full-coverage) checks the sample's publish paths and output modes before you start the full coverage run.
+
 The [nested collections quickstart](./examples/razorwire-mvc/NESTED-COLLECTIONS.md) in the same MVC host runs a minimal DateOnly editor at `/Reactivity/NestedCollections` with physical/mark removal, sparse-key invalid redisplay, and ordinary server commands. The separate [faithful V4 fixture](./examples/razorwire-mvc/NESTED-COLLECTIONS.md#faithful-v4-consumer-fixture) at `/Reactivity/SkoolitV4Collections` retains the source's temporal policy and explains the exact-package proof. See the [Form Interactions guide](./Web/ForgeTrust.RazorWire/Docs/form-interactions.md) for the shared API and migration contract; fixture results do not establish live adoption.
 
 The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFailures` that shows server-handled validation, development anti-forgery diagnostics, default fallback rendering, and consumer styling hooks. It also includes `/Reactivity/FormLoading` for local and shared status indicators, the package fallback, and Turbo Frame loading; see the [Form Loading Feedback guide](./Web/ForgeTrust.RazorWire/Docs/form-loading.md) for the public contract.
