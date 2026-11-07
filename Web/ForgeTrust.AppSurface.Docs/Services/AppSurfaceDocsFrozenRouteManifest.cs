@@ -36,6 +36,18 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     /// <remarks>The snapshot owns a read-only copy; consumers cannot change the routes shared by mounted aliases.</remarks>
     internal IReadOnlyList<string> PublicRoutePaths { get; private set; } = [];
 
+    /// <summary>Gets the canonical page winners and their validated physical artifact mappings.</summary>
+    /// <remarks>
+    /// This projection contains canonical entries only; source-shaped and declared aliases are excluded. Route paths are
+    /// the logical identities without URL fragments. Legacy manifests keep their canonical inventory but have no
+    /// physical artifact path. Modern archive callers may use only the validated whole-export-root artifact path supplied
+    /// by the frozen mapping; it retains any canonical fragment and must never be derived from a route.
+    /// </remarks>
+    internal IReadOnlyList<AppSurfaceDocsFrozenCanonicalEntry> CanonicalEntries { get; private set; } = [];
+
+    /// <summary>Gets only frozen canonical winners, excluding source-shaped and declared recovery aliases.</summary>
+    internal IReadOnlyList<string> CanonicalRoutePaths { get; private set; } = [];
+
     private AppSurfaceDocsFrozenRouteManifest(
         IReadOnlyDictionary<string, string> canonicalRoutePathByAlias,
         IReadOnlyDictionary<string, string>? artifactPathByCanonicalRoute = null,
@@ -467,8 +479,21 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         IReadOnlyDictionary<string, string> artifacts,
         bool htmlUsesExportRootUrls)
     {
+        var canonicalRoutePaths = (document.Entries ?? [])
+            .Where(entry => entry?.CanonicalRoutePath is not null)
+            .Select(entry => NormalizeRoutePath(entry.CanonicalRoutePath!))
+            .Where(IsSafeRoutePath)
+            .ToArray();
         return new AppSurfaceDocsFrozenRouteManifest(aliases, artifacts, htmlUsesExportRootUrls)
         {
+            CanonicalRoutePaths = Array.AsReadOnly(canonicalRoutePaths),
+            CanonicalEntries = Array.AsReadOnly(canonicalRoutePaths
+                .Select(routePath => new AppSurfaceDocsFrozenCanonicalEntry(
+                    GetRoutePathPart(routePath),
+                    artifacts.TryGetValue(GetRoutePathPart(routePath), out var artifactPath)
+                        ? artifactPath
+                        : null))
+                .ToArray()),
             PublicRoutePaths = Array.AsReadOnly((document.Entries ?? []).SelectMany(entry =>
                 new[] { entry.CanonicalRoutePath, entry.SourcePath }.Concat(entry.RecoveryAliases ?? []).Concat(entry.DeclaredAliases ?? []))
                 .Where(path => path is not null && IsSafeRoutePath(NormalizeRoutePath(path)))
@@ -568,6 +593,13 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         string? CanonicalArtifactPath = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] JsonElement ExportCanonicalLiveUrl = default);
 }
+
+/// <summary>One immutable public canonical winner from a verified frozen route manifest.</summary>
+/// <param name="RoutePath">Logical docs-root-relative canonical route, without the canonical URL fragment.</param>
+/// <param name="ArtifactPath">Validated whole-export-root HTML mapping, retaining its canonical fragment, or null for a legacy manifest.</param>
+internal sealed record AppSurfaceDocsFrozenCanonicalEntry(
+    string RoutePath,
+    string? ArtifactPath);
 
 /// <summary>
 /// Caches the frozen route manifest for one mounted exact-version tree.

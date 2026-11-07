@@ -21,6 +21,7 @@ public class ExportContext
 
     private readonly List<string> _additionalSeedRoutes = [];
     private readonly List<ExportDeploymentExtra> _deploymentExtras = [];
+    private readonly List<Func<ExportContext, CancellationToken, Task>> _releaseArchiveArtifactFinalizers = [];
 
     /// <summary>
     /// Gets optional in-memory seed routes used when <see cref="SeedRoutesPath"/> is not configured.
@@ -171,6 +172,11 @@ public class ExportContext
     /// </remarks>
     public bool ReleaseArchiveManifestEnabled { get; private set; }
 
+    /// <summary>Gets host-registered artifact writers that run after route finalization and before archive hashing.</summary>
+    /// <remarks>Only integrations that own the exact-release archive contract can register these internal writers.</remarks>
+    internal IReadOnlyList<Func<ExportContext, CancellationToken, Task>> ReleaseArchiveArtifactFinalizers =>
+        _releaseArchiveArtifactFinalizers.AsReadOnly();
+
     /// <summary>
     /// Enables generation of the AppSurface Docs release archive manifest after final export materialization.
     /// </summary>
@@ -182,6 +188,27 @@ public class ExportContext
     public void EnableReleaseArchiveManifest()
     {
         ReleaseArchiveManifestEnabled = true;
+    }
+
+    /// <summary>Registers a host-owned archive artifact to be written before its bytes enter the release digest.</summary>
+    /// <param name="finalizer">Writer that materializes a generated archive artifact after frozen route mappings exist.</param>
+    /// <remarks>
+    /// The callback runs after canonical HTML has been emitted and the AppSurface Docs route manifest has been finalized,
+    /// but before <c>.appsurface-docs-release-manifest.json</c> is written. It must write only deterministic artifacts
+    /// owned by the host integration; the release archive writer then hashes their final bytes with the rest of the tree.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="finalizer"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The release archive manifest has not been enabled.</exception>
+    internal void RegisterReleaseArchiveArtifactFinalizer(
+        Func<ExportContext, CancellationToken, Task> finalizer)
+    {
+        ArgumentNullException.ThrowIfNull(finalizer);
+        if (!ReleaseArchiveManifestEnabled)
+        {
+            throw new InvalidOperationException("Enable the release archive manifest before registering archive artifact finalizers.");
+        }
+
+        _releaseArchiveArtifactFinalizers.Add(finalizer);
     }
 
     /// <summary>

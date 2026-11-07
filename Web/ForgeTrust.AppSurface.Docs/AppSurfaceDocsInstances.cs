@@ -804,7 +804,8 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
                 docsUrlBuilder.PublicOrigin,
                 options.Versioning.MaxRewrittenFileSizeBytes,
                 logger,
-                catalog.IsAliasNamespaceActive),
+                catalog.IsAliasNamespaceActive,
+                catalog.ConceptSwitching),
             providers);
     }
 

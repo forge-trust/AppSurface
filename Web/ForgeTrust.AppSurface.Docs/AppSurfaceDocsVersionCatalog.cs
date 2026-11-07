@@ -105,6 +105,31 @@ public sealed class AppSurfaceDocsPublishedVersion
     public string? ReleaseManifestSha256 { get; set; }
 
     /// <summary>
+    /// Gets or sets an optional trusted-release-root-relative concept bridge path for pages without embedded identities.
+    /// </summary>
+    /// <remarks>
+    /// Set this together with <see cref="ConceptMapSha256"/> to contribute digest-pinned legacy relationships to the
+    /// catalog-wide identity snapshot. Each membership identifies its own exact release and manifest pin; a map
+    /// referenced by either endpoint participates in both switching directions. The path is confined beneath
+    /// <see cref="AppSurfaceDocsVersioningOptions.TrustedReleaseRootPath"/>
+    /// using the same relative-file rules as other version artifacts. Omit both properties when no bridge applies. The
+    /// bridge does not modify or supplement the immutable release tree; see the
+    /// <see href="https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#concept-switch-artifacts">concept identity bridge reference</see>.
+    /// </remarks>
+    public string? ConceptMapPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the SHA-256 digest that pins the exact bytes at <see cref="ConceptMapPath"/>.
+    /// </summary>
+    /// <remarks>
+    /// This value is required when <see cref="ConceptMapPath"/> is supplied, and the path is required when this pin is
+    /// supplied. The bridge parser accepts only schema <c>appsurface-docs-concept-map-v1</c>; a bad optional bridge
+    /// disables concept resolution without changing healthy archive availability. Changing bridge bytes requires an
+    /// updated digest and a host restart/redeploy.
+    /// </remarks>
+    public string? ConceptMapSha256 { get; set; }
+
+    /// <summary>
     /// Gets or sets the support-state badge surfaced in the version archive.
     /// </summary>
     public AppSurfaceDocsVersionSupportState SupportState { get; set; } = AppSurfaceDocsVersionSupportState.Current;

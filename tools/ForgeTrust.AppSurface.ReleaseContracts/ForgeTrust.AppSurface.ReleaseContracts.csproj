@@ -9,6 +9,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\..\Web\ForgeTrust.AppSurface.Docs\wwwroot\docs\docs-version-switch.js" Link="Assets\docs-version-switch.js" LogicalName="ForgeTrust.AppSurface.ReleaseContracts.Assets.docs-version-switch.js" />
+    <EmbeddedResource Include="..\..\Web\ForgeTrust.AppSurface.Docs\wwwroot\docs\docs-version-switch.css" Link="Assets\docs-version-switch.css" LogicalName="ForgeTrust.AppSurface.ReleaseContracts.Assets.docs-version-switch.css" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Docs" />
