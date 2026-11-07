@@ -52,9 +52,10 @@ fail() {
 
 publish() {
   local mode=$1 name=$2 enabled=$3
-  mkdir "$scratch/$name"
+  local fixture_targets=${4:-$targets}
+  mkdir -p "$scratch/$name"
   dotnet publish Fixture.csproj -c Release --no-restore --no-self-contained -v:diag \
-    -o "$scratch/$name/output" "-p:FixtureMode=$mode" "-p:FixtureTargets=$targets" \
+    -o "$scratch/$name/output" "-p:FixtureMode=$mode" "-p:FixtureTargets=$fixture_targets" \
     "-p:FixtureInventory=$scratch/$name" "-p:AppSurfacePublishPreflight=$enabled" \
     "-p:AppSurfacePreflightReceiptDirectory=$scratch/$name" >"$scratch/$name.log" 2>&1
   local result=$?
@@ -124,6 +125,55 @@ done
 [[ -s "$scratch/guarded/checked-static.txt" ]]
 diff -u <(sort "$scratch/guarded/static.txt") <(sort "$scratch/guarded/checked-static.txt")
 printf '%s\n' 'PASS: clean guard order, both SDK lists match, coverage sentinel reached'
+
+# A failed invocation must not leave success receipts from an earlier invocation.
+publish clean reused true || fail 'initial reused-directory publish' "$scratch/reused.log"
+rm -rf -- "$scratch/reused/output"
+rm -- "$scratch/reused/coverage-started"
+if publish cross reused true; then fail 'reused-directory collision unexpectedly succeeded'; fi
+grep -q 'error ASPUB001' "$scratch/reused.log" || fail 'reused collision diagnostic' "$scratch/reused.log"
+[[ ! -e "$scratch/reused/paths.ok" && ! -e "$scratch/reused/permissions.ok" && ! -e "$scratch/reused/coverage-started" ]] ||
+  fail 'reused directory retained stale success receipts'
+[[ -z $(find "$scratch/reused/output" -type f -print -quit) ]]
+printf '%s\n' 'PASS: rejected publish removes both prior receipts from a reused directory'
+
+# A permissions-only target call cannot borrow a successful prior path check.
+if dotnet msbuild Fixture.csproj -t:AppSurfaceCheckPublishPermissions \
+  -p:Configuration=Release "-p:PublishDir=$scratch/guarded/output/" \
+  "-p:FixtureTargets=$targets" -p:AppSurfacePublishPreflight=true \
+  "-p:AppSurfacePreflightReceiptDirectory=$scratch/guarded" >"$scratch/permissions-only.log" 2>&1; then
+  fail 'permissions-only call accepted stale path receipt'
+fi
+grep -q 'error ASPUB003' "$scratch/permissions-only.log" ||
+  fail 'permissions-only diagnostic' "$scratch/permissions-only.log"
+printf '%s\n' 'PASS: permissions phase requires the path check in the current invocation'
+
+# Configuration refusals clear previous receipts too.
+mkdir "$scratch/unsupported-config"
+cp "$scratch/guarded/paths.ok" "$scratch/guarded/permissions.ok" "$scratch/unsupported-config/"
+if dotnet msbuild Fixture.csproj -t:AppSurfaceCheckPublishPaths -p:Configuration=Debug \
+  "-p:FixtureTargets=$targets" -p:AppSurfacePublishPreflight=true \
+  "-p:AppSurfacePreflightReceiptDirectory=$scratch/unsupported-config" >"$scratch/unsupported-config.log" 2>&1; then
+  fail 'unsupported configuration unexpectedly succeeded'
+fi
+grep -q 'error ASPUB003' "$scratch/unsupported-config.log" ||
+  fail 'unsupported configuration diagnostic' "$scratch/unsupported-config.log"
+[[ ! -e "$scratch/unsupported-config/paths.ok" && ! -e "$scratch/unsupported-config/permissions.ok" ]]
+printf '%s\n' 'PASS: configuration refusal removes previous success receipts'
+
+# Copy only the import to represent a checkout where the Release task was not built.
+mkdir "$scratch/missing-task"
+cp "$targets" "$scratch/missing-task/PublishPreflight.targets"
+if publish clean missing-task true "$scratch/missing-task/PublishPreflight.targets"; then
+  fail 'missing task assembly unexpectedly succeeded'
+fi
+grep -E 'error ASPUB003.*publish-preflight\.sh' "$scratch/missing-task.log" >/dev/null ||
+  fail 'missing task assembly diagnostic' "$scratch/missing-task.log"
+for writer in "${writers[@]}"; do
+  [[ -z $(target_line "$scratch/missing-task.log" "$writer") ]] || fail "missing task started $writer"
+done
+[[ ! -e "$scratch/missing-task/paths.ok" && ! -e "$scratch/missing-task/permissions.ok" ]]
+printf '%s\n' 'PASS: missing task assembly fails with actionable ASPUB003 before copying'
 
 printf '\n#error anonymized SDK failure\n' >> Program.cs
 if publish clean sdk-error true; then fail 'SDK error unexpectedly succeeded'; fi

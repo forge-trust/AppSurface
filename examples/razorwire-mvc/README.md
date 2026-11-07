@@ -262,8 +262,10 @@ The preflight builds a repository-only MSBuild task, then restores and builds th
 
 | Diagnostic | What to do |
 | --- | --- |
-| `ASPUB001` | Two ordinary or static SDK copy destinations conflict. Change the item destination paths to be distinct even when compared without case; check the reported source items and both path spellings. |
+| `ASPUB001` | Two ordinary or static SDK copy destinations conflict. Change the item destination paths to be distinct even when compared without case, and use consistent casing for shared directory components: `wwwroot/Images/a.png` and `wwwroot/images/b.png` conflict even though the filenames differ. Check the reported source items and both path spellings. |
 | `ASPUB002` | A published regular file has group/other write permission or setuid, setgid, or sticky bits. Inspect the source mode and build environment (including umask), fix the cause and publish again. The preflight never rewrites modes. |
-| `ASPUB003` | A required check could not complete. Check the SDK, GNU find, or the reported input/output error, then retry. |
+| `ASPUB003` | A required check could not complete. Use `./scripts/publish-preflight.sh` to build the Release task and run both phases in order; setting the MSBuild switch or invoking the permissions target alone is not the supported entry point. Check the SDK, GNU find, or the reported input/output error, then retry. |
 
 The path check uses the ordinary and static SDK copy lists before either writer copies a payload. Direct SDK transforms such as `web.config` are outside that path check; the permissions check walks the finished output without following symbolic links. These checks cover this sample invocation only. The existing coverage and final release checks are still required for their respective workflows.
+
+The script builds the task in Release at its repository-local path and supplies a fresh receipt directory. The path phase removes any previous `paths.ok` and `permissions.ok` receipts before validation; the permissions phase also requires the path phase to have succeeded in the same MSBuild invocation. Receipts from earlier runs cannot substitute for that ordering check. Run `./scripts/test-publish-preflight.sh` on Linux to verify both SDK copy lists, failure ordering, receipt handling, and diagnostic behavior with the anonymized fixtures.

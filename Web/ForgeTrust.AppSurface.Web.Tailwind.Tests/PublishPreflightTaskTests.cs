@@ -61,6 +61,7 @@ public sealed class PublishPreflightTaskTests : IDisposable
 
     [Theory]
     [InlineData("wwwroot/Readme.txt", "wwwroot/readme.txt")]
+    [InlineData("wwwroot/Images/a.png", "wwwroot/images/b.png")]
     [InlineData("wwwroot/item", "wwwroot/item/child.txt")]
     [InlineData("wwwroot/item/child.txt", "wwwroot/item")]
     [InlineData("wwwroot/same.txt", "wwwroot/same.txt")]

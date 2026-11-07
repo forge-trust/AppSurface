@@ -1,6 +1,9 @@
 <Project>
+  <PropertyGroup>
+    <_AppSurfacePreflightTaskAssembly>$(MSBuildThisFileDirectory)bin/Release/net10.0/ForgeTrust.AppSurface.PublishPreflight.dll</_AppSurfacePreflightTaskAssembly>
+  </PropertyGroup>
   <UsingTask TaskName="AppSurfacePublishPreflightTask"
-             AssemblyFile="$(MSBuildThisFileDirectory)bin/Release/net10.0/ForgeTrust.AppSurface.PublishPreflight.dll" />
+             AssemblyFile="$(_AppSurfacePreflightTaskAssembly)" />
 
   <!-- ComputeFilesToPublish precedes both SDK copy pipelines. Do not run the static
        split target here: its AfterTargets targets copy files. Reuse its SDK tasks
@@ -8,12 +11,20 @@
   <Target Name="AppSurfaceCheckPublishPaths"
           AfterTargets="ComputeFilesToPublish"
           DependsOnTargets="_ComputeResolvedFilesToPublishTypes">
+    <PropertyGroup>
+      <_AppSurfacePublishPathsChecked>false</_AppSurfacePublishPathsChecked>
+    </PropertyGroup>
+    <!-- Receipts describe this invocation, including when a caller reuses a directory. -->
+    <Delete Files="$(AppSurfacePreflightReceiptDirectory)/paths.ok;$(AppSurfacePreflightReceiptDirectory)/permissions.ok"
+            Condition="'$(AppSurfacePreflightReceiptDirectory)' != '' And Exists('$(AppSurfacePreflightReceiptDirectory)')" />
     <Error Code="ASPUB003" Condition="!$([MSBuild]::IsOSPlatform('Linux'))"
            Text="Path check: the publish preflight requires Linux." />
     <Error Code="ASPUB003" Condition="'$(Configuration)' != 'Release' Or '$(SelfContained)' == 'true' Or '$(RuntimeIdentifier)' != '' Or '$(PublishSingleFile)' == 'true'"
            Text="Path check: use a framework-dependent Release publish without a runtime identifier or single-file bundling." />
     <Error Code="ASPUB003" Condition="'$(AppSurfacePreflightReceiptDirectory)' == '' Or !Exists('$(AppSurfacePreflightReceiptDirectory)')"
-           Text="Path check: a fresh preflight receipt directory is required; use the pilot script." />
+           Text="Path check: a fresh preflight receipt directory is required; run ./scripts/publish-preflight.sh." />
+    <Error Code="ASPUB003" Condition="!Exists('$(_AppSurfacePreflightTaskAssembly)')"
+           Text="Path check: the Release preflight task assembly is missing. Run ./scripts/publish-preflight.sh to build it and publish." />
     <Error Code="ASPUB003" Condition="'$(StaticWebAssetPublishManifestPath)' == '' Or !Exists('$(StaticWebAssetPublishManifestPath)')"
            Text="Path check: the SDK static web assets publish manifest is missing." />
 
@@ -43,12 +54,15 @@
                                    OrdinaryFiles="@(_ResolvedFileToPublishPreserveNewest);@(_ResolvedFileToPublishAlways)"
                                    StaticFiles="@(_AppSurfaceStaticPublishPaths)" />
     <WriteLinesToFile File="$(AppSurfacePreflightReceiptDirectory)/paths.ok" Lines="paths checked" Overwrite="true" />
+    <PropertyGroup>
+      <_AppSurfacePublishPathsChecked>true</_AppSurfacePublishPathsChecked>
+    </PropertyGroup>
   </Target>
 
   <!-- The Web SDK's AfterPublish phase follows its direct output transforms. -->
   <Target Name="AppSurfaceCheckPublishPermissions" AfterTargets="AfterPublish">
-    <Error Code="ASPUB003" Condition="!Exists('$(AppSurfacePreflightReceiptDirectory)/paths.ok')"
-           Text="Permissions check: the pre-copy path check did not complete." />
+    <Error Code="ASPUB003" Condition="'$(_AppSurfacePublishPathsChecked)' != 'true' Or !Exists('$(AppSurfacePreflightReceiptDirectory)/paths.ok')"
+           Text="Permissions check: the pre-copy path check did not complete in this invocation. Run ./scripts/publish-preflight.sh." />
     <AppSurfacePublishPreflightTask Phase="permissions" PublishDirectory="$(PublishDir)" />
     <WriteLinesToFile File="$(AppSurfacePreflightReceiptDirectory)/permissions.ok" Lines="permissions checked" Overwrite="true" />
   </Target>
