@@ -6574,6 +6574,78 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(staging + ".verification", plan.RootElement.GetProperty("verificationRoot").GetString());
     }
 
+    [Fact]
+    public async Task DocsPublicationRestoresPreviousVerificationWhenServingGenerationFailsAndCanRetry()
+    {
+        await SeedRepositoryAsync();
+        var previousDocs = await SeedDocsArchiveAsync("0.0.9");
+        var previousServing = ExternalPath("previous-serving");
+        var firstPublication = await RunAsync(
+            [
+                "docs-publication",
+                "--version", "0.0.9",
+                "--tag", "v0.0.9",
+                "--docs-exact-tree", TestPathUtils.PathUnder(previousDocs.TrustedReleaseRootPath, previousDocs.ExactTreePath),
+                "--archive-output", RepositoryPath("artifacts/appsurface-docs-v0.0.9.tar.gz"),
+                "--pages-staging-root", previousServing,
+                "--plan-output", RepositoryPath("artifacts/docs-publication-previous-plan.json")
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(0, firstPublication.ExitCode);
+        var previousVerification = previousServing + ".verification";
+        var previousServingSnapshot = SnapshotFiles(previousServing);
+        var previousVerificationSnapshot = SnapshotFiles(previousVerification);
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var staging = ExternalPath("next-serving");
+        var archive = RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz");
+        var planPath = RepositoryPath("artifacts/docs-publication-next-plan.json");
+        var failServingMove = true;
+        using var moveFailure = ReleaseDocsStaticConceptPublication.UseDirectoryMoveFailureForTesting((source, destination) =>
+        {
+            if (!failServingMove
+                || !source.EndsWith(".switch-staging", StringComparison.Ordinal)
+                || !string.Equals(destination, Path.GetFullPath(staging), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            failServingMove = false;
+            return true;
+        });
+
+        string[] PublicationArguments() =>
+        [
+            "docs-publication",
+            "--version", "0.1.0",
+            "--tag", "v0.1.0",
+            "--docs-exact-tree", TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+            "--existing-pages-root", previousServing,
+            "--archive-output", archive,
+            "--pages-staging-root", staging,
+            "--plan-output", planPath
+        ];
+
+        var failedPublication = await RunAsync(PublicationArguments(), new FakeCommandRunner());
+
+        Assert.Equal(1, failedPublication.ExitCode);
+        Assert.Contains("Code: docs-switch-processing-failed", failedPublication.Stderr, StringComparison.Ordinal);
+        Assert.Equal(previousServingSnapshot, SnapshotFiles(previousServing));
+        Assert.Equal(previousVerificationSnapshot, SnapshotFiles(previousVerification));
+        Assert.False(Directory.Exists(staging + ".verification"));
+        Assert.False(Directory.Exists(staging + ".switch-staging"));
+        Assert.False(Directory.Exists(staging + ".switch-previous"));
+
+        var retriedPublication = await RunAsync(PublicationArguments(), new FakeCommandRunner());
+
+        Assert.Equal(0, retriedPublication.ExitCode);
+        Assert.Equal(previousServingSnapshot, SnapshotFiles(previousServing));
+        Assert.Equal(previousVerificationSnapshot, SnapshotFiles(previousVerification));
+        var mergedCatalog = await File.ReadAllTextAsync(Path.Join(staging, "versions.json"));
+        Assert.Contains("\"version\": \"0.0.9\"", mergedCatalog, StringComparison.Ordinal);
+        Assert.Contains("\"version\": \"0.1.0\"", mergedCatalog, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(1L)]
     [InlineData(8_388_608L)]
@@ -7147,23 +7219,28 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Theory]
-    [InlineData("archive")]
-    [InlineData("plan")]
-    [InlineData("summary")]
-    public async Task DocsPublicationRejectsGeneratedOutputPathsUnderExistingPagesRoot(string outputKind)
+    [InlineData("archive", false)]
+    [InlineData("plan", false)]
+    [InlineData("summary", false)]
+    [InlineData("archive", true)]
+    [InlineData("plan", true)]
+    [InlineData("summary", true)]
+    public async Task DocsPublicationRejectsGeneratedOutputPathsUnderExistingPagesRoot(string outputKind, bool useVerificationCompanion)
     {
         await SeedRepositoryAsync();
         var docs = await SeedDocsArchiveAsync("0.1.0");
         var existingPagesRoot = RepositoryPath("artifacts/existing-pages");
         Directory.CreateDirectory(existingPagesRoot);
+        var protectedRoot = useVerificationCompanion ? existingPagesRoot + ".verification" : existingPagesRoot;
+        Directory.CreateDirectory(protectedRoot);
         var archive = string.Equals(outputKind, "archive", StringComparison.Ordinal)
-            ? Path.Join(existingPagesRoot, "appsurface-docs-v0.1.0.tar.gz")
+            ? Path.Join(protectedRoot, "appsurface-docs-v0.1.0.tar.gz")
             : RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz");
         var plan = string.Equals(outputKind, "plan", StringComparison.Ordinal)
-            ? Path.Join(existingPagesRoot, "docs-publication-plan.json")
+            ? Path.Join(protectedRoot, "docs-publication-plan.json")
             : RepositoryPath("artifacts/docs-publication-plan.json");
         var summary = string.Equals(outputKind, "summary", StringComparison.Ordinal)
-            ? Path.Join(existingPagesRoot, "docs-publication-summary.md")
+            ? Path.Join(protectedRoot, "docs-publication-summary.md")
             : RepositoryPath("artifacts/docs-publication-summary.md");
 
         var result = await RunAsync(
@@ -7191,6 +7268,9 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Code: release-docs-publication-output-path-unsafe", result.Stderr, StringComparison.Ordinal);
         Assert.Contains("existing Pages payload", result.Stderr, StringComparison.Ordinal);
+        Assert.False(File.Exists(archive));
+        Assert.False(File.Exists(plan));
+        Assert.False(File.Exists(summary));
     }
 
     [Fact]
@@ -7740,6 +7820,13 @@ public sealed class ReleaseToolTests : IDisposable
         var hash = await SHA256.HashDataAsync(stream, CancellationToken.None);
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
+
+    private static Dictionary<string, string> SnapshotFiles(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+        .OrderBy(path => Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/'), StringComparer.Ordinal)
+        .ToDictionary(
+            path => Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/'),
+            path => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(),
+            StringComparer.Ordinal);
 
     private string RepositoryPath(string relativePath)
     {

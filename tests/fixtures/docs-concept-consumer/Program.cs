@@ -14,7 +14,7 @@ if (conceptCoreTypes.Length == 0)
 }
 
 var publicConceptTypes = conceptCoreTypes
-    .Where(type => type.IsPublic || type.IsNestedPublic)
+    .Where(type => type.IsVisible)
     .Select(type => type.Name)
     .Order(StringComparer.Ordinal)
     .ToArray();

@@ -814,6 +814,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
               const setTimeout = window.setTimeout.bind(window);
               window.setTimeout = (callback, delay, ...args) => {
                 if (typeof callback === "function"
+                    // Hold only the named restoration callback from _AppSurfaceDocsLayout.cshtml.
                     && callback.name === "restoreFrameHashAndMainScrollPosition"
                     && [80, 240].includes(delay)) {
                   return setTimeout(
@@ -844,15 +845,24 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
               .querySelector("#docs-sidebar a[href='/docs/Namespaces/ForgeTrust.AppSurface.Aspire.html']")
               ?.click()
             """);
-        await page.WaitForFunctionAsync(
-            """
-            () => window.__rwFrameNavigationSentinel === 'alive'
-              && window.location.pathname === '/docs/Namespaces/ForgeTrust.AppSurface.Aspire.html'
-              && document.querySelector('#doc-content h1')?.textContent?.trim() === 'Aspire'
-              && (window.__rwHeldFrameScrollRestores?.length ?? 0) >= 2
-            """,
-            null,
-            new PageWaitForFunctionOptions { Timeout = 30_000 });
+        try
+        {
+            await page.WaitForFunctionAsync(
+                """
+                () => window.__rwFrameNavigationSentinel === 'alive'
+                  && window.location.pathname === '/docs/Namespaces/ForgeTrust.AppSurface.Aspire.html'
+                  && document.querySelector('#doc-content h1')?.textContent?.trim() === 'Aspire'
+                  && (window.__rwHeldFrameScrollRestores?.length ?? 0) >= 2
+                """,
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException(
+                "The Docs frame did not reach Aspire with two held restoreFrameHashAndMainScrollPosition callbacks.",
+                exception);
+        }
 
         var scrollStates = await page.EvaluateAsync<FrameNavigationScrollState>(
             """

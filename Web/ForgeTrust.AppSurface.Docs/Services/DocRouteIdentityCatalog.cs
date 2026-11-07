@@ -460,6 +460,8 @@ internal sealed class DocRouteIdentityCatalog
     {
         if (string.IsNullOrWhiteSpace(aliasRoutePath)
             || IsRootReadme(StripFragment(identity.SourcePath))
+            || _reservedRoutePaths.Contains(aliasRoutePath)
+            || IsReservedPrefix(aliasRoutePath)
             || string.Equals(aliasRoutePath, identity.PublicRoutePath, StringComparison.OrdinalIgnoreCase))
         {
             return false;

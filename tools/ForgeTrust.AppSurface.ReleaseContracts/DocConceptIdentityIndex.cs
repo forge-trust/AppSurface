@@ -218,6 +218,7 @@ internal sealed class DocConceptIdentityIndex
         var quarantinedPages = new HashSet<PageKey>(PageKeyComparer.Instance);
         var membershipFacts = new Dictionary<ConceptMembershipKey, MembershipFact>(ConceptMembershipKeyComparer.Instance);
         var conceptIdsByPage = new Dictionary<PageKey, HashSet<string>>(PageKeyComparer.Instance);
+        var legacyLocaleClaims = new Dictionary<MutablePage, LegacyLocaleClaims>();
 
         foreach (var release in mutableReleases.Values)
         {
@@ -301,7 +302,7 @@ internal sealed class DocConceptIdentityIndex
                 PageKey? mappedPageKey = null;
                 if (!membership.IsAbsent)
                 {
-                    if (!TryResolveMembershipPage(release, membership, out var mappedPage, out var membershipFailure))
+                    if (!TryResolveMembershipPage(release, membership, legacyLocaleClaims, quarantinedConceptIds, quarantinedPages, out var mappedPage, out var membershipFailure))
                     {
                         strictValid = false;
                         QuarantineMembershipPageConflict(release, membership, quarantinedConceptIds, quarantinedPages);
@@ -342,7 +343,7 @@ internal sealed class DocConceptIdentityIndex
 
                 MutablePage? fallbackPage = null;
                 if (membership.FallbackSectionRoute is not null
-                    && !TryResolveMembershipFallback(release, membership, out fallbackPage))
+                    && !TryResolveMembershipFallback(release, membership, legacyLocaleClaims, quarantinedConceptIds, quarantinedPages, out fallbackPage))
                 {
                     strictValid = false;
                     quarantinedConceptIds.Add(membership.ConceptId);
@@ -932,6 +933,9 @@ internal sealed class DocConceptIdentityIndex
     private static bool TryResolveMembershipPage(
         MutableRelease release,
         DocConceptBridgeMembership membership,
+        IDictionary<MutablePage, LegacyLocaleClaims> legacyLocaleClaims,
+        ISet<string> quarantinedConceptIds,
+        ISet<PageKey> quarantinedPages,
         out MutablePage? page,
         out DocConceptValidationFailure failure)
     {
@@ -948,25 +952,23 @@ internal sealed class DocConceptIdentityIndex
         }
 
         page = candidates[0];
-        if (page.LocaleIsKnown)
+        if (!TryClaimLegacyPageLocale(release, page, membership, legacyLocaleClaims, quarantinedConceptIds, quarantinedPages))
         {
-            if (!string.Equals(page.Locale, membership.Locale, StringComparison.Ordinal))
-            {
-                page = null;
-                return false;
-            }
-        }
-        else
-        {
-            page.Locale = membership.Locale;
-            page.LocaleIsKnown = true;
+            page = null;
+            return false;
         }
 
         return true;
     }
 
     /// <summary>Finds an authored fallback in the exact public release and selected locale.</summary>
-    private static bool TryResolveMembershipFallback(MutableRelease release, DocConceptBridgeMembership membership, out MutablePage? fallback)
+    private static bool TryResolveMembershipFallback(
+        MutableRelease release,
+        DocConceptBridgeMembership membership,
+        IDictionary<MutablePage, LegacyLocaleClaims> legacyLocaleClaims,
+        ISet<string> quarantinedConceptIds,
+        ISet<PageKey> quarantinedPages,
+        out MutablePage? fallback)
     {
         fallback = null;
         // The caller resolves exact release pins and availability and invokes this only for a declared fallback route.
@@ -978,13 +980,60 @@ internal sealed class DocConceptIdentityIndex
         }
 
         fallback = candidates[0];
-        if (fallback.LocaleIsKnown)
+        if (TryClaimLegacyPageLocale(release, fallback, membership, legacyLocaleClaims, quarantinedConceptIds, quarantinedPages))
         {
-            return string.Equals(fallback.Locale, membership.Locale, StringComparison.Ordinal);
+            return true;
         }
 
-        fallback.Locale = membership.Locale;
-        fallback.LocaleIsKnown = true;
+        fallback = null;
+        return false;
+    }
+
+    /// <summary>Assigns a legacy page locale only while all direct and fallback membership claims agree.</summary>
+    private static bool TryClaimLegacyPageLocale(
+        MutableRelease release,
+        MutablePage page,
+        DocConceptBridgeMembership membership,
+        IDictionary<MutablePage, LegacyLocaleClaims> legacyLocaleClaims,
+        ISet<string> quarantinedConceptIds,
+        ISet<PageKey> quarantinedPages)
+    {
+        if (!legacyLocaleClaims.TryGetValue(page, out var claims))
+        {
+            if (page.LocaleIsKnown)
+            {
+                return string.Equals(page.Locale, membership.Locale, StringComparison.Ordinal);
+            }
+
+            claims = new LegacyLocaleClaims(membership.Locale);
+            legacyLocaleClaims.Add(page, claims);
+        }
+
+        claims.ConceptIds.Add(membership.ConceptId);
+        if (claims.IsConflicted || !string.Equals(claims.Locale, membership.Locale, StringComparison.Ordinal))
+        {
+            var existingConceptId = page.ConceptId;
+            claims.IsConflicted = true;
+            page.Locale = null;
+            page.LocaleIsKnown = false;
+            page.ConceptId = null;
+            page.Landing = false;
+            quarantinedPages.Add(new PageKey(release.Key, null, false, page.RoutePath));
+            foreach (var conceptId in claims.ConceptIds)
+            {
+                quarantinedConceptIds.Add(conceptId);
+            }
+
+            if (existingConceptId is not null)
+            {
+                quarantinedConceptIds.Add(existingConceptId);
+            }
+
+            return false;
+        }
+
+        page.Locale = membership.Locale;
+        page.LocaleIsKnown = true;
         return true;
     }
 
@@ -1237,6 +1286,14 @@ internal sealed class DocConceptIdentityIndex
         public bool IsServeable { get; }
 
         public DocConceptCanonicalPage ToImmutable() => new(RoutePath, ArtifactPath, Locale, LocaleIsKnown, Title, Anchors, Landing, ConceptId, IsServeable);
+    }
+
+    /// <summary>Collects all concept identities that claim one legacy route locale.</summary>
+    private sealed class LegacyLocaleClaims(string? locale)
+    {
+        public string? Locale { get; } = locale;
+        public HashSet<string> ConceptIds { get; } = new(StringComparer.Ordinal);
+        public bool IsConflicted { get; set; }
     }
 
     /// <summary>Comparer that preserves exact release version and pin while normalizing hexadecimal pin case.</summary>

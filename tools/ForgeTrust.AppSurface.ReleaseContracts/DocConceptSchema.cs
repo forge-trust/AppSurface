@@ -402,23 +402,58 @@ internal static class DocConceptSchema
         return routePath.Split('/').All(segment => segment.Length > 0 && !segment.StartsWith(".", StringComparison.Ordinal));
     }
 
-    /// <summary>Checks a whole-export-root relative ordinary HTML artifact mapping without deriving it from a route.</summary>
+    /// <summary>Checks a whole-export-root relative ordinary HTML artifact mapping and its trusted canonical fragment.</summary>
     internal static bool IsSafeArtifactPath(string artifactPath)
     {
-        if (string.IsNullOrWhiteSpace(artifactPath) || artifactPath.StartsWith("/", StringComparison.Ordinal)
-            || artifactPath.Contains('\\') || artifactPath.Contains('?')
-            || artifactPath.Any(char.IsControl) || artifactPath.Contains("//", StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(artifactPath)
+            || !string.Equals(artifactPath, artifactPath.Trim(), StringComparison.Ordinal)
+            || artifactPath.Any(char.IsControl))
         {
             return false;
         }
 
-        var pathPart = artifactPath.Split('#', 2)[0];
-        if (!pathPart.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        var fragmentStart = artifactPath.IndexOf('#');
+        var pathPart = fragmentStart >= 0 ? artifactPath[..fragmentStart] : artifactPath;
+        var fragment = fragmentStart >= 0 ? artifactPath[(fragmentStart + 1)..] : null;
+        if (string.IsNullOrWhiteSpace(pathPart)
+            || pathPart.StartsWith("/", StringComparison.Ordinal)
+            || pathPart.IndexOfAny(['\\', ':', '?', '#', '%']) >= 0
+            || pathPart.Contains("//", StringComparison.Ordinal)
+            || !pathPart.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+            || pathPart.Split('/').Any(segment => string.IsNullOrWhiteSpace(segment) || segment.StartsWith(".", StringComparison.Ordinal)))
         {
             return false;
         }
 
-        return pathPart.Split('/').All(segment => segment.Length > 0 && segment is not ("." or ".."));
+        return fragment is null || IsSafeArtifactFragment(fragment);
+    }
+
+    /// <summary>Allows canonical fragment data without letting it become another filesystem path component.</summary>
+    private static bool IsSafeArtifactFragment(string fragment)
+    {
+        if (fragment.IndexOfAny(['/', '\\', ':', '?', '#']) >= 0)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < fragment.Length; index++)
+        {
+            if (fragment[index] != '%')
+            {
+                continue;
+            }
+
+            if (index + 2 >= fragment.Length || !Uri.IsHexDigit(fragment[index + 1]) || !Uri.IsHexDigit(fragment[index + 2]))
+            {
+                return false;
+            }
+
+            // Encoded separators in the trusted canonical fragment remain fragment data and are never decoded
+            // into the filesystem path. Preserve them because the route manifest owns this fragment identity.
+            index += 2;
+        }
+
+        return true;
     }
 
     /// <summary>Checks that a locale is already trimmed and contains no URL, whitespace, or control syntax.</summary>

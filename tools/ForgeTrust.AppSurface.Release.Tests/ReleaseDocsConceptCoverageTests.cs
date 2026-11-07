@@ -312,9 +312,41 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
         var result = await GenerateAsync(fixture, outputRoot);
 
         Assert.Equal(new[] { "1.0.0" }, result.VerifiedVersions);
-        Assert.False(Directory.Exists(TestPathUtils.PathUnder(outputRoot, "Releases")));
+        Assert.DoesNotContain(Directory.EnumerateDirectories(outputRoot),
+            path => string.Equals(Path.GetFileName(path), "Releases", StringComparison.Ordinal));
+        Assert.Equal(verifiedFiles[Path.Join("1.0.0", "export", "start.html")],
+            await File.ReadAllBytesAsync(TestPathUtils.PathUnder(outputRoot, "releases", "1.0.0", "export", "start.html")));
         Assert.True(File.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "1.0.0", "export", "start.html")));
         Assert.Equal(originalSnapshot, SnapshotFiles(fixture.Root));
+    }
+
+    [Theory]
+    [InlineData("moved", "moved", true)]
+    [InlineData("moved", "stale", false)]
+    [InlineData("moved", "different length", false)]
+    public async Task CopyPinnedMember_VerifiesTheBytesActuallyStaged(string verified, string current, bool matches)
+    {
+        Directory.CreateDirectory(_root);
+        var source = TestPathUtils.PathUnder(_root, "original.html");
+        var destination = TestPathUtils.PathUnder(_root, "private-stage", "copy.html");
+        var expectedBytes = Encoding.UTF8.GetBytes(verified);
+        var expectedDigest = Convert.ToHexString(SHA256.HashData(expectedBytes)).ToLowerInvariant();
+        await File.WriteAllTextAsync(source, current);
+
+        Task Copy() => ReleaseDocsStaticConceptPublication.CopyPinnedMemberAsync(
+            source, destination, expectedBytes.Length, expectedDigest, CancellationToken.None);
+
+        if (matches)
+        {
+            await Copy();
+            Assert.Equal(verified, await File.ReadAllTextAsync(destination));
+        }
+        else
+        {
+            var exception = await Assert.ThrowsAsync<ReleaseToolException>(Copy);
+            Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
+            Assert.Equal(current, await File.ReadAllTextAsync(source));
+        }
     }
 
     [Theory]

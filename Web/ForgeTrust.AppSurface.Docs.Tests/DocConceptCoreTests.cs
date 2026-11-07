@@ -900,6 +900,26 @@ public sealed class DocConceptCoreTests
     }
 
     [Fact]
+    public void ArtifactPathsMatchFrozenPhysicalPathRulesAndRetainSafeCanonicalFragments()
+    {
+        Assert.True(DocConceptSchema.IsSafeArtifactPath("guide/topic.html"));
+        Assert.True(DocConceptSchema.IsSafeArtifactPath("guide/topic.html#intro"));
+        Assert.True(DocConceptSchema.IsSafeArtifactPath("guide/topic.html#intro%20section"));
+        Assert.True(DocConceptSchema.IsSafeArtifactPath("guide/topic.html#intro%2Fsection"));
+
+        foreach (var unsafeArtifact in new string[]
+        {
+            " guide/topic.html", "guide/topic.html ", "/guide/topic.html", "C:/guide/topic.html",
+            "guide\\topic.html", "guide//topic.html", "guide/.git/topic.html", ".private/topic.html",
+            "guide/topic.html#/../../outside.html", "guide/topic.html#section/child", "guide/topic.html#section\\child",
+            "guide/topic.html#bad%escape", "guide%2Ftopic.html", "guide/topic.html?view=full"
+        })
+        {
+            Assert.False(DocConceptSchema.IsSafeArtifactPath(unsafeArtifact), unsafeArtifact);
+        }
+    }
+
+    [Fact]
     public void BridgeSchemaRejectsInvalidMembershipShapesAndPins()
     {
         var cases = new (string Json, DocConceptValidationFailure Failure)[]
@@ -1373,22 +1393,59 @@ public sealed class DocConceptCoreTests
 
         var englishMembership = new Membership("legacy-target", legacyPin, "en", "page", "shared/topic") { ConceptId = englishConcept };
         var frenchMembership = new Membership("legacy-target", legacyPin, "fr", "page", "shared/topic") { ConceptId = frenchConcept };
-        var map = reverse ? Bridge(frenchMembership, englishMembership) : Bridge(englishMembership, frenchMembership);
+        var englishMap = Bridge(englishMembership);
+        var frenchMap = Bridge(frenchMembership);
+        var maps = reverse ? new[] { frenchMap, englishMap } : new[] { englishMap, frenchMap };
         var build = DocConceptIdentityIndex.BuildCombined(
             [englishSource, legacyTarget, frenchSource, englishTarget, frenchTarget],
-            [map], DocConceptValidationMode.Quarantine, Budget);
+            maps, DocConceptValidationMode.Quarantine, Budget);
 
         Assert.Contains(build.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
         Assert.True(build.Index.TryGetPageIdentity(englishSource.Version, englishPin, "old/english", out var englishIdentity));
         Assert.True(build.Index.TryGetPageIdentity(frenchSource.Version, frenchPin, "old/french", out var frenchIdentity));
-        var firstClaimedPage = build.Index.GetPage(new DocConceptPageIdentity("legacy-target", legacyPin, "shared/topic", reverse ? "fr" : "en", true));
-        Assert.NotNull(firstClaimedPage);
-        Assert.Equal("shared/topic", firstClaimedPage.RoutePath);
-        Assert.Null(build.Index.GetPage(new DocConceptPageIdentity("legacy-target", legacyPin, "shared/topic", reverse ? "en" : "fr", true)));
+        Assert.True(build.Index.TryGetPageIdentity("legacy-target", legacyPin, "shared/topic", out var conflictedIdentity));
+        Assert.False(conflictedIdentity!.LocaleIsKnown);
+        Assert.Null(conflictedIdentity.Locale);
+        Assert.NotNull(build.Index.GetPage(conflictedIdentity));
+        Assert.Null(build.Index.GetPage(new DocConceptPageIdentity("legacy-target", legacyPin, "shared/topic", "en", true)));
+        Assert.Null(build.Index.GetPage(new DocConceptPageIdentity("legacy-target", legacyPin, "shared/topic", "fr", true)));
         Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(englishIdentity!, "legacy-target", legacyPin).Reason);
         Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(frenchIdentity!, "legacy-target", legacyPin).Reason);
         Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(englishIdentity!, "english-target", englishTargetPin).Reason);
         Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(frenchIdentity!, "french-target", frenchTargetPin).Reason);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConflictingLegacyFallbackLocaleMembershipsQuarantineEveryClaim(bool reverse)
+    {
+        var englishPin = Pin('8');
+        var legacyPin = Pin('9');
+        var frenchPin = Pin('a');
+        var englishSource = Release("english-source", englishPin,
+            [new Page("old/english", "en", "english", "English", [])]);
+        var legacyTarget = LegacyWithRoutes("legacy-target", legacyPin, "shared/section");
+        var frenchSource = Release("french-source", frenchPin,
+            [new Page("old/french", "fr", "french", "French", [])]);
+        var englishFallback = new Membership("legacy-target", legacyPin, "en", "absent", FallbackSectionRoute: "shared/section") { ConceptId = "english" };
+        var frenchFallback = new Membership("legacy-target", legacyPin, "fr", "absent", FallbackSectionRoute: "shared/section") { ConceptId = "french" };
+        var englishMap = Bridge(englishFallback);
+        var frenchMap = Bridge(frenchFallback);
+        var maps = reverse ? new[] { frenchMap, englishMap } : new[] { englishMap, frenchMap };
+
+        var build = DocConceptIdentityIndex.BuildCombined(
+            [englishSource, legacyTarget, frenchSource], maps, DocConceptValidationMode.Quarantine, Budget);
+
+        Assert.Contains(build.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+        Assert.True(build.Index.TryGetPageIdentity("legacy-target", legacyPin, "shared/section", out var fallbackIdentity));
+        Assert.False(fallbackIdentity!.LocaleIsKnown);
+        Assert.Null(build.Index.GetPage(new DocConceptPageIdentity("legacy-target", legacyPin, "shared/section", "en", true)));
+        Assert.Null(build.Index.GetPage(new DocConceptPageIdentity("legacy-target", legacyPin, "shared/section", "fr", true)));
+        Assert.True(build.Index.TryGetPageIdentity("english-source", englishPin, "old/english", out var englishIdentity));
+        Assert.True(build.Index.TryGetPageIdentity("french-source", frenchPin, "old/french", out var frenchIdentity));
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(englishIdentity!, "legacy-target", legacyPin).Reason);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(frenchIdentity!, "legacy-target", legacyPin).Reason);
     }
 
     [Fact]

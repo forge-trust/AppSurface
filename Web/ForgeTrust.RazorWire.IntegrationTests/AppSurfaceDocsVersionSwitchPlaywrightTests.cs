@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using AngleSharp.Html.Parser;
 using Microsoft.Playwright;
 
@@ -617,8 +618,9 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
 
         var bodyText = await page.Locator("main.docs-version-choice").InnerTextAsync();
         Assert.Contains(expectedHeading, bodyText, StringComparison.Ordinal);
-        Assert.Contains("2.0.0", bodyText, StringComparison.Ordinal);
-        Assert.Contains("en", bodyText, StringComparison.Ordinal);
+        var versionLocale = page.Locator("main.docs-version-choice section > p")
+            .Filter(new LocatorFilterOptions { HasTextRegex = new Regex("^2[.]0[.]0 · en$") });
+        Assert.Equal(1, await versionLocale.CountAsync());
         Assert.Contains("Return to original guide", bodyText, StringComparison.Ordinal);
         Assert.Equal(0, await page.Locator("script[data-docs-switch-runtime]").CountAsync());
 

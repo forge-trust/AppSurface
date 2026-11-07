@@ -366,7 +366,9 @@ public sealed class AppSurfaceDocsVersionSwitchFixture : IAsyncLifetime
             .WithArguments(arguments)
             .WithWorkingDirectory(workingDirectory)
             .WithValidation(CommandResultValidation.None);
-        var result = await command.ExecuteBufferedAsync();
+        // Bound the whole child process as well as the export host startup within it.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        var result = await command.ExecuteBufferedAsync(deadline.Token);
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(

@@ -14,6 +14,12 @@ internal static class MarkdownFrontMatterParser
         @"^(?<indent>[\t ]*)download_markdown\s*:\s*(?<value>[^\r\n]*)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline);
 
+    private static readonly Regex YamlTimestampPattern = new(
+        @"\A(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|"
+        + @"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?"
+        + @"(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)\z",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
         .WithNodeTypeResolver(new ConceptIdYamlValueTypeResolver(), where => where.OnTop())
@@ -386,8 +392,7 @@ internal static class MarkdownFrontMatterParser
             // YAML plain scalars that resolve as numeric or timestamp types must be quoted when used as IDs.
             return Regex.IsMatch(value, @"^[+-]?(?:0|[1-9][0-9_]*|0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+)$", RegexOptions.CultureInvariant)
                    || Regex.IsMatch(value, @"^[+-]?(?:(?:[0-9][0-9_]*)?\.[0-9_]+|[0-9][0-9_]*\.?[0-9_]*[eE][+-]?[0-9]+|\.[0-9_]+[eE][+-]?[0-9]+)$", RegexOptions.CultureInvariant)
-                   || DateTime.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
-                       System.Globalization.DateTimeStyles.RoundtripKind, out _);
+                   || YamlTimestampPattern.IsMatch(value);
         }
 
         private static void SkipCurrentNode(IParser parser)

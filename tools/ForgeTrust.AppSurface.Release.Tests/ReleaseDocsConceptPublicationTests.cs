@@ -176,6 +176,37 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
         Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.VerificationRoot));
     }
 
+    [Fact]
+    public async Task GenerateAsync_RestoresPreviousServingTreeWhenStagingMoveFails()
+    {
+        var fixture = await CreateFixtureAsync();
+        var outputRoot = Path.Combine(_root, "serving-move-failure");
+        Directory.CreateDirectory(outputRoot);
+        var sentinel = Path.Combine(outputRoot, "previous-output.txt");
+        await File.WriteAllTextAsync(sentinel, "previous complete serving output");
+        var previousSnapshot = SnapshotFiles(outputRoot);
+        var failStagingMove = true;
+        using var moveFailure = ReleaseDocsStaticConceptPublication.UseDirectoryMoveFailureForTesting((source, destination) =>
+        {
+            if (!failStagingMove
+                || !source.EndsWith(".switch-staging", StringComparison.Ordinal)
+                || !string.Equals(destination, outputRoot, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            failStagingMove = false;
+            return true;
+        });
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, outputRoot, 4 * 1024 * 1024));
+
+        Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
+        Assert.Equal(previousSnapshot, SnapshotFiles(outputRoot));
+        Assert.False(Directory.Exists(outputRoot + ".switch-staging"));
+        Assert.False(Directory.Exists(outputRoot + ".switch-previous"));
+    }
+
     [Theory]
     [InlineData("true")]
     [InlineData("{}")]

@@ -13,6 +13,7 @@ namespace ForgeTrust.AppSurface.Release;
 /// <remarks>Original exact trees remain the sole inputs to archive verification and are never rewritten.</remarks>
 internal static class ReleaseDocsStaticConceptPublication
 {
+    private static readonly AsyncLocal<Func<string, string, bool>?> DirectoryMoveFailureForTesting = new();
     internal const string InventoryFileName = ".appsurface-docs-serving-inventory.json";
     internal const string InventorySchema = "appsurface-docs-serving-inventory-v1";
     internal const string TransformVersion = "docs-version-switch-static-v1";
@@ -21,6 +22,27 @@ internal static class ReleaseDocsStaticConceptPublication
     private const string RouteManifestFileName = ".appsurface-docs-route-manifest.json";
     private const string RuntimeRelativePath = "versions/switch/runtime.js";
     private const string StyleRelativePath = "versions/switch/switch.css";
+
+    /// <summary>Temporarily injects a directory-move failure for deterministic publication rollback tests.</summary>
+    internal static IDisposable UseDirectoryMoveFailureForTesting(Func<string, string, bool> shouldFail)
+    {
+        ArgumentNullException.ThrowIfNull(shouldFail);
+        var previous = DirectoryMoveFailureForTesting.Value;
+        DirectoryMoveFailureForTesting.Value = shouldFail;
+        return new DirectoryMoveFailureScope(previous);
+    }
+
+    private sealed class DirectoryMoveFailureScope(Func<string, string, bool>? previous) : IDisposable
+    {
+        public void Dispose() => DirectoryMoveFailureForTesting.Value = previous;
+    }
+
+    private static void MoveDirectory(string source, string destination)
+    {
+        if (DirectoryMoveFailureForTesting.Value?.Invoke(source, destination) == true)
+            throw new IOException("A directory move failed during serving publication.");
+        Directory.Move(source, destination);
+    }
 
     internal static Task<DocsServingOutput> GenerateAsync(
         string verificationRoot,
@@ -105,26 +127,42 @@ internal static class ReleaseDocsStaticConceptPublication
 
             var outputRoot = Path.GetFullPath(servingRoot);
             var stagingRoot = outputRoot + ".switch-staging";
-            foreach (var boundary in new[] { verificationRoot, outputRoot, stagingRoot })
+            var backupRoot = outputRoot + ".switch-previous";
+            foreach (var boundary in new[] { verificationRoot, outputRoot, stagingRoot, backupRoot })
             {
                 if ((File.Exists(boundary) || Directory.Exists(boundary))
                     && (File.GetAttributes(boundary) & FileAttributes.ReparsePoint) != 0)
                     throw Invalid("A serving input or output boundary is a reparse-point directory.");
             }
-            EnsureDistinctRoots(Path.GetFullPath(verificationRoot), outputRoot, stagingRoot);
+            EnsureDistinctRoots(Path.GetFullPath(verificationRoot), outputRoot, stagingRoot, backupRoot);
             ResetDirectory(stagingRoot);
             try
             {
+                // Materialize exact members from the pinned inventory and hash the bytes actually copied.
+                // The mounted projection reads this private snapshot, never the original tree a second time.
+                foreach (var release in servedReleases)
+                {
+                    foreach (var (member, pin) in release.FilePins!)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var relative = release.ExactTreePath + "/" + member;
+                        // Classify private archive members using their authenticated pin, not a new read of mutable input.
+                        if (privateMaps.Contains(relative)
+                            || maps.Any(map => map.Bytes.Length == pin.Length
+                                && string.Equals(map.Sha256, pin.Sha256, StringComparison.OrdinalIgnoreCase))) continue;
+                        var source = SafeCombine(verificationRoot, relative);
+                        var destination = SafeCombine(stagingRoot, relative);
+                        await CopyPinnedMemberAsync(source, destination, pin.Length, pin.Sha256, cancellationToken);
+                    }
+                }
+
                 Dictionary<string, (long Length, string Sha256)>? priorFiles = null;
                 foreach (var file in EnumerateFiles(verificationRoot, cancellationToken))
                 {
                     var relative = Path.GetRelativePath(verificationRoot, file).Replace(Path.DirectorySeparatorChar, '/');
                     if (IsPrivateMap(file, relative)) continue;
                     if (relative.StartsWith("releases/", StringComparison.OrdinalIgnoreCase)
-                        && !servedReleases.Any(release => relative.StartsWith(release.ExactTreePath + "/", StringComparison.Ordinal))) continue;
-                    if (releases.Any(release => (!release.IsPublic || !release.IsAvailable)
-                            && (relative.Equals(release.ExactTreePath, StringComparison.OrdinalIgnoreCase)
-                                || relative.StartsWith(release.ExactTreePath + "/", StringComparison.OrdinalIgnoreCase)))) continue;
+                        || releases.Any(release => relative.StartsWith(release.ExactTreePath + "/", StringComparison.OrdinalIgnoreCase))) continue;
                     var oldMount = ServingMember(root, "v/");
                     var managed = ServingMember(root, "versions/switch/");
                     if (relative.StartsWith(oldMount, StringComparison.OrdinalIgnoreCase)
@@ -150,12 +188,11 @@ internal static class ReleaseDocsStaticConceptPublication
                 {
                     foreach (var release in servedReleases)
                     {
-                        var inputTree = SafeCombine(verificationRoot, release.ExactTreePath);
+                        var inputTree = SafeCombine(stagingRoot, release.ExactTreePath);
                         foreach (var file in EnumerateFiles(inputTree, cancellationToken))
                         {
                             var relative = Path.GetRelativePath(inputTree, file).Replace(Path.DirectorySeparatorChar, '/');
                             if (relative is ReleaseManifestFileName or RouteManifestFileName or ConceptIndexFileName) continue;
-                            if (IsPrivateMap(file, release.ExactTreePath + "/" + relative)) continue;
                             var destination = SafeCombine(stagingRoot, ServingMember(root, "v/" + release.Version + "/" + relative));
                             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                             File.Copy(file, destination, overwrite: true);
@@ -217,7 +254,7 @@ internal static class ReleaseDocsStaticConceptPublication
                         if (page.RoutePath.Equals("versions/switch", StringComparison.OrdinalIgnoreCase)
                             || page.RoutePath.StartsWith("versions/switch/", StringComparison.OrdinalIgnoreCase))
                             throw Invalid("A canonical route collides with the reserved switch namespace.");
-                        var physicalPath = SafeCombine(verificationRoot, release.ExactTreePath + "/" + memberPath);
+                        var physicalPath = SafeCombine(stagingRoot, release.ExactTreePath + "/" + memberPath);
                         if (!File.Exists(physicalPath)) throw Invalid("A validated canonical page artifact is missing from the exact tree.");
                         var originalBytes = await ReadBoundedAsync(physicalPath, limit, cancellationToken);
                         var originalHtml = new UTF8Encoding(false, true).GetString(originalBytes);
@@ -283,8 +320,34 @@ internal static class ReleaseDocsStaticConceptPublication
                 });
                 await File.WriteAllBytesAsync(Path.Combine(stagingRoot, InventoryFileName), inventoryBytes, cancellationToken);
 
-                if (Directory.Exists(outputRoot)) Directory.Delete(outputRoot, recursive: true);
-                Directory.Move(stagingRoot, outputRoot);
+                if (Directory.Exists(backupRoot) || File.Exists(backupRoot))
+                    throw Invalid("A serving rollback path already exists and cannot be safely reused.");
+                var hadPrevious = Directory.Exists(outputRoot);
+                if (hadPrevious) MoveDirectory(outputRoot, backupRoot);
+                try
+                {
+                    MoveDirectory(stagingRoot, outputRoot);
+                }
+                catch
+                {
+                    if (hadPrevious && !Directory.Exists(outputRoot)) MoveDirectory(backupRoot, outputRoot);
+                    throw;
+                }
+                if (hadPrevious)
+                {
+                    try
+                    {
+                        Directory.Delete(backupRoot, recursive: true);
+                    }
+                    catch (IOException)
+                    {
+                        // The new serving output is committed; leave the uniquely named prior tree for safe inspection.
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        // The new serving output is committed; leave the uniquely named prior tree for safe inspection.
+                    }
+                }
                 return new DocsServingOutput(outputRoot, Path.Combine(outputRoot, InventoryFileName), outputRecords.Count,
                     inventoryBytes.Length, releases.Where(item => item.IsPublic && item.IsAvailable).Select(item => item.Version).ToArray());
             }
@@ -347,24 +410,25 @@ internal static class ReleaseDocsStaticConceptPublication
                 continue;
             }
             var manifest = await File.ReadAllBytesAsync(Path.Combine(tree, ReleaseManifestFileName), token);
-            var routes = ReadCanonicalRoutes(tree, manifest);
+            if (!MatchesDigest(manifest, pin)) throw Invalid("The release manifest changed after verification.");
+            using var manifestDocument = JsonDocument.Parse(manifest);
+            var filePins = manifestDocument.RootElement.GetProperty("files").EnumerateArray().ToDictionary(
+                entry => entry.GetProperty("path").GetString()!.Trim(),
+                entry => new StaticFilePin(entry.GetProperty("length").GetInt64(), entry.GetProperty("sha256").GetString()!),
+                StringComparer.Ordinal);
+            filePins.Add(ReleaseManifestFileName, new StaticFilePin(manifest.LongLength, pin));
+            var (routes, usesExportRoot) = ReadCanonicalRoutes(tree, filePins);
             var conceptPath = Path.Combine(tree, ConceptIndexFileName);
             byte[]? concept = null;
             if (File.Exists(conceptPath))
             {
                 concept = await ReadBoundedAsync(conceptPath, limit, token);
-                if (!ManifestPins(manifest, ConceptIndexFileName, concept)) throw Invalid("Concept sidecar is not pinned by the exact release manifest.");
+                if (!MatchesPin(filePins, ConceptIndexFileName, concept)) throw Invalid("Concept sidecar is not pinned by the exact release manifest.");
             }
-            var search = File.Exists(Path.Combine(tree, "search-index.json"));
+            var search = filePins.ContainsKey("search-index.json");
             var input = new DocConceptReleaseInput(version, pin, isPublic, true, routes.Count > 0, search,
                 routes.FirstOrDefault(route => route.RoutePath.Length == 0)?.RoutePath, routes, concept is null ? (ReadOnlyMemory<byte>?)null : concept.AsMemory());
-            var usesExportRoot = false;
-            if (File.Exists(Path.Combine(tree, RouteManifestFileName)))
-            {
-                using var frozen = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(tree, RouteManifestFileName), token));
-                usesExportRoot = frozen.RootElement.TryGetProperty("htmlUrlBase", out var urlBase) && urlBase.GetString() == "export-root";
-            }
-            result.Add(new StaticRelease(version, pin, exact, isPublic, true, input, usesExportRoot));
+            result.Add(new StaticRelease(version, pin, exact, isPublic, true, input, usesExportRoot, filePins));
         }
         return result;
     }
@@ -389,14 +453,14 @@ internal static class ReleaseDocsStaticConceptPublication
         return result;
     }
 
-    private static List<DocConceptCanonicalRouteFact> ReadCanonicalRoutes(string tree, byte[] releaseManifestBytes)
+    private static (List<DocConceptCanonicalRouteFact> Routes, bool UsesExportRoot) ReadCanonicalRoutes(
+        string tree, IReadOnlyDictionary<string, StaticFilePin> filePins)
     {
-        using var manifest = JsonDocument.Parse(releaseManifestBytes);
-        var manifestFiles = manifest.RootElement.GetProperty("files").EnumerateArray()
-            .Select(item => item.GetProperty("path").GetString()!).ToHashSet(StringComparer.Ordinal);
-        var routeManifestPath = Path.Combine(tree, RouteManifestFileName);
-        if (!manifestFiles.Contains(RouteManifestFileName) || !File.Exists(routeManifestPath)) return [];
-        using var routesDocument = JsonDocument.Parse(File.ReadAllBytes(routeManifestPath));
+        if (!filePins.ContainsKey(RouteManifestFileName)) return ([], false);
+        var routeBytes = File.ReadAllBytes(Path.Combine(tree, RouteManifestFileName));
+        if (!MatchesPin(filePins, RouteManifestFileName, routeBytes))
+            throw Invalid("The frozen route manifest changed after verification.");
+        using var routesDocument = JsonDocument.Parse(routeBytes);
         var result = new List<DocConceptCanonicalRouteFact>();
         var modern = routesDocument.RootElement.TryGetProperty("htmlUrlBase", out var mode);
         if (modern && mode.GetString() != "export-root") throw Invalid("The frozen route manifest uses an unsupported physical projection.");
@@ -414,17 +478,17 @@ internal static class ReleaseDocsStaticConceptPublication
                     : part.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ? new[] { part }
                     : new[] { part + ".html", part + "/index.html" };
                 artifact = candidates.SelectMany(candidate => new[] { candidate, "docs/" + candidate })
-                    .FirstOrDefault(manifestFiles.Contains);
+                    .FirstOrDefault(filePins.ContainsKey);
             }
             if (artifact is null) continue;
             var member = artifact.Split('#')[0];
-            if (!manifestFiles.Contains(member) || !File.Exists(SafeCombine(tree, member))
+            if (!filePins.ContainsKey(member) || !File.Exists(SafeCombine(tree, member))
                 || !member.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
                 throw Invalid("A canonical physical artifact is not a verified ordinary HTML file.");
             var destination = member + (parts.Length == 2 ? "#" + parts[1] : string.Empty);
             result.Add(new DocConceptCanonicalRouteFact(part, destination, null, LocaleIsKnown: false));
         }
-        return result;
+        return (result, modern);
     }
 
     private static IEnumerable<DocConceptChoiceView> CreateChoiceViews(DocConceptIdentityIndex index,
@@ -614,18 +678,24 @@ internal static class ReleaseDocsStaticConceptPublication
 
     private static string Hash(string value) => "sha256-" + Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    private static bool ManifestPins(byte[] manifestBytes, string path, byte[] bytes)
+    private static bool MatchesDigest(byte[] bytes, string sha256) =>
+        string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), sha256, StringComparison.OrdinalIgnoreCase);
+
+    private static bool MatchesPin(IReadOnlyDictionary<string, StaticFilePin> pins, string path, byte[] bytes) =>
+        pins.TryGetValue(path, out var pin) && pin.Length == bytes.LongLength && MatchesDigest(bytes, pin.Sha256);
+
+    /// <summary>Copies one exact archive member and checks the staged bytes against its original manifest pin.</summary>
+    internal static async Task CopyPinnedMemberAsync(
+        string source, string destination, long length, string sha256, CancellationToken token)
     {
-        using var document = JsonDocument.Parse(manifestBytes);
-        foreach (var item in document.RootElement.GetProperty("files").EnumerateArray())
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        File.Copy(source, destination, overwrite: false);
+        await using var stream = File.OpenRead(destination);
+        if (stream.Length != length
+            || !Convert.ToHexString(await SHA256.HashDataAsync(stream, token)).Equals(sha256, StringComparison.OrdinalIgnoreCase))
         {
-            if (string.Equals(item.GetProperty("path").GetString(), path, StringComparison.Ordinal))
-            {
-                return item.GetProperty("length").GetInt64() == bytes.LongLength
-                    && string.Equals(item.GetProperty("sha256").GetString(), Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
-            }
+            throw Invalid("A copied release member does not match its verified archive pin.");
         }
-        return false;
     }
 
     private static async Task<byte[]> ReadBoundedAsync(string path, int limit, CancellationToken token)
@@ -699,9 +769,14 @@ internal static class ReleaseDocsStaticConceptPublication
         }
     }
 
-    private static void EnsureDistinctRoots(string source, string output, string staging)
+    private static void EnsureDistinctRoots(string source, string output, string staging, string backup)
     {
-        if (SameOrNested(source, output) || SameOrNested(output, source) || SameOrNested(source, staging) || SameOrNested(staging, source))
+        if (SameOrNested(source, output) || SameOrNested(output, source)
+            || SameOrNested(source, staging) || SameOrNested(staging, source)
+            || SameOrNested(source, backup) || SameOrNested(backup, source)
+            || SameOrNested(output, staging) || SameOrNested(staging, output)
+            || SameOrNested(output, backup) || SameOrNested(backup, output)
+            || SameOrNested(staging, backup) || SameOrNested(backup, staging))
             throw Invalid("Verification input and serving output roots must be distinct, non-overlapping directories.");
     }
 
@@ -848,7 +923,10 @@ internal static class ReleaseDocsStaticConceptPublication
     private static ReleaseToolException Failure(string code, string summary, string detail, string fix) => new(ReleaseDiagnostic.Error(
         code, summary, detail, fix, "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
 
-    private sealed record StaticRelease(string Version, string ManifestSha256, string ExactTreePath, bool IsPublic, bool IsAvailable, DocConceptReleaseInput Input, bool UsesExportRoot = false);
+    private sealed record StaticFilePin(long Length, string Sha256);
+    private sealed record StaticRelease(string Version, string ManifestSha256, string ExactTreePath, bool IsPublic,
+        bool IsAvailable, DocConceptReleaseInput Input, bool UsesExportRoot = false,
+        IReadOnlyDictionary<string, StaticFilePin>? FilePins = null);
 }
 
 internal sealed record DocsStaticServingConfiguration(string InstanceId);

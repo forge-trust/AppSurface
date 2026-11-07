@@ -268,7 +268,13 @@ jobs:
           plan="${RUNNER_TEMP}/docs-publication-plan.json"
           summary="${RUNNER_TEMP}/docs-publication-summary.md"
           max_rewritten_file_size_bytes=4194304
-          if [[ "${VERSION}" == "0.2.0-preview.11" ]]; then
+          # Static publication checks every hydrated archive, not just the release being published.
+          existing_catalog="${EXISTING_PAGES_ROOT}/versions.json"
+          retains_preview_11=false
+          if [[ -f "${existing_catalog}" ]]; then
+            retains_preview_11="$(jq -r 'any(.versions[]; .version == "0.2.0-preview.11")' "${existing_catalog}")"
+          fi
+          if [[ "${VERSION}" == "0.2.0-preview.11" || "${retains_preview_11}" == "true" ]]; then
             max_rewritten_file_size_bytes=16777216
           fi
           case "${PROMOTE_RECOMMENDED}" in

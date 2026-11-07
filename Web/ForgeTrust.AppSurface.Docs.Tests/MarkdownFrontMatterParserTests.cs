@@ -86,6 +86,32 @@ public sealed class MarkdownFrontMatterParserTests
         Assert.Empty(result.Diagnostics);
     }
 
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("2026-jan-02")]
+    [InlineData("2026-1-6")]
+    public void ParseMetadataYamlWithDiagnostics_ShouldAcceptPlainConceptIdsOutsideYamlTimestampGrammar(string value)
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics($"concept_id: {value}");
+
+        Assert.Equal(value, result.Metadata?.ConceptId);
+        Assert.False(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData("2026-11-06")]
+    [InlineData("2026-11-06T04:35:16.5Z")]
+    [InlineData("2026-1-6 4:05:06 -5")]
+    public void ParseMetadataYamlWithDiagnostics_ShouldRejectImplicitYamlTimestampConceptIds(string value)
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics($"concept_id: {value}");
+
+        Assert.Null(result.Metadata?.ConceptId);
+        Assert.True(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-concept-id");
+    }
+
     [Fact]
     public void ParseMetadataYamlWithDiagnostics_ShouldLeaveAnAbsentConceptIdUnspecified()
     {
