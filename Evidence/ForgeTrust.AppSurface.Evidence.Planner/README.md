@@ -24,6 +24,8 @@ var plan = planner.Resolve(policy, [new NormalizedDiffPath("src/Orders/SubmitOrd
 
 `Resolve` normalizes and sorts paths, applies the most-specific matching rules, and falls back to `ConservativeProfileId` for a path that has no rule. If equally specific rules choose different profiles, it throws `EvidencePlanningException` instead of silently taking a lower-risk route. `EvidenceUnifiedDiffReader.Read(...)` accepts a CI-provided Git-formatted unified diff when callers do not want to depend on a local Git checkout. Hunked diffs must include `diff --git` file headers; use explicit paths when only a non-Git diff is available.
 
+Set `EvidencePolicy.CombineProfiles = true` to union distinct profiles selected by matched rules. The planner sorts source profile ids, declaration ids, paths, and matched rule ids before producing a stable `combined-<digest>` profile. Repeated resource, producer, or obligation ids must have identical canonical declarations; a conflict fails closed with `ASEVD133`. Profiles must share one scope or resolution fails with `ASEVD134`. An empty profile contributes no declarations. Paths with no matching rule still select the configured conservative profile. With the default `false`, any multi-profile selection keeps the existing conservative fallback behavior. The option is serialized only when true, preserving the canonical bytes of existing policies.
+
 ## Policy design
 
 Keep the policy small and explicit:
@@ -41,6 +43,8 @@ The planner does not classify C# semantics or infer that a getter, constructor, 
 | --- | --- | --- |
 | `ASEVD105` | Conservative fallback points at an empty profile. | Choose a non-empty profile that genuinely mediates unknown changes. |
 | `ASEVD117` | Same-precedence rules selected different profiles. | Add an explicit precedence or remove the overlap. |
+| `ASEVD133` | Selected profiles declare conflicting values for one resource, producer, or obligation id. | Make same-id declarations identical or keep the profiles separate. |
+| `ASEVD134` | Selected profiles have different scopes. | Select profiles with a shared scope or disable profile combination. |
 | `ASEVD118` | A supplied changed path is not normalized. | Use a repository-relative forward-slash path without `.` or `..` segments. |
 | `ASEVD121` | An identifier is empty or exceeds 128 characters. | Use a stable identifier up to 128 characters. |
 | `ASEVD111`, `ASEVD124` | A producer or resource requires an undeclared resource. | Declare every required resource in the same profile. |

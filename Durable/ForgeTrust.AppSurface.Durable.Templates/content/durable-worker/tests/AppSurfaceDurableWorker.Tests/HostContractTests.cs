@@ -211,10 +211,10 @@ public sealed class HostContractTests
     {
         Assert.Throws<ArgumentNullException>(() => WorkerApplication.CreateBuilder(null!));
 
-        var defaults = WorkerApplication.CreateBuilder([]);
+        var defaults = WorkerApplication.CreateBuilder(["--hostBuilder:reloadConfigOnChange=false"]);
         Assert.Equal("http://127.0.0.1:5080", defaults.WebHost.GetSetting(WebHostDefaults.ServerUrlsKey));
 
-        var configured = WorkerApplication.CreateBuilder(["--urls", "http://127.0.0.1:0"]);
+        var configured = WorkerApplication.CreateBuilder(["--urls", "http://127.0.0.1:0", "--hostBuilder:reloadConfigOnChange=false"]);
         Assert.Equal("http://127.0.0.1:0", configured.WebHost.GetSetting(WebHostDefaults.ServerUrlsKey));
     }
 
@@ -1589,12 +1589,27 @@ public sealed class HostContractTests
         return builder;
     }
 
+    [Fact]
+    public void Test_builder_uses_explicit_configuration_without_file_reload_watchers()
+    {
+        var builder = CreateBareTestBuilder();
+
+        Assert.Equal("false", builder.Configuration["hostBuilder:reloadConfigOnChange"]);
+        Assert.All(builder.Configuration.Sources.OfType<Microsoft.Extensions.Configuration.Json.JsonConfigurationSource>(),
+            source => Assert.False(source.ReloadOnChange));
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Test:Reload"] = "initial" });
+        builder.Configuration["Test:Reload"] = "updated";
+        Assert.Equal("updated", builder.Configuration["Test:Reload"]);
+    }
+
     private static WebApplicationBuilder CreateBareTestBuilder(string environmentName = "Development", bool useKestrel = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = environmentName,
             ContentRootPath = AppContext.BaseDirectory,
+            // Tests supply their configuration explicitly; native watchers add no observation to these fixtures.
+            Args = ["--hostBuilder:reloadConfigOnChange=false"],
         });
         if (useKestrel)
         {
