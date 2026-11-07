@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
@@ -1635,30 +1636,60 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     [Fact]
     public async Task RelocatedOwnedParentRefusesStopUntilTheExactAncestorIsRestored()
     {
-        var parentPath = Path.Join(_root, "owned-parent");
-        Directory.CreateDirectory(parentPath);
-        using var fixture = new NativeClusterFixture(parentPath);
-        var cluster = await fixture.StartAsync();
-        var relocatedParent = Path.Join(_root, "relocated-parent");
-        Directory.Move(parentPath, relocatedParent);
+        // Keep PostgreSQL's socket path short even when the test runner uses a deeply nested TMPDIR.
+        var testRoot = OperatingSystem.IsLinux() ? CreatePrivateTestRoot("/tmp") : _root;
+        var ownsTestRoot = !StringComparer.Ordinal.Equals(testRoot, _root);
+        var parentPath = Path.Join(testRoot, "owned-parent");
         try
         {
-            var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(500).AsTask());
+            Directory.CreateDirectory(parentPath);
+            using (var fixture = new NativeClusterFixture(parentPath))
+            {
+                var cluster = await fixture.StartAsync();
+                if (!OperatingSystem.IsWindows())
+                {
+                    foreach (var port in new[] { 5432, 65535 })
+                    {
+                        var socketPath = Path.Join(cluster.OwnedRoot, "socket", $".s.PGSQL.{port}");
+                        Assert.True(Encoding.UTF8.GetByteCount(socketPath) <= 103,
+                            $"Socket path is {Encoding.UTF8.GetByteCount(socketPath)} bytes: {socketPath}");
+                    }
+                }
+                var relocatedParent = Path.Join(testRoot, "relocated-parent");
+                Directory.Move(parentPath, relocatedParent);
+                try
+                {
+                    var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(500).AsTask());
 
-            Assert.Equal("Native PostgreSQL owned root has a missing or reparse-point ancestor.", error.Message);
-            Assert.True(fixture.Runtime.ServerRunning);
-            Assert.True(Directory.Exists(Path.Join(relocatedParent, Path.GetFileName(cluster.OwnedRoot))));
-            Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+                    Assert.Equal("Native PostgreSQL owned root has a missing or reparse-point ancestor.", error.Message);
+                    Assert.True(fixture.Runtime.ServerRunning);
+                    Assert.True(Directory.Exists(Path.Join(relocatedParent, Path.GetFileName(cluster.OwnedRoot))));
+                    Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+                }
+                finally
+                {
+                    Directory.Move(relocatedParent, parentPath);
+                    await cluster.DisposeWithBudgetAsync(2_000);
+                }
+
+                Assert.False(fixture.Runtime.ServerRunning);
+                Assert.False(Directory.Exists(cluster.OwnedRoot));
+                Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+            }
         }
         finally
         {
-            Directory.Move(relocatedParent, parentPath);
-            await cluster.DisposeWithBudgetAsync(2_000);
+            if (ownsTestRoot && Directory.Exists(parentPath)
+                && !Directory.EnumerateFileSystemEntries(parentPath).Any())
+            {
+                Directory.Delete(parentPath);
+            }
+            if (ownsTestRoot && Directory.Exists(testRoot)
+                && !Directory.EnumerateFileSystemEntries(testRoot).Any())
+            {
+                Directory.Delete(testRoot);
+            }
         }
-
-        Assert.False(fixture.Runtime.ServerRunning);
-        Assert.False(Directory.Exists(cluster.OwnedRoot));
-        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
     }
 
     [Fact]
@@ -2262,9 +2293,10 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         }
     }
 
-    private static string CreatePrivateTestRoot()
+    private static string CreatePrivateTestRoot(string? temporaryOverride = null)
     {
-        var temporary = OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
+        var temporary = temporaryOverride
+            ?? (OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath()));
         var root = Path.Join(temporary, "apg" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(root);
         if (!OperatingSystem.IsWindows())

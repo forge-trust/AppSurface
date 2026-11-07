@@ -7,6 +7,130 @@ namespace ForgeTrust.AppSurface.Caching.Tests;
 
 public class MemoTests : IDisposable
 {
+    [Fact]
+    public void ExplicitClockConstructorRejectsMissingDependenciesAndNonpositiveFailureWindows()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        Assert.Equal("cache", Assert.Throws<ArgumentNullException>(() =>
+            new Memo(null!, TimeSpan.FromSeconds(1), TimeProvider.System)).ParamName);
+        Assert.Equal("timeProvider", Assert.Throws<ArgumentNullException>(() =>
+            new Memo(cache, TimeSpan.FromSeconds(1), (TimeProvider)null!)).ParamName);
+        Assert.Equal("utcNow", Assert.Throws<ArgumentNullException>(() =>
+            new Memo(cache, TimeSpan.FromSeconds(1), (Func<DateTimeOffset>)null!)).ParamName);
+        foreach (var duration in new[] { TimeSpan.Zero, TimeSpan.FromTicks(-1) })
+            Assert.Equal("failureCacheDuration", Assert.Throws<ArgumentOutOfRangeException>(() =>
+                new Memo(cache, duration, TimeProvider.System)).ParamName);
+    }
+
+    [Fact]
+    public async Task DrainingJoinsTheOriginalRefreshAndCallerCancellationDoesNotCancelIt()
+    {
+        var clock = new MemoClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        using var memo = new Memo(cache, TimeSpan.FromSeconds(1), clock);
+        var alreadyCancelled = new CancellationToken(canceled: true);
+        Assert.Equal(alreadyCancelled, Assert.Throws<OperationCanceledException>(() =>
+        {
+            _ = memo.DrainBackgroundRefreshesAsync(alreadyCancelled);
+        }).CancellationToken);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var workToken = new CancellationToken(canceled: true);
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        Task<int> Read() => memo.GetAsync(async token =>
+        {
+            if (Interlocked.Increment(ref calls) == 1) return 1;
+            workToken = token;
+            entered.TrySetResult();
+            return await release.Task;
+        }, policy, callerFilePath: "controlled-refresh", callerLineNumber: 1);
+
+        try
+        {
+            Assert.Equal(1, await Read());
+            clock.Advance(TimeSpan.FromMilliseconds(1100));
+            Assert.Equal(1, await Read().WaitAsync(TimeSpan.FromSeconds(5)));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            using var waitCancellation = new CancellationTokenSource();
+            var cancelledWait = memo.DrainBackgroundRefreshesAsync(waitCancellation.Token);
+            Assert.False(cancelledWait.IsCompleted);
+            waitCancellation.Cancel();
+            var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWait);
+            Assert.Equal(waitCancellation.Token, error.CancellationToken);
+            Assert.False(workToken.CanBeCanceled);
+            Assert.False(release.Task.IsCompleted);
+            var joined = memo.DrainBackgroundRefreshesAsync();
+            Assert.False(joined.IsCompleted);
+            release.SetResult(2);
+            await joined.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(2, await Read());
+            Assert.Equal(2, calls);
+        }
+        finally
+        {
+            release.TrySetResult(2);
+            await memo.DrainBackgroundRefreshesAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        await memo.DrainBackgroundRefreshesAsync(); // No pending refresh is also a completed snapshot.
+        memo.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => { _ = memo.DrainBackgroundRefreshesAsync(); });
+    }
+
+    [Fact]
+    public async Task DrainWaitsForEveryCapturedRefreshAndExcludesLaterReads()
+    {
+        // Value: protects=drain joins all snapshot tasks without joining later refreshes;
+        // fails_when=drain waits for only one task or keeps expanding its snapshot;
+        // why_new=the existing ownership test has one refresh; seam=none;
+        // no_claim=shutdown coordination is owned by the caller.
+        var clock = new MemoClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        using var memo = new Memo(cache, TimeSpan.FromSeconds(1), clock);
+        var releases = Enumerable.Range(0, 3).Select(_ =>
+            new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        var calls = new int[3];
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        Task<int> Read(int key) => memo.GetAsync(key, async current =>
+            Interlocked.Increment(ref calls[current]) == 1 ? 1 : await releases[current].Task,
+            policy, callerFilePath: "snapshot-refreshes", callerLineNumber: 1);
+
+        try
+        {
+            for (var key = 0; key < releases.Length; key++) Assert.Equal(1, await Read(key));
+            clock.Advance(TimeSpan.FromMilliseconds(1100));
+            Assert.Equal(1, await Read(0));
+            Assert.Equal(1, await Read(1));
+            var snapshot = memo.DrainBackgroundRefreshesAsync();
+            Assert.Equal(1, await Read(2));
+            Assert.False(snapshot.IsCompleted);
+            releases[0].SetResult(2);
+            Assert.False(snapshot.IsCompleted);
+            releases[1].SetException(new InvalidOperationException("controlled refresh failure"));
+            await snapshot.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(releases[2].Task.IsCompleted);
+            var laterSnapshot = memo.DrainBackgroundRefreshesAsync();
+            Assert.False(laterSnapshot.IsCompleted);
+            releases[2].SetResult(3);
+            await laterSnapshot.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(2, await Read(0));
+            Assert.Equal(3, await Read(2));
+        }
+        finally
+        {
+            foreach (var release in releases) release.TrySetResult(2);
+            await memo.DrainBackgroundRefreshesAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    private sealed class MemoClock : TimeProvider, Microsoft.Extensions.Internal.ISystemClock
+    {
+        private long _ticks = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).Ticks;
+        public DateTimeOffset UtcNow => GetUtcNow();
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+        internal void Advance(TimeSpan elapsed) => Interlocked.Add(ref _ticks, elapsed.Ticks);
+    }
+
     // MemoryCache reads this clock for expiration; wall-clock scheduling cannot advance it.
     private sealed class CacheClock : ISystemClock
     {
@@ -582,7 +706,8 @@ public class MemoTests : IDisposable
     public void Constructor_NullClock_Throws()
     {
         var cache = A.Fake<IMemoryCache>();
-        Assert.Throws<ArgumentNullException>(() => new Memo(cache, TimeSpan.FromMilliseconds(100), null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new Memo(cache, TimeSpan.FromMilliseconds(100), (Func<DateTimeOffset>)null!));
     }
 
     [Fact]

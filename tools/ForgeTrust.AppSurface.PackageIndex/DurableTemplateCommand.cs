@@ -38,7 +38,12 @@ internal static class DurableTemplateCommand
             cancellationToken, nativeToolIdentity: () => nativeIdentity, nativeAcquisitionIdentity: () => acquiredIdentity);
     }
 
-    /// <summary>Runs the generated ordinary-startup smoke against one privately owned native PostgreSQL cluster.</summary>
+    /// <summary>Runs the generated ordinary-startup smoke against one privately owned native PostgreSQL cluster.
+    /// Linux uses <c>/tmp</c> and macOS uses <c>/private/tmp</c> for the cluster root; Windows and other platforms
+    /// use the system temporary directory. The short Unix paths keep PostgreSQL's socket path within its fixed limit.</summary>
+    /// <remarks>The smoke still enforces the 103-byte Unix-domain socket path limit in
+    /// <see cref="DurableTemplateNativePostgreSql"/>. Linux and macOS ignore user-selected temporary-directory
+    /// environment paths for this owned cluster because they can exceed that limit.</remarks>
     /// <param name="bin">Absolute PostgreSQL tool directory selected for the smoke runner.</param>
     /// <param name="root">Generated test project to run.</param>
     /// <param name="environment">Environment shared with the generated proof, copied before adding cluster credentials.</param>
@@ -58,8 +63,9 @@ internal static class DurableTemplateCommand
         Func<DurableTemplateNativePostgreSql, int, ValueTask>? disposeClusterAsync = null,
         Action<NativePostgreSqlToolIdentity>? acquisitionIdentitySink = null)
     {
-        // macOS user temp paths can exceed PostgreSQL's Unix-domain socket path limit.
-        var temporary = OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
+        // Linux and macOS user temp paths can exceed PostgreSQL's Unix-domain socket path limit.
+        var temporary = OperatingSystem.IsLinux() ? "/tmp" :
+            OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
         var ownedRoot = Path.Join(temporary, "appsurface-native-template-" + Guid.NewGuid().ToString("N"));
         var cluster = startClusterAsync is null
             ? await DurableTemplateNativePostgreSql.StartAsync(ownedRoot, runner, cancellationToken,
