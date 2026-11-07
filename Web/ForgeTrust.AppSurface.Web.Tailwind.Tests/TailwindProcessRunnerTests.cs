@@ -1,5 +1,8 @@
+extern alias TailwindTasks;
+
 using System.Runtime.InteropServices;
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
+using TaskInternal = TailwindTasks::ForgeTrust.AppSurface.Web.Tailwind.Internal;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
@@ -22,6 +25,80 @@ public sealed class TailwindProcessRunnerTests : IDisposable
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    [Theory]
+    [InlineData("", (int)TailwindOutputLevel.Debug)]
+    [InlineData(" \t", (int)TailwindOutputLevel.Debug)]
+    [InlineData("≈ tailwindcss v4.1.18", (int)TailwindOutputLevel.Information)]
+    [InlineData("Done in 34ms", (int)TailwindOutputLevel.Information)]
+    [InlineData("\u001b[3m\u001b[1m\u001b[34m≈ tailwindcss v4.1.18\u001b[0m", (int)TailwindOutputLevel.Information)]
+    [InlineData("\u001b[32mDone in \u001b[1m34ms\u001b[m", (int)TailwindOutputLevel.Information)]
+    [InlineData("\u001b[1;32mDone in 34ms\u001b[0m", (int)TailwindOutputLevel.Information)]
+    [InlineData("\u001b[38:2::34:56:78m≈ tailwindcss v4.1.18\u001b[0m", (int)TailwindOutputLevel.Information)]
+    [InlineData("\u001b[33mWarning: unexpected input\u001b[0m", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b[31mError: boom\u001b[0m", (int)TailwindOutputLevel.Error)]
+    [InlineData("unrecognized message", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b[31≈ tailwindcss v4.1.18", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b[/mDone in 34ms", (int)TailwindOutputLevel.Error)]
+    [InlineData("Done in 34ms\u001b[31", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b[2K≈ tailwindcss v4.1.18", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b[", (int)TailwindOutputLevel.Error)]
+    [InlineData("Done in 34ms\u001b[2K", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b]0;title\u0007Done in 34ms", (int)TailwindOutputLevel.Error)]
+    [InlineData("\u001b[0m \u001b[m", (int)TailwindOutputLevel.Debug)]
+    public void Classify_IgnoresOnlyCompleteSgrStyling(string line, int expected)
+    {
+        // Value: protects=runtime and MSBuild copies classify identical stderr messages;
+        // fails_when=SGR parsing changes severity or either compiled host copy diverges;
+        // why_new=the classifier source is linked into two production assemblies; seam=none;
+        // no_claim=classification does not establish Tailwind package or native-host acceptance.
+        Assert.Equal((TailwindOutputLevel)expected, TailwindStderrClassifier.Classify(line));
+        Assert.Equal((TaskInternal.TailwindOutputLevel)expected, TaskInternal.TailwindStderrClassifier.Classify(line));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ClassifiesColoredStderrWithoutChangingCallbacksOrCapturedOutput()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var scriptPath = await WriteUnixScriptAsync(
+            "colored-tailwind",
+            """
+            #!/bin/sh
+            printf '\033[3m\033[1m\033[34m≈ tailwindcss v4.1.18\033[0m\n\033[32mDone in 34ms\033[0m\n\033[33mWarning: unexpected input\033[0m\n\033[31mError: boom\033[0m\nDone in 34ms\033[2K\n' >&2
+            exit 0
+            """);
+        string[] expectedLines =
+        [
+            "\u001b[3m\u001b[1m\u001b[34m≈ tailwindcss v4.1.18\u001b[0m",
+            "\u001b[32mDone in 34ms\u001b[0m",
+            "\u001b[33mWarning: unexpected input\u001b[0m",
+            "\u001b[31mError: boom\u001b[0m",
+            "Done in 34ms\u001b[2K",
+        ];
+        var stderrLines = new List<(string Line, TailwindOutputLevel Level)>();
+
+        var result = await TailwindProcessRunner.ExecuteAsync(
+            scriptPath,
+            [],
+            _tempRoot,
+            null,
+            (line, level) => stderrLines.Add((line, level)),
+            captureLimit: 8192,
+            CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(expectedLines, stderrLines.Select(static item => item.Line));
+        Assert.Equal(
+            [TailwindOutputLevel.Information, TailwindOutputLevel.Information, TailwindOutputLevel.Error, TailwindOutputLevel.Error, TailwindOutputLevel.Error],
+            stderrLines.Select(static item => item.Level));
+        Assert.Equal(string.Join('\n', expectedLines) + "\n", result.Stderr);
+        Assert.Equal(string.Empty, result.Stdout);
     }
 
     [Fact]
