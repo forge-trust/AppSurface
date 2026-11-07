@@ -13,5 +13,7 @@
   </ItemGroup>
 
   <Import Project="..\..\Web\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets" Condition="Exists('..\..\Web\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets')" />
+  <Import Project="../../tools/PublishPreflight/PublishPreflight.targets"
+          Condition="'$(AppSurfacePublishPreflight)' == 'true'" />
 
 </Project>

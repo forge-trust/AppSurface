@@ -249,3 +249,23 @@ To enable Razor Runtime Compilation and live static asset updates in the sample,
 Local assets such as `site.js` and `site.css` automatically receive version hashes for cache busting. You can still use `asp-append-version="true"` explicitly if you want to make that behavior obvious in markup.
 
 Use the [nested collections quickstart](NESTED-COLLECTIONS.md) at `/Reactivity/NestedCollections?mode=physical` or `?mode=mark` for the small DateOnly editor. It walks through sparse parent/date keys, removing a child, duplicating its parent, a `422` with the attempted value retained, correction, and ordinary commands with JavaScript disabled. The separate [faithful V4 consumer fixture](NESTED-COLLECTIONS.md#faithful-v4-consumer-fixture) at `/Reactivity/SkoolitV4Collections` retains the pinned source's temporal field shape and posted-key rendering adapter; exact-package proof requires recording the consumed package/assets and executed round trip. The [Form Interactions guide](../../Web/ForgeTrust.RazorWire/Docs/form-interactions.md) defines the shared API, ownership, event, and identity rules. These samples do not establish live Skoolit adoption or measured first-use timing.
+
+### Check publish output before full coverage
+
+From the repository root on Linux, with .NET 10, Bash, and GNU find installed, run:
+
+```bash
+./scripts/publish-preflight.sh && ./scripts/coverage-solution.sh
+```
+
+The preflight builds a repository-only MSBuild task, then restores and builds this sample's normal framework-dependent Release publish, including [Tailwind asset generation](../../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md). The first run may need NuGet and Tailwind downloads. It uses a fresh scratch output and removes it on exit. The preflight does not start the app or run coverage itself. Use the same checkout sequentially for publish and coverage; a separate output directory does not isolate their build intermediates. An ordinary `dotnet publish` does not run this opt-in check.
+
+| Diagnostic | What to do |
+| --- | --- |
+| `ASPUB001` | Two ordinary or static SDK copy destinations conflict. Change the item destination paths to be distinct even when compared without case, and use consistent casing for shared directory components: `wwwroot/Images/a.png` and `wwwroot/images/b.png` conflict even though the filenames differ. Check the reported source items and both path spellings. |
+| `ASPUB002` | A published regular file has group/other write permission or setuid, setgid, or sticky bits. Inspect the source mode and build environment (including umask), fix the cause and publish again. The preflight never rewrites modes. |
+| `ASPUB003` | A required check could not complete. Use `./scripts/publish-preflight.sh` to build the Release task and run both phases in order; setting the MSBuild switch or invoking the permissions target alone is not the supported entry point. Check the SDK, GNU find, or the reported input/output error, then retry. |
+
+The path check uses the ordinary and static SDK copy lists before either writer copies a payload. Direct SDK transforms such as `web.config` are outside that path check; the permissions check walks the finished output without following symbolic links. These checks cover this sample invocation only. The existing coverage and final release checks are still required for their respective workflows.
+
+The script builds the task in Release at its repository-local path and supplies a fresh receipt directory. The path phase removes any previous `paths.ok` and `permissions.ok` receipts before validation; the permissions phase also requires the path phase to have succeeded in the same MSBuild invocation. Receipts from earlier runs cannot substitute for that ordering check. Run `./scripts/test-publish-preflight.sh` on Linux to verify both SDK copy lists, failure ordering, receipt handling, and diagnostic behavior with the anonymized fixtures.
