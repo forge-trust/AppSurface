@@ -8,6 +8,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal sealed class PackageArtifactWorkflow
 {
     private const string TailwindMainPackageId = "ForgeTrust.AppSurface.Web.Tailwind";
+    private const string CloudTasksPackageId = "ForgeTrust.AppSurface.Durable.CloudTasks";
 
     internal const int RestoreTimeoutMilliseconds = 180_000;
     internal const int BuildTimeoutMilliseconds = 300_000;
@@ -20,6 +21,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly ICoverageCliConsumerProofWorkflow _coverageProofWorkflow;
     private readonly IDocsPackageConsumerProofWorkflow _docsProofWorkflow;
     private readonly PackagePayloadInventoryLoader _payloadInventoryLoader;
+    private readonly Func<CloudTasksPackageConsumerProofRequest, PackageArtifactValidationReport, CancellationToken, Task> _cloudTasksProof;
     private readonly PackageArtifactManifestWriter _artifactManifestWriter;
     private readonly Func<string, string, CancellationToken, Task> _sourceIdentityVerifier;
     private readonly Func<DurableTemplateConsumerProofRequest, IReadOnlyList<PackageArtifactValidationReportEntry>, CancellationToken, Task<DurableTemplateProofReceipt>> _templateProof;
@@ -48,6 +50,10 @@ internal sealed class PackageArtifactWorkflow
     /// receipt; tests may supply a deterministic proof to verify packing, cleanup and manifest withholding. A failed
     /// receipt prevents manifest creation. The delegate receives only validated archives and owns its proof cleanup.
     /// </param>
+    /// <param name="cloudTasksProof">
+    /// Optional packed Cloud Tasks consumer proof seam. Production restores and builds public-API consumers from the
+    /// exact validated local archive and compares the packed neutral Durable graph with the selected source snapshot.
+    /// </param>
     internal PackageArtifactWorkflow(
         PackagePublishPlanResolver planResolver,
         ICommandRunner commandRunner,
@@ -55,7 +61,8 @@ internal sealed class PackageArtifactWorkflow
         ICoverageCliConsumerProofWorkflow coverageProofWorkflow,
         IDocsPackageConsumerProofWorkflow docsProofWorkflow,
         Func<string, string, CancellationToken, Task>? sourceIdentityVerifier = null,
-        Func<DurableTemplateConsumerProofRequest, IReadOnlyList<PackageArtifactValidationReportEntry>, CancellationToken, Task<DurableTemplateProofReceipt>>? templateProof = null)
+        Func<DurableTemplateConsumerProofRequest, IReadOnlyList<PackageArtifactValidationReportEntry>, CancellationToken, Task<DurableTemplateProofReceipt>>? templateProof = null,
+        Func<CloudTasksPackageConsumerProofRequest, PackageArtifactValidationReport, CancellationToken, Task>? cloudTasksProof = null)
     {
         _planResolver = planResolver;
         _commandRunner = commandRunner;
@@ -63,6 +70,8 @@ internal sealed class PackageArtifactWorkflow
         _coverageProofWorkflow = coverageProofWorkflow;
         _docsProofWorkflow = docsProofWorkflow;
         _payloadInventoryLoader = new PackagePayloadInventoryLoader();
+        _cloudTasksProof = cloudTasksProof ?? (async (request, report, token) =>
+            _ = await new CloudTasksPackageConsumerProof(_commandRunner).RunAsync(request, report, token));
         _artifactManifestWriter = new PackageArtifactManifestWriter();
         _sourceIdentityVerifier = sourceIdentityVerifier ?? TailwindSourceIdentity.RequireAsync;
         _templateProof = templateProof ?? ((request, artifacts, token) =>
@@ -113,7 +122,8 @@ internal sealed class PackageArtifactWorkflow
         var plan = await _planResolver.ResolveAsync(
             request.RepositoryRoot,
             request.ManifestPath,
-            cancellationToken);
+            cancellationToken,
+            includeReadinessBlockedForVerification: true);
         var payloadInventory = await _payloadInventoryLoader.LoadAsync(
             request.RepositoryRoot,
             cancellationToken);
@@ -121,6 +131,7 @@ internal sealed class PackageArtifactWorkflow
         Directory.CreateDirectory(request.ArtifactsOutputPath);
         CleanPackageArtifacts(request.ArtifactsOutputPath);
         DeleteArtifactManifest(request.ArtifactManifestPath);
+        DeleteFileIfPresent(Path.Join(request.ArtifactsOutputPath, CloudTasksPackageConsumerProof.ReportFileName));
 
         await RunRepositoryCommandAsync(
             request,
@@ -167,7 +178,7 @@ internal sealed class PackageArtifactWorkflow
                 "pack", entry.ProjectPath, "--configuration", "Release", "--no-restore", "--no-build",
                 "--output", request.ArtifactsOutputPath, $"/p:Version={request.PackageVersion}",
                 $"/p:PackageVersion={request.PackageVersion}", $"/p:RepositoryCommit={request.SourceCommit ?? string.Empty}",
-                "/p:ContinuousIntegrationBuild=true"
+                "/p:ContinuousIntegrationBuild=true", $"/p:DeterministicTimestamp={CloudTasksPackageConsumerProof.DeterministicPackageTimestamp}"
             };
             try
             {
@@ -232,6 +243,31 @@ internal sealed class PackageArtifactWorkflow
                     tailwindProofWorkDirectory,
                     ex,
                     cancellationToken);
+                throw;
+            }
+        }
+        var hasCloudTasksPackage = plan.Entries.Any(static entry => string.Equals(
+            entry.PackageId,
+            CloudTasksPackageId,
+            StringComparison.OrdinalIgnoreCase));
+        if (hasCloudTasksPackage)
+        {
+            try
+            {
+                await _cloudTasksProof(
+                    new CloudTasksPackageConsumerProofRequest(
+                        request.RepositoryRoot,
+                        request.ArtifactsOutputPath,
+                        request.PackageVersion,
+                        request.Source,
+                        request.SourceCommit,
+                        request.CloudTasksBaselineRef),
+                    report,
+                    cancellationToken);
+            }
+            catch
+            {
+                DeleteArtifactManifest(request.ArtifactManifestPath);
                 throw;
             }
         }
@@ -687,6 +723,7 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="ProducerRunId">Optional trusted workflow run ID used to create release producer evidence.</param>
 /// <param name="ProducerAttempt">Optional trusted producer attempt used to create release producer evidence.</param>
 /// <param name="SourceCommit">Optional full source commit bound to the release producer evidence.</param>
+/// <param name="CloudTasksBaselineRef">Optional historical acceptance target ref; the unique merge-base with the candidate is required. Omitted uses the candidate source snapshot.</param>
 internal sealed record PackageArtifactRequest(
     string RepositoryRoot,
     string ManifestPath,
@@ -702,4 +739,5 @@ internal sealed record PackageArtifactRequest(
     string? RepositoryId = null,
     string? ProducerRunId = null,
     string? ProducerAttempt = null,
-    string? SourceCommit = null);
+    string? SourceCommit = null,
+    string? CloudTasksBaselineRef = null);
