@@ -16,7 +16,7 @@ for current release risk, migration guidance, and readiness.
 
 An `EvidencePolicy` resolves into an immutable `EvidencePlan`. A run records declared `EvidenceProducerResult` values and then uses `EvidenceManifestBuilder.Build(...)` to produce an `EvidenceManifest`. Both plan and manifest have canonical JSON and SHA-256 digests, so a gate can verify a result without rerunning the test suite.
 
-`EvidencePolicy.CombineProfiles` is an opt-in (`false` by default) policy property. When enabled, the planner unions distinct profiles selected by matched paths, requiring identical canonical declarations for repeated ids and a shared profile scope. Unknown paths continue to use `ConservativeProfileId`; see the [planner reference](../ForgeTrust.AppSurface.Evidence.Planner/README.md) for merge rules and diagnostics. The default property is omitted from canonical JSON, so existing policies retain their serialized bytes and positional constructor.
+`EvidencePolicy.CombineProfiles` is an opt-in (`false` by default) policy property. When enabled, the planner unions distinct profiles selected by matched paths, requiring identical canonical declarations for repeated ids and a shared profile scope. Unknown paths continue to use `ConservativeProfileId`; see the [planner reference](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) for merge rules and diagnostics. The default property is omitted from canonical JSON, so existing policies retain their serialized bytes and positional constructor.
 
 | Type family | Purpose |
 | --- | --- |

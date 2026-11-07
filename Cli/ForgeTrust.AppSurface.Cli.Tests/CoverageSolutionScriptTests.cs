@@ -111,9 +111,9 @@ public sealed class CoverageSolutionScriptTests
             dependencies.Children.Cast<YamlScalarNode>().Select(node => node.Value));
         Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
         var buildCondition = ((YamlScalarNode)build.Children[new YamlScalarNode("if")]).Value!;
-        Assert.Contains("needs.coverage-evidence-plan.result == 'success'", buildCondition, StringComparison.Ordinal);
-        Assert.Contains("needs.packed-durable-consumers.result == 'success'", buildCondition, StringComparison.Ordinal);
-        Assert.Contains("needs.coverage-security-platform.result == 'skipped'", buildCondition, StringComparison.Ordinal);
+        Assert.Equal(
+            "${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && needs.packed-durable-consumers.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result == 'skipped')) }}",
+            buildCondition);
 
         var packed = (YamlMappingNode)jobs.Children[new YamlScalarNode("packed-durable-consumers")];
         Assert.Equal("ubuntu-latest", ((YamlScalarNode)packed.Children[new YamlScalarNode("runs-on")]).Value);

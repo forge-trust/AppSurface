@@ -59,7 +59,7 @@ public sealed class RepositoryGitChangesTests : IDisposable
         var patch = await File.ReadAllTextAsync(output);
         Assert.Contains("+current staged content", patch);
         Assert.Contains("+current unstaged file", patch);
-        Assert.Contains("+current unstaged file", patch);
+        Assert.DoesNotContain("+current unstaged content", patch);
         Assert.Contains("+current untracked content", patch);
         Assert.Contains("diff --git a/empty.txt b/empty.txt", patch);
         Assert.DoesNotContain("@@ -0,0 +1,1 @@\n+\n", patch);
