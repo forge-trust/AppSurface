@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.ReleaseContracts;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -13,8 +14,16 @@ internal static class MarkdownFrontMatterParser
         @"^(?<indent>[\t ]*)download_markdown\s*:\s*(?<value>[^\r\n]*)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline);
 
+    private static readonly Regex YamlTimestampPattern = new(
+        @"\A(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|"
+        + @"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?"
+        + @"(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)\z",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
+        .WithNodeTypeResolver(new ConceptIdYamlValueTypeResolver(), where => where.OnTop())
+        .WithTypeConverter(new ConceptIdYamlValueConverter())
         .WithTypeConverter(new AutoRelatedPagesYamlValueConverter())
         .IgnoreUnmatchedProperties()
         .Build();
@@ -140,6 +149,10 @@ internal static class MarkdownFrontMatterParser
         var metadata = new DocMetadata
         {
             Title = Normalize(document.Title),
+            ConceptId = NormalizeConceptId(document.ConceptId, diagnostics),
+            ConceptIdIsInvalid = document.ConceptId.IsInvalid
+                                 || (!string.IsNullOrWhiteSpace(document.ConceptId.Value)
+                                     && !DocConceptSchema.TryNormalizeConceptId(document.ConceptId.Value, out _)),
             Summary = Normalize(document.Summary),
             PageType = Normalize(document.PageType),
             Audience = Normalize(document.Audience),
@@ -258,6 +271,154 @@ internal static class MarkdownFrontMatterParser
     private static string? Normalize(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string? NormalizeConceptId(ConceptIdYamlValue value, List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        if (!value.IsInvalid && DocConceptSchema.TryNormalizeConceptId(value.Value, out var conceptId))
+        {
+            return conceptId;
+        }
+
+        AddInvalidConceptIdDiagnostic(diagnostics);
+        return null;
+    }
+
+    private static void AddInvalidConceptIdDiagnostic(List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        diagnostics.Add(new AppSurfaceDocsMetadataDiagnostic(
+            "invalid-concept-id",
+            "concept_id",
+            "The authored concept identifier is invalid and must be corrected before export.",
+            "Concept identifiers must use 1–128 lowercase ASCII letters, digits, dots, underscores, or hyphens and begin and end with a letter or digit.",
+            "Correct concept_id without changing its intended identity, or remove it when no cross-release identity is known."));
+    }
+
+    private readonly record struct ConceptIdYamlValue(string? Value, bool IsInvalid);
+
+    /// <summary>
+    /// Lets explicitly tagged YAML nodes reach the concept-ID converter without changing tag resolution for other metadata.
+    /// </summary>
+    /// <remarks>
+    /// YamlDotNet's unknown-tag resolver runs before type converters and otherwise rejects tags such as <c>!!null</c> before
+    /// the converter can apply the concept-ID scalar rules. This resolver claims only the private concept-ID wrapper type;
+    /// the converter still validates the actual tag and scalar, while every other metadata field keeps default resolution.
+    /// </remarks>
+    private sealed class ConceptIdYamlValueTypeResolver : INodeTypeResolver
+    {
+        public bool Resolve(NodeEvent? nodeEvent, ref Type currentType)
+        {
+            _ = nodeEvent;
+            return currentType == typeof(ConceptIdYamlValue);
+        }
+    }
+
+    private sealed class ConceptIdYamlValueConverter : IYamlTypeConverter
+    {
+        private const string StringTag = "tag:yaml.org,2002:str";
+        private const string NullTag = "tag:yaml.org,2002:null";
+
+        public bool Accepts(Type type)
+        {
+            return type == typeof(ConceptIdYamlValue);
+        }
+
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        {
+            if (parser.Current is not Scalar scalar)
+            {
+                SkipCurrentNode(parser);
+                return new ConceptIdYamlValue(null, IsInvalid: true);
+            }
+
+            parser.MoveNext();
+
+            if (IsYamlNull(scalar))
+            {
+                return new ConceptIdYamlValue(null, IsInvalid: false);
+            }
+
+            if (!IsYamlString(scalar))
+            {
+                return new ConceptIdYamlValue(null, IsInvalid: true);
+            }
+
+            return new ConceptIdYamlValue(scalar.Value, IsInvalid: false);
+        }
+
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
+        {
+            throw new NotSupportedException("This converter is only used for deserialization.");
+        }
+
+        private static bool IsYamlNull(Scalar scalar)
+        {
+            if (!scalar.Tag.IsEmpty)
+            {
+                return string.Equals(scalar.Tag.Value, NullTag, StringComparison.Ordinal);
+            }
+
+            return scalar.Style is ScalarStyle.Plain or ScalarStyle.Any
+                   && (scalar.Value is "" or "~"
+                       || string.Equals(scalar.Value, "null", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsYamlString(Scalar scalar)
+        {
+            if (!scalar.Tag.IsEmpty)
+            {
+                return string.Equals(scalar.Tag.Value, StringTag, StringComparison.Ordinal);
+            }
+
+            if (scalar.Style is not (ScalarStyle.Plain or ScalarStyle.Any))
+            {
+                return true;
+            }
+
+            return !IsImplicitNonStringScalar(scalar.Value);
+        }
+
+        private static bool IsImplicitNonStringScalar(string value)
+        {
+            if (bool.TryParse(value, out _)
+                || string.Equals(value, ".nan", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, ".inf", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "-.inf", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "+.inf", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // YAML plain scalars that resolve as numeric or timestamp types must be quoted when used as IDs.
+            return Regex.IsMatch(value, @"^[+-]?(?:0|[1-9][0-9_]*|0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+)$", RegexOptions.CultureInvariant)
+                   || Regex.IsMatch(value, @"^[+-]?(?:(?:[0-9][0-9_]*)?\.[0-9_]+|[0-9][0-9_]*\.?[0-9_]*[eE][+-]?[0-9]+|\.[0-9_]+[eE][+-]?[0-9]+)$", RegexOptions.CultureInvariant)
+                   || YamlTimestampPattern.IsMatch(value);
+        }
+
+        private static void SkipCurrentNode(IParser parser)
+        {
+            var nesting = 0;
+            do
+            {
+                switch (parser.Current)
+                {
+                    case SequenceStart:
+                    case MappingStart:
+                        nesting++;
+                        break;
+                    case SequenceEnd:
+                    case MappingEnd:
+                        nesting--;
+                        break;
+                }
+
+                if (!parser.MoveNext())
+                {
+                    break;
+                }
+            }
+            while (nesting > 0);
+        }
     }
 
     private readonly record struct AutoRelatedPagesYamlValue(bool? Value);
@@ -1119,6 +1280,8 @@ internal static class MarkdownFrontMatterParser
     private sealed class FrontMatterDocument
     {
         public string? Title { get; init; }
+
+        public ConceptIdYamlValue ConceptId { get; init; }
 
         public string? Summary { get; init; }
 

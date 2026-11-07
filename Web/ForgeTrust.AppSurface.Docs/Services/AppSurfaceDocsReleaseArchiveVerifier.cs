@@ -405,7 +405,8 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             }
 
             if (segment.StartsWith(".", StringComparison.Ordinal)
-                && !string.Equals(path, RouteManifestFileName, StringComparison.Ordinal))
+                && !string.Equals(path, RouteManifestFileName, StringComparison.Ordinal)
+                && !string.Equals(path, ".appsurface-docs-concepts.json", StringComparison.Ordinal))
             {
                 return false;
             }

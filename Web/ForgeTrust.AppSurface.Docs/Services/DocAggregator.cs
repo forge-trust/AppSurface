@@ -858,6 +858,68 @@ public class DocAggregator
     }
 
     /// <summary>
+    /// Gets concept metadata for the public canonical winners in the current export snapshot.
+    /// </summary>
+    /// <remarks>
+    /// The projection joins the final route winners to the same detached docs, locale graph, and resolved section winners
+    /// used by live Docs behavior. It intentionally excludes aliases, reserved routes, collision losers, and raw landing
+    /// candidates so export consumers cannot infer identity from a noncanonical source.
+    /// </remarks>
+    /// <param name="cancellationToken">Token observed while waiting for the cached snapshot.</param>
+    /// <returns>Immutable per-canonical-page authoring facts for the concept index exporter.</returns>
+    internal async Task<IReadOnlyList<AppSurfaceDocsConceptExportPage>> GetConceptExportPagesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
+        var landingSourcePaths = snapshot.PublicSections
+            .Where(section => section.LandingDoc is not null)
+            .Select(section => section.LandingDoc!.Path)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pages = new List<AppSurfaceDocsConceptExportPage>(snapshot.RouteManifest.Entries.Count);
+        foreach (var entry in snapshot.RouteManifest.Entries)
+        {
+            if (!snapshot.DocsByPath.TryGetValue(entry.SourcePath, out var doc))
+            {
+                throw new InvalidOperationException(
+                    $"Public canonical route '{entry.CanonicalRoutePath}' does not resolve to its snapshot document.");
+            }
+
+            snapshot.LocalizedGraph.VariantsBySourcePath.TryGetValue(entry.SourcePath, out var variant);
+            var title = variant?.Title ?? doc.Metadata?.Title ?? doc.Title;
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                throw new InvalidOperationException(
+                    $"Public canonical route '{entry.CanonicalRoutePath}' has no resolved export title.");
+            }
+
+            var conceptId = doc.Metadata?.ConceptId;
+            var conceptIdIsInvalid = doc.Metadata?.ConceptIdIsInvalid == true;
+            if (conceptId is not null)
+            {
+                if (ForgeTrust.AppSurface.ReleaseContracts.DocConceptSchema.TryNormalizeConceptId(conceptId, out var normalizedConceptId))
+                {
+                    conceptId = normalizedConceptId;
+                }
+                else
+                {
+                    conceptIdIsInvalid = true;
+                    conceptId = null;
+                }
+            }
+
+            pages.Add(new AppSurfaceDocsConceptExportPage(
+                entry.CanonicalRoutePath,
+                variant?.Locale,
+                conceptId,
+                title.Trim(),
+                landingSourcePaths.Contains(doc.Path),
+                conceptIdIsInvalid));
+        }
+
+        return Array.AsReadOnly(pages.ToArray());
+    }
+
+    /// <summary>
     /// Builds the typed details view model for the specified documentation page.
     /// </summary>
     /// <param name="path">The documentation path to resolve.</param>

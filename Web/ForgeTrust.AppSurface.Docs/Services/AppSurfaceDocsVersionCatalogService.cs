@@ -14,7 +14,7 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// <see cref="AppSurfaceDocsResolvedVersion.AvailabilityIssue"/> values are sanitized for archive UI consumption, while
 /// filesystem paths and exception details stay in structured logs only.
 /// </remarks>
-public sealed class AppSurfaceDocsVersionCatalogService
+public sealed partial class AppSurfaceDocsVersionCatalogService
 {
     private const string MaxRewrittenFileSizeKey = "AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes";
     private const string RewriteLimitDocsAnchor = "AppSurface Docs README section 'Published tree rewrite limit'";
@@ -187,6 +187,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
 
         var seenVersions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var versions = new List<AppSurfaceDocsResolvedVersion>();
+        var conceptDeclarations = new List<(JsonElement Entry, AppSurfaceDocsResolvedVersion Version)>();
         string? recommendedVersion;
         IEnumerable<JsonElement> versionEntries;
         try
@@ -246,13 +247,15 @@ public sealed class AppSurfaceDocsVersionCatalogService
 
             var resolved = ResolveVersion(version, normalizedVersion, trustedReleaseRootPath);
             versions.Add(resolved);
+            conceptDeclarations.Add((versionEntry, resolved));
         }
 
         var recommendedVersionEntry = ResolveRecommendedVersion(recommendedVersion, versions, catalogPath);
         return new AppSurfaceDocsResolvedVersionCatalog(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, catalogPath, versions, recommendedVersionEntry)
         {
             Aliases = aliasResolver.Resolve(aliasDeclaration, versions),
-            IsAliasNamespaceActive = aliasDeclaration.IsActive
+            IsAliasNamespaceActive = aliasDeclaration.IsActive,
+            ConceptSwitching = LoadConceptSwitching(conceptDeclarations, trustedReleaseRootPath)
         };
     }
 
@@ -984,6 +987,9 @@ public sealed record AppSurfaceDocsResolvedVersionCatalog(
     IReadOnlyList<AppSurfaceDocsResolvedVersion> Versions,
     AppSurfaceDocsResolvedVersion? RecommendedVersion)
 {
+    /// <summary>Gets the caller-owned, immutable concept-switch snapshot for this catalog lifetime.</summary>
+    internal AppSurfaceDocsConceptSwitching? ConceptSwitching { get; init; }
+
     /// <summary>
     /// Gets the resolved aliases in authored order. Invalid entries and every member of duplicate-name groups remain
     /// available here for operator diagnostics.

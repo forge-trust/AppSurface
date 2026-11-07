@@ -1,8 +1,10 @@
 using System.Formats.Tar;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using ForgeTrust.AppSurface.ReleaseContracts;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -21,6 +23,9 @@ namespace ForgeTrust.AppSurface.Release;
 internal sealed class ReleaseDocsPublication
 {
     private const string ReleaseManifestFileName = ".appsurface-docs-release-manifest.json";
+    internal const long DefaultMaxRewrittenFileSizeBytes = DocConceptArtifactBudget.DefaultMaximumBytes;
+    internal const long MinMaxRewrittenFileSizeBytes = DocConceptArtifactBudget.MinimumBytes;
+    internal const long MaxMaxRewrittenFileSizeBytes = DocConceptArtifactBudget.MaximumBytes;
     private readonly ReleaseWorkspace _workspace;
 
     /// <summary>
@@ -64,8 +69,13 @@ internal sealed class ReleaseDocsPublication
                 "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
         }
 
+        ValidateMaxRewrittenFileSizeBytes(request.MaxRewrittenFileSizeBytes);
+
         ValidateExactTreePath(request.ExactTreePath);
-        ValidatePublicationOutputPaths(request);
+        var existingVerificationRoot = request.ExistingPagesRoot is { Length: > 0 } existingRoot
+            && Directory.Exists(existingRoot + ".verification") ? existingRoot + ".verification" : null;
+        var existingPagesSource = existingVerificationRoot ?? request.ExistingPagesRoot;
+        ValidatePublicationOutputPaths(request, existingVerificationRoot, existingPagesSource);
         Directory.CreateDirectory(Path.GetDirectoryName(request.ArchivePath)!);
         Directory.CreateDirectory(Path.GetDirectoryName(request.PlanPath)!);
         Directory.CreateDirectory(request.PagesStagingRoot);
@@ -98,22 +108,48 @@ internal sealed class ReleaseDocsPublication
         var sha256Path = request.ArchivePath + ".sha256";
         await File.WriteAllTextAsync(sha256Path, $"{archiveSha256}  {Path.GetFileName(request.ArchivePath)}{Environment.NewLine}", cancellationToken);
 
-        ResetDirectory(request.PagesStagingRoot);
-        if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot))
+        var verificationRoot = request.PagesStagingRoot + ".verification";
+        var verificationStagingRoot = CreateUniqueSiblingPath(verificationRoot, ".publication-staging");
+        var verificationBackupRoot = CreateUniqueSiblingPath(verificationRoot, ".publication-previous");
+        ValidatePublicationScratchRoot(verificationStagingRoot, request, verificationRoot, existingVerificationRoot);
+        ValidatePublicationScratchRoot(verificationBackupRoot, request, verificationRoot, existingVerificationRoot);
+        Directory.CreateDirectory(verificationStagingRoot);
+        string? previousVerificationRoot = null;
+        var publicationCommitted = false;
+        try
         {
-            CopyDirectory(request.ExistingPagesRoot, request.PagesStagingRoot);
-        }
+            if (!string.IsNullOrWhiteSpace(existingPagesSource))
+            {
+                CopyDirectory(existingPagesSource, verificationStagingRoot);
+            }
 
-        var exactTreePath = $"releases/{request.Version}";
-        ValidateCatalogExactTreePath(exactTreePath);
-        var stagedExactTree = Path.Join(request.PagesStagingRoot, "releases", request.Version.ToString());
-        CopyDirectory(request.ExactTreePath, stagedExactTree);
-        var promotedStable = request.Version.IsStable && request.PromoteRecommended;
-        var catalogPath = Path.Join(request.PagesStagingRoot, "versions.json");
-        var recommendedVersion = await WriteCatalogAsync(request, catalogPath, exactTreePath, releaseManifestSha256, cancellationToken);
+            var exactTreePath = $"releases/{request.Version}";
+            ValidateCatalogExactTreePath(exactTreePath);
+            var stagedExactTree = Path.Join(verificationStagingRoot, "releases", request.Version.ToString());
+            CopyDirectory(request.ExactTreePath, stagedExactTree);
+            var promotedStable = request.Version.IsStable && request.PromoteRecommended;
+            var catalogPath = Path.Join(verificationStagingRoot, "versions.json");
+            var recommendedVersion = await WriteCatalogAsync(request with { ExistingPagesRoot = verificationStagingRoot }, catalogPath,
+                exactTreePath, releaseManifestSha256, cancellationToken);
 
-        var summaryPath = request.SummaryPath ?? Path.Join(Path.GetDirectoryName(request.PlanPath)!, "docs-publication-summary.md");
-        var plan = new DocsPublicationPlan(
+            previousVerificationRoot = PromoteVerificationRoot(verificationStagingRoot, verificationRoot, verificationBackupRoot);
+            try
+            {
+                await ReleaseDocsStaticConceptPublication.GenerateAsync(verificationRoot, request.PagesStagingRoot,
+                    request.Version.ToString(), "/docs", request.MaxRewrittenFileSizeBytes, cancellationToken);
+            }
+            catch
+            {
+                RollbackVerificationRoot(verificationRoot, verificationStagingRoot, previousVerificationRoot);
+                previousVerificationRoot = null;
+                throw;
+            }
+            publicationCommitted = true;
+            TryDeleteOwnedDirectoryIfPresent(previousVerificationRoot);
+            previousVerificationRoot = null;
+
+            var summaryPath = request.SummaryPath ?? Path.Join(Path.GetDirectoryName(request.PlanPath)!, "docs-publication-summary.md");
+            var plan = new DocsPublicationPlan(
             Schema: "appsurface-docs-publication-plan-v1",
             Version: request.Version.ToString(),
             Tag: request.Tag,
@@ -125,7 +161,7 @@ internal sealed class ReleaseDocsPublication
             ExactTreePath: exactTreePath,
             ReleaseManifestSha256: releaseManifestSha256,
             PagesStagingRoot: request.PagesStagingRoot,
-            CatalogPath: catalogPath,
+            CatalogPath: Path.Join(verificationRoot, "versions.json"),
             RecommendedVersion: recommendedVersion,
             CatalogEntry: new DocsPublicationCatalogEntry(
                 request.Version.ToString(),
@@ -137,11 +173,23 @@ internal sealed class ReleaseDocsPublication
                 exactTreePath,
                 releaseManifestSha256),
             RetryPolicy: new DocsPublicationRetryPolicy(DraftAssetReplaceAllowed: true, PublicAssetReplaceAllowed: false),
-            Recovery: new DocsPublicationRecovery(summaryPath));
+            Recovery: new DocsPublicationRecovery(summaryPath),
+            MaxRewrittenFileSizeBytes: request.MaxRewrittenFileSizeBytes,
+            VerificationRoot: verificationRoot);
 
-        await File.WriteAllTextAsync(request.PlanPath, JsonSerializer.Serialize(plan, ReleaseJson.Options) + Environment.NewLine, cancellationToken);
-        await WriteRecoverySummaryAsync(plan, cancellationToken);
-        return plan;
+            await File.WriteAllTextAsync(request.PlanPath, JsonSerializer.Serialize(plan, ReleaseJson.Options) + Environment.NewLine, cancellationToken);
+            await WriteRecoverySummaryAsync(plan, cancellationToken);
+            return plan;
+        }
+        catch
+        {
+            if (!publicationCommitted && previousVerificationRoot is not null)
+            {
+                RollbackVerificationRoot(verificationRoot, verificationStagingRoot, previousVerificationRoot);
+            }
+            DeleteOwnedDirectoryIfPresent(verificationStagingRoot);
+            throw;
+        }
     }
 
     /// <summary>
@@ -177,10 +225,27 @@ internal sealed class ReleaseDocsPublication
         AppendOutput(builder, "sha256_path", plan.Sha256Path);
         AppendOutput(builder, "catalog_path", plan.CatalogPath);
         AppendOutput(builder, "pages_staging_root", plan.PagesStagingRoot);
+        AppendOutput(builder, "verification_root", plan.VerificationRoot ?? plan.PagesStagingRoot);
         AppendOutput(builder, "exact_tree_path", plan.ExactTreePath);
         AppendOutput(builder, "release_manifest_sha256", plan.ReleaseManifestSha256);
         AppendOutput(builder, "recovery_summary_path", plan.Recovery.SummaryPath);
+        AppendOutput(builder, "max_rewritten_file_size_bytes", plan.MaxRewrittenFileSizeBytes.ToString(CultureInfo.InvariantCulture));
         await File.AppendAllTextAsync(githubOutputPath, builder.ToString(), cancellationToken);
+    }
+
+    private static void ValidateMaxRewrittenFileSizeBytes(long maxRewrittenFileSizeBytes)
+    {
+        if (maxRewrittenFileSizeBytes is >= MinMaxRewrittenFileSizeBytes and <= MaxMaxRewrittenFileSizeBytes)
+        {
+            return;
+        }
+
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-docs-publication-rewritten-file-size-invalid",
+            "Docs publication received an invalid rewritten artifact size limit.",
+            $"`--max-rewritten-file-size-bytes {maxRewrittenFileSizeBytes.ToString(CultureInfo.InvariantCulture)}` is outside the supported range of {MinMaxRewrittenFileSizeBytes} through {MaxMaxRewrittenFileSizeBytes} bytes.",
+            $"Pass `--max-rewritten-file-size-bytes` between {MinMaxRewrittenFileSizeBytes} and {MaxMaxRewrittenFileSizeBytes}; the default is {DefaultMaxRewrittenFileSizeBytes} bytes.",
+            "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
     }
 
     private static async Task CreateDeterministicTarGzAsync(string sourceDirectory, string archivePath, CancellationToken cancellationToken)
@@ -413,7 +478,7 @@ internal sealed class ReleaseDocsPublication
 
             ```bash
             gh release view {plan.Tag} --json isDraft,url
-            appsurface docs verify-archive --catalog "{plan.CatalogPath}" --version "{plan.Version}" --trusted-release-root "{plan.PagesStagingRoot}"
+            appsurface docs verify-archive --catalog "{plan.CatalogPath}" --version "{plan.Version}" --trusted-release-root "{plan.VerificationRoot ?? plan.PagesStagingRoot}" --max-rewritten-file-size-bytes {plan.MaxRewrittenFileSizeBytes.ToString(CultureInfo.InvariantCulture)}
             ```
 
             Pages deployed, release publish failed:
@@ -432,14 +497,87 @@ internal sealed class ReleaseDocsPublication
         await File.WriteAllTextAsync(plan.Recovery.SummaryPath, summary, cancellationToken);
     }
 
-    private static void ResetDirectory(string path)
+    private static string? PromoteVerificationRoot(string stagingRoot, string verificationRoot, string previousRoot)
     {
-        if (Directory.Exists(path))
+        if (File.Exists(stagingRoot) || (Directory.Exists(stagingRoot) && (File.GetAttributes(stagingRoot) & FileAttributes.ReparsePoint) != 0))
+        {
+            throw new IOException("The verification staging root is not an ordinary directory.");
+        }
+        if (File.Exists(verificationRoot) || (Directory.Exists(verificationRoot) && (File.GetAttributes(verificationRoot) & FileAttributes.ReparsePoint) != 0))
+        {
+            throw new IOException("The existing verification root is not an ordinary directory.");
+        }
+        var hadPrevious = Directory.Exists(verificationRoot);
+        if (hadPrevious)
+        {
+            Directory.Move(verificationRoot, previousRoot);
+        }
+
+        try
+        {
+            Directory.Move(stagingRoot, verificationRoot);
+        }
+        catch
+        {
+            if (hadPrevious && !Directory.Exists(verificationRoot))
+            {
+                Directory.Move(previousRoot, verificationRoot);
+            }
+            throw;
+        }
+
+        return hadPrevious ? previousRoot : null;
+    }
+
+    private static void RollbackVerificationRoot(string verificationRoot, string stagingRoot, string? previousRoot)
+    {
+        if (Directory.Exists(verificationRoot))
+        {
+            if (Directory.Exists(stagingRoot))
+            {
+                DeleteOwnedDirectoryIfPresent(stagingRoot);
+            }
+            Directory.Move(verificationRoot, stagingRoot);
+        }
+        if (previousRoot is not null && Directory.Exists(previousRoot) && !Directory.Exists(verificationRoot))
+        {
+            Directory.Move(previousRoot, verificationRoot);
+        }
+    }
+
+    private static void DeleteOwnedDirectoryIfPresent(string? path)
+    {
+        if (path is not null && Directory.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0)
         {
             Directory.Delete(path, recursive: true);
         }
+    }
 
-        Directory.CreateDirectory(path);
+    private static void TryDeleteOwnedDirectoryIfPresent(string? path)
+    {
+        try
+        {
+            DeleteOwnedDirectoryIfPresent(path);
+        }
+        catch (IOException)
+        {
+            // The publication is already committed. A leftover uniquely named backup is safe to inspect and cannot be reused as input.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Keep the prior verified tree recoverable without reporting a failed publication after the serving swap succeeded.
+        }
+    }
+
+    private static string CreateUniqueSiblingPath(string path, string suffix)
+    {
+        string candidate;
+        do
+        {
+            candidate = path + suffix + "-" + Guid.NewGuid().ToString("N");
+        }
+        while (Directory.Exists(candidate) || File.Exists(candidate));
+        return candidate;
     }
 
     private static void CopyDirectory(string source, string destination)
@@ -488,8 +626,27 @@ internal sealed class ReleaseDocsPublication
         }
     }
 
-    private void ValidatePublicationOutputPaths(DocsPublicationRequest request)
+    /// <summary>Protects both the named Pages root and its selected verification companion before any output is written.</summary>
+    private void ValidatePublicationOutputPaths(DocsPublicationRequest request, string? existingVerificationRoot, string? existingPagesSource)
     {
+        var existingInputs = new[] { request.ExistingPagesRoot, existingVerificationRoot }
+            .OfType<string>().Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
+        var summaryPath = request.SummaryPath ?? Path.Join(Path.GetDirectoryName(request.PlanPath)!, "docs-publication-summary.md");
+        foreach (var scratch in new[]
+                 {
+                     request.PagesStagingRoot + ".verification",
+                     request.PagesStagingRoot + ".switch-staging",
+                     request.PagesStagingRoot + ".switch-previous"
+                 })
+        {
+            ValidatePagesStagingRoot(scratch, "repository root", _workspace.RepositoryRoot);
+            ValidatePagesStagingRoot(scratch, "docs exact tree", request.ExactTreePath);
+            foreach (var output in new[] { request.ArchivePath, request.ArchivePath + ".sha256", request.ArchivePath + ".tar", request.PlanPath,
+                         summaryPath })
+                ValidatePagesStagingRoot(scratch, "publication output", output);
+            foreach (var existingInput in existingInputs)
+                ValidatePagesStagingRoot(scratch, "existing Pages root", existingInput);
+        }
         ValidatePagesStagingRoot(request.PagesStagingRoot, "repository root", _workspace.RepositoryRoot);
         ValidatePagesStagingRoot(request.PagesStagingRoot, "docs exact tree", request.ExactTreePath);
         ValidatePagesStagingRoot(request.PagesStagingRoot, "archive output", request.ArchivePath);
@@ -503,29 +660,50 @@ internal sealed class ReleaseDocsPublication
             ValidateGeneratedOutputOutsideExactTree(request.ExactTreePath, "recovery summary output", request.SummaryPath);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot))
+        foreach (var existingInput in existingInputs)
         {
-            ValidatePagesStagingRoot(request.PagesStagingRoot, "existing Pages root", request.ExistingPagesRoot);
-            ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "archive output", request.ArchivePath);
-            ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "archive digest output", request.ArchivePath + ".sha256");
-            ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "temporary archive output", request.ArchivePath + ".tar");
-            ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "publication plan output", request.PlanPath);
-            if (!string.IsNullOrWhiteSpace(request.SummaryPath))
-            {
-                ValidateGeneratedOutputOutsideExistingPagesRoot(request.ExistingPagesRoot, "recovery summary output", request.SummaryPath);
-            }
+            ValidatePagesStagingRoot(request.PagesStagingRoot, "existing Pages root", existingInput);
+            ValidateGeneratedOutputOutsideExistingPagesRoot(existingInput, "archive output", request.ArchivePath);
+            ValidateGeneratedOutputOutsideExistingPagesRoot(existingInput, "archive digest output", request.ArchivePath + ".sha256");
+            ValidateGeneratedOutputOutsideExistingPagesRoot(existingInput, "temporary archive output", request.ArchivePath + ".tar");
+            ValidateGeneratedOutputOutsideExistingPagesRoot(existingInput, "publication plan output", request.PlanPath);
+            ValidateGeneratedOutputOutsideExistingPagesRoot(existingInput, "recovery summary output", summaryPath);
+        }
 
-            if (!Directory.Exists(request.ExistingPagesRoot))
+        if (!string.IsNullOrWhiteSpace(existingPagesSource))
+        {
+            if (!Directory.Exists(existingPagesSource))
             {
                 throw new ReleaseToolException(ReleaseDiagnostic.Error(
                     "release-docs-publication-existing-pages-missing",
                     "Docs publication could not hydrate the existing Pages payload.",
-                    $"`--existing-pages-root {_workspace.DisplayPath(request.ExistingPagesRoot)}` does not exist or is not an ordinary directory.",
+                    $"`--existing-pages-root {_workspace.DisplayPath(existingPagesSource)}` does not exist or is not an ordinary directory.",
                     "Export or download the current Pages payload before creating the publication plan, or omit the option only when intentionally publishing the first docs catalog.",
                     "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
             }
 
-            ThrowIfReparsePoint(request.ExistingPagesRoot, request.ExistingPagesRoot);
+            ThrowIfReparsePoint(existingPagesSource, existingPagesSource);
+        }
+    }
+
+    private void ValidatePublicationScratchRoot(string scratchRoot, DocsPublicationRequest request, string verificationRoot, string? existingVerificationRoot)
+    {
+        foreach (var related in new[]
+                 {
+                     _workspace.RepositoryRoot,
+                     request.ExactTreePath,
+                     request.PagesStagingRoot,
+                     request.ExistingPagesRoot,
+                     request.ArchivePath,
+                     request.ArchivePath + ".sha256",
+                     request.ArchivePath + ".tar",
+                     request.PlanPath,
+                     request.SummaryPath,
+                     verificationRoot,
+                     existingVerificationRoot
+                 }.OfType<string>())
+        {
+            ValidatePagesStagingRoot(scratchRoot, "publication input or output", related);
         }
     }
 
@@ -704,6 +882,7 @@ internal sealed class ReleaseDocsPublication
 /// <param name="SummaryPath">Optional output path for the maintainer recovery summary.</param>
 /// <param name="ExpectedReleaseManifestSha256">Optional release evidence digest that the exact-tree manifest must match.</param>
 /// <param name="PromoteRecommended">Whether stable publication should update the public recommended docs pointer.</param>
+/// <param name="MaxRewrittenFileSizeBytes">Per-artifact UTF-8 limit shared with host rewriting, archive verification, and static switch artifacts.</param>
 internal sealed record DocsPublicationRequest(
     SemVer Version,
     string Tag,
@@ -714,7 +893,8 @@ internal sealed record DocsPublicationRequest(
     string PlanPath,
     string? SummaryPath,
     string? ExpectedReleaseManifestSha256,
-    bool PromoteRecommended);
+    bool PromoteRecommended,
+    long MaxRewrittenFileSizeBytes);
 
 /// <summary>
 /// Machine-readable release docs publication plan.
@@ -735,6 +915,8 @@ internal sealed record DocsPublicationRequest(
 /// <param name="CatalogEntry">Catalog entry generated for this release.</param>
 /// <param name="RetryPolicy">Policy for draft/public asset replacement during recovery.</param>
 /// <param name="Recovery">Recovery summary metadata.</param>
+/// <param name="MaxRewrittenFileSizeBytes">Effective per-artifact UTF-8 limit used by publication and archive verification.</param>
+/// <param name="VerificationRoot">Untouched local archive inputs used for the original pin verification, separate from derived serving files.</param>
 internal sealed record DocsPublicationPlan(
     string Schema,
     string Version,
@@ -751,7 +933,9 @@ internal sealed record DocsPublicationPlan(
     string? RecommendedVersion,
     DocsPublicationCatalogEntry CatalogEntry,
     DocsPublicationRetryPolicy RetryPolicy,
-    DocsPublicationRecovery Recovery);
+    DocsPublicationRecovery Recovery,
+    long MaxRewrittenFileSizeBytes,
+    string? VerificationRoot = null);
 
 /// <summary>
 /// Version catalog entry produced for the released docs tree.

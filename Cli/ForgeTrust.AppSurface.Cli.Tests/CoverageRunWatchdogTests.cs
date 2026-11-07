@@ -572,6 +572,7 @@ public sealed class CoverageRunWatchdogTests
         {
             var artifact = Path.Join(output.Path, "coverage-watchdog.json");
             await WaitForFileAsync(artifact);
+            await WaitForErrorOccurrencesAsync(console, "Coverage watchdog warning", 1);
 
             Assert.InRange(new FileInfo(artifact).Length, 1, 64 * 1024);
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(artifact));
@@ -955,6 +956,7 @@ public sealed class CoverageRunWatchdogTests
 
         var artifact = Path.Join(output.Path, "coverage-watchdog.json");
         await WaitForFileAsync(artifact);
+        await WaitForErrorOccurrencesAsync(console, "Coverage watchdog warning", 1);
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(artifact));
         var primary = document.RootElement.GetProperty("primary");
         var options = primary.GetProperty("command").GetProperty("options");

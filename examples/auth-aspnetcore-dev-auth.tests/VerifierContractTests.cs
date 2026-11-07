@@ -277,12 +277,17 @@ public sealed class VerifierContractTests
     {
         await using var fixture = await VerifierFixture.CreateAsync("resistant-child");
 
-        await Assert.ThrowsAsync<TimeoutException>(
+        var exception = await Assert.ThrowsAsync<TimeoutException>(
             () => fixture.RunAndSignalTwiceWithSimulatedCleanupHandlerTimeoutAsync(
                 "TERM",
                 TimeSpan.FromSeconds(12),
                 TimeSpan.FromMilliseconds(100)));
 
+        Assert.Contains("Diagnostic context: signal targets the verifier PID only", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("bash-version ", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("stdout capture: still reading", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("stderr capture: still reading", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Pre-termination Linux process snapshots:", exception.Message, StringComparison.Ordinal);
         fixture.AssertNoChildrenRemain();
     }
 
@@ -591,6 +596,11 @@ public sealed class VerifierContractTests
             startInfo.Environment["TMPDIR"] = TemporaryDirectory;
             startInfo.Environment["VERIFIER_FIXTURE_MODE"] = Mode;
             startInfo.Environment["VERIFIER_FIXTURE_EVENTS"] = EventsPath;
+            if (signal is not null)
+            {
+                startInfo.Environment["VERIFIER_FIXTURE_SIGNAL"] = signal;
+            }
+
             startInfo.Environment["BASH_ENV"] = BashEnvironmentPath;
             startInfo.Environment["CURL_HOME"] = Path.Combine(Root, "curl-home");
             startInfo.Environment["APP_SURFACE_DEV_AUTH_PORT"] = port ?? "61258";
@@ -604,8 +614,13 @@ public sealed class VerifierContractTests
             var cleanupSignalHandlerStarted = sendSecondSignal
                 ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
                 : null;
-            var standardOutput = process.StandardOutput.ReadToEndAsync();
-            var standardError = ReadStandardErrorAsync(process.StandardError, cleanupSignalHandlerStarted);
+            var standardOutputTail = new BoundedOutputTail(2048);
+            var standardErrorTail = new BoundedOutputTail(2048);
+            var standardOutput = ReadStandardOutputAsync(process.StandardOutput, standardOutputTail);
+            var standardError = ReadStandardErrorAsync(
+                process.StandardError,
+                cleanupSignalHandlerStarted,
+                standardErrorTail);
 
             try
             {
@@ -636,18 +651,165 @@ public sealed class VerifierContractTests
                     await standardOutput,
                     await standardError);
             }
-            catch
+            catch (Exception exception)
             {
+                var timeoutDiagnostics = exception is TimeoutException
+                    ? TryBuildTimeoutDiagnostics(process, standardOutput, standardError, standardOutputTail, standardErrorTail)
+                    : null;
                 var cleanupDeadline = DateTime.UtcNow + processTimeout;
                 await TerminateProcessTreeAsync(process, cleanupDeadline);
                 await DrainOutputAsync(standardOutput, standardError, cleanupDeadline);
+                if (exception is TimeoutException)
+                {
+                    throw new TimeoutException(
+                        $"{exception.Message}{Environment.NewLine}{timeoutDiagnostics}",
+                        exception);
+                }
+
                 throw;
+            }
+        }
+
+        private string TryBuildTimeoutDiagnostics(
+            Process process,
+            Task<string> standardOutput,
+            Task<string> standardError,
+            BoundedOutputTail standardOutputTail,
+            BoundedOutputTail standardErrorTail)
+        {
+            try
+            {
+                var eventLines = ReadBoundedDiagnosticEventLines();
+                var bashVersion = eventLines.FirstOrDefault(line => line.StartsWith("bash-version ", StringComparison.Ordinal))
+                    ?? "[Bash version marker was not recorded]";
+                var childPids = eventLines
+                    .Where(line => line.StartsWith("child-pid ", StringComparison.Ordinal))
+                    .Select(line => line["child-pid ".Length..])
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(8)
+                    .ToArray();
+                var processSnapshots = new List<string>
+                {
+                    ReadLinuxProcessSnapshot("verifier", process.Id),
+                };
+                processSnapshots.AddRange(childPids.Select(pidText =>
+                    int.TryParse(pidText, NumberStyles.None, CultureInfo.InvariantCulture, out var pid)
+                        ? ReadLinuxProcessSnapshot("child", pid)
+                        : $"child pid={GetTail(pidText, 32)}: [invalid pid event]"));
+
+                return string.Join(
+                    Environment.NewLine,
+                    "Diagnostic context: signal targets the verifier PID only; it is not terminal process-group Ctrl-C.",
+                    bashVersion,
+                    $"stdout capture: {GetCaptureStatus(standardOutput)}{Environment.NewLine}{standardOutputTail.Read()}",
+                    $"stderr capture: {GetCaptureStatus(standardError)}{Environment.NewLine}{standardErrorTail.Read()}",
+                    "Pre-termination Linux process snapshots:",
+                    string.Join(Environment.NewLine, processSnapshots),
+                    $"Fixture event tail:{Environment.NewLine}{ReadBoundedDiagnosticEventTail()}");
+            }
+            catch (Exception exception)
+            {
+                return $"[timeout diagnostic capture failed: {exception.GetType().Name}]";
+            }
+        }
+
+        private string[] ReadBoundedDiagnosticEventLines()
+        {
+            return File.Exists(EventsPath)
+                ? File.ReadLines(EventsPath).Take(128).Select(line => GetTail(line, 256)).ToArray()
+                : [];
+        }
+
+        private string ReadBoundedDiagnosticEventTail()
+        {
+            if (!File.Exists(EventsPath))
+            {
+                return "[event log unavailable]";
+            }
+
+            using var events = new FileStream(EventsPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var byteCount = (int)Math.Min(events.Length, 2048);
+            events.Seek(-byteCount, SeekOrigin.End);
+            var buffer = new byte[byteCount];
+            events.ReadExactly(buffer);
+            return System.Text.Encoding.UTF8.GetString(buffer);
+        }
+
+        private static string GetCaptureStatus(Task<string> capture)
+        {
+            if (capture.IsFaulted)
+            {
+                var error = capture.Exception?.GetBaseException();
+                return $"faulted ({error?.GetType().Name ?? "unknown read error"})";
+            }
+
+            if (capture.IsCanceled)
+            {
+                return "canceled";
+            }
+
+            return capture.IsCompletedSuccessfully ? "completed" : "still reading";
+        }
+
+        private static string ReadLinuxProcessSnapshot(string label, int pid)
+        {
+            if (!OperatingSystem.IsLinux())
+            {
+                return $"{label} pid={pid}: [Linux /proc unavailable on this host]";
+            }
+
+            var statusPath = $"/proc/{pid}/status";
+            try
+            {
+                var relevantStatus = File.ReadLines(statusPath)
+                    .Where(line => line.StartsWith("State:", StringComparison.Ordinal)
+                        || line.StartsWith("SigPnd:", StringComparison.Ordinal)
+                        || line.StartsWith("ShdPnd:", StringComparison.Ordinal)
+                        || line.StartsWith("SigBlk:", StringComparison.Ordinal)
+                        || line.StartsWith("SigIgn:", StringComparison.Ordinal)
+                        || line.StartsWith("SigCgt:", StringComparison.Ordinal))
+                    .Select(line => GetTail(line, 128));
+                var waitChannel = GetTail(File.ReadAllText($"/proc/{pid}/wchan").Trim(), 128);
+                return $"{label} pid={pid}:{Environment.NewLine}{string.Join(Environment.NewLine, relevantStatus)}{Environment.NewLine}wchan: {waitChannel}";
+            }
+            catch (IOException exception)
+            {
+                return $"{label} pid={pid}: [snapshot unavailable: {exception.GetType().Name}]";
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                return $"{label} pid={pid}: [snapshot unavailable: {exception.GetType().Name}]";
+            }
+        }
+
+        private static string GetTail(string value, int maximumLength)
+        {
+            return value.Length <= maximumLength ? value : value[^maximumLength..];
+        }
+
+        private static async Task<string> ReadStandardOutputAsync(
+            StreamReader standardOutput,
+            BoundedOutputTail outputTail)
+        {
+            var output = new System.Text.StringBuilder();
+            var buffer = new char[1024];
+            while (true)
+            {
+                var count = await standardOutput.ReadAsync(buffer.AsMemory());
+                if (count == 0)
+                {
+                    return output.ToString();
+                }
+
+                output.Append(buffer, 0, count);
+                outputTail.Append(buffer.AsSpan(0, count));
             }
         }
 
         private static async Task<string> ReadStandardErrorAsync(
             StreamReader standardError,
-            TaskCompletionSource? cleanupSignalHandlerStarted)
+            TaskCompletionSource? cleanupSignalHandlerStarted,
+            BoundedOutputTail outputTail)
         {
             var output = new System.Text.StringBuilder();
             var buffer = new char[1024];
@@ -662,6 +824,7 @@ public sealed class VerifierContractTests
 
                 var outputLengthBeforeAppend = output.Length;
                 output.Append(buffer, 0, count);
+                outputTail.Append(buffer.AsSpan(0, count));
                 if (waitingForCleanupSignalHandler
                     && ContainsCleanupSignalHandlerStartedMarker(output, outputLengthBeforeAppend))
                 {
@@ -724,6 +887,41 @@ public sealed class VerifierContractTests
             catch (ObjectDisposedException)
             {
                 // Preserve the exception that triggered cleanup.
+            }
+        }
+
+        private sealed class BoundedOutputTail(int capacity)
+        {
+            private readonly object gate = new();
+            private readonly System.Text.StringBuilder value = new();
+
+            internal void Append(ReadOnlySpan<char> chunk)
+            {
+                lock (gate)
+                {
+                    if (chunk.Length >= capacity)
+                    {
+                        value.Clear();
+                        value.Append(chunk[^capacity..]);
+                        return;
+                    }
+
+                    var excessLength = value.Length + chunk.Length - capacity;
+                    if (excessLength > 0)
+                    {
+                        value.Remove(0, excessLength);
+                    }
+
+                    value.Append(chunk);
+                }
+            }
+
+            internal string Read()
+            {
+                lock (gate)
+                {
+                    return value.ToString();
+                }
             }
         }
 
@@ -892,6 +1090,11 @@ public sealed class VerifierContractTests
         """;
 
     private const string BashEnvironmentFixture = """
+        if [[ -n "${VERIFIER_FIXTURE_SIGNAL:-}" ]]; then
+          printf 'bash-version pid=%s version=%s signal=%s\n' "$$" "${BASH_VERSION:-unknown}" "$VERIFIER_FIXTURE_SIGNAL" >> "${VERIFIER_FIXTURE_EVENTS:?}"
+          unset VERIFIER_FIXTURE_SIGNAL
+        fi
+
         if [[ "${VERIFIER_FIXTURE_MODE:-}" == "production-builtin-immune" ]]; then
           kill() {
             case "${1:-}" in

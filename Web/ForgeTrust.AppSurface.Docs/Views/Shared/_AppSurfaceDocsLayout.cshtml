@@ -464,9 +464,25 @@
             });
         }
 
+        let mainScrollRestoreGeneration = 0;
+
+        function cancelMainScrollRestoration() {
+            mainScrollRestoreGeneration++;
+        }
+
         function restoreMainScrollAfterFrameLoad(event) {
             if (event.target?.id !== "doc-content" || !mainContent) {
                 return;
+            }
+
+            const restoreGeneration = ++mainScrollRestoreGeneration;
+            function restoreFrameHashAndMainScrollPosition() {
+                if (restoreGeneration !== mainScrollRestoreGeneration) {
+                    return;
+                }
+
+                restorePendingFrameHashNavigation();
+                restoreMainScrollPosition();
             }
 
             restorePendingFrameHashNavigation();
@@ -481,11 +497,6 @@
             for (const delay of [80, 240]) {
                 window.setTimeout(restoreFrameHashAndMainScrollPosition, delay);
             }
-        }
-
-        function restoreFrameHashAndMainScrollPosition() {
-            restorePendingFrameHashNavigation();
-            restoreMainScrollPosition();
         }
 
         function rememberPendingFrameHashNavigation(anchorLink, targetUrl) {
@@ -659,6 +670,15 @@
             syncSidebarForViewport();
         });
 
+        // Reader input supersedes queued frame corrections, including callbacks from an older frame.
+        for (const eventName of ["wheel", "touchstart", "pointerdown"]) {
+            mainContent?.addEventListener(eventName, cancelMainScrollRestoration, { passive: true });
+        }
+        mainContent?.addEventListener("keydown", event => {
+            if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
+                cancelMainScrollRestoration();
+            }
+        });
         document.addEventListener("turbo:frame-load", restoreMainScrollAfterFrameLoad);
         window.addEventListener("hashchange", restoreMainScrollPosition);
         document.addEventListener("click", revealRazorWireOutlineTargetDetails, true);

@@ -338,6 +338,7 @@
       "forgetrust.appsurface.release": {
         "type": "Project",
         "dependencies": {
+          "AngleSharp": "[1.7.1, 1.7.1]",
           "CliFx": "[3.0.0, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.ReleaseContracts": "[0.1.0, )",
@@ -353,6 +354,12 @@
       },
       "forgetrust.appsurface.testing": {
         "type": "Project"
+      },
+      "AngleSharp": {
+        "type": "CentralTransitive",
+        "requested": "[1.7.1, 1.7.1]",
+        "resolved": "1.7.1",
+        "contentHash": "QBblGpRB3SYD66Mls7fHyl1mWkP93n7ErWDWHc1vd9sPHhdlTkmUoY3CjgfjcWNxGF9m7xjNyztRfErXqoBKOA=="
       },
       "CliFx": {
         "type": "CentralTransitive",

@@ -77,6 +77,135 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ParseMetadataYamlWithDiagnostics_ShouldTrimAndPreserveValidConceptId()
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics("concept_id: '  guides.configuration.setup  '");
+
+        Assert.Equal("guides.configuration.setup", result.Metadata?.ConceptId);
+        Assert.False(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("2026-jan-02")]
+    [InlineData("2026-1-6")]
+    public void ParseMetadataYamlWithDiagnostics_ShouldAcceptPlainConceptIdsOutsideYamlTimestampGrammar(string value)
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics($"concept_id: {value}");
+
+        Assert.Equal(value, result.Metadata?.ConceptId);
+        Assert.False(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData("2026-11-06")]
+    [InlineData("2026-11-06T04:35:16.5Z")]
+    [InlineData("2026-1-6 4:05:06 -5")]
+    public void ParseMetadataYamlWithDiagnostics_ShouldRejectImplicitYamlTimestampConceptIds(string value)
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics($"concept_id: {value}");
+
+        Assert.Null(result.Metadata?.ConceptId);
+        Assert.True(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-concept-id");
+    }
+
+    [Fact]
+    public void ParseMetadataYamlWithDiagnostics_ShouldLeaveAnAbsentConceptIdUnspecified()
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics("title: Guide");
+
+        Assert.Equal("Guide", result.Metadata?.Title);
+        Assert.Null(result.Metadata?.ConceptId);
+        Assert.False(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ParseMetadataYamlWithDiagnostics_ShouldHonorExplicitNullAndStringTagsForConceptIds()
+    {
+        var explicitNull = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics("concept_id: !!null null");
+        var explicitString = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics("concept_id: !!str true");
+
+        Assert.Null(explicitNull.Metadata?.ConceptId);
+        Assert.False(explicitNull.Metadata!.ConceptIdIsInvalid);
+        Assert.Empty(explicitNull.Diagnostics);
+        Assert.Equal("true", explicitString.Metadata?.ConceptId);
+        Assert.False(explicitString.Metadata!.ConceptIdIsInvalid);
+        Assert.Empty(explicitString.Diagnostics);
+    }
+
+    [Fact]
+    public void ParseMetadataYamlWithDiagnostics_ShouldRejectExplicitNonStringAndUnknownConceptIdTags()
+    {
+        var explicitInteger = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics("concept_id: !!int 123");
+        var unknownTag = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics("concept_id: !custom guides.setup");
+
+        Assert.Null(explicitInteger.Metadata?.ConceptId);
+        Assert.True(explicitInteger.Metadata!.ConceptIdIsInvalid);
+        Assert.Contains(explicitInteger.Diagnostics, diagnostic => diagnostic.Code == "invalid-concept-id");
+        Assert.Null(unknownTag.Metadata?.ConceptId);
+        Assert.True(unknownTag.Metadata!.ConceptIdIsInvalid);
+        Assert.Contains(unknownTag.Diagnostics, diagnostic => diagnostic.Code == "invalid-concept-id");
+    }
+
+    [Fact]
+    public void ParseMetadataYamlWithDiagnostics_ShouldKeepExplicitTagsScopedToConceptId()
+    {
+        var taggedTitle = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics("title: !!str Guide");
+
+        Assert.Equal("Guide", taggedTitle.Metadata?.Title);
+        Assert.Empty(taggedTitle.Diagnostics);
+        Assert.Throws<YamlException>(
+            () => MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics("title: !!null null"));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("~")]
+    [InlineData("\"   \"")]
+    public void ParseMetadataYamlWithDiagnostics_ShouldTreatNullAndBlankConceptIdsAsUnspecified(string value)
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics($"concept_id: {value}");
+
+        Assert.Null(result.Metadata?.ConceptId);
+        Assert.False(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData("Guides.Setup")]
+    [InlineData(".starts-with-punctuation")]
+    [InlineData("ends-with-")]
+    [InlineData("../private")]
+    [InlineData("this-identifier-is-longer-than-one-hundred-and-twenty-eight-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void ParseMetadataYamlWithDiagnostics_ShouldPreserveInvalidConceptIdAsFailureEvidence(string value)
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics($"concept_id: '{value}'");
+
+        Assert.Null(result.Metadata?.ConceptId);
+        Assert.True(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-concept-id");
+    }
+
+    [Theory]
+    [InlineData("123")]
+    [InlineData("true")]
+    [InlineData("[guide, setup]")]
+    [InlineData("{name: guide}")]
+    public void ParseMetadataYamlWithDiagnostics_ShouldRejectNonStringConceptIdsWithoutDroppingOtherFields(string value)
+    {
+        var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics($"title: Kept\nconcept_id: {value}");
+
+        Assert.Equal("Kept", result.Metadata?.Title);
+        Assert.Null(result.Metadata?.ConceptId);
+        Assert.True(result.Metadata!.ConceptIdIsInvalid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-concept-id");
+    }
+
+    [Fact]
     public void Extract_ShouldParseNamespaceMetadata()
     {
         var markdown = """
