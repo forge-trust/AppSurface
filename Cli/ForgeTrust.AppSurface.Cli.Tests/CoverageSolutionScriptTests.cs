@@ -1124,6 +1124,7 @@ public sealed class CoverageSolutionScriptTests
         startInfo.Environment.Remove("COVERAGE_GATE_DIFF_BASE");
         startInfo.Environment.Remove("COVERAGE_FANIN_NATIVE");
         startInfo.Environment.Remove("COVERAGE_DIRECTORY");
+        startInfo.Environment.Remove("COVERAGE_CLI_PATH");
 
         startInfo.Environment["DOTNET_INVOCATION_MARKER"] = dotnetInvocationMarker;
         startInfo.Environment["DOTNET_STUB_EXIT_CODE"] = dotnetExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
