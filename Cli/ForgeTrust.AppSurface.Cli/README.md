@@ -1157,7 +1157,7 @@ Options:
 - `--min-line`: Minimum line coverage percentage from `0` through `100`. Defaults to `0`.
 - `--min-branch`: Minimum branch coverage percentage from `0` through `100`. Defaults to `0`.
 - `--tolerance`: Grace margin from `0` through `100` subtracted from every configured overall and patch threshold before evaluation. Defaults to `0.5`.
-- `--diff-base`: Git ref or commit compared with `HEAD` for patch coverage. When set, the command runs `git diff --unified=0 --no-ext-diff --relative <base>...HEAD --` from the repository root.
+- `--diff-base`: Git ref or commit compared with `HEAD` for patch coverage. When set, the command runs `git --no-pager --no-replace-objects diff --unified=0 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --relative <base>...HEAD --` from the repository root. It uses standard path prefixes and disables external diff drivers and text converters so the gate measures the committed source.
 - `--diff-file`: Unified diff file for patch coverage. Use this for CI systems that can download a pull request or compare diff without fetching full repository history.
 - `--diff-stdin`: Read unified diff text from stdin. Use this with pipes or redirected input; interactive stdin fails fast so local terminals do not appear hung.
 - `--diff-label`: Optional display label for the selected patch source in JSON, Markdown, and GitHub summaries.
@@ -1173,7 +1173,7 @@ Use the default tolerance to absorb insignificant coverage-report rounding diffe
 
 The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
 
-Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. The default `measurable` mode counts a Cobertura line as covered when `hits > 0`, preserving the original local gate behavior. `codecov` mode retains only changed lines present in Cobertura and counts a line as covered when `hits > 0` and it has no branch data or full condition coverage (`covered == valid`); partial condition coverage therefore counts as an uncovered line, matching Codecov's patch-line calculation. Lines absent from Cobertura remain excluded in both modes, including test-only or otherwise non-instrumented modules that Codecov excludes. The patch-line mode affects only the patch line metric; `--min-patch-branch` remains a separate branch-condition metric and still counts changed Cobertura conditions. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
+Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. The default `measurable` mode counts a Cobertura line as covered when `hits > 0`, preserving the original local gate behavior. `codecov` mode retains only changed lines present in Cobertura and counts a line as covered when `hits > 0` and it has no branch data or full condition coverage (`covered == valid`); partial condition coverage therefore counts as an uncovered line, matching Codecov's patch-line calculation. Lines absent from Cobertura remain excluded in both modes, including test-only or otherwise non-instrumented modules that Codecov excludes. The patch-line mode affects only the patch line metric; `--min-patch-branch` remains a separate branch-condition metric and still counts changed Cobertura conditions. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty diffs and valid deletion-only diffs are accepted. Adding or deleting an empty file adds no measured lines in either a SHA-1 or SHA-256 Git repository. Malformed diffs from any source fail with `ASCOV015` before coverage is evaluated; this includes paths that cannot be represented safely by the patch path format. External examples include HTML login pages and JSON API errors.
 
 #### Agent-actionable patch targets
 
@@ -1325,7 +1325,7 @@ For repositories with an existing coverage producer, replace the `coverage run` 
 Use `--diff-base origin/main` for local development or simple CI jobs that already fetched the base ref. Use `--diff-file` when CI already produced a unified diff artifact, and use `--diff-stdin` when another command streams unified diff text:
 
 ```bash
-git diff --unified=0 --no-ext-diff --relative origin/main...HEAD -- \
+git --no-pager --no-replace-objects diff --unified=0 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --relative origin/main...HEAD -- \
   | appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --diff-stdin --diff-label origin/main...HEAD --min-patch-line 95
 ```
 
@@ -1340,12 +1340,12 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV007` | A threshold or tolerance is outside the `0` through `100` range. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, `--min-patch-branch`, or `--tolerance`. |
 | `ASCOV008` | GitHub step summary could not be written. | Check `$GITHUB_STEP_SUMMARY` permissions or add `--no-github-summary`. |
 | `ASCOV009` | The report output path is unsafe. | Use a dedicated artifact directory, not a filesystem root or working directory. |
-| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage, or the diff exceeded 20 MiB. | Fetch the diff base, pass a valid local commit/ref to `--diff-base`, or reduce the comparison size. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
+| `ASCOV010` | The diff base was blank or option-like (began with `-`), the command could not run or read `git diff` for changed-line coverage, or the diff exceeded 20 MiB. | Fetch the diff base, pass a valid local commit/ref to `--diff-base`, or reduce the comparison size. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
 | `ASCOV011` | A patch threshold was set without a patch diff source. | Pass exactly one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
 | `ASCOV012` | Multiple patch diff sources were set. | Keep only one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
 | `ASCOV013` | An external diff file/stdin artifact is missing, unreadable, or larger than 20 MiB. | Regenerate the unified diff artifact or pass a smaller diff. |
 | `ASCOV014` | `--diff-stdin` was requested from an interactive terminal. | Pipe or redirect unified diff text, or use `--diff-file`. |
-| `ASCOV015` | A non-empty external diff artifact is not unified diff text. | Download the diff with `Accept: application/vnd.github.diff`, fix the producer, or use `--diff-base`. |
+| `ASCOV015` | A diff from any source is malformed or cannot be parsed completely, including a path that cannot be represented safely. | Fix the diff producer or use portable repository-relative paths, then inspect the diff before rerunning the gate. |
 | `ASCOV016` | Patch source metadata is invalid. | Correct `--diff-label` or `--repository-root`. |
 | `ASCOV017` | `--patch-line-mode` is not `measurable` or `codecov`. | Use `measurable` or `codecov`. |
 | `ASCOV018` | `--patch-line-mode` was supplied without a patch source. | Pass exactly one patch source or remove `--patch-line-mode`. |
@@ -1605,3 +1605,9 @@ Run the export command from source while developing:
 ```bash
 dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs export --repo . --output ./dist/docs --mode cdn --strict
 ```
+
+## AppSurface coverage fan-in
+
+`appsurface coverage fan-in capture|compose|accept|verify` calls the neutral [Coverage facade](../../Coverage/ForgeTrust.AppSurface.Coverage/README.md). Each command takes a strict versioned `--request` JSON file; writing operations require an explicit fresh `--result` file, and `capture --collect` runs supervised collection before capture. `--json` writes one terminal JSON document to stdout with progress/diagnostics on stderr. Read the [fan-in request, exit, trust and recovery contracts](../../guides/coverage-fan-in.md#installed-commands-and-request-schema) before scripting a pipeline. The repository's [dogfood adapter](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Coverage.Dogfood/Program.cs) supplies its complete strict policy to installed commands.
+
+Capture/compose success does not accept coverage. Aggregate-only acceptance records `PatchNotRequested`; patch-required acceptance retains the independently required primary aggregate and conservative composed patch gates. Verification is read-only validity of existing evidence, never proof of fresh execution. Schema-v1 evidence uses the historical compatibility path; v1/v2 envelopes cannot mix or relabel old evidence as current.

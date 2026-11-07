@@ -169,7 +169,8 @@ public sealed class CoverageEvidenceProducerTests
         await File.WriteAllTextAsync(solutionPath, "{}");
         await File.WriteAllTextAsync(projectPath, "<Project />");
         var outputDirectory = TestPathUtils.PathUnder(directory.Path, "output");
-        var producer = CreateProducer(new DeadlineCoverageRunProcessRunner());
+        var clock = new DeadlineTimeProvider(TimeSpan.FromSeconds(3));
+        var producer = CreateProducer(new DeadlineCoverageRunProcessRunner(clock, "test"), clock);
         using var standardOutputWriter = new StringWriter();
         using var standardErrorWriter = new StringWriter();
 
@@ -197,7 +198,8 @@ public sealed class CoverageEvidenceProducerTests
         await File.WriteAllTextAsync(solutionPath, "{}");
         await File.WriteAllTextAsync(projectPath, "<Project />");
         var outputDirectory = TestPathUtils.PathUnder(directory.Path, "output");
-        var producer = CreateProducer(new DeadlineCoverageRunProcessRunner(waitOperation: "msbuild"));
+        var clock = new DeadlineTimeProvider(TimeSpan.FromSeconds(1));
+        var producer = CreateProducer(new DeadlineCoverageRunProcessRunner(clock, "msbuild"), clock);
         using var standardOutputWriter = new StringWriter();
         using var standardErrorWriter = new StringWriter();
 
@@ -349,9 +351,10 @@ public sealed class CoverageEvidenceProducerTests
         Assert.DoesNotContain(processRunner.TestArguments[0], argument => argument.StartsWith("--logger:junit;", StringComparison.Ordinal));
     }
 
-    private static CoverageEvidenceProducer CreateProducer(ICoverageRunProcessRunner processRunner) => new(
+    private static CoverageEvidenceProducer CreateProducer(ICoverageRunProcessRunner processRunner, TimeProvider? clock = null) => new(
         new CoverageEvidenceExecutionWorkflow(
-            new CoverageRunWorkflow(processRunner, new PassingCoverageReportGenerator(), TimeProvider.System)));
+            new CoverageRunWorkflow(processRunner, new PassingCoverageReportGenerator(), TimeProvider.System)),
+        clock);
 
     private static EvidenceProducerDeclaration CreateDeclaration(
         string kind = "coverage",
@@ -376,7 +379,7 @@ public sealed class CoverageEvidenceProducerTests
         }
     }
 
-    private sealed class DeadlineCoverageRunProcessRunner(string waitOperation = "test") : ICoverageRunProcessRunner
+    private sealed class DeadlineCoverageRunProcessRunner(DeadlineTimeProvider clock, string timeoutOperation) : ICoverageRunProcessRunner
     {
         private const string CapabilityOutput = """
             {
@@ -385,26 +388,55 @@ public sealed class CoverageEvidenceProducerTests
             }
             """;
 
-        public async Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
+        public Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
         {
             request.Lease.Complete();
-            if (request.Arguments.FirstOrDefault() == waitOperation)
+            if (request.Arguments.FirstOrDefault() == timeoutOperation)
             {
-                return await WaitForDeadlineAsync(cancellationToken);
+                clock.Expire();
+                return Task.FromCanceled<CoverageRunProcessResult>(cancellationToken);
             }
 
-            return request.Arguments.FirstOrDefault() switch
+            return Task.FromResult(request.Arguments.FirstOrDefault() switch
             {
                 "sln" => new CoverageRunProcessResult(0, "Project(s)\n----------\ntests/Sample.Tests/Sample.Tests.csproj\n"),
                 "msbuild" => new CoverageRunProcessResult(0, CapabilityOutput, StandardOutput: CapabilityOutput),
                 _ => new CoverageRunProcessResult(0, "build output"),
-            };
+            });
+        }
+    }
+
+    private sealed class DeadlineTimeProvider(TimeSpan timeout) : TimeProvider
+    {
+        private DeadlineTimer? _timer;
+
+        public override long GetTimestamp() => 0;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Assert.Equal(timeout, dueTime);
+            Assert.Equal(Timeout.InfiniteTimeSpan, period);
+            _timer = new DeadlineTimer(() => callback(state));
+            return _timer;
         }
 
-        private static async Task<CoverageRunProcessResult> WaitForDeadlineAsync(CancellationToken cancellationToken)
+        public void Expire() => (_timer ?? throw new InvalidOperationException("The producer deadline was not scheduled.")).Expire();
+
+        private sealed class DeadlineTimer(Action fire) : ITimer
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-            throw new InvalidOperationException("The producer deadline should cancel the test invocation.");
+            private Action? _fire = fire;
+
+            public void Expire() => Interlocked.Exchange(ref _fire, null)?.Invoke();
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => throw new NotSupportedException();
+
+            public void Dispose() => Interlocked.Exchange(ref _fire, null);
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
         }
     }
 

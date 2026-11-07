@@ -36,8 +36,52 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--min-patch-branch 85", script, StringComparison.Ordinal);
         Assert.Contains("--patch-line-mode codecov", script, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_REQUIRE_NON_SANDBOX:-true", script, StringComparison.Ordinal);
-        Assert.Equal(3, CountOccurrences(script, "--no-restore"));
+        Assert.Contains("coverage_command=(\"$COVERAGE_CLI_PATH\")", script, StringComparison.Ordinal);
+        Assert.Contains("--operation fanin", script, StringComparison.Ordinal);
+        Assert.Contains("--run-id \"$COVERAGE_RUN_ID\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("coverage_fanin.py", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("python", script, StringComparison.Ordinal);
         Assert.Contains("if [[ -n \"$COVERAGE_GATE_DIFF_BASE\" ]]; then", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildWorkflowBindsInstalledCandidateAndThreeNativeInputsToCurrentSourceAndRun()
+    {
+        var workflow = ReadWorkflow();
+        Assert.DoesNotContain("coverage_fanin.py", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("test_coverage_fanin.py", workflow, StringComparison.Ordinal);
+        Assert.Contains("name: coverage-cli-candidate", workflow, StringComparison.Ordinal);
+        Assert.Contains("Candidate CLI package source, SDK, or pinned version does not match this lane.", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_RUN_SCOPE: ${{ github.repository }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_RUN_ID: ${{ github.run_id }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_DOGFOOD_OUTPUT", workflow, StringComparison.Ordinal);
+        Assert.Contains("/composed/coverage.cobertura.xml", workflow, StringComparison.Ordinal);
+        Assert.Contains("steps.solution-coverage.outcome == 'success'", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BothCoverageLanesRequireAnIsolatedFeedAndCheckTheInstalledArchiveBeforeExecution()
+    {
+        var yaml = new YamlStream();
+        using var reader = new StringReader(ReadWorkflow());
+        yaml.Load(reader);
+        var jobs = (YamlMappingNode)((YamlMappingNode)yaml.Documents.Single().RootNode)["jobs"];
+        foreach (var name in new[] { "build", "coverage-security-platform" })
+        {
+            var job = (YamlMappingNode)jobs[name];
+            var steps = ((YamlSequenceNode)job["steps"]).OfType<YamlMappingNode>();
+            var install = Assert.Single(steps, step => step.Children.TryGetValue("name", out var title)
+                && title is YamlScalarNode { Value: "Verify and install candidate CLI" });
+            var command = Assert.IsType<YamlScalarNode>(install["run"]).Value!;
+            Assert.DoesNotContain("--add-source", command, StringComparison.Ordinal);
+            Assert.Contains("<packageSources><clear />", command, StringComparison.Ordinal);
+            Assert.Contains("--configfile $toolConfig", command, StringComparison.Ordinal);
+            var check = command.IndexOf("Get-FileHash -LiteralPath $installedArchives[0].FullName", StringComparison.Ordinal);
+            var publish = command.IndexOf("COVERAGE_CLI_PATH=$command", StringComparison.Ordinal);
+            Assert.True(check >= 0 && publish > check);
+        }
     }
 
     [Theory]
@@ -162,7 +206,7 @@ public sealed class CoverageSolutionScriptTests
             "${{ success() && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}",
             ((YamlScalarNode)upload.Children[new YamlScalarNode("if")]).Value);
         var uploadWith = (YamlMappingNode)upload.Children[new YamlScalarNode("with")];
-        Assert.Equal("TestResults/coverage-fanin/coverage.cobertura.xml", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("files")]).Value);
+        Assert.Equal("${{ runner.temp }}/coverage-dogfood-fanin-${{ github.run_id }}-${{ github.run_attempt }}/composed/coverage.cobertura.xml", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("files")]).Value);
         Assert.Equal("true", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("disable_search")]).Value);
 
         var testResults = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
@@ -185,7 +229,7 @@ public sealed class CoverageSolutionScriptTests
         var coverageJob = (YamlMappingNode)jobs.Children[new YamlScalarNode("coverage-security-platform")];
         Assert.Equal("Coverage security contracts (${{ matrix.os }})", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("name")]).Value);
         Assert.Equal("${{ matrix.os }}", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("runs-on")]).Value);
-        Assert.Equal("10", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("timeout-minutes")]).Value);
+        Assert.Equal("20", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("timeout-minutes")]).Value);
 
         var steps = (YamlSequenceNode)coverageJob.Children[new YamlScalarNode("steps")];
         var runCoverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
@@ -197,7 +241,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--configuration Release", runCommand, StringComparison.Ordinal);
         Assert.Contains("--no-restore", runCommand, StringComparison.Ordinal);
         Assert.Contains("/p:TailwindEnabled=false", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--logger \"console;verbosity=detailed\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--results-directory \"${{ runner.temp }}/coverage-native-results\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--collect:\"XPlat Code Coverage\"", runCommand, StringComparison.Ordinal);

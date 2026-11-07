@@ -5,6 +5,7 @@ permissions:
 
 env:
   COVERAGE_SDK_VERSION: 10.0.402
+  COVERAGE_CLI_CANDIDATE_VERSION: 0.1.0-ci.${{ github.run_id }}.${{ github.run_attempt }}
 
 on:
   push:
@@ -58,14 +59,10 @@ jobs:
             ${{ runner.temp }}/config-package-contract/*.log
           if-no-files-found: warn
 
-  coverage-security-platform:
-    name: Coverage security contracts (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+  coverage-cli-candidate:
+    name: Pack coverage CLI candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
@@ -74,6 +71,80 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
+          cache: true
+          cache-dependency-path: Cli/ForgeTrust.AppSurface.Cli/packages.lock.json
+
+      - name: Select exact coverage SDK
+        shell: pwsh
+        run: |
+          $selection = @{ sdk = @{ version = "${{ env.COVERAGE_SDK_VERSION }}"; rollForward = "disable" } }
+          $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) "global.json")
+          if ((dotnet --version) -ne "${{ env.COVERAGE_SDK_VERSION }}") { throw "Coverage SDK selection failed" }
+
+      - name: Restore candidate CLI (locked)
+        run: dotnet restore Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --locked-mode
+
+      - name: Pack source and SDK bound candidate CLI
+        run: |
+          set -euo pipefail
+          candidate_feed="$RUNNER_TEMP/coverage-candidate-feed"
+          mkdir -p "$candidate_feed"
+          source_commit="$(git rev-parse HEAD)"
+          source_tree="$(git rev-parse 'HEAD^{tree}')"
+          sdk="$(dotnet --version)"
+          test "$source_commit" = "$GITHUB_SHA"
+          dotnet pack Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj \
+            --configuration Release --no-restore --output "$candidate_feed" \
+            -p:Version="$COVERAGE_CLI_CANDIDATE_VERSION" \
+            -p:PackageVersion="$COVERAGE_CLI_CANDIDATE_VERSION" \
+            -p:RepositoryCommit="$source_commit" -p:SourceRevisionId="$source_commit"
+          package="$candidate_feed/ForgeTrust.AppSurface.Cli.$COVERAGE_CLI_CANDIDATE_VERSION.nupkg"
+          test -f "$package"
+          package_sha256="$(sha256sum "$package" | cut -d ' ' -f 1)"
+          jq -n --arg commit "$source_commit" --arg tree "$source_tree" --arg sdk "$sdk" \
+            --arg version "$COVERAGE_CLI_CANDIDATE_VERSION" --arg sha256 "$package_sha256" \
+            '{schemaVersion:1,commit:$commit,tree:$tree,sdk:$sdk,version:$version,packageSha256:$sha256}' \
+            > "$candidate_feed/candidate.json"
+
+      - name: Upload same-run candidate CLI package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-cli-candidate
+          path: ${{ runner.temp }}/coverage-candidate-feed
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage-security-platform:
+    name: Coverage security contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [coverage-cli-candidate]
+    # Leave time for the native suite, candidate installation, and evidence upload.
+    # The test command still uses a separate two-minute hang detector.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+      BUILD_CONFIGURATION: Release
+      COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}
+      COVERAGE_RUN_SCOPE: ${{ github.repository }}
+      COVERAGE_RUN_ID: ${{ github.run_id }}
+      COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -93,6 +164,54 @@ jobs:
       - name: Restore coverage security tests (locked)
         run: dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
 
+      - name: Restore dogfood adapter (locked)
+        run: dotnet restore tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --locked-mode
+
+      - name: Download same-source CLI candidate package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-cli-candidate
+          path: ${{ runner.temp }}/coverage-candidate-feed
+
+      - name: Verify and install candidate CLI
+        shell: pwsh
+        run: |
+          $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
+          $manifest = Get-Content -Raw -Path (Join-Path $feed "candidate.json") | ConvertFrom-Json
+          $commit = (git rev-parse HEAD).Trim()
+          $tree = (git rev-parse "HEAD^{tree}").Trim()
+          $sdk = (dotnet --version).Trim()
+          $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
+          if ($manifest.commit -ne $env:GITHUB_SHA -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
+              $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
+              $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
+            throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
+          }
+          if ((Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
+            throw "Candidate CLI package hash does not match its same-run manifest."
+          }
+          $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
+          $toolConfig = Join-Path $feed "candidate.nuget.config"
+          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
+          @"
+          <configuration>
+            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
+            <fallbackPackageFolders><clear /></fallbackPackageFolders>
+          </configuration>
+          "@ | Set-Content -LiteralPath $toolConfig
+          dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
+            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
+          if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
+          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
+            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
+          if ($installedArchives.Count -ne 1 -or
+              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
+            throw "Installed CLI archive does not match the same-run candidate."
+          }
+          $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
+          if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
+          Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
+
       - name: Prepare generated docs stylesheet for coverage security tests
         shell: pwsh
         run: |
@@ -106,7 +225,7 @@ jobs:
           --configuration Release
           --no-restore
           /p:TailwindEnabled=false
-          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand"
+          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn"
           --logger "console;verbosity=detailed"
           --results-directory "${{ runner.temp }}/coverage-native-results"
           --collect:"XPlat Code Coverage"
@@ -117,19 +236,30 @@ jobs:
           DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.IntegrationTests]*"
 
       - name: Attest successful native coverage evidence
+        id: capture-native-coverage
         shell: pwsh
+        env:
+          COVERAGE_DOGFOOD_OUTPUT: ${{ runner.temp }}/coverage-dogfood-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           $reports = @(Get-ChildItem -Path "${{ runner.temp }}/coverage-native-results" -Recurse -Filter coverage.cobertura.xml)
           if ($reports.Count -ne 1) { throw "Expected exactly one fresh native coverage report" }
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --configuration Release --no-build --no-restore -- coverage merge --source "${{ runner.temp }}/coverage-native-results" --output "${{ runner.temp }}/coverage-native-canonical"
+          & $env:COVERAGE_CLI_PATH coverage merge --source "${{ runner.temp }}/coverage-native-results" --output "${{ runner.temp }}/coverage-native-canonical"
           if ($LASTEXITCODE -ne 0) { throw "Native coverage normalization failed" }
-          python scripts/coverage_fanin.py capture --configuration Release --scope native --raw-report $reports[0].FullName --report "${{ runner.temp }}/coverage-native-canonical/coverage.cobertura.xml" --output "${{ runner.temp }}/coverage-native"
+          $platform = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "Darwin" } else { "Linux" }
+          $adapter = @('--operation', 'native', '--repository', $PWD.Path, '--cli', $env:COVERAGE_CLI_PATH,
+            '--output', $env:COVERAGE_DOGFOOD_OUTPUT, '--configuration', 'Release', '--native-platform', $platform,
+            '--report', "${{ runner.temp }}/coverage-native-canonical/coverage.cobertura.xml", '--raw', $reports[0].FullName,
+            '--run-scope', $env:COVERAGE_RUN_SCOPE, '--run-id', $env:COVERAGE_RUN_ID, '--attempt', $env:COVERAGE_RUN_ATTEMPT)
+          if ($env:COVERAGE_GATE_DIFF_BASE) { $adapter += @('--diff-base', $env:COVERAGE_GATE_DIFF_BASE) }
+          dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release --no-restore -- @adapter
+          if ($LASTEXITCODE -ne 0) { throw "Native coverage capture failed" }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "capture-path=$(Join-Path $env:COVERAGE_DOGFOOD_OUTPUT 'capture')"
 
       - name: Upload attested native coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-native-${{ matrix.os }}
-          path: ${{ runner.temp }}/coverage-native
+          path: ${{ steps.capture-native-coverage.outputs.capture-path }}
           if-no-files-found: error
           retention-days: 7
 
@@ -516,6 +646,51 @@ jobs:
           cache: pnpm
           cache-dependency-path: Web/pnpm-lock.yaml
 
+      - name: Download same-source CLI candidate package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-cli-candidate
+          path: ${{ runner.temp }}/coverage-candidate-feed
+
+      - name: Verify and install candidate CLI
+        shell: pwsh
+        run: |
+          $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
+          $manifest = Get-Content -Raw -Path (Join-Path $feed "candidate.json") | ConvertFrom-Json
+          $commit = (git rev-parse HEAD).Trim()
+          $tree = (git rev-parse "HEAD^{tree}").Trim()
+          $sdk = (dotnet --version).Trim()
+          $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
+          if ($manifest.commit -ne $env:GITHUB_SHA -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
+              $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
+              $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
+            throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
+          }
+          if ((Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
+            throw "Candidate CLI package hash does not match its same-run manifest."
+          }
+          $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
+          $toolConfig = Join-Path $feed "candidate.nuget.config"
+          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
+          @"
+          <configuration>
+            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
+            <fallbackPackageFolders><clear /></fallbackPackageFolders>
+          </configuration>
+          "@ | Set-Content -LiteralPath $toolConfig
+          dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
+            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
+          if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
+          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
+            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
+          if ($installedArchives.Count -ne 1 -or
+              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
+            throw "Installed CLI archive does not match the same-run candidate."
+          }
+          $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
+          if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
+          Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
+
       - name: Verify generated package chooser
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-restore -- verify
@@ -546,7 +721,7 @@ jobs:
         run: python3 -m unittest discover -s examples/durable-external-activation -p 'test_*.py'
 
       - name: Verify coverage fan-in contracts
-        run: python3 -m unittest discover -s scripts/tests -p 'test_coverage_fanin.py'
+        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~CoverageFanIn'
 
       - name: Verify Cloud Run execution fixture comparisons
         run: python3 -m unittest discover -s Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1 -p 'test_*.py'
@@ -565,6 +740,10 @@ jobs:
           COVERAGE_PARALLELISM: 2
           COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}
           COVERAGE_FANIN_NATIVE: ${{ runner.temp }}/coverage-native-inputs
+          COVERAGE_DOGFOOD_OUTPUT: ${{ runner.temp }}/coverage-dogfood-fanin-${{ github.run_id }}-${{ github.run_attempt }}
+          COVERAGE_RUN_SCOPE: ${{ github.repository }}
+          COVERAGE_RUN_ID: ${{ github.run_id }}
+          COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}
           APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
         run: |
           ./scripts/coverage-solution.sh
@@ -598,7 +777,7 @@ jobs:
           name: coverage-gate-reports
           path: |
             TestResults/coverage-merged/fanin-primary/**
-            TestResults/coverage-fanin/**
+            ${{ runner.temp }}/coverage-dogfood-fanin-${{ github.run_id }}-${{ github.run_attempt }}/**
             TestResults/coverage-merged/aggregate-gate/**
             TestResults/coverage-merged/coverage-gate.json
             TestResults/coverage-merged/coverage-gate.md
@@ -635,7 +814,7 @@ jobs:
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: ${{ success() && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
-          files: 'TestResults/coverage-fanin/coverage.cobertura.xml'
+          files: '${{ runner.temp }}/coverage-dogfood-fanin-${{ github.run_id }}-${{ github.run_attempt }}/composed/coverage.cobertura.xml'
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
 

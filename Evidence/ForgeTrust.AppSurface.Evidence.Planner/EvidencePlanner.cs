@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -15,6 +16,27 @@ public sealed class EvidencePlanner
     /// <param name="changedPaths">Explicit normalized changed paths.</param>
     /// <returns>A hash-bound evidence plan.</returns>
     public EvidencePlan Resolve(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths)
+        => ResolveCore(policy, changedPaths, null);
+
+    /// <summary>Resolves a plan that also binds the exact unified patch captured by the caller.</summary>
+    /// <param name="policy">Versioned consumer policy.</param>
+    /// <param name="patch">Exact UTF-8 unified patch bytes; copied before parsing and hashing. At most 20 MiB.</param>
+    /// <param name="additionalPaths">Optional normalized paths considered alongside paths read from the patch.</param>
+    /// <returns>A plan whose digest covers the patch identity as well as policy selection.</returns>
+    public EvidencePlan ResolvePatch(EvidencePolicy policy, ReadOnlyMemory<byte> patch,
+        IReadOnlyList<NormalizedDiffPath>? additionalPaths = null)
+    {
+        if (patch.IsEmpty || patch.Length > 20 * 1024 * 1024)
+            throw new EvidencePlanningException("ASEVD101", "Evidence planning requires a bounded, nonempty patch.",
+                "Provide a unified patch no larger than 20 MiB, or plan from explicit paths only.");
+        var snapshot = patch.ToArray();
+        var patchPaths = EvidenceUnifiedDiffReader.Read(Encoding.UTF8.GetString(snapshot));
+        return ResolveCore(policy, (additionalPaths ?? []).Concat(patchPaths).ToArray(),
+            Convert.ToHexStringLower(SHA256.HashData(snapshot)));
+    }
+
+    private static EvidencePlan ResolveCore(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths,
+        string? patchSha256)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(changedPaths);
@@ -75,7 +97,8 @@ public sealed class EvidencePlanner
                 .OrderBy(static id => id, StringComparer.Ordinal)
                 .ToArray(),
             PlanDigest: string.Empty,
-            PolicySnapshot: policy);
+            PolicySnapshot: policy)
+        { PatchSha256 = patchSha256 };
 
         return draft with { PlanDigest = EvidenceDigest.CanonicalSha256(draft) };
     }
@@ -464,13 +487,13 @@ public static class EvidenceUnifiedDiffReader
 
             if (line.StartsWith("rename from ", StringComparison.Ordinal))
             {
-                renamedFrom = ReadDiffPath(line[12..]);
+                renamedFrom = ReadDiffPath(line[12..], stripGitPrefix: false);
                 continue;
             }
 
             if (line.StartsWith("rename to ", StringComparison.Ordinal))
             {
-                var renamedTo = ReadDiffPath(line[10..]);
+                var renamedTo = ReadDiffPath(line[10..], stripGitPrefix: false);
                 if (renamedFrom is not null && renamedTo is not null)
                 {
                     paths.Add(new NormalizedDiffPath(renamedTo, "renamed", renamedFrom));
@@ -483,7 +506,7 @@ public static class EvidenceUnifiedDiffReader
 
             if (!suppressHeaderPair && line.StartsWith("--- ", StringComparison.Ordinal))
             {
-                oldPath = ReadDiffPath(line[4..]);
+                oldPath = ReadDiffPath(line[4..], stripGitPrefix: true);
                 continue;
             }
 
@@ -492,7 +515,7 @@ public static class EvidenceUnifiedDiffReader
                 continue;
             }
 
-            var newPath = ReadDiffPath(line[4..]);
+            var newPath = ReadDiffPath(line[4..], stripGitPrefix: true);
             if (oldPath is null && newPath is null)
             {
                 continue;
@@ -518,15 +541,17 @@ public static class EvidenceUnifiedDiffReader
             .ToArray();
     }
 
-    private static string? ReadDiffPath(string value)
+    private static string? ReadDiffPath(string value, bool stripGitPrefix)
     {
-        var path = value.Split('\t', 2)[0].Trim();
+        if (!GitPatchPathHeader.TryDecode(value.TrimEnd('\r'), out var path))
+            throw new EvidencePlanningException("ASEVD133", "A Git patch path header is invalid.",
+                "Supply an unmodified Git unified patch with UTF-8 paths.");
         if (path == "/dev/null")
         {
             return null;
         }
 
-        if (path.StartsWith("a/", StringComparison.Ordinal) || path.StartsWith("b/", StringComparison.Ordinal))
+        if (stripGitPrefix && (path.StartsWith("a/", StringComparison.Ordinal) || path.StartsWith("b/", StringComparison.Ordinal)))
         {
             path = path[2..];
         }

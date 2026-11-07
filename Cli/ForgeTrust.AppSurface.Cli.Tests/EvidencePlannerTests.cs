@@ -427,8 +427,16 @@ public sealed class EvidencePlannerTests
         Assert.Contains("docs/New.md", snapshot.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("src/Replaced.cs", snapshot.Text, StringComparison.Ordinal);
         Assert.Equal("docs/New.md", Assert.Single(resolution.Plan.ChangedPaths).Path);
+        Assert.Equal(snapshot.Sha256.ToLowerInvariant(), resolution.Plan.PatchSha256);
+        var boundOutput = Path.Join(directory.Path, "patch-output");
+        await workflow.WritePlanAsync(resolution.Plan, boundOutput, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(resolution.Plan, []), boundOutput, CancellationToken.None);
+        var verifiedPatch = await workflow.VerifyAsync(Path.Join(boundOutput, "evidence-plan.json"),
+            Path.Join(boundOutput, "evidence-manifest.json"), CancellationToken.None);
+        Assert.Equal(resolution.Plan.PlanDigest, verifiedPatch.Plan.PlanDigest);
 
         var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
+        Assert.Null(plan.PatchSha256);
         var output = Path.Join(directory.Path, "output");
         await workflow.WritePlanAsync(plan, output, CancellationToken.None);
         await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, []), output, CancellationToken.None);
@@ -439,6 +447,72 @@ public sealed class EvidencePlannerTests
 
         var missingEvidenceException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "missing-plan.json"), Path.Join(output, "missing-manifest.json"), CancellationToken.None));
         Assert.Contains("ASEVD208", missingEvidenceException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExactPatchIdentityChangesThePlanWithoutChangingPathSelection()
+    {
+        var planner = new EvidencePlanner();
+        var policy = CreatePolicy();
+        NormalizedDiffPath[] paths = [new("src/Feature.cs")];
+        var pathOnly = planner.Resolve(policy, paths);
+        var first = planner.ResolvePatch(policy, "diff --git a/src/Feature.cs b/src/Feature.cs\n--- a/src/Feature.cs\n+++ b/src/Feature.cs\n@@ -1 +1 @@\n-a\n+b\n"u8.ToArray());
+        var second = planner.ResolvePatch(policy, "diff --git a/src/Feature.cs b/src/Feature.cs\n--- a/src/Feature.cs\n+++ b/src/Feature.cs\n@@ -1 +1 @@\n-a\n+c\n"u8.ToArray());
+
+        Assert.Equal(pathOnly.DiffDigest, first.DiffDigest);
+        Assert.Equal(first.DiffDigest, second.DiffDigest);
+        Assert.NotEqual(first.PatchSha256, second.PatchSha256);
+        Assert.NotEqual(first.PlanDigest, second.PlanDigest);
+        Assert.True(EvidenceManifestBuilder.Verify(first, EvidenceManifestBuilder.Build(first, [])));
+        Assert.False(EvidenceManifestBuilder.Verify(first with { PatchSha256 = second.PatchSha256 }, EvidenceManifestBuilder.Build(first, [])));
+        Assert.Throws<EvidencePlanningException>(() => planner.ResolvePatch(policy, ReadOnlyMemory<byte>.Empty));
+    }
+
+    [Theory]
+    [InlineData("\"b/src/Caf\\303\\251.cs\"", "src/Café.cs")]
+    [InlineData("b/src/My File.cs\t", "src/My File.cs")]
+    [InlineData("\"b/src/Caf\\303\\251.cs\"\t", "src/Café.cs")]
+    public void ResolvePatch_UsesDecodedGitPathForPolicySelection(string header, string expectedPath)
+    {
+        var policy = CreatePolicy();
+        var patch = System.Text.Encoding.UTF8.GetBytes($"diff --git a/src/Old.cs {header}\n--- a/src/Old.cs\n+++ {header}\n@@ -1 +1 @@\n-a\n+b\n");
+        var planner = new EvidencePlanner();
+
+        var plan = planner.ResolvePatch(policy, patch);
+
+        Assert.Equal(planner.Resolve(policy, [new NormalizedDiffPath(expectedPath)]).Profile.Id, plan.Profile.Id);
+        Assert.Equal(expectedPath, Assert.Single(plan.ChangedPaths).Path);
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(patch)), plan.PatchSha256);
+    }
+
+    [Theory]
+    [InlineData("\"b/src/NoClosingQuote.cs")]
+    [InlineData("\"b/src/Invalid\\q.cs\"")]
+    [InlineData("\"b/src/Invalid\\400.cs\"")]
+    [InlineData("\"b/src/Invalid\\377.cs\"")]
+    [InlineData("\"b/src/File.cs\"junk")]
+    public void ResolvePatch_RejectsMalformedGitPath(string header)
+    {
+        var patch = System.Text.Encoding.UTF8.GetBytes($"--- a/src/File.cs\n+++ {header}\n");
+
+        AssertPlanningCode(() => new EvidencePlanner().ResolvePatch(CreatePolicy(), patch), "ASEVD133");
+    }
+
+    [Fact]
+    public void ResolvePatch_KeepsLiteralDirectoryPrefixesInRenameMetadata()
+    {
+        var patch = """
+            diff --git a/a/old.cs b/b/new.cs
+            similarity index 100%
+            rename from a/old.cs
+            rename to b/new.cs
+            """u8.ToArray();
+
+        var plan = new EvidencePlanner().ResolvePatch(CreatePolicy(), patch);
+
+        var changed = Assert.Single(plan.ChangedPaths);
+        Assert.Equal("b/new.cs", changed.Path);
+        Assert.Equal("a/old.cs", changed.PreviousPath);
     }
 
     [Fact]

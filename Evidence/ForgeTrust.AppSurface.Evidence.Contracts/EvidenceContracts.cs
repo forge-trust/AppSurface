@@ -342,7 +342,13 @@ public sealed record EvidencePlan(
     IReadOnlyList<NormalizedDiffPath> ChangedPaths,
     IReadOnlyList<string> MatchedRuleIds,
     string PlanDigest,
-    EvidencePolicy? PolicySnapshot = null);
+    EvidencePolicy? PolicySnapshot = null)
+{
+    /// <summary>Lowercase SHA-256 of the exact unified patch bytes captured at planning, when available.</summary>
+    /// <remarks><see cref="DiffDigest"/> still identifies the normalized path list; a path-only plan cannot bind patch acceptance.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PatchSha256 { get; init; }
+}
 
 /// <summary>
 /// Captures a bounded producer result returned to the EvidenceHost.
@@ -1093,6 +1099,7 @@ public static class EvidenceManifestBuilder
 
         var planWithoutDigest = plan with { PlanDigest = string.Empty };
         if (plan.PolicySnapshot is null
+            || plan.PatchSha256 is { } patch && (patch.Length != 64 || !patch.All(char.IsAsciiHexDigitLower))
             || !string.Equals(plan.PolicyDigest, EvidenceDigest.CanonicalSha256(plan.PolicySnapshot), StringComparison.Ordinal)
             || !string.Equals(plan.DiffDigest, EvidenceDigest.CanonicalSha256(plan.ChangedPaths), StringComparison.Ordinal)
             || !string.Equals(plan.PlanDigest, EvidenceDigest.CanonicalSha256(planWithoutDigest), StringComparison.Ordinal)

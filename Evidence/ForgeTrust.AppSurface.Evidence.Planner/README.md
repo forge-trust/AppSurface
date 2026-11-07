@@ -24,6 +24,16 @@ var plan = planner.Resolve(policy, [new NormalizedDiffPath("src/Orders/SubmitOrd
 
 `Resolve` normalizes and sorts paths, applies the most-specific matching rules, and falls back to `ConservativeProfileId` for a path that has no rule. If equally specific rules choose different profiles, it throws `EvidencePlanningException` instead of silently taking a lower-risk route. `EvidenceUnifiedDiffReader.Read(...)` accepts a CI-provided Git-formatted unified diff when callers do not want to depend on a local Git checkout. Hunked diffs must include `diff --git` file headers; use explicit paths when only a non-Git diff is available.
 
+For the [Coverage EvidenceHost producer](../ForgeTrust.AppSurface.Evidence.Aspire/README.md#coverage-fan-in-producer), use `ResolvePatch(policy, patchBytes, additionalPaths)` with the exact UTF-8 patch captured for planning (up to 20 MiB). The planner copies the bytes, derives the patch paths, and records their patch SHA-256 separately from the normalized path digest. The Evidence CLI binds the snapshot automatically when you pass `--diff-file`. A path-only plan still resolves normally but cannot close a patch coverage obligation with this producer.
+
+Generate the planning patch from the repository root with the same path prefixes and options as the coverage gate. Use the same `DIFF_BASE` in the acceptance policy:
+
+```sh
+git --no-pager --no-replace-objects diff --unified=0 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --relative "${DIFF_BASE}...HEAD" -- > "$PATCH_FILE"
+```
+
+Choose a patch output path outside the checkout so the source remains clean. Pass the file's exact bytes to `ResolvePatch` or `--diff-file`.
+
 ## Policy design
 
 Keep the policy small and explicit:
@@ -49,5 +59,6 @@ The planner does not classify C# semantics or infer that a getter, constructor, 
 | `ASEVD130` | Coverage execution parallelism is outside 1 through 32. | Choose a bounded project concurrency from 1 through 32. |
 | `ASEVD131` | A coverage execution test-result format is unsupported. | Select `none` or `junit` in the [coverage declaration](../ForgeTrust.AppSurface.Evidence.Contracts/README.md). |
 | `ASEVD132` | A coverage producer has an unsupported `coverageArtifactRetention` value. | Use `managed` (the default) or `full`; this setting does not change coverage gate requirements. |
+| `ASEVD133` | A Git patch path header is empty or contains invalid quoting or invalid UTF-8 path bytes. | Supply an unmodified Git unified patch with UTF-8 paths. |
 
 Read next: [contracts](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), [CLI workflow](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md), and the [policy cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).

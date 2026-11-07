@@ -479,6 +479,9 @@ internal sealed record CoverageGateRequest(
 {
     /// <summary>Gets a compatible caller-owned output context for nested first-party Evidence evaluation.</summary>
     internal CoverageArtifactSession? ArtifactSession { get; init; }
+
+    /// <summary>Opens a retained immutable input snapshot for nested fan-in evaluation; callers own every returned stream.</summary>
+    internal Func<Stream>? CoverageStreamFactory { get; init; }
     /// <summary>
     /// Supports existing first-party request construction while intentionally discarding CLI-only summary options.
     /// </summary>
@@ -515,6 +518,8 @@ internal sealed partial record CoveragePatchRequest(
 
 internal sealed partial record CoveragePatchRequest
 {
+    /// <summary>Opens the same immutable Cobertura snapshot used by aggregate evaluation.</summary>
+    internal Func<Stream>? CoverageStreamFactory { get; init; }
     public CoveragePatchRequest(
         string RepositoryRoot,
         string DiffBase,
@@ -900,7 +905,7 @@ internal static class CoverageGateEvaluator
 
         try
         {
-            await using var stream = File.OpenRead(request.CoveragePath);
+            await using var stream = request.CoverageStreamFactory?.Invoke() ?? File.OpenRead(request.CoveragePath);
             using var reader = XmlReader.Create(stream, ReaderSettings);
             while (true)
             {
@@ -1004,7 +1009,7 @@ internal static class CoverageGateEvaluator
             throw new CommandException("ASCOV001 --coverage must point to a Cobertura XML file.");
         }
 
-        if (!File.Exists(request.CoveragePath))
+        if (request.CoverageStreamFactory is null && !File.Exists(request.CoveragePath))
         {
             throw new CommandException($"ASCOV001 Cobertura file not found: {request.CoveragePath}");
         }
@@ -1256,14 +1261,16 @@ internal static class PatchCoverageEvaluator
         ValidateLineMode(request.LineMode);
 
         var parseResult = ParseChangedLinesDetailed(artifact.Text);
-        if (request.DiffSource.IsExternalArtifact && parseResult.Status == PatchDiffParseStatus.Malformed)
+        if (parseResult.Status == PatchDiffParseStatus.Malformed)
         {
-            throw new CommandException(
-                $"ASCOV015 The patch diff from {GetDiffSourceDisplay(request.DiffSource)} could not be parsed as unified diff text. Download a unified diff artifact or use --diff-base for local git history.");
+            var diagnostic = request.DiffSource.IsExternalArtifact
+                ? $"ASCOV015 The patch diff from {GetDiffSourceDisplay(request.DiffSource)} could not be parsed as unified diff text. Download a unified diff artifact or use --diff-base for local git history."
+                : $"ASCOV015 The patch diff from {GetDiffSourceDisplay(request.DiffSource)} could not be parsed completely as unified diff text. It may contain a path that cannot be represented safely; use portable repository-relative paths and inspect the Git diff.";
+            throw new CommandException(diagnostic);
         }
 
         var changedLines = parseResult.ChangedLines;
-        var lineHits = await ReadLineCoverageMapAsync(coveragePath, request.RepositoryRoot, cancellationToken);
+        var lineHits = await ReadLineCoverageMapAsync(coveragePath, request.RepositoryRoot, cancellationToken, request.CoverageStreamFactory);
         var lines = new List<PatchCoverageLine>();
         foreach (var (file, changedFileLines) in changedLines.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
@@ -1500,7 +1507,12 @@ internal static class PatchCoverageEvaluator
                 state.CurrentDiffStarted = true;
                 sawFileMarker = true;
                 state.CurrentDiffHasNewFileMarker = true;
-                state.CurrentFile = NormalizeDiffPath(line["+++ ".Length..]);
+                if (!TryNormalizeDiffPath(line["+++ ".Length..], out var currentFile))
+                {
+                    return new PatchDiffParseResult(ToReadOnly(changedLines), PatchDiffParseStatus.Malformed);
+                }
+
+                state.CurrentFile = currentFile;
                 state.CurrentNewLine = null;
                 continue;
             }
@@ -1729,7 +1741,8 @@ internal static class PatchCoverageEvaluator
 
     private static bool IsEmptyFileIndexLine(string line)
     {
-        const string emptyBlobSha = "e69de29";
+        const string emptyBlobSha1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+        const string emptyBlobSha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
         var text = line["index ".Length..].Trim();
         var rangeEnd = text.IndexOf(' ', StringComparison.Ordinal);
         var range = rangeEnd < 0 ? text : text[..rangeEnd];
@@ -1741,12 +1754,25 @@ internal static class PatchCoverageEvaluator
 
         var before = range[..separator];
         var after = range[(separator + 2)..];
-        return (IsAllZeroAbbreviatedSha(before) && after.StartsWith(emptyBlobSha, StringComparison.Ordinal))
-            || (before.StartsWith(emptyBlobSha, StringComparison.Ordinal) && IsAllZeroAbbreviatedSha(after));
+        return IsEmptyFileObjectIdPair(before, after, emptyBlobSha1)
+            || IsEmptyFileObjectIdPair(after, before, emptyBlobSha1)
+            || IsEmptyFileObjectIdPair(before, after, emptyBlobSha256)
+            || IsEmptyFileObjectIdPair(after, before, emptyBlobSha256);
+
+        static bool IsEmptyFileObjectIdPair(string zeroId, string emptyBlobId, string fullEmptyBlobId)
+            => IsAllZeroAbbreviatedSha(zeroId, fullEmptyBlobId.Length)
+                && IsValidObjectIdAbbreviation(emptyBlobId, fullEmptyBlobId);
+
+        static bool IsValidObjectIdAbbreviation(string value, string objectId)
+            => value.Length >= 4
+                && value.Length <= objectId.Length
+                && objectId.StartsWith(value, StringComparison.Ordinal);
     }
 
-    private static bool IsAllZeroAbbreviatedSha(string value)
-        => value.Length >= 7 && value.All(ch => ch == '0');
+    private static bool IsAllZeroAbbreviatedSha(string value, int maximumLength)
+        => value.Length is >= 4
+            && value.Length <= maximumLength
+            && value.All(ch => ch == '0');
 
     private static string GetDiffSourceDisplay(PatchDiffSource source) => source.Kind switch
     {
@@ -1765,13 +1791,14 @@ internal static class PatchCoverageEvaluator
     private static async Task<Dictionary<string, Dictionary<int, PatchLineCoverageData>>> ReadLineCoverageMapAsync(
         string coveragePath,
         string repositoryRoot,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<Stream>? coverageStreamFactory = null)
     {
         var lineHits = new Dictionary<string, Dictionary<int, PatchLineCoverageData>>(StringComparer.Ordinal);
 
         try
         {
-            await using var stream = File.OpenRead(coveragePath);
+            await using var stream = coverageStreamFactory?.Invoke() ?? File.OpenRead(coveragePath);
             using var reader = XmlReader.Create(stream, ReaderSettings);
             string? currentFile = null;
 
@@ -1870,12 +1897,22 @@ internal static class PatchCoverageEvaluator
         }
     }
 
-    private static string? NormalizeDiffPath(string value)
+    private static bool TryNormalizeDiffPath(string value, out string? normalizedPath)
     {
-        var path = value.Trim();
+        normalizedPath = null;
+        if (!GitPatchPathHeader.TryDecode(value, out var path))
+        {
+            return false;
+        }
+
+        if (path.Contains('\\'))
+        {
+            return false;
+        }
+
         if (string.Equals(path, "/dev/null", StringComparison.Ordinal))
         {
-            return null;
+            return true;
         }
 
         if (path.StartsWith("b/", StringComparison.Ordinal) || path.StartsWith("a/", StringComparison.Ordinal))
@@ -1883,7 +1920,8 @@ internal static class PatchCoverageEvaluator
             path = path[2..];
         }
 
-        return NormalizeRelativePath(path);
+        normalizedPath = NormalizeRelativePath(path);
+        return normalizedPath is not null;
     }
 
     private static string? NormalizeCoveragePath(string? value, string repositoryRoot)
@@ -2025,10 +2063,10 @@ internal static class GitDiffReader
     internal const long DefaultMaximumDiffBytes = 20 * 1024 * 1024;
 
     /// <summary>
-    /// Reads a zero-context diff between <paramref name="diffBase"/> and <c>HEAD</c>.
+    /// Reads a zero-context diff between <paramref name="diffBase"/> and <c>HEAD</c> without running external diff drivers or text converters.
     /// </summary>
     /// <param name="repositoryRoot">Repository root where git should run.</param>
-    /// <param name="diffBase">Git ref or commit compared with HEAD.</param>
+    /// <param name="diffBase">Nonempty Git ref or commit compared with HEAD. Option-like values beginning with '-' are rejected before Git runs.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="maxBytes">Maximum UTF-8 byte length accepted from git.</param>
     /// <returns>Unified diff text.</returns>
@@ -2039,6 +2077,11 @@ internal static class GitDiffReader
         long maxBytes = DefaultMaximumDiffBytes)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+        // ArgumentList prevents shell expansion, but Git still parses a leading dash as
+        // an option before the revision/path separator. In particular, --output could
+        // create a file outside the admitted coverage generation.
+        if (string.IsNullOrWhiteSpace(diffBase) || diffBase.StartsWith('-'))
+            throw new CommandException("ASCOV010 The diff base must be a Git revision, not a command option.");
         var startInfo = new ProcessStartInfo("git")
         {
             WorkingDirectory = repositoryRoot,
@@ -2047,9 +2090,13 @@ internal static class GitDiffReader
             UseShellExecute = false,
         };
         startInfo.ArgumentList.Add("--no-pager");
+        startInfo.ArgumentList.Add("--no-replace-objects");
         startInfo.ArgumentList.Add("diff");
         startInfo.ArgumentList.Add("--unified=0");
         startInfo.ArgumentList.Add("--no-ext-diff");
+        startInfo.ArgumentList.Add("--no-textconv");
+        startInfo.ArgumentList.Add("--src-prefix=a/");
+        startInfo.ArgumentList.Add("--dst-prefix=b/");
         startInfo.ArgumentList.Add("--relative");
         startInfo.ArgumentList.Add($"{diffBase}...HEAD");
         startInfo.ArgumentList.Add("--");

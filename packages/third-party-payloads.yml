@@ -42,6 +42,26 @@ notices:
       - Directory.Packages.props
     version_source_path: Directory.Packages.props
     version_source_contains: <PackageVersion Include="ReportGenerator" Version="5.5.10" />
+  - id: evidence-coverage-reportgenerator-runtime
+    package_id: ForgeTrust.AppSurface.Evidence.Coverage
+    component: ReportGenerator
+    version: 5.5.10
+    license: Apache-2.0
+    source_url: https://github.com/danielpalme/ReportGenerator
+    payload_patterns:
+      - tools/**/reportgenerator/**
+    notice_paths:
+      - THIRD-PARTY-NOTICES.md
+    markers:
+      - ReportGenerator
+      - 5.5.10
+      - Apache-2.0
+    source_paths:
+      - Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj
+      - Evidence/ForgeTrust.AppSurface.Evidence.Coverage/reportgenerator-runtime-manifest.json
+      - Directory.Packages.props
+    version_source_path: Directory.Packages.props
+    version_source_contains: <PackageVersion Include="ReportGenerator" Version="5.5.10" />
   - id: docs-minisearch-embedded-runtime
     package_id: ForgeTrust.AppSurface.Docs
     component: MiniSearch

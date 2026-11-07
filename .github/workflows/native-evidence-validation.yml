@@ -58,6 +58,44 @@ jobs:
           $hostPath = (Get-Command dotnet).Source
           dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll --package $package --version $version --source-commit '${{ github.sha }}' --dotnet $hostPath --output $proof --scratch-parent $env:RUNNER_TEMP
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove installed neutral coverage package and published application
+        shell: pwsh
+        run: |
+          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
+          $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-library-feed'
+          $proof = Join-Path $env:RUNNER_TEMP 'native-coverage-library-proof'
+          New-Item -ItemType Directory -Path $feed -Force | Out-Null
+          Copy-Item (Join-Path $env:RUNNER_TEMP "native-evidence-feed/ForgeTrust.AppSurface.Cli.$version.nupkg") $feed
+          dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=${{ github.sha }}" "/p:SourceRevisionId=${{ github.sha }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet pack Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=${{ github.sha }}" "/p:SourceRevisionId=${{ github.sha }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release -- --package-proof --feed $feed --version $version --output $proof --dotnet (Get-Command dotnet).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Reject case-varied engine version skew before proof output
+        shell: pwsh
+        run: |
+          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
+          $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-invalid-metadata'
+          $output = Join-Path $env:RUNNER_TEMP 'native-coverage-invalid-proof'
+          New-Item -ItemType Directory -Path $feed | Out-Null
+          # These are metadata-only admission fixtures. The canonical exact edge must
+          # not hide a case-varied, open engine edge in another framework group.
+          foreach ($id in @('ForgeTrust.AppSurface.Coverage', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Cli')) {
+            $dependencies = ''
+            if ($id -eq 'ForgeTrust.AppSurface.Coverage') {
+              $dependencies = "<dependencies><group targetFramework='net10.0'><dependency id='ForgeTrust.AppSurface.Evidence.Coverage' version='[$version]' /></group><group targetFramework='net9.0'><dependency id='forgetrust.appsurface.evidence.coverage' version='$version' /></group></dependencies>"
+            }
+            $metadata = "<package xmlns='http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd'><metadata><id>$id</id><version>$version</version>$dependencies</metadata></package>"
+            $archive = [System.IO.Compression.ZipFile]::Open((Join-Path $feed "$id.$version.nupkg"), [System.IO.Compression.ZipArchiveMode]::Create)
+            try {
+              $writer = [System.IO.StreamWriter]::new($archive.CreateEntry("$id.nuspec").Open())
+              try { $writer.Write($metadata) } finally { $writer.Dispose() }
+            } finally { $archive.Dispose() }
+          }
+          $diagnostic = & dotnet tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/Release/net10.0/ForgeTrust.AppSurface.Coverage.Dogfood.dll --package-proof --feed $feed --version $version --output $output --dotnet (Get-Command dotnet).Source 2>&1
+          if ($LASTEXITCODE -eq 0 -or (Test-Path $output) -or !($diagnostic -match 'ASCOV312 Packed coverage proof failed')) { throw 'Invalid engine metadata passed admission or created proof output, or the proof runner failed to execute.' }
+          exit 0
       # Retain the native fixture's failure proof before negative tests can fail.
       # Both acceptance layers remain required; a failed journey cannot skip tests.
       - name: Test native lifecycle contracts
@@ -66,13 +104,18 @@ jobs:
         run: |
           dotnet restore Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests'
+          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~EvidenceCoverageFanInProducerTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve native EvidenceHost artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-evidence-${{ matrix.os }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/native-evidence-proof
+          path: |
+            ${{ runner.temp }}/native-evidence-proof
+            ${{ runner.temp }}/native-coverage-library-proof/proof.json
+            ${{ runner.temp }}/native-coverage-library-proof/*.log
+            ${{ runner.temp }}/native-coverage-library-proof/direct/runs/**
+            ${{ runner.temp }}/native-coverage-library-proof/published-proof/runs/**
           if-no-files-found: warn
           retention-days: 7
