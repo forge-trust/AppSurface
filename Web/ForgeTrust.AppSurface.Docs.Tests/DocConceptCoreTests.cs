@@ -156,6 +156,31 @@ public sealed class DocConceptCoreTests
     }
 
     [Fact]
+    public void PinnedBridgeCannotRelabelAnAlreadyKnownCanonicalPageLocale()
+    {
+        var sourcePin = Pin('a');
+        var targetPin = Pin('b');
+        var source = Release("source", sourcePin,
+            [new Page("old/topic", "en", "topic", "Topic", [])]);
+        var target = Release("target", targetPin,
+            [new Page("current/topic", "en", "topic", "Topic", [])]);
+        var map = Bridge(
+            new Membership("source", sourcePin, "en", "page", "old/topic"),
+            new Membership("target", targetPin, "fr", "page", "current/topic"));
+
+        var build = DocConceptIdentityIndex.BuildCombined(
+            [source, target], [map], DocConceptValidationMode.Quarantine, Budget);
+
+        Assert.Contains(build.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+        Assert.True(build.Index.TryGetPageIdentity("target", targetPin, "current/topic", out var targetIdentity));
+        Assert.Equal("en", targetIdentity!.Locale);
+        Assert.True(targetIdentity.LocaleIsKnown);
+        Assert.Null(build.Index.GetPage(targetIdentity with { Locale = "fr" }));
+        Assert.True(build.Index.TryGetPageIdentity("source", sourcePin, "old/topic", out var sourceIdentity));
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(sourceIdentity!, "target", targetPin).Reason);
+    }
+
+    [Fact]
     public void InvalidBridgeBlocksLegacyRouteCompatibilityAndIncomingIsDestinationBound()
     {
         var sourcePin = Pin('3');
@@ -562,6 +587,31 @@ public sealed class DocConceptCoreTests
         Assert.Null(unknownOutcome.HomeRoutePath);
     }
 
+    [Fact]
+    public void ServeableUnknownLocaleKeepsATargetIndeterminateAndDisablesOtherLocaleRecovery()
+    {
+        var sourcePin = Pin('5');
+        var targetPin = Pin('6');
+        var source = Release("source", sourcePin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var target = new DocConceptReleaseInput("target", targetPin, true, true, true, true, "guide",
+        [
+            Route("guide/topic", null, localeKnown: false),
+            Route("guide", "fr")
+        ], null);
+        var index = Build([source, target]).Index;
+
+        var resolution = index.Resolve(new DocConceptPageIdentity("source", sourcePin, "guide/topic", "en", true), "target", targetPin);
+
+        Assert.Equal(DocConceptResolutionReason.Unknown, resolution.Reason);
+        Assert.Null(resolution.TargetPage);
+        Assert.Null(resolution.FallbackSection);
+        Assert.Null(resolution.HomeRoutePath);
+        Assert.False(resolution.SearchAvailable);
+        Assert.True(index.TryGetPageIdentity("target", targetPin, "guide/topic", out var unknownIdentity));
+        Assert.False(unknownIdentity!.LocaleIsKnown);
+        Assert.NotNull(index.GetPage(unknownIdentity));
+    }
+
     // Value: protects=selected-language recovery when a counterpart exists only in another language;
     // fails_when=foreign concept membership suppresses verified selected-locale fallback, search, or home;
     // why_new=the existing locale test has no target pages in the selected language; seam=none;
@@ -906,13 +956,16 @@ public sealed class DocConceptCoreTests
         Assert.True(DocConceptSchema.IsSafeArtifactPath("guide/topic.html#intro"));
         Assert.True(DocConceptSchema.IsSafeArtifactPath("guide/topic.html#intro%20section"));
         Assert.True(DocConceptSchema.IsSafeArtifactPath("guide/topic.html#intro%2Fsection"));
+        Assert.False(DocConceptSchema.IsSafeArtifactPath("#intro"));
 
         foreach (var unsafeArtifact in new string[]
         {
             " guide/topic.html", "guide/topic.html ", "/guide/topic.html", "C:/guide/topic.html",
             "guide\\topic.html", "guide//topic.html", "guide/.git/topic.html", ".private/topic.html",
             "guide/topic.html#/../../outside.html", "guide/topic.html#section/child", "guide/topic.html#section\\child",
-            "guide/topic.html#bad%escape", "guide%2Ftopic.html", "guide/topic.html?view=full"
+            "guide/topic.html#section:child", "guide/topic.html#section?view=full",
+            "guide/topic.html#bad%escape", "guide/topic.html#bad%A", "guide/topic.html#bad%G0",
+            "guide%2Ftopic.html", "guide/topic.html?view=full", "guide/topic.txt#intro"
         })
         {
             Assert.False(DocConceptSchema.IsSafeArtifactPath(unsafeArtifact), unsafeArtifact);
@@ -1370,9 +1423,11 @@ public sealed class DocConceptCoreTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void ConflictingLegacyLocaleMembershipsQuarantineTheRouteRegardlessOfMapOrder(bool reverse)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void ConflictingLegacyLocaleMembershipsQuarantineTheRouteRegardlessOfMapOrder(bool reverse, bool repeatClaim)
     {
         const string englishConcept = "english";
         const string frenchConcept = "french";
@@ -1395,7 +1450,9 @@ public sealed class DocConceptCoreTests
         var frenchMembership = new Membership("legacy-target", legacyPin, "fr", "page", "shared/topic") { ConceptId = frenchConcept };
         var englishMap = Bridge(englishMembership);
         var frenchMap = Bridge(frenchMembership);
-        var maps = reverse ? new[] { frenchMap, englishMap } : new[] { englishMap, frenchMap };
+        var repeatedEnglishReference = new DocConceptMapReference("another/concept-map.json", englishMap.Sha256, englishMap.Bytes);
+        var maps = (reverse ? new[] { frenchMap, englishMap } : new[] { englishMap, frenchMap }).ToList();
+        if (repeatClaim) maps.Add(repeatedEnglishReference);
         var build = DocConceptIdentityIndex.BuildCombined(
             [englishSource, legacyTarget, frenchSource, englishTarget, frenchTarget],
             maps, DocConceptValidationMode.Quarantine, Budget);

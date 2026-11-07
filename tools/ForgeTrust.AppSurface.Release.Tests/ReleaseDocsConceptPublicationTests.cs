@@ -204,7 +204,8 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
         Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
         Assert.Equal(previousSnapshot, SnapshotFiles(outputRoot));
         Assert.False(Directory.Exists(outputRoot + ".switch-staging"));
-        Assert.False(Directory.Exists(outputRoot + ".switch-previous"));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(outputRoot)!),
+            path => path.StartsWith(outputRoot + ".switch-previous", StringComparison.Ordinal));
     }
 
     [Theory]

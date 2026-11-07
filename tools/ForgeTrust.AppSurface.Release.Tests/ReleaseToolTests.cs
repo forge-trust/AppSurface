@@ -6634,7 +6634,8 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(previousVerificationSnapshot, SnapshotFiles(previousVerification));
         Assert.False(Directory.Exists(staging + ".verification"));
         Assert.False(Directory.Exists(staging + ".switch-staging"));
-        Assert.False(Directory.Exists(staging + ".switch-previous"));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(staging)!),
+            path => path.StartsWith(staging + ".switch-previous", StringComparison.Ordinal));
 
         var retriedPublication = await RunAsync(PublicationArguments(), new FakeCommandRunner());
 
@@ -6644,6 +6645,179 @@ public sealed class ReleaseToolTests : IDisposable
         var mergedCatalog = await File.ReadAllTextAsync(Path.Join(staging, "versions.json"));
         Assert.Contains("\"version\": \"0.0.9\"", mergedCatalog, StringComparison.Ordinal);
         Assert.Contains("\"version\": \"0.1.0\"", mergedCatalog, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsPublicationReplacesExistingVerificationTargetWithoutUsingItAsExistingPagesInput()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var staging = ExternalPath("pages");
+        var verification = staging + ".verification";
+        Directory.CreateDirectory(verification);
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(verification, "prior-verification-marker.txt"), "prior verification");
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version", "0.1.0",
+                "--tag", "v0.1.0",
+                "--docs-exact-tree", TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                "--archive-output", RepositoryPath("artifacts/replaced-verification.tar.gz"),
+                "--pages-staging-root", staging,
+                "--plan-output", RepositoryPath("artifacts/replaced-verification-plan.json")
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(verification, "prior-verification-marker.txt")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(verification, "versions.json")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(verification, docs.ExactTreePath, ".appsurface-docs-release-manifest.json")));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(verification)!),
+            path => path.StartsWith(verification + ".publication-staging-", StringComparison.Ordinal)
+                || path.StartsWith(verification + ".publication-previous-", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("reparse-point")]
+    public async Task DocsPublicationPreservesExistingVerificationFileOrReparseBoundary(string boundaryKind)
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var staging = ExternalPath("pages");
+        var verification = staging + ".verification";
+        Directory.CreateDirectory(Path.GetDirectoryName(verification)!);
+        Dictionary<string, string> targetSnapshot = new(StringComparer.Ordinal);
+        if (string.Equals(boundaryKind, "file", StringComparison.Ordinal))
+        {
+            await File.WriteAllTextAsync(verification, "preserve verification boundary file");
+        }
+        else
+        {
+            var target = ExternalPath("verification-link-target");
+            Directory.CreateDirectory(target);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(target, "keep.txt"), "preserve verification boundary target");
+            if (!TryCreateSymbolicLink(verification, target, isDirectory: true))
+            {
+                throw Xunit.Sdk.SkipException.ForSkip("This host does not allow the directory symlink needed for the verification-boundary check.");
+            }
+
+            targetSnapshot = SnapshotFiles(target);
+        }
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version", "0.1.0",
+                "--tag", "v0.1.0",
+                "--docs-exact-tree", TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                "--archive-output", RepositoryPath("artifacts/verification-boundary.tar.gz"),
+                "--pages-staging-root", staging,
+                "--plan-output", RepositoryPath("artifacts/verification-boundary-plan.json")
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-io-failure", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("The existing verification root is not an ordinary directory.", result.Stderr, StringComparison.Ordinal);
+        var archive = RepositoryPath("artifacts/verification-boundary.tar.gz");
+        Assert.True(File.Exists(archive));
+        Assert.False(File.Exists(RepositoryPath("artifacts/verification-boundary-plan.json")));
+        Assert.False(File.Exists(RepositoryPath("artifacts/docs-publication-summary.md")));
+        if (string.Equals(boundaryKind, "file", StringComparison.Ordinal))
+        {
+            Assert.Equal("preserve verification boundary file", await File.ReadAllTextAsync(verification));
+        }
+        else
+        {
+            Assert.True((File.GetAttributes(verification) & FileAttributes.ReparsePoint) != 0);
+            Assert.Equal(targetSnapshot, SnapshotFiles(ExternalPath("verification-link-target")));
+        }
+
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(verification)!),
+            path => path.StartsWith(verification + ".publication-staging-", StringComparison.Ordinal)
+                || path.StartsWith(verification + ".publication-previous-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DocsPublicationRestoresReplacedVerificationWhenServingMoveFailsAndCanRetry()
+    {
+        await SeedRepositoryAsync();
+        var previousDocs = await SeedDocsArchiveAsync("0.0.9");
+        var staging = ExternalPath("same-serving-root");
+        var previousPublication = await RunAsync(
+            [
+                "docs-publication",
+                "--version", "0.0.9",
+                "--tag", "v0.0.9",
+                "--docs-exact-tree", TestPathUtils.PathUnder(previousDocs.TrustedReleaseRootPath, previousDocs.ExactTreePath),
+                "--archive-output", RepositoryPath("artifacts/same-root-v0.0.9.tar.gz"),
+                "--pages-staging-root", staging,
+                "--plan-output", RepositoryPath("artifacts/same-root-v0.0.9-plan.json")
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(0, previousPublication.ExitCode);
+        var verification = staging + ".verification";
+        var servingSnapshot = SnapshotFiles(staging);
+        var verificationSnapshot = SnapshotFiles(verification);
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var failServingMove = true;
+        using var moveFailure = ReleaseDocsStaticConceptPublication.UseDirectoryMoveFailureForTesting((source, destination) =>
+        {
+            if (!failServingMove
+                || !source.EndsWith(".switch-staging", StringComparison.Ordinal)
+                || !string.Equals(destination, Path.GetFullPath(staging), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            failServingMove = false;
+            return true;
+        });
+
+        string[] PublicationArguments() =>
+        [
+            "docs-publication",
+            "--version", "0.1.0",
+            "--tag", "v0.1.0",
+            "--docs-exact-tree", TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+            "--archive-output", RepositoryPath("artifacts/same-root-v0.1.0.tar.gz"),
+            "--pages-staging-root", staging,
+            "--plan-output", RepositoryPath("artifacts/same-root-v0.1.0-plan.json")
+        ];
+
+        var failedPublication = await RunAsync(PublicationArguments(), new FakeCommandRunner());
+
+        Assert.Equal(1, failedPublication.ExitCode);
+        Assert.Contains("Code: docs-switch-processing-failed", failedPublication.Stderr, StringComparison.Ordinal);
+        Assert.Equal(servingSnapshot, SnapshotFiles(staging));
+        Assert.Equal(verificationSnapshot, SnapshotFiles(verification));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(verification)!),
+            path => path.StartsWith(verification + ".publication-staging-", StringComparison.Ordinal)
+                || path.StartsWith(verification + ".publication-previous-", StringComparison.Ordinal));
+        Assert.False(Directory.Exists(staging + ".switch-staging"));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(staging)!),
+            path => path.StartsWith(staging + ".switch-previous", StringComparison.Ordinal));
+
+        var retriedPublication = await RunAsync(PublicationArguments(), new FakeCommandRunner());
+
+        Assert.Equal(0, retriedPublication.ExitCode);
+        var servingCatalog = await File.ReadAllTextAsync(TestPathUtils.PathUnder(staging, "versions.json"));
+        var verificationCatalog = await File.ReadAllTextAsync(TestPathUtils.PathUnder(verification, "versions.json"));
+        Assert.Contains("\"version\": \"0.1.0\"", servingCatalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"version\": \"0.0.9\"", servingCatalog, StringComparison.Ordinal);
+        Assert.Contains("\"version\": \"0.1.0\"", verificationCatalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"version\": \"0.0.9\"", verificationCatalog, StringComparison.Ordinal);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(staging, "releases/0.0.9/.appsurface-docs-release-manifest.json")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(verification, docs.ExactTreePath, ".appsurface-docs-release-manifest.json")));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(verification)!),
+            path => path.StartsWith(verification + ".publication-staging-", StringComparison.Ordinal)
+                || path.StartsWith(verification + ".publication-previous-", StringComparison.Ordinal));
+        Assert.False(Directory.Exists(staging + ".switch-staging"));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(staging)!),
+            path => path.StartsWith(staging + ".switch-previous", StringComparison.Ordinal));
     }
 
     [Theory]

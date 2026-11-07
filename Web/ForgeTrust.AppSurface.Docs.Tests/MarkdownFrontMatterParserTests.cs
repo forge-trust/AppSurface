@@ -193,6 +193,10 @@ public sealed class MarkdownFrontMatterParserTests
     [Theory]
     [InlineData("123")]
     [InlineData("true")]
+    [InlineData(".nan")]
+    [InlineData(".inf")]
+    [InlineData("-.inf")]
+    [InlineData("+.inf")]
     [InlineData("[guide, setup]")]
     [InlineData("{name: guide}")]
     public void ParseMetadataYamlWithDiagnostics_ShouldRejectNonStringConceptIdsWithoutDroppingOtherFields(string value)

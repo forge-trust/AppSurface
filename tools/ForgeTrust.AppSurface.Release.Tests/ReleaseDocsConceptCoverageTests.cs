@@ -320,6 +320,121 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
         Assert.Equal(originalSnapshot, SnapshotFiles(fixture.Root));
     }
 
+    [Fact]
+    public async Task GenerateAsync_CarriesOrdinaryRootAssetsAndACatalogPinnedTreeOutsideTheDefaultReleaseDirectory()
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var oldTree = TestPathUtils.PathUnder(fixture.Root, "releases", "1.0.0");
+        var newTree = TestPathUtils.PathUnder(fixture.Root, "archives", "current");
+        Directory.CreateDirectory(Path.GetDirectoryName(newTree)!);
+        Directory.Move(oldTree, newTree);
+        await SetCatalogFieldAsync(fixture, "1.0.0", "exactTreePath", JsonValue.Create("archives/current"));
+        var asset = Encoding.UTF8.GetBytes("a caller-owned root asset");
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(fixture.Root, "brand.txt"), asset);
+        var originalSnapshot = SnapshotFiles(fixture.Root);
+        var outputRoot = TestPathUtils.PathUnder(_root, "nonstandard-exact-tree");
+
+        var result = await GenerateAsync(fixture, outputRoot);
+
+        Assert.Equal(new[] { "1.0.0" }, result.VerifiedVersions);
+        Assert.Equal(asset, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(outputRoot, "brand.txt")));
+        Assert.Equal(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(newTree, "export", "start.html")),
+            await File.ReadAllBytesAsync(TestPathUtils.PathUnder(outputRoot, "archives", "current", "export", "start.html")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "1.0.0", "export", "start.html")));
+        Assert.Equal(originalSnapshot, SnapshotFiles(fixture.Root));
+    }
+
+    [Theory]
+    [InlineData("source-overview", "target-overview", "source-overview", "target-overview")]
+    [InlineData("source%20overview", "target%2Foverview", "source%2520overview", "target%252Foverview")]
+    public async Task GenerateAsync_PreservesCanonicalFragmentsInCounterpartAndReturnLinks(
+        string sourceFragment, string targetFragment, string encodedSourceFragment, string encodedTargetFragment)
+    {
+        var fixture = await CreateFixtureAsync(
+        [
+            new ReleaseInput("1.0.0", [new PageInput("guides/start", "export/start.html", "en", "setup",
+                Html: "<html><head></head><body><h1 id='" + sourceFragment + "'>Source</h1></body></html>")]),
+            new ReleaseInput("2.0.0", [new PageInput("guides/new", "export/new.html", "en", "setup",
+                Html: "<html><head></head><body><h1 id='" + targetFragment + "'>Target</h1></body></html>")])
+        ]);
+        foreach (var version in new[] { "1.0.0", "2.0.0" })
+        {
+            var path = TestPathUtils.PathUnder(fixture.Root, "releases", version, RouteManifestName);
+            var manifest = JsonNode.Parse(await File.ReadAllBytesAsync(path))!.AsObject();
+            var entry = manifest["entries"]![0]!.AsObject();
+            entry["canonicalRoutePath"] = entry["canonicalRoutePath"]!.GetValue<string>()
+                + "#" + (version == "1.0.0" ? sourceFragment : targetFragment);
+            await RewriteReleaseManifestAsync(fixture, version, RouteManifestName, JsonSerializer.SerializeToUtf8Bytes(manifest, WebJson));
+        }
+        var outputRoot = TestPathUtils.PathUnder(_root, "canonical-fragments");
+
+        await GenerateAsync(fixture, outputRoot);
+
+        using var catalog = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(fixture.Root, "versions.json")));
+        var sourcePin = catalog.RootElement.GetProperty("versions").EnumerateArray()
+            .Single(entry => entry.GetProperty("version").GetString() == "1.0.0").GetProperty("releaseManifestSha256").GetString()!;
+        var identity = new DocConceptPageIdentity("1.0.0", sourcePin, "guides/start", "en", true);
+        var key = DocConceptIdentityIndex.CreateSourceKey("Default", identity);
+        var choicePath = TestPathUtils.PathUnder(outputRoot, "docs", "versions", "switch", key + ".html");
+        var choice = new HtmlParser().ParseDocument(await File.ReadAllTextAsync(choicePath));
+        Assert.Contains(choice.QuerySelectorAll("a[href]"), link => link.GetAttribute("href") ==
+            "/docs/v/2.0.0/export/new.html?docsFrom=" + key + "#" + encodedTargetFragment);
+        Assert.Contains(choice.QuerySelectorAll("a[href]"), link => link.GetAttribute("href") ==
+            "/docs/v/1.0.0/export/start.html#" + encodedSourceFragment);
+        Assert.True(File.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "2.0.0", "export", "new.html")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "2.0.0", "export", "new.html#" + targetFragment)));
+        // Canonical route fragments are raw heading IDs, like DocsUrlBuilder input. A literal '%' in an ID
+        // needs URL escaping; one browser decode must recover the exact source or target heading ID.
+        var targetGuide = new HtmlParser().ParseDocument(await File.ReadAllTextAsync(
+            TestPathUtils.PathUnder(outputRoot, "docs", "v", "2.0.0", "export", "new.html")));
+        Assert.Equal(targetGuide.QuerySelector("h1")!.Id, Uri.UnescapeDataString(encodedTargetFragment));
+        Assert.Equal(sourceFragment, Uri.UnescapeDataString(encodedSourceFragment));
+    }
+
+    [Theory]
+    [InlineData("http://manual.example/old", "http://manual.example/docs/v/1.0.0/guide.html")]
+    [InlineData("https://manual.example/old", "https://manual.example/docs/v/1.0.0/guide.html")]
+    [InlineData("ftp://manual.example/old", "/docs/v/1.0.0/guide.html")]
+    public async Task GenerateAsync_RebasesLegacyHomeLinksAndRetainsOnlyWebCanonicalOrigins(string canonical, string expectedCanonical)
+    {
+        var fixture = await CreateFixtureAsync([new ReleaseInput("1.0.0",
+        [
+            new PageInput("guide", "guide.html", "en", null, Html:
+                "<html><head><link rel='canonical' href='" + canonical + "'><meta http-equiv='refresh'></head>"
+                + "<body><h1>Guide</h1><a href='/docs'>Docs</a><a href='/docs/'>Docs slash</a></body></html>")
+        ], LegacyRouteManifest: true, IncludeSidecar: false)]);
+        var outputRoot = TestPathUtils.PathUnder(_root, "legacy-home-links");
+
+        await GenerateAsync(fixture, outputRoot);
+
+        var guide = new HtmlParser().ParseDocument(await File.ReadAllTextAsync(
+            TestPathUtils.PathUnder(outputRoot, "docs", "v", "1.0.0", "guide.html")));
+        Assert.Equal(expectedCanonical, guide.QuerySelector("link[rel=canonical]")!.GetAttribute("href"));
+        Assert.Equal(new[] { "/docs/v/1.0.0/", "/docs/v/1.0.0/" }, guide.QuerySelectorAll("body > a")
+            .Select(link => link.GetAttribute("href")).ToArray());
+        Assert.Null(guide.QuerySelector("meta[http-equiv=refresh]")!.GetAttribute("content"));
+    }
+
+    [Theory]
+    [InlineData("null", true)]
+    [InlineData("0", true)]
+    [InlineData("\"0\"", true)]
+    [InlineData("\"1\"", false)]
+    public async Task GenerateAsync_HonorsSupportedVisibilityRepresentations(string visibility, bool isPublic)
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease(), SingleRelease("2.0.0")]);
+        await SetCatalogFieldAsync(fixture, "2.0.0", "visibility", JsonNode.Parse(visibility));
+        var outputRoot = TestPathUtils.PathUnder(_root, "visibility-representations");
+
+        var result = await GenerateAsync(fixture, outputRoot);
+
+        Assert.Equal(isPublic, result.VerifiedVersions.Contains("2.0.0", StringComparer.Ordinal));
+        Assert.Equal(isPublic, Directory.Exists(TestPathUtils.PathUnder(outputRoot, "docs", "v", "2.0.0")));
+        using var catalog = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(outputRoot, "versions.json")));
+        Assert.Equal(isPublic, catalog.RootElement.GetProperty("versions").EnumerateArray()
+            .Any(entry => entry.GetProperty("version").GetString() == "2.0.0"));
+    }
+
     [Theory]
     [InlineData("moved", "moved", true)]
     [InlineData("moved", "stale", false)]
@@ -394,6 +509,123 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
         Assert.False(File.Exists(TestPathUtils.PathUnder(outputRoot, "partial-generation.txt")));
         Assert.False(Directory.Exists(stagingRoot));
         Assert.True(File.Exists(result.InventoryPath));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task GenerateAsync_PreservesPriorBackupArtifactsAndPublishesUsingFreshBackupSibling(bool isDirectory, bool isUniqueSibling)
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var sourceSnapshot = SnapshotFiles(fixture.Root);
+        var outputRoot = ExistingOutput("prior-backup-artifact-" + Guid.NewGuid().ToString("N"));
+        var rollbackRoot = outputRoot + ".switch-previous" + (isUniqueSibling ? "-" + Guid.NewGuid().ToString("N") : string.Empty);
+        var marker = isDirectory ? TestPathUtils.PathUnder(rollbackRoot, "retained.txt") : rollbackRoot;
+        if (isDirectory) Directory.CreateDirectory(rollbackRoot);
+        await File.WriteAllTextAsync(marker, "retained rollback evidence");
+
+        var result = await GenerateAsync(fixture, outputRoot);
+
+        Assert.True(File.Exists(result.InventoryPath));
+        Assert.Equal("retained rollback evidence", await File.ReadAllTextAsync(marker));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(outputRoot, "prior-output.txt")));
+        Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.Root));
+        Assert.False(Directory.Exists(outputRoot + ".switch-staging"));
+        Assert.Equal(!isDirectory, File.Exists(rollbackRoot));
+        Assert.Equal(isDirectory, Directory.Exists(rollbackRoot));
+        Assert.Equal(isUniqueSibling ? new[] { rollbackRoot } : Array.Empty<string>(), ExistingRollbackSiblings(outputRoot));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_RestoresPreviousOutputFromGeneratedBackupWhenStagingMoveFails()
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var sourceSnapshot = SnapshotFiles(fixture.Root);
+        var outputRoot = ExistingOutput("rollback-generated-backup");
+        var previousSnapshot = SnapshotFiles(outputRoot);
+        var legacyBackup = outputRoot + ".switch-previous";
+        await File.WriteAllTextAsync(legacyBackup, "retained legacy backup");
+        var uniqueBackupLeftover = outputRoot + ".switch-previous-" + Guid.NewGuid().ToString("N");
+        await File.WriteAllTextAsync(uniqueBackupLeftover, "retained unique backup");
+        string? generatedBackupRoot = null;
+        var restoredUsingGeneratedBackup = false;
+        var stagingRoot = outputRoot + ".switch-staging";
+        using var moveFailure = ReleaseDocsStaticConceptPublication.UseDirectoryMoveFailureForTesting((source, destination) =>
+        {
+            if (string.Equals(source, outputRoot, StringComparison.Ordinal)
+                && destination.StartsWith(outputRoot + ".switch-previous-", StringComparison.Ordinal))
+                generatedBackupRoot = destination;
+            if (string.Equals(source, stagingRoot, StringComparison.Ordinal)
+                && string.Equals(destination, outputRoot, StringComparison.Ordinal)) return true;
+            if (generatedBackupRoot is not null
+                && string.Equals(source, generatedBackupRoot, StringComparison.Ordinal)
+                && string.Equals(destination, outputRoot, StringComparison.Ordinal))
+                restoredUsingGeneratedBackup = true;
+            return false;
+        });
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, outputRoot));
+
+        Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
+        Assert.True(restoredUsingGeneratedBackup);
+        var ownedBackupRoot = Assert.IsType<string>(generatedBackupRoot);
+        Assert.NotEqual(legacyBackup, ownedBackupRoot);
+        Assert.NotEqual(uniqueBackupLeftover, ownedBackupRoot);
+        Assert.False(Directory.Exists(ownedBackupRoot));
+        Assert.False(File.Exists(ownedBackupRoot));
+        Assert.False(Directory.Exists(stagingRoot));
+        Assert.Equal(previousSnapshot, SnapshotFiles(outputRoot));
+        Assert.Equal("retained legacy backup", await File.ReadAllTextAsync(legacyBackup));
+        Assert.Equal("retained unique backup", await File.ReadAllTextAsync(uniqueBackupLeftover));
+        Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.Root));
+        Assert.Equal(new[] { uniqueBackupLeftover }, ExistingRollbackSiblings(outputRoot));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_RetainsBackupWhenCleanupFailsAndALaterPublicationStillSucceeds()
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var sourceSnapshot = SnapshotFiles(fixture.Root);
+        var outputRoot = ExistingOutput("backup-cleanup-failure");
+        var previousSnapshot = SnapshotFiles(outputRoot);
+        string? backupRoot = null;
+        string? retainedTree = null;
+        using (ReleaseDocsStaticConceptPublication.UseDirectoryMoveFailureForTesting((source, destination) =>
+        {
+            if (string.Equals(source, outputRoot, StringComparison.Ordinal)) backupRoot = destination;
+            if (string.Equals(source, outputRoot + ".switch-staging", StringComparison.Ordinal)
+                && string.Equals(destination, outputRoot, StringComparison.Ordinal))
+            {
+                Assert.NotNull(backupRoot);
+                retainedTree = backupRoot + ".retained";
+                // Replace only this invocation's owned backup with a file so Directory.Delete fails
+                // portably, while preserving the previous serving tree for the recovery assertions.
+                Directory.Move(backupRoot, retainedTree);
+                File.WriteAllText(backupRoot, "retained cleanup boundary");
+            }
+            return false;
+        }))
+        {
+            var result = await GenerateAsync(fixture, outputRoot);
+            Assert.True(File.Exists(result.InventoryPath));
+        }
+
+        Assert.NotNull(backupRoot);
+        Assert.NotNull(retainedTree);
+        Assert.Equal("retained cleanup boundary", await File.ReadAllTextAsync(backupRoot));
+        Assert.Equal(previousSnapshot, SnapshotFiles(retainedTree));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(outputRoot, "prior-output.txt")));
+
+        var retry = await GenerateAsync(fixture, outputRoot);
+
+        Assert.True(File.Exists(retry.InventoryPath));
+        Assert.Equal("retained cleanup boundary", await File.ReadAllTextAsync(backupRoot));
+        Assert.Equal(previousSnapshot, SnapshotFiles(retainedTree));
+        Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.Root));
+        Assert.False(Directory.Exists(outputRoot + ".switch-staging"));
+        Assert.Equal(new[] { backupRoot, retainedTree }.Order(StringComparer.Ordinal), ExistingRollbackSiblings(outputRoot));
     }
 
     [Fact]
@@ -922,6 +1154,43 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
     }
 
     [Fact]
+    public async Task GenerateAsync_RejectsLinkedBridgeMembersWithoutReplacingOutput()
+    {
+        var fixture = await CreateFixtureAsync([SingleRelease()]);
+        var target = ExistingOutput("linked-bridge-target");
+        var targetSnapshot = SnapshotFiles(target);
+        var link = TestPathUtils.PathUnder(fixture.Root, "bridges", "linked-map");
+        Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException or NotSupportedException)
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("This host does not allow the directory symlink needed for the bridge-boundary check.");
+        }
+        try
+        {
+            await SetCatalogFieldAsync(fixture, "1.0.0", "conceptMapPath", JsonValue.Create("bridges/linked-map/prior-output.txt"));
+            await SetCatalogFieldAsync(fixture, "1.0.0", "conceptMapSha256", JsonValue.Create(new string('a', 64)));
+            var outputRoot = ExistingOutput("linked-bridge-output");
+            var previousSnapshot = SnapshotFiles(outputRoot);
+
+            var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => GenerateAsync(fixture, outputRoot));
+
+            Assert.Equal("docs-switch-processing-failed", exception.Diagnostic.Code);
+            Assert.Equal("A derived path contains a reparse point.", exception.Diagnostic.Cause);
+            Assert.Equal(targetSnapshot, SnapshotFiles(target));
+            Assert.Equal(previousSnapshot, SnapshotFiles(outputRoot));
+            Assert.False(Directory.Exists(outputRoot + ".switch-staging"));
+        }
+        finally
+        {
+            Directory.Delete(link);
+        }
+    }
+
+    [Fact]
     public async Task GenerateAsync_PropagatesCancellationWithoutReplacingPriorOutput()
     {
         var fixture = await CreateFixtureAsync([SingleRelease()]);
@@ -1004,6 +1273,10 @@ public sealed class ReleaseDocsConceptCoverageTests(ITestOutputHelper output) : 
         File.WriteAllText(TestPathUtils.PathUnder(path, "prior-output.txt"), "complete previous serving generation");
         return path;
     }
+
+    private static string[] ExistingRollbackSiblings(string outputRoot) =>
+        Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(outputRoot)!, Path.GetFileName(outputRoot) + ".switch-previous-*")
+            .OrderBy(path => path, StringComparer.Ordinal).ToArray();
 
     private static ReleaseInput SingleRelease(string version = "1.0.0", string visibility = "Public") => new(version,
     [

@@ -44,6 +44,17 @@ internal static class ReleaseDocsStaticConceptPublication
         Directory.Move(source, destination);
     }
 
+    private static string CreateUniqueSiblingPath(string path, string suffix)
+    {
+        string candidate;
+        do
+        {
+            candidate = path + suffix + "-" + Guid.NewGuid().ToString("N");
+        }
+        while (Directory.Exists(candidate) || File.Exists(candidate));
+        return candidate;
+    }
+
     internal static Task<DocsServingOutput> GenerateAsync(
         string verificationRoot,
         string servingRoot,
@@ -127,7 +138,7 @@ internal static class ReleaseDocsStaticConceptPublication
 
             var outputRoot = Path.GetFullPath(servingRoot);
             var stagingRoot = outputRoot + ".switch-staging";
-            var backupRoot = outputRoot + ".switch-previous";
+            var backupRoot = CreateUniqueSiblingPath(outputRoot, ".switch-previous");
             foreach (var boundary in new[] { verificationRoot, outputRoot, stagingRoot, backupRoot })
             {
                 if ((File.Exists(boundary) || Directory.Exists(boundary))
