@@ -77,6 +77,7 @@ internal static partial class CoverageFanInEngine
                 else if (operation == "verify")
                 {
                     await VerifyAcceptedAsync(request, io, bundles, deadline.Token).ConfigureAwait(false);
+                    await VerifySourceAsync(request, deadline.Token).ConfigureAwait(false);
                     io.VerifyBindings();
                     state.Verified = true;
                     state.Patch = PatchOutcome(request);

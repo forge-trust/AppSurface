@@ -694,6 +694,60 @@ public sealed class CoverageFanInWorkflowTests
         Assert.False(Directory.Exists(output));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VerifyRechecksSourceAfterReadingAcceptedEvidenceWithoutChangingItsInputs(bool changeSource)
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.AcceptAsync(fixture.Accept())).Outcome);
+        var before = Snapshot(fixture.Captured).Concat(Snapshot(fixture.Composed)).Concat(Snapshot(fixture.Accepted)).ToArray();
+        var policy = CoveragePolicyEncoding.Freeze(fixture.Policy);
+        var runner = new SourceChangeRunner(() =>
+        {
+            if (changeSource)
+            {
+                File.AppendAllText(Path.Join(fixture.Repository, "checks", "Verification.csproj"), "\n<!-- changed during verification -->");
+            }
+        });
+        var request = new CoverageFanInEngineRequest(
+            new(JsonSerializer.SerializeToElement(policy, CoveragePolicyEncoding.Json), CoveragePolicyEncoding.Digest(policy)),
+            fixture.Repository, PrimaryCaptureDirectory: fixture.Captured, SupplementaryCaptureDirectories: [],
+            ComposedOutputDirectory: fixture.Composed, AcceptedOutputDirectory: fixture.Accepted)
+        { IdentityRunner = runner };
+
+        var result = await CoverageFanInEngine.ExecuteAsync("verify", request,
+            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+
+        Assert.True(runner.ObservedSourceIndex);
+        Assert.Equal(changeSource ? "Rejected" : "Succeeded", result.Outcome);
+        Assert.Equal(!changeSource, result.Verified);
+        Assert.False(result.Accepted);
+        Assert.False(result.Created);
+        Assert.False(result.Committed);
+        Assert.True(result.CleanupComplete);
+        Assert.Equal(before, Snapshot(fixture.Captured).Concat(Snapshot(fixture.Composed)).Concat(Snapshot(fixture.Accepted)).ToArray());
+    }
+
+    private sealed class SourceChangeRunner(Action afterSourceIndex) : ICoverageRunProcessRunner
+    {
+        private readonly CliWrapCoverageRunProcessRunner _inner = new();
+        internal bool ObservedSourceIndex { get; private set; }
+
+        public async Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken token)
+        {
+            var result = await _inner.RunAsync(request, token);
+            if (!ObservedSourceIndex && request.FileName == "git" && request.Arguments.Contains("ls-files"))
+            {
+                ObservedSourceIndex = true;
+                afterSourceIndex();
+            }
+            return result;
+        }
+    }
+
     private static void AssertVerifyRejected(CoverageFanInResult result)
     {
         Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
