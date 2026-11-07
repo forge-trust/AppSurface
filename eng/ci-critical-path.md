@@ -1,13 +1,13 @@
 # AppSurface CI Critical Path
 
-This note is the CI-000 baseline for build-time work. It records the current PR decision path before coverage artifact changes or coverage-matrix experiments are judged by timing data.
+This note is the CI-000 baseline for build-time work. Historical timing samples below describe the runs taken at the dates shown; the current coverage decision path is governed by the shared [evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) and the tracked workflows.
 
 ## Current PR validation path
 
 AppSurface currently runs these workflows for ordinary pull requests to `main`:
 
-- `build.yml`: generated package chooser verification, Markdown snippet verification, web asset verification, solution tests with coverage, Codecov upload, and AppSurface Docs export.
-- `package-gate.yml`: isolated NuGet restore, release package build, package manifest gate, and package packing.
+- `build.yml`: changed-path planning; when native coverage is selected, C# native coverage captures on Linux, Windows, and macOS followed by full-solution coverage and C# fan-in composition/verification; plus generated verification, web assets, Codecov reporting, and AppSurface Docs export. Test-only coverage selections run full-solution coverage with the direct patch gate and skip the native matrix.
+- `package-gate.yml`: policy-scoped package checks, including isolated package validation when selected.
 - `package-artifacts.yml`: package artifact verification and upload.
 - `code-quality.yml`: locked restore, release build, generated verification, and `dotnet format --verify-no-changes`.
 - `release-contract.yml`: PR title and unreleased-entry contract.
@@ -38,8 +38,8 @@ Future CI performance changes should compare:
 - Keep all current PR workflows active.
 - Keep coverage as PR confidence unless a measured follow-up proves Codecov coverage and test-result reporting still work under a different policy.
 - Use `concurrency.cancel-in-progress` on long PR workflows so superseded commits stop consuming runner capacity.
-- Keep PR tests in a single coverage-bearing lane until a measured public-CLI matrix design proves it reduces total GitHub Actions minutes, not just wall-clock time.
-- Preserve a single merged Cobertura output at `TestResults/coverage-merged/coverage.cobertura.xml` for Codecov and local contributors.
+- Keep full-solution coverage and its direct patch gate for every selected coverage profile. Select the three-OS native evidence matrix only when root policy selection includes coverage and at least one other producer; fan-in must use captures from the same workflow run and attempt. Preserve the direct gate's documented no-measurable-patch behavior and the native fan-in's strict nonempty-denominator contract.
+- Keep the shared evidence policy as the source of truth for local and CI producer selection. The current `build.yml` coverage path uses the C# validation DLL and writes evidence under `TestResults/coverage-evidence/coverage/`, with `coverage-fanin/` and `coverage-fanin-composed/` alongside it. The historical `coverage-merged/` layout remains relevant to the unconditional compatibility scripts, not this workflow path.
 
 ## NuGet cache policy
 
@@ -51,7 +51,7 @@ Issue #479 treats NuGet package caching as a measured CI hygiene change, not as 
 
 Each cache-enabled job sets `NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages` at the job level before `actions/setup-dotnet`, then uses `setup-dotnet` with `cache: true` and cache dependency paths for both `**/packages.lock.json` and `**/packages.*.lock.json`. The broad lock-file paths are intentional for this first rollout because the selected solution-shaped jobs restore project graphs spread across the repository, including RID-specific AppHost lock files. A dependency or lock-file change anywhere in that graph can invalidate the cache; that is expected and safer than silently omitting a restored project from the cache key. If future timing data shows lock-file churn dominates cache misses, split the cache dependency paths by job/project scope in a follow-up.
 
-Cache-enabled build jobs should restore explicitly before later .NET commands. When `build.yml` runs `scripts/coverage-solution.sh` after that restore, it sets `BUILD_NO_RESTORE=true` so the public CLI's solution build does not hide additional restore work inside the coverage timing. The default script then runs the aggregate coverage gate itself; pull-request jobs set `COVERAGE_GATE_DIFF_BASE=HEAD^1` so the patch gate uses the synthetic merge checkout, while baseline jobs set the variable empty to omit patch thresholds.
+Cache-enabled build jobs should restore explicitly before later .NET commands. The current `build.yml` coverage path resolves event-bound changed paths with the C# validation tool, then runs its `solution-coverage` producer for full-solution Release collection and the aggregate gate. `selection.json` exposes `requiresNativeCoverage`: source-code selections that include coverage and package checks request native evidence on PRs, while test-only coverage selections use the direct patch gate. PRs with native evidence capture the selected Linux, Windows, and macOS shards and use the public `EvidenceCoverageFanIn` API for composition and verification before the Codecov-mode patch gate. Aggregate and applicable patch thresholds remain 95% line and 85% branch with 0.5 percentage-point tolerance; direct patch gates retain the CLI's documented no-measurable-points behavior, while native fan-in continues to require measurable patch denominators. Main-branch runs have no patch baseline. Existing ignored local artifacts may still affect package checks if they are in paths those checks inspect; ignore status is not a package-check skip. `scripts/coverage-solution.sh` and the Python fan-in/gate helpers remain unconditional compatibility entry points and are not called by the new workflow path.
 
 Package-sensitive workflows stay uncached unless a separate issue evaluates their trust boundary. In particular, `package-gate.yml` must keep its isolated `${{ runner.temp }}/nuget-packages` restore and `NuGet.package-gate.config` source policy. Publish, smoke-restore, trusted-publishing, and package validation workflows should not inherit the shared NuGet cache by convention.
 

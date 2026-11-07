@@ -164,6 +164,11 @@ public partial class ExportEngine
         if (context.ReleaseArchiveManifestEnabled)
         {
             await FinalizeAppSurfaceDocsRouteManifestAsync(context, cancellationToken);
+            foreach (var finalizer in context.ReleaseArchiveArtifactFinalizers)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await finalizer(context, cancellationToken);
+            }
         }
 
         await MaterializeDeploymentExtrasAsync(context, cancellationToken);
@@ -787,6 +792,7 @@ public partial class ExportEngine
         inventory.Add(Path.Join(context.OutputPath, "_redirects"), "provider redirect artifact");
         inventory.Add(Path.Join(context.OutputPath, "_headers"), "provider headers artifact");
         inventory.Add(Path.Join(context.OutputPath, ".appsurface-docs-route-manifest.json"), "AppSurface Docs route manifest");
+        inventory.Add(Path.Join(context.OutputPath, ".appsurface-docs-concepts.json"), "AppSurface Docs concept index");
         inventory.Add(Path.Join(context.OutputPath, ReleaseArchiveManifestWriter.FileName), "AppSurface Docs release archive manifest");
 
         foreach (var artifact in context.RedirectArtifacts)

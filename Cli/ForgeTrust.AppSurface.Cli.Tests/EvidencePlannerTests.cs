@@ -8,6 +8,112 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidencePlannerTests
 {
     [Fact]
+    public void CombineProfiles_ShouldOmitDefaultFromCanonicalPolicyJson()
+    {
+        var policy = CreatePolicy();
+        var legacyShape = new { policy.Id, policy.Version, policy.ConservativeProfileId, policy.Profiles, policy.Rules };
+
+        Assert.Equal(EvidenceCanonicalJson.Serialize(legacyShape), EvidenceCanonicalJson.Serialize(policy));
+    }
+
+    [Fact]
+    public void CombineProfiles_ShouldUnionDistinctSelectionsAndKeepSelectedRuleIds()
+    {
+        var policy = CreatePolicy() with
+        {
+            CombineProfiles = true,
+            Rules = [new EvidencePolicyRule("docs", "docs/*", "no-evidence"), new EvidencePolicyRule("src", "src/*", "coverage")],
+        };
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("docs/readme.md"), new NormalizedDiffPath("src/Feature.cs")]);
+
+        Assert.StartsWith("combined-", plan.Profile.Id, StringComparison.Ordinal);
+        Assert.Single(plan.Profile.Producers);
+        Assert.Equal(["docs", "src"], plan.MatchedRuleIds);
+    }
+
+    [Fact]
+    public void CombineProfiles_ShouldUnionDistinctProducerDeclarations()
+    {
+        var first = CreateUnionProfile("first", "producer-a", "assertion-a", "obligation-a");
+        var second = CreateUnionProfile("second", "producer-b", "assertion-b", "obligation-b");
+        var policy = new EvidencePolicy("union", "1", "first", [first, second],
+        [new EvidencePolicyRule("a", "a/*", "first"), new EvidencePolicyRule("b", "b/*", "second")])
+        { CombineProfiles = true };
+
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("b/file"), new NormalizedDiffPath("a/file")]);
+
+        Assert.Equal(["producer-a", "producer-b"], plan.Profile.Producers.Select(static producer => producer.Id));
+        Assert.Equal(["obligation-a", "obligation-b"], plan.Profile.Obligations.Select(static obligation => obligation.Id));
+    }
+
+    [Fact]
+    public void CombineProfiles_ShouldBeStableAcrossProfileAndPathOrder()
+    {
+        var policy = CreatePolicy() with { CombineProfiles = true };
+        var planner = new EvidencePlanner();
+        var first = planner.Resolve(policy, [new NormalizedDiffPath("docs/readme.md"), new NormalizedDiffPath("src/Feature.cs")]);
+        var reversed = planner.Resolve(policy with { Profiles = policy.Profiles.Reverse().ToArray() }, [new NormalizedDiffPath("src/Feature.cs"), new NormalizedDiffPath("docs/readme.md")]);
+
+        Assert.Equal(EvidenceCanonicalJson.Serialize(first.Profile), EvidenceCanonicalJson.Serialize(reversed.Profile));
+        Assert.Equal(first.MatchedRuleIds, reversed.MatchedRuleIds);
+    }
+
+    [Fact]
+    public void CombineProfiles_ShouldUseConservativeProfileForUnknownPaths()
+    {
+        var plan = new EvidencePlanner().Resolve(CreatePolicy() with { CombineProfiles = true }, [new NormalizedDiffPath("unknown/file")]);
+
+        Assert.Equal("coverage", plan.Profile.Id);
+        Assert.Contains("conservative:coverage", plan.MatchedRuleIds, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void CombineProfiles_ShouldRejectConflictingDeclarationsAndScopes()
+    {
+        var conflicting = CreatePolicy() with
+        {
+            CombineProfiles = true,
+            Profiles = [CreateCoverageProfile(EvidenceProfileScope.Targeted), CreateCoverageProfile(EvidenceProfileScope.Targeted) with
+            {
+                Id = "other",
+                Producers = [CreateCoverageProfile(EvidenceProfileScope.Targeted).Producers[0] with { TimeoutSeconds = 90 }],
+            }],
+            Rules = [new EvidencePolicyRule("docs", "docs/*", "coverage"), new EvidencePolicyRule("src", "src/*", "other")],
+        };
+        AssertPlanningCode(() => new EvidencePlanner().Resolve(conflicting, [new NormalizedDiffPath("docs/readme.md"), new NormalizedDiffPath("src/file.cs")]), "ASEVD133");
+
+        var scopes = CreatePolicy() with
+        {
+            CombineProfiles = true,
+            Profiles = [CreateNoEvidenceProfile(), CreateCoverageProfile(EvidenceProfileScope.Release)],
+        };
+        AssertPlanningCode(() => new EvidencePlanner().Resolve(scopes, [new NormalizedDiffPath("docs/readme.md"), new NormalizedDiffPath("src/Feature.cs")]), "ASEVD134");
+    }
+
+    [Theory]
+    [InlineData("resource")]
+    [InlineData("obligation")]
+    public void CombineProfiles_ShouldRejectConflictingResourceAndObligationDeclarations(string kind)
+    {
+        var commonProducer = new EvidenceProducerDeclaration("producer", "coverage", "1", [], ["assertion"], [], 60);
+        var first = new EvidenceProfile("first", EvidenceProfileScope.Targeted,
+            kind == "resource" ? [new EvidenceResourceDeclaration("shared", "completion", 10, [])] : [],
+            [commonProducer],
+            [new EvidenceObligation("shared-obligation", "behavior", "first", ["producer"], "assertion")]);
+        var second = first with
+        {
+            Id = "second",
+            Resources = kind == "resource" ? [new EvidenceResourceDeclaration("shared", "completion", 20, [])] : [],
+            Obligations = kind == "obligation" ? [new EvidenceObligation("shared-obligation", "behavior", "second", ["producer"], "assertion")] : first.Obligations,
+        };
+        var policy = new EvidencePolicy("union", "1", "first", [first, second],
+            [new EvidencePolicyRule("a", "a/*", "first"), new EvidencePolicyRule("b", "b/*", "second")])
+        { CombineProfiles = true };
+
+        AssertPlanningCode(() => new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("a/file"), new NormalizedDiffPath("b/file")]), "ASEVD133");
+    }
+
+    [Fact]
     public void DefaultExecutionOptions_ShouldPreserveExistingCanonicalDeclarationBytes()
     {
         var declaration = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], [], [], 60);
@@ -1013,6 +1119,11 @@ public sealed class EvidencePlannerTests
         [new EvidencePolicyRule("docs", "docs/**", "no-evidence")]);
 
     private static EvidenceProfile CreateNoEvidenceProfile() => new("no-evidence", EvidenceProfileScope.Targeted, [], [], []);
+
+    private static EvidenceProfile CreateUnionProfile(string id, string producerId, string assertionId, string obligationId) => new(
+        id, EvidenceProfileScope.Targeted, [],
+        [new EvidenceProducerDeclaration(producerId, "coverage", "1", [], [assertionId], [], 60)],
+        [new EvidenceObligation(obligationId, "behavior", "Union test", [producerId], assertionId)]);
 
     private static EvidenceProfile CreateCoverageProfile(EvidenceProfileScope scope) => new(
         "coverage",

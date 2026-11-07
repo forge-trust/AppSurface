@@ -6,6 +6,7 @@ permissions:
 env:
   COVERAGE_SDK_VERSION: 10.0.402
   COVERAGE_CLI_CANDIDATE_VERSION: 0.1.0-ci.${{ github.run_id }}.${{ github.run_attempt }}
+  COVERAGE_SOURCE_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
 on:
   push:
@@ -59,8 +60,71 @@ jobs:
             ${{ runner.temp }}/config-package-contract/*.log
           if-no-files-found: warn
 
+  coverage-evidence-plan:
+    name: Plan solution coverage evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      requires_coverage: ${{ steps.plan.outputs.requires_coverage }}
+      requires_native_coverage: ${{ steps.plan.outputs.requires_native_coverage }}
+      diff_base: ${{ steps.plan.outputs.diff_base }}
+    steps:
+      - name: Checkout exact event head with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
+      - name: Select exact coverage SDK
+        shell: pwsh
+        run: |
+          $selection = @{ sdk = @{ version = "${{ env.COVERAGE_SDK_VERSION }}"; rollForward = 'disable' } }
+          $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) 'global.json')
+          if ((dotnet --version) -ne "${{ env.COVERAGE_SDK_VERSION }}") { throw 'Coverage planning SDK selection failed' }
+      - name: Build validation tool
+        run: |
+          dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
+          dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
+      - name: Collect and plan solution coverage
+        id: plan
+        shell: pwsh
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "coverage-plan-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
+          $changes = Join-Path $root 'changes'
+          $plan = Join-Path $root 'plan'
+          dotnet $validation --operation collect --repository $env:GITHUB_WORKSPACE --event-file $env:GITHUB_EVENT_PATH --event-name $env:GITHUB_EVENT_NAME --workflow-sha $env:GITHUB_SHA --output $changes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet $validation --operation plan --scope coverage --policy .github/evidence.policy.json --changed-paths (Join-Path $changes 'changed-paths.json') --output $plan
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $source = Get-Content -Raw (Join-Path $changes 'source-state.json') | ConvertFrom-Json
+          $selection = Get-Content -Raw (Join-Path $plan 'selection.json') | ConvertFrom-Json
+          $required = if ([bool]$selection.requiresCoverage) { 'true' } else { 'false' }
+          "requires_coverage=$required" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          $nativeRequired = if ([bool]$selection.requiresNativeCoverage) { 'true' } else { 'false' }
+          "requires_native_coverage=$nativeRequired" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          $diffBase = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $source.baseCommit } else { '' }
+          "diff_base=$diffBase" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+      - name: Preserve coverage selection plan
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-evidence-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coverage-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
+
   coverage-cli-candidate:
     name: Pack coverage CLI candidate
+    needs: [coverage-evidence-plan]
+    if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -70,6 +134,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -98,7 +163,7 @@ jobs:
           source_commit="$(git rev-parse HEAD)"
           source_tree="$(git rev-parse 'HEAD^{tree}')"
           sdk="$(dotnet --version)"
-          test "$source_commit" = "$GITHUB_SHA"
+          test "$source_commit" = "$COVERAGE_SOURCE_COMMIT"
           dotnet pack Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj \
             --configuration Release --no-restore --output "$candidate_feed" \
             -p:Version="$COVERAGE_CLI_CANDIDATE_VERSION" \
@@ -123,7 +188,8 @@ jobs:
   coverage-security-platform:
     name: Coverage security contracts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: [coverage-cli-candidate]
+    needs: [coverage-evidence-plan, coverage-cli-candidate]
+    if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' }}
     # Leave time for the native suite, candidate installation, and evidence upload.
     # The test command still uses a separate two-minute hang detector.
     timeout-minutes: 20
@@ -134,7 +200,7 @@ jobs:
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
       BUILD_CONFIGURATION: Release
-      COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}
+      COVERAGE_GATE_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.diff_base }}
       COVERAGE_RUN_SCOPE: ${{ github.repository }}
       COVERAGE_RUN_ID: ${{ github.run_id }}
       COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -143,6 +209,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -182,7 +249,7 @@ jobs:
           $tree = (git rev-parse "HEAD^{tree}").Trim()
           $sdk = (dotnet --version).Trim()
           $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
-          if ($manifest.commit -ne $env:GITHUB_SHA -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
+          if ($manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
               $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
               $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
             throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
@@ -582,7 +649,8 @@ jobs:
         run: ./Durable/verify-packed-consumers.sh
 
   build:
-    needs: [coverage-security-platform, packed-durable-consumers]
+    needs: [coverage-evidence-plan, coverage-cli-candidate, coverage-security-platform, packed-durable-consumers]
+    if: ${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && needs.packed-durable-consumers.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && needs.coverage-cli-candidate.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_coverage != 'true' && needs.coverage-cli-candidate.result == 'skipped')) && ((needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -593,6 +661,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -647,12 +716,14 @@ jobs:
           cache-dependency-path: Web/pnpm-lock.yaml
 
       - name: Download same-source CLI candidate package
+        if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: coverage-cli-candidate
           path: ${{ runner.temp }}/coverage-candidate-feed
 
       - name: Verify and install candidate CLI
+        if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         shell: pwsh
         run: |
           $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
@@ -661,7 +732,7 @@ jobs:
           $tree = (git rev-parse "HEAD^{tree}").Trim()
           $sdk = (dotnet --version).Trim()
           $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
-          if ($manifest.commit -ne $env:GITHUB_SHA -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
+          if ($manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
               $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
               $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
             throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
@@ -699,7 +770,10 @@ jobs:
         run: python3 .github/tests/tailwind_workflow_transport_tests.py
 
       - name: Verify Durable template release artifact transport
-        run: python3 .github/tests/durable_template_workflow_transport_tests.py
+        run: >-
+          dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj
+          --configuration Release --no-restore
+          --filter FullyQualifiedName~DurableTemplateWorkflowTransportTests
 
       - name: Verify generated Markdown snippets
         run: |
@@ -720,13 +794,11 @@ jobs:
       - name: Verify the Durable doctor report consumer
         run: python3 -m unittest discover -s examples/durable-external-activation -p 'test_*.py'
 
-      - name: Verify coverage fan-in contracts
-        run: dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~CoverageFanIn'
-
       - name: Verify Cloud Run execution fixture comparisons
         run: python3 -m unittest discover -s Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1 -p 'test_*.py'
 
       - name: Download same-run native coverage evidence
+        if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-native-*
@@ -735,18 +807,24 @@ jobs:
       - name: Run solution coverage and gate
         id: solution-coverage
         env:
-          BUILD_CONFIGURATION: Release
-          BUILD_NO_RESTORE: true
-          COVERAGE_PARALLELISM: 2
-          COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}
-          COVERAGE_FANIN_NATIVE: ${{ runner.temp }}/coverage-native-inputs
-          COVERAGE_DOGFOOD_OUTPUT: ${{ runner.temp }}/coverage-dogfood-fanin-${{ github.run_id }}-${{ github.run_attempt }}
-          COVERAGE_RUN_SCOPE: ${{ github.repository }}
-          COVERAGE_RUN_ID: ${{ github.run_id }}
-          COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          COVERAGE_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.diff_base }}
           APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
         run: |
-          ./scripts/coverage-solution.sh
+          set -euo pipefail
+          validation="tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
+          evidence_root="TestResults/coverage-evidence"
+          changes="$RUNNER_TEMP/coverage-changes-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          plan="$RUNNER_TEMP/coverage-plan-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
+          dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
+          dotnet "$validation" --operation collect --repository "$GITHUB_WORKSPACE" --event-file "$GITHUB_EVENT_PATH" --event-name "$GITHUB_EVENT_NAME" --workflow-sha "$GITHUB_SHA" --output "$changes"
+          dotnet "$validation" --operation plan --scope coverage --policy .github/evidence.policy.json --changed-paths "$changes/changed-paths.json" --output "$plan"
+          args=(--operation run --scope coverage --policy .github/evidence.policy.json --changed-paths "$changes/changed-paths.json" --plan "$plan/evidence-plan.json" --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --output "$evidence_root")
+          if [[ "$(jq -r '.requiresCoverage' "$plan/selection.json")" == "true" ]]; then args+=(--coverage-cli "$COVERAGE_CLI_PATH"); fi
+          if [[ -n "$COVERAGE_DIFF_BASE" && "$(jq -r '.requiresCoverage' "$plan/selection.json")" == "true" ]]; then args+=(--diff-base "$COVERAGE_DIFF_BASE"); fi
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$(jq -r '.requiresNativeCoverage' "$plan/selection.json")" == "true" ]]; then args+=(--native-coverage-directory "$RUNNER_TEMP/coverage-native-inputs"); fi
+          dotnet "$validation" "${args[@]}"
+          dotnet "$validation" --operation verify --scope coverage --policy .github/evidence.policy.json --changed-paths "$changes/changed-paths.json" --plan "$plan/evidence-plan.json" --manifest "$evidence_root/evidence-manifest.json" --artifact-root "$evidence_root/artifacts"
 
       - name: Upload docs outline layout evidence
         if: ${{ always() && !cancelled() }}
@@ -758,37 +836,43 @@ jobs:
 
       - name: Upload test-result diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         with:
           name: test-result-diagnostics
           path: |
-            TestResults/coverage-merged/slow-test-diagnostics.md
-            TestResults/coverage-merged/slow-test-diagnostics.json
-            TestResults/coverage-merged/timings.json
-            TestResults/coverage-merged/junit-*.xml
-            TestResults/coverage-merged/projects/**/dotnet-test.log
+            TestResults/coverage-evidence/**
           if-no-files-found: warn
           retention-days: 14
 
       - name: Upload coverage gate reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         with:
           name: coverage-gate-reports
           path: |
-            TestResults/coverage-merged/fanin-primary/**
-            ${{ runner.temp }}/coverage-dogfood-fanin-${{ github.run_id }}-${{ github.run_attempt }}/**
-            TestResults/coverage-merged/aggregate-gate/**
-            TestResults/coverage-merged/coverage-gate.json
-            TestResults/coverage-merged/coverage-gate.md
-            TestResults/coverage-merged/coverage-patch-targets.json
-            TestResults/coverage-merged/coverage-patch-targets.md
+            TestResults/coverage-evidence/evidence-summary.md
+            TestResults/coverage-evidence/evidence-manifest.json
+            TestResults/coverage-evidence/coverage/aggregate-gate/**
+            TestResults/coverage-evidence/coverage/patch-gate/**
+            TestResults/coverage-evidence/coverage-fanin/**
+          if-no-files-found: warn
+
+      - name: Upload unselected coverage manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage != 'true' }}
+        with:
+          name: coverage-selection-manifest
+          path: |
+            TestResults/coverage-evidence/evidence-plan.json
+            TestResults/coverage-evidence/selection.json
+            TestResults/coverage-evidence/evidence-manifest.json
+            TestResults/coverage-evidence/evidence-summary.md
           if-no-files-found: warn
 
       - name: Publish bounded test-result and slow-test diagnostics summary
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         run: |
-          diagnostics_markdown="TestResults/coverage-merged/slow-test-diagnostics.md"
+          diagnostics_markdown="TestResults/coverage-evidence/coverage/slow-test-diagnostics.md"
           summary_preview_maximum_bytes=65536
           if [[ -f "$diagnostics_markdown" ]]; then
             diagnostics_bytes="$(wc -c < "$diagnostics_markdown")"
@@ -812,19 +896,32 @@ jobs:
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        if: ${{ success() && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}
+        if: ${{ success() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
-          files: '${{ runner.temp }}/coverage-dogfood-fanin-${{ github.run_id }}-${{ github.run_attempt }}/composed/coverage.cobertura.xml'
+          files: ${{ github.event_name == 'pull_request' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && 'TestResults/coverage-evidence/coverage-fanin/composed/coverage.cobertura.xml' || 'TestResults/coverage-evidence/coverage/coverage.cobertura.xml' }}
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        if: ${{ always() && !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
-          files: 'TestResults/coverage-merged/junit-*.xml'
+          files: 'TestResults/coverage-evidence/coverage/junit-*.xml'
           report_type: test_results
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-manifest-gate:
+    name: Coverage evidence gate
+    if: ${{ always() }}
+    needs: [coverage-evidence-plan, coverage-security-platform, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless planning, selected native evidence, and the build passed
+        if: ${{ needs.coverage-evidence-plan.result != 'success' || needs.build.result != 'success' || (needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result != 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result != 'skipped' && needs.coverage-security-platform.result != 'success') }}
+        run: exit 1
+      - name: Confirm the selected coverage evidence gate passed
+        if: ${{ needs.coverage-evidence-plan.result == 'success' && needs.build.result == 'success' && (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' || needs.coverage-security-platform.result == 'success') }}
+        run: echo 'The selected coverage evidence gate passed.'
 
   export-appsurface-docs:
     needs: build

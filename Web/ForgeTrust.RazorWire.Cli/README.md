@@ -350,3 +350,21 @@ Export one managed docs search-index root per frozen archive. Multiple successfu
 The AppSurface Docs export handoff stages each canonical live URL in `.appsurface-docs-route-manifest.json`. After ordinary HTML and redirect aliases have materialized, the exporter resolves each staged URL to its successful, non-alias HTML outcome, validates the actual file under the whole export root, removes the staging value, and writes its relative path as `canonicalArtifactPath` with `htmlUrlBase: export-root`. This runs before archive normalization and release-manifest hashing, so the catalog pin covers the finalized route mapping. A root route maps to its real `index.html` member even when its publish URL is `/`.
 
 The mapping requires every staged entry to have an ordinary HTML target. Missing targets, unsafe artifact paths, duplicate physical targets, and collisions between canonical routes, aliases, and artifact paths fail with [`RWEXPORT012`](#if-export-fails). An entry may map its artifact to its own canonical path, but an alias cannot name any artifact path. Older v1 route manifests without staging data are left byte-for-byte unchanged. See the [exact-version tree contract](../ForgeTrust.AppSurface.Docs/README.md#exact-version-tree-contract) for how the finalized paths are consumed by archive verification and redirects.
+
+The canonical and alias namespace `versions/switch`, including its descendants, is reserved for the
+[concept-switch artifacts](../ForgeTrust.AppSurface.Docs/README.md#concept-switch-artifacts).
+An authored collision fails with `RWEXPORT012`, reason `reserved-switch-namespace`; choose a different
+canonical route or alias and re-export before updating a release pin.
+
+The internal `ExportContext.RegisterReleaseArchiveArtifactFinalizer` handoff lets the AppSurface Docs host
+write deterministic metadata such as `.appsurface-docs-concepts.json`. Call `EnableReleaseArchiveManifest`
+first; registration rejects a null callback or a context without archive generation enabled. The default
+finalizer list is empty. Register all writers before export starts. `ReleaseArchiveArtifactFinalizers` exposes a read-only registration-order view;
+the engine awaits each writer after frozen route finalization and before deployment extras and archive
+normalization/hashing, checking cancellation before each writer. A writer failure aborts export before the
+release manifest can be produced; previously emitted output is not rolled back. Writers must observe the
+supplied cancellation token, use the existing output-path guards and own only their
+generated artifact; they must not rewrite canonical winners or hash unfinished bytes. Prefer ordinary
+deployment extras for caller-supplied files and this internal handoff only for metadata that depends on
+final canonical mappings. See the [CLI export contract](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-docs-export)
+for the complete Docs export flow.

@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
 [Trait("Category", "Unit")]
-public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
+public sealed partial class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
 {
     private readonly string _tempDirectory;
 

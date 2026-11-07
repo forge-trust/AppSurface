@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Validation;
@@ -68,7 +69,139 @@ public sealed class NativeEvidenceProgramTests
         var result = await InvokeAsync(["--help"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Native AppSurface EvidenceHost acceptance", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("AppSurface EvidenceHost acceptance", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("--scope all|native|coverage|packages", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("directory")]
+    [InlineData("file")]
+    [InlineData("unsupported-option")]
+    public async Task Collect_RejectsOutputCollisionOrUnsupportedOptionsWithoutModifyingCallerInput(string failure)
+    {
+        using var fixture = new NativeCaptureFixture();
+        var output = Path.Join(fixture.Root, "collection");
+        if (failure == "directory") Directory.CreateDirectory(output);
+        if (failure == "file") await File.WriteAllTextAsync(output, "caller-owned");
+        var args = new List<string> { "--operation", "collect", "--output", output };
+        if (failure == "unsupported-option") args.AddRange(["--scope", "coverage"]);
+
+        var result = await InvokeAsync(args.ToArray());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("ArgumentException", result.StandardError, StringComparison.Ordinal);
+        if (failure == "file") Assert.Equal("caller-owned", await File.ReadAllTextAsync(output));
+        if (failure == "directory") Assert.Empty(Directory.EnumerateFileSystemEntries(output));
+        if (failure == "unsupported-option") Assert.False(Directory.Exists(output));
+    }
+
+    [Theory]
+    [InlineData("local")]
+    [InlineData("local-plan")]
+    public async Task LocalOperations_DispatchToSharedPolicyAndCompleteAnEmptyInventory(string operation)
+    {
+        using var fixture = new NativeCaptureFixture();
+        var output = Path.Join(fixture.Root, "local-evidence");
+        var policy = Path.Join(fixture.Root, "policy.json");
+        File.Copy(Path.Join(TestPathUtils.FindRepoRoot(AppContext.BaseDirectory), ".github", "evidence.policy.json"), policy);
+
+        var result = await InvokeAsync(["--operation", operation, "--repository", fixture.Repository,
+            "--base", fixture.Commit, "--policy", policy, "--output", output]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("No local changes", result.StandardOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(output, "proof", "evidence-manifest.json")));
+    }
+
+    [Fact]
+    public async Task CaptureNative_UsesRealCheckoutAndWritesBoundIdentityReceipt()
+    {
+        using var fixture = new NativeCaptureFixture();
+        var sdk = await RunAsync(ResolveDotnetHost(), ["--version"], fixture.Repository);
+        Assert.Equal(0, sdk.ExitCode);
+        var runValues = new Dictionary<string, string?>
+        {
+            ["GITHUB_REPOSITORY"] = "example/native-capture-tests",
+            ["GITHUB_RUN_ID"] = "123456",
+            ["GITHUB_RUN_ATTEMPT"] = "2",
+        };
+        var previous = runValues.ToDictionary(pair => pair.Key, pair => Environment.GetEnvironmentVariable(pair.Key));
+        try
+        {
+            foreach (var (key, value) in runValues) Environment.SetEnvironmentVariable(key, value);
+            var result = await InvokeAsync(["--operation", "capture-native", "--repository", fixture.Repository,
+                "--report", fixture.Report, "--raw-report", fixture.RawReport, "--output", fixture.Output,
+                "--dotnet", ResolveDotnetHost()]);
+
+            Assert.True(result.ExitCode == 0, result.StandardError);
+            using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(fixture.Output, "manifest.json")));
+            var root = manifest.RootElement;
+            Assert.Equal(fixture.Commit, root.GetProperty("commit").GetString());
+            Assert.Equal(fixture.Tree, root.GetProperty("tree").GetString());
+            Assert.Equal(sdk.StandardOutput.Trim(), root.GetProperty("sdk").GetString());
+            Assert.Equal("native", root.GetProperty("scope").GetString());
+            Assert.Equal(OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "Darwin" : "Linux",
+                root.GetProperty("platform").GetString());
+            Assert.Equal(runValues.Count, root.GetProperty("run").EnumerateObject().Count());
+            foreach (var (key, value) in runValues) Assert.Equal(value, root.GetProperty("run").GetProperty(key).GetString());
+            Assert.Equal(["collector.cobertura.xml", "coverage.cobertura.xml"],
+                root.GetProperty("files").EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
+            Assert.True(File.Exists(Path.Join(fixture.Output, "collector.cobertura.xml")));
+            Assert.True(File.Exists(Path.Join(fixture.Output, "coverage.cobertura.xml")));
+        }
+        finally
+        {
+            foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value);
+        }
+    }
+
+    [Theory]
+    [InlineData("dirty")]
+    [InlineData("missing-host")]
+    [InlineData("unsupported-option")]
+    [InlineData("missing-project-inventory")]
+    public async Task CaptureNative_RejectsInvalidCheckoutOrOptions(string failure)
+    {
+        using var fixture = new NativeCaptureFixture();
+        var runValues = new Dictionary<string, string?>
+        {
+            ["GITHUB_REPOSITORY"] = "example/native-capture-tests",
+            ["GITHUB_RUN_ID"] = "123456",
+            ["GITHUB_RUN_ATTEMPT"] = "2",
+        };
+        var previous = runValues.ToDictionary(pair => pair.Key, pair => Environment.GetEnvironmentVariable(pair.Key));
+        var args = new List<string> { "--operation", "capture-native", "--repository", fixture.Repository,
+            "--report", fixture.Report, "--raw-report", fixture.RawReport, "--output", fixture.Output,
+            "--dotnet", failure == "missing-host" ? Path.Join(fixture.Root, "missing-dotnet") : ResolveDotnetHost() };
+        if (failure == "dirty") await File.WriteAllTextAsync(Path.Join(fixture.Repository, "dirty.txt"), "dirty");
+        if (failure == "unsupported-option") args.AddRange(["--scope", "native"]);
+        if (failure == "missing-project-inventory")
+        {
+            await File.WriteAllTextAsync(Path.Join(fixture.Repository, "ForgeTrust.AppSurface.slnx"), "<Solution />");
+            fixture.AmendSolutionCommit();
+            Assert.Empty(fixture.RunGit("status", "--porcelain"));
+            foreach (var (key, value) in runValues) Environment.SetEnvironmentVariable(key, value);
+        }
+
+        try
+        {
+            var result = await InvokeAsync(args.ToArray());
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Native validation failed", result.StandardError, StringComparison.Ordinal);
+            Assert.Contains(failure switch
+            {
+                "dirty" => "InvalidOperationException",
+                "missing-host" => "EvidenceCommandException",
+                "unsupported-option" or "missing-project-inventory" => "ArgumentException",
+                _ => throw new ArgumentOutOfRangeException(nameof(failure)),
+            }, result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(fixture.Output));
+        }
+        finally
+        {
+            foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value);
+        }
     }
 
     [Theory]
@@ -256,6 +389,81 @@ public sealed class NativeEvidenceProgramTests
         var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
         return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
             .Select(directory => Path.Join(directory, executable)).First(File.Exists);
+    }
+
+    private static async Task<ProcessResult> RunAsync(string executable, string[] arguments, string workingDirectory)
+    {
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start process.");
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        return new ProcessResult(process.ExitCode, stdout, stderr);
+    }
+
+    private sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
+
+    private sealed class NativeCaptureFixture : IDisposable
+    {
+        public string Root { get; } = Directory.CreateTempSubdirectory("appsurface-native-capture-").FullName;
+        public string Repository => Path.Join(Root, "repo");
+        public string Report => Path.Join(Root, "normalized.xml");
+        public string RawReport => Path.Join(Root, "raw.xml");
+        public string Output => Path.Join(Root, "capture");
+        public string Commit { get; private set; }
+        public string Tree { get; private set; }
+        public NativeCaptureFixture()
+        {
+            Directory.CreateDirectory(Repository);
+            File.WriteAllText(Path.Join(Repository, "ForgeTrust.AppSurface.slnx"),
+                "<Solution><Project Path=\"tests/Fixture.Tests/Fixture.Tests.csproj\" /></Solution>");
+            File.WriteAllText(Path.Join(Repository, "tracked.txt"), "tracked");
+            var xml = $"<coverage lines-valid=\"1\" lines-covered=\"1\" branches-valid=\"0\" branches-covered=\"0\"><sources /><packages><package name=\"Fixture\"><classes><class name=\"Fixture\" filename=\"{Path.Join(Repository, "tracked.txt").Replace("\\", "/")}\"><methods /><lines><line number=\"1\" hits=\"1\" /></lines></class></classes></package></packages></coverage>";
+            File.WriteAllText(Report, xml);
+            File.WriteAllText(RawReport, xml);
+            RunGit("init");
+            RunGit("config", "user.email", "tests@example.invalid");
+            RunGit("config", "user.name", "Evidence Tests");
+            RunGit("add", "ForgeTrust.AppSurface.slnx", "tracked.txt");
+            RunGit("commit", "-m", "fixture");
+            Commit = RunGit("rev-parse", "HEAD").Trim();
+            Tree = RunGit("rev-parse", "HEAD^{tree}").Trim();
+        }
+
+        public void AmendSolutionCommit()
+        {
+            RunGit("add", "ForgeTrust.AppSurface.slnx");
+            RunGit("commit", "--amend", "--no-edit");
+            Commit = RunGit("rev-parse", "HEAD").Trim();
+            Tree = RunGit("rev-parse", "HEAD^{tree}").Trim();
+        }
+
+        public string RunGit(params string[] args)
+        {
+            var startInfo = new ProcessStartInfo("git")
+            {
+                WorkingDirectory = Repository,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            foreach (var argument in args) startInfo.ArgumentList.Add(argument);
+            using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            if (process.ExitCode != 0) throw new InvalidOperationException(stderr);
+            return stdout;
+        }
+
+        public void Dispose() => NativeEvidenceTestDirectory.Delete(Root);
     }
 
     private sealed record InvocationResult(int ExitCode, string StandardOutput, string StandardError);
