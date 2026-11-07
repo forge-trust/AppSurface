@@ -39,6 +39,7 @@
     <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tailwind.Tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj" Aliases="TailwindTasks" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
+    <ProjectReference Include="../../tools/PublishPreflight/ForgeTrust.AppSurface.PublishPreflight.csproj" />
   </ItemGroup>
 
   <ItemGroup>

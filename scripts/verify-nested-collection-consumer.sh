@@ -429,8 +429,11 @@ import_matches = list(import_pattern.finditer(text))
 if len(import_matches) != 1 or tailwind_import not in import_matches[0].group(1):
     raise SystemExit("Copied example did not contain exactly one Tailwind targets import.")
 import_match = import_matches[0]
-# NuGet imports the packed Tailwind build target; no repository source import remains.
+# NuGet imports the packed Tailwind build target.
 text = text[:import_match.start()] + text[import_match.end():]
+# The opt-in publish preflight belongs to the source checkout, not the packed consumer.
+text = re.sub(r'(?m)^[ \t]*<Import\s+Project="\.\./\.\./tools/PublishPreflight/PublishPreflight\.targets"[^>]*/>[ \t]*\n',
+              "", text)
 
 if "<IsExampleProject>true</IsExampleProject>" not in text:
     text = text.replace("    <ImplicitUsings>enable</ImplicitUsings>",
@@ -438,6 +441,8 @@ if "<IsExampleProject>true</IsExampleProject>" not in text:
 root = ET.fromstring(text)
 if any(element.tag.rsplit("}", 1)[-1] == "ProjectReference" for element in root.iter()):
     raise SystemExit("Copied package consumer still contains a source ProjectReference.")
+if any(element.tag.rsplit("}", 1)[-1] == "Import" for element in root.iter()):
+    raise SystemExit("Copied package consumer still contains a source Import.")
 for package_id in ("ForgeTrust.RazorWire", "ForgeTrust.AppSurface.Web.Tailwind"):
     matches = [element for element in root.iter()
                if element.tag.rsplit("}", 1)[-1] == "PackageReference" and element.get("Include") == package_id]
