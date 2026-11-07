@@ -46,10 +46,12 @@ public sealed class EvidencePlanner
             .Select(static result => result.Profile)
             .DistinctBy(static profile => profile.Id, StringComparer.Ordinal)
             .ToArray();
-        var conservativeFallback = distinctProfiles.Length != 1;
-        var profile = conservativeFallback
-            ? profiles[policy.ConservativeProfileId]
-            : distinctProfiles[0];
+        var conservativeFallback = distinctProfiles.Length != 1 && !policy.CombineProfiles;
+        var profile = distinctProfiles.Length == 1
+            ? distinctProfiles[0]
+            : policy.CombineProfiles
+                ? CombineProfiles(distinctProfiles)
+                : profiles[policy.ConservativeProfileId];
         var policyDigest = EvidenceDigest.CanonicalSha256(policy);
         var normalizedPaths = changedPaths
             .Select(NormalizePath)
@@ -78,6 +80,41 @@ public sealed class EvidencePlanner
             PolicySnapshot: policy);
 
         return draft with { PlanDigest = EvidenceDigest.CanonicalSha256(draft) };
+    }
+
+    private static EvidenceProfile CombineProfiles(IReadOnlyList<EvidenceProfile> profiles)
+    {
+        var ordered = profiles.OrderBy(static profile => profile.Id, StringComparer.Ordinal).ToArray();
+        if (ordered.Select(static profile => profile.Scope).Distinct().Count() != 1)
+        {
+            throw new EvidencePlanningException("ASEVD134", "Selected profiles have different scopes and cannot be combined.", "Select profiles with one shared scope or disable profile combination.");
+        }
+
+        var resources = MergeDeclarations(ordered.SelectMany(static profile => profile.Resources), static value => value.Id, "resource");
+        var producers = MergeDeclarations(ordered.SelectMany(static profile => profile.Producers), static value => value.Id, "producer");
+        var obligations = MergeDeclarations(ordered.SelectMany(static profile => profile.Obligations), static value => value.Id, "obligation");
+        var identity = EvidenceDigest.CanonicalSha256(ordered)[..16];
+        var combined = new EvidenceProfile($"combined-{identity}", ordered[0].Scope, resources, producers, obligations);
+        ValidateProfile(combined);
+        return combined;
+    }
+
+    private static IReadOnlyList<T> MergeDeclarations<T>(IEnumerable<T> declarations, Func<T, string> getId, string kind)
+    {
+        var merged = new SortedDictionary<string, T>(StringComparer.Ordinal);
+        foreach (var declaration in declarations)
+        {
+            var id = getId(declaration);
+            if (merged.TryGetValue(id, out var existing)
+                && !EvidenceCanonicalJson.Serialize(existing).AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(declaration)))
+            {
+                throw new EvidencePlanningException("ASEVD133", $"Selected profiles declare conflicting {kind} '{id}'.", "Make declarations with the same id identical or use separate profile selections.");
+            }
+
+            merged[id] = declaration;
+        }
+
+        return merged.Values.ToArray();
     }
 
     /// <summary>

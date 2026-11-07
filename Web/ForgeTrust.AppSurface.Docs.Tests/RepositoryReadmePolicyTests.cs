@@ -12,6 +12,37 @@ public sealed partial class RepositoryReadmePolicyTests
     private const string CanonicalPackageChooserUrl = "https://github.com/forge-trust/AppSurface/blob/main/packages/README.md";
     private const string CanonicalReleaseHubUrl = "https://github.com/forge-trust/AppSurface/blob/main/releases/README.md";
 
+    [Theory]
+    [InlineData("README.md")]
+    [InlineData("CONTRIBUTING.md")]
+    [InlineData("eng/ci-critical-path.md")]
+    [InlineData("guides/coverage-fan-in.md")]
+    [InlineData("start-here/evidencehost.md")]
+    [InlineData("tools/ForgeTrust.AppSurface.Evidence.Validation/README.md")]
+    public void EvidencePolicyReferences_ShouldRenderAsRepositorySourceLinks(string sourcePath)
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var markdown = File.ReadAllText(TestPathUtils.PathUnder(repoRoot, sourcePath));
+        var html = Markdig.Markdown.ToHtml(markdown);
+        var rewritten = DocContentLinkRewriter.RewriteInternalDocLinks(sourcePath, html, "/docs",
+            DocLinkTargetManifest.FromPaths([sourcePath]));
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(rewritten);
+        var references = document.QuerySelectorAll("a[href]")
+            .Where(anchor => anchor.GetAttribute("href")!.Contains(".github/", StringComparison.Ordinal)).ToArray();
+        Assert.NotEmpty(references);
+        const string sourcePrefix = "https://github.com/forge-trust/AppSurface/blob/main/";
+        foreach (var reference in references)
+        {
+            var href = reference.GetAttribute("href")!;
+            Assert.StartsWith(sourcePrefix + ".github/", href, StringComparison.Ordinal);
+            var relativePath = href[sourcePrefix.Length..];
+            var suffix = relativePath.IndexOfAny(['?', '#']);
+            if (suffix >= 0) relativePath = relativePath[..suffix];
+            Assert.True(File.Exists(TestPathUtils.PathUnder(repoRoot, relativePath)), $"Missing repository source target: {href}");
+            Assert.Null(reference.GetAttribute("data-turbo-frame"));
+        }
+    }
+
     [Fact]
     public void AuthoredReadmes_ShouldNotStartWithYamlFrontMatter()
     {

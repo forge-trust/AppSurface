@@ -7923,6 +7923,8 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         var codeQualityWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/code-quality.yml"));
         var vcsIgnoreParityWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/vcs-ignore-parity.yml"));
         var packageGateWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/package-gate.yml"));
+        var packageChecksProducer = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot,
+            "tools/ForgeTrust.AppSurface.Evidence.Validation/PackageChecksProducer.cs"));
         var packageArtifactsWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/package-artifacts.yml"));
         var prereleasePublishWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/nuget-prerelease-publish.yml"));
         var stablePublishWorkflow = await File.ReadAllTextAsync(CombineSafeChildPath(repositoryRoot, ".github/workflows/nuget-stable-publish.yml"));
@@ -7947,15 +7949,20 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         Assert.DoesNotContain("/p:TailwindEnabled=false", buildWorkflowWithoutCoverageSecurityJob, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
         Assert.Contains("ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj", vcsIgnoreParityWorkflow, StringComparison.Ordinal);
-        Assert.Contains("Verify package artifacts", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("verify-packages", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("PACKAGE_VERSION: 0.0.0-ci.${{ github.run_number }}", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("Validate package manifest gate", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("Verify generated package documentation", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("docs-package-consumer-proof.md", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("docs-package-consumer-proof/consumer/NuGet.config", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("docs-package-consumer-proof/consumer/packages.lock.json", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("docs-package-consumer-proof/consumer/obj/project.assets.json", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Run and verify scoped package evidence", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("--operation run --scope packages", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("--operation verify --scope packages", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("--policy .github/evidence.policy.json", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("--manifest \"$proof/evidence-manifest.json\" --artifact-root \"$proof/artifacts\"", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("package-evidence-*/package-checks/artifacts/durable-template-consumer-proof.json", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("package-evidence-*/package-checks/**", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("package-evidence-*/package-checks/artifacts/**", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("package-evidence-*/artifacts/**", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("stage = \"gate\";", packageChecksProducer, StringComparison.Ordinal);
+        Assert.Contains("stage = \"verify\";", packageChecksProducer, StringComparison.Ordinal);
+        Assert.Contains("stage = \"verify-packages\";", packageChecksProducer, StringComparison.Ordinal);
+        Assert.Contains("\"--package-version\", version", packageChecksProducer, StringComparison.Ordinal);
+        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageChecksProducer);
         Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.Contains("Upload package validation diagnostics", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.Contains("if: ${{ always() }}", packageArtifactsWorkflow, StringComparison.Ordinal);

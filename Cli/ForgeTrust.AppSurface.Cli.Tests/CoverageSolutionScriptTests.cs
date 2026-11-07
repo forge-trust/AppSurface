@@ -64,7 +64,7 @@ public sealed class CoverageSolutionScriptTests
     }
 
     [Fact]
-    public void BuildWorkflow_ShouldUseCoverageSolutionScriptForDefaultLane()
+    public void BuildWorkflow_ShouldUseSharedEvidencePolicyForDefaultLane()
     {
         var workflow = ReadWorkflow();
 
@@ -75,16 +75,18 @@ public sealed class CoverageSolutionScriptTests
         var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
         var build = (YamlMappingNode)jobs.Children[new YamlScalarNode("build")];
         Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
-        Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
-        Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
-        Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
-        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("./scripts/coverage-solution.sh", workflow, StringComparison.Ordinal);
+        Assert.Contains("ForgeTrust.AppSurface.Evidence.Validation.dll", workflow, StringComparison.Ordinal);
+        Assert.Contains("--operation plan --scope coverage --policy .github/evidence.policy.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("--operation run --scope coverage", workflow, StringComparison.Ordinal);
+        Assert.Contains("--operation verify --scope coverage", workflow, StringComparison.Ordinal);
+        Assert.Contains("Verify Cloud Run execution fixture comparisons", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.diff_base }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("--manifest \"$evidence_root/evidence-manifest.json\" --artifact-root \"$evidence_root/artifacts\"", workflow, StringComparison.Ordinal);
         Assert.Contains("Publish bounded test-result and slow-test diagnostics summary", workflow, StringComparison.Ordinal);
         Assert.Contains("test-result-diagnostics", workflow, StringComparison.Ordinal);
-        Assert.Contains("TestResults/coverage-merged/timings.json", workflow, StringComparison.Ordinal);
-        Assert.Contains("TestResults/coverage-merged/junit-*.xml", workflow, StringComparison.Ordinal);
-        Assert.Contains("TestResults/coverage-merged/projects/**/dotnet-test.log", workflow, StringComparison.Ordinal);
+        Assert.Contains("TestResults/coverage-evidence/**", workflow, StringComparison.Ordinal);
+        Assert.Contains("TestResults/coverage-evidence/coverage/junit-*.xml", workflow, StringComparison.Ordinal);
+        Assert.Contains("TestResults/coverage-evidence/coverage/slow-test-diagnostics.md", workflow, StringComparison.Ordinal);
         Assert.Contains("Test-result and slow-test diagnostics were truncated in this summary", workflow, StringComparison.Ordinal);
         Assert.Contains("Download the \\`test-result-diagnostics\\` artifact for the complete report.", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("render-junit-test-summary.py", workflow, StringComparison.Ordinal);
@@ -105,10 +107,13 @@ public sealed class CoverageSolutionScriptTests
         var build = (YamlMappingNode)jobs.Children[new YamlScalarNode("build")];
         var dependencies = (YamlSequenceNode)build.Children[new YamlScalarNode("needs")];
         Assert.Equal(
-            new[] { "coverage-security-platform", "packed-durable-consumers" },
+            new[] { "coverage-evidence-plan", "coverage-security-platform", "packed-durable-consumers" },
             dependencies.Children.Cast<YamlScalarNode>().Select(node => node.Value));
         Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
-        Assert.False(build.Children.ContainsKey(new YamlScalarNode("if")));
+        var buildCondition = ((YamlScalarNode)build.Children[new YamlScalarNode("if")]).Value!;
+        Assert.Equal(
+            "${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && needs.packed-durable-consumers.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result == 'skipped')) }}",
+            buildCondition);
 
         var packed = (YamlMappingNode)jobs.Children[new YamlScalarNode("packed-durable-consumers")];
         Assert.Equal("ubuntu-latest", ((YamlScalarNode)packed.Children[new YamlScalarNode("runs-on")]).Value);
@@ -150,25 +155,29 @@ public sealed class CoverageSolutionScriptTests
         var coverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Run solution coverage and gate");
         Assert.Equal("solution-coverage", ((YamlScalarNode)coverage.Children[new YamlScalarNode("id")]).Value);
-        Assert.Equal("./scripts/coverage-solution.sh", ((YamlScalarNode)coverage.Children[new YamlScalarNode("run")]).Value!.Trim());
+        var coverageCommand = ((YamlScalarNode)coverage.Children[new YamlScalarNode("run")]).Value!;
+        Assert.Contains("--operation run --scope coverage", coverageCommand, StringComparison.Ordinal);
+        Assert.Contains("--operation verify --scope coverage", coverageCommand, StringComparison.Ordinal);
+        Assert.Contains("--native-coverage-directory \"$RUNNER_TEMP/coverage-native-inputs\"", coverageCommand, StringComparison.Ordinal);
         Assert.False(coverage.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
         var environment = (YamlMappingNode)coverage.Children[new YamlScalarNode("env")];
-        Assert.Equal("${{ runner.temp }}/coverage-native-inputs", ((YamlScalarNode)environment.Children[new YamlScalarNode("COVERAGE_FANIN_NATIVE")]).Value);
+        Assert.Equal("${{ needs.coverage-evidence-plan.outputs.diff_base }}", ((YamlScalarNode)environment.Children[new YamlScalarNode("COVERAGE_DIFF_BASE")]).Value);
 
         var upload = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload coverage reports to Codecov");
         Assert.True(steps.Children.IndexOf(coverage) < steps.Children.IndexOf(upload));
         Assert.Equal(
-            "${{ success() && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}",
+            "${{ success() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}",
             ((YamlScalarNode)upload.Children[new YamlScalarNode("if")]).Value);
         var uploadWith = (YamlMappingNode)upload.Children[new YamlScalarNode("with")];
-        Assert.Equal("TestResults/coverage-fanin/coverage.cobertura.xml", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("files")]).Value);
+        Assert.Equal("${{ github.event_name == 'pull_request' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && 'TestResults/coverage-evidence/coverage-fanin-composed/coverage.cobertura.xml' || 'TestResults/coverage-evidence/coverage/coverage.cobertura.xml' }}",
+            ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("files")]).Value);
         Assert.Equal("true", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("disable_search")]).Value);
 
         var testResults = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload test results to Codecov");
         Assert.Equal(
-            "${{ always() && !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}",
+            "${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && env.CODECOV_TOKEN_PRESENT == 'true' }}",
             ((YamlScalarNode)testResults.Children[new YamlScalarNode("if")]).Value);
     }
 

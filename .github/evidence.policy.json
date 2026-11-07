@@ -1,0 +1,1038 @@
+{
+  "id": "appsurface-repository-ci",
+  "version": "2.0.0",
+  "conservativeProfileId": "native-acceptance",
+  "combineProfiles": true,
+  "profiles": [
+    {
+      "id": "no-evidence",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [],
+      "obligations": []
+    },
+    {
+      "id": "coverage",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [
+        {
+          "id": "solution-coverage",
+          "kind": "repository-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "coverage/solution-complete@1",
+            "coverage/thresholds@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            },
+            {
+              "logicalName": "aggregate-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 2097152
+            },
+            {
+              "logicalName": "patch-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": false,
+              "maximumBytes": 2097152
+            }
+          ],
+          "timeoutSeconds": 5400,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          },
+          "coverageArtifactRetention": "managed"
+        }
+      ],
+      "obligations": [
+        {
+          "id": "solution-coverage-0",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/solution-complete@1"
+        },
+        {
+          "id": "solution-coverage-1",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/thresholds@1"
+        }
+      ]
+    },
+    {
+      "id": "packages",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [
+        {
+          "id": "package-checks",
+          "kind": "repository-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "package/manifest@1",
+            "package/generated-docs@1",
+            "package/archives-and-consumers@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            },
+            {
+              "logicalName": "package-manifest",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 2097152
+            },
+            {
+              "logicalName": "package-report",
+              "relativeRoot": "proof",
+              "mediaType": "text/markdown",
+              "required": true,
+              "maximumBytes": 2097152
+            }
+          ],
+          "timeoutSeconds": 3600,
+          "coverageGate": null,
+          "coverageArtifactRetention": "managed"
+        }
+      ],
+      "obligations": [
+        {
+          "id": "package-checks-0",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/manifest@1"
+        },
+        {
+          "id": "package-checks-1",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/generated-docs@1"
+        },
+        {
+          "id": "package-checks-2",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/archives-and-consumers@1"
+        }
+      ]
+    },
+    {
+      "id": "code",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [
+        {
+          "id": "solution-coverage",
+          "kind": "repository-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "coverage/solution-complete@1",
+            "coverage/thresholds@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            },
+            {
+              "logicalName": "aggregate-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 2097152
+            },
+            {
+              "logicalName": "patch-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": false,
+              "maximumBytes": 2097152
+            }
+          ],
+          "timeoutSeconds": 5400,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          },
+          "coverageArtifactRetention": "managed"
+        },
+        {
+          "id": "package-checks",
+          "kind": "repository-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "package/manifest@1",
+            "package/generated-docs@1",
+            "package/archives-and-consumers@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            },
+            {
+              "logicalName": "package-manifest",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 2097152
+            },
+            {
+              "logicalName": "package-report",
+              "relativeRoot": "proof",
+              "mediaType": "text/markdown",
+              "required": true,
+              "maximumBytes": 2097152
+            }
+          ],
+          "timeoutSeconds": 3600,
+          "coverageGate": null,
+          "coverageArtifactRetention": "managed"
+        }
+      ],
+      "obligations": [
+        {
+          "id": "solution-coverage-0",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/solution-complete@1"
+        },
+        {
+          "id": "solution-coverage-1",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/thresholds@1"
+        },
+        {
+          "id": "package-checks-0",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/manifest@1"
+        },
+        {
+          "id": "package-checks-1",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/generated-docs@1"
+        },
+        {
+          "id": "package-checks-2",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/archives-and-consumers@1"
+        }
+      ]
+    },
+    {
+      "id": "storage",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [
+        {
+          "id": "packed-storage",
+          "kind": "native-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "storage/published-cli@1",
+            "storage/byte-preservation@1",
+            "storage/explicit-retirement@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            }
+          ],
+          "timeoutSeconds": 600,
+          "coverageGate": null,
+          "coverageArtifactRetention": "managed"
+        },
+        {
+          "id": "solution-coverage",
+          "kind": "repository-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "coverage/solution-complete@1",
+            "coverage/thresholds@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            },
+            {
+              "logicalName": "aggregate-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 2097152
+            },
+            {
+              "logicalName": "patch-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": false,
+              "maximumBytes": 2097152
+            }
+          ],
+          "timeoutSeconds": 5400,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          },
+          "coverageArtifactRetention": "managed"
+        }
+      ],
+      "obligations": [
+        {
+          "id": "packed-storage-0",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "packed-storage"
+          ],
+          "requiredAssertionId": "storage/published-cli@1"
+        },
+        {
+          "id": "packed-storage-1",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "packed-storage"
+          ],
+          "requiredAssertionId": "storage/byte-preservation@1"
+        },
+        {
+          "id": "packed-storage-2",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "packed-storage"
+          ],
+          "requiredAssertionId": "storage/explicit-retirement@1"
+        },
+        {
+          "id": "solution-coverage-0",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/solution-complete@1"
+        },
+        {
+          "id": "solution-coverage-1",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/thresholds@1"
+        }
+      ]
+    },
+    {
+      "id": "consumer",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [
+        {
+          "id": "installed-consumer",
+          "kind": "native-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "consumer/package-identity@1",
+            "consumer/executed-tests@1",
+            "consumer/coverage-gate@1",
+            "consumer/source-integrity@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            }
+          ],
+          "timeoutSeconds": 1800,
+          "coverageGate": null,
+          "coverageArtifactRetention": "managed"
+        },
+        {
+          "id": "solution-coverage",
+          "kind": "repository-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "coverage/solution-complete@1",
+            "coverage/thresholds@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            },
+            {
+              "logicalName": "aggregate-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 2097152
+            },
+            {
+              "logicalName": "patch-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": false,
+              "maximumBytes": 2097152
+            }
+          ],
+          "timeoutSeconds": 5400,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          },
+          "coverageArtifactRetention": "managed"
+        }
+      ],
+      "obligations": [
+        {
+          "id": "installed-consumer-0",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "installed-consumer"
+          ],
+          "requiredAssertionId": "consumer/package-identity@1"
+        },
+        {
+          "id": "installed-consumer-1",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "installed-consumer"
+          ],
+          "requiredAssertionId": "consumer/executed-tests@1"
+        },
+        {
+          "id": "installed-consumer-2",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "installed-consumer"
+          ],
+          "requiredAssertionId": "consumer/coverage-gate@1"
+        },
+        {
+          "id": "installed-consumer-3",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "installed-consumer"
+          ],
+          "requiredAssertionId": "consumer/source-integrity@1"
+        },
+        {
+          "id": "solution-coverage-0",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/solution-complete@1"
+        },
+        {
+          "id": "solution-coverage-1",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/thresholds@1"
+        }
+      ]
+    },
+    {
+      "id": "native-acceptance",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [
+        {
+          "id": "packed-storage",
+          "kind": "native-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "storage/published-cli@1",
+            "storage/byte-preservation@1",
+            "storage/explicit-retirement@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            }
+          ],
+          "timeoutSeconds": 600,
+          "coverageGate": null,
+          "coverageArtifactRetention": "managed"
+        },
+        {
+          "id": "installed-consumer",
+          "kind": "native-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "consumer/package-identity@1",
+            "consumer/executed-tests@1",
+            "consumer/coverage-gate@1",
+            "consumer/source-integrity@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            }
+          ],
+          "timeoutSeconds": 1800,
+          "coverageGate": null,
+          "coverageArtifactRetention": "managed"
+        },
+        {
+          "id": "solution-coverage",
+          "kind": "repository-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "coverage/solution-complete@1",
+            "coverage/thresholds@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            },
+            {
+              "logicalName": "aggregate-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 2097152
+            },
+            {
+              "logicalName": "patch-gate",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": false,
+              "maximumBytes": 2097152
+            }
+          ],
+          "timeoutSeconds": 5400,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          },
+          "coverageArtifactRetention": "managed"
+        },
+        {
+          "id": "package-checks",
+          "kind": "repository-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": [
+            "package/manifest@1",
+            "package/generated-docs@1",
+            "package/archives-and-consumers@1"
+          ],
+          "artifactSlots": [
+            {
+              "logicalName": "result",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 1048576
+            },
+            {
+              "logicalName": "transcript",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 16777216
+            },
+            {
+              "logicalName": "package-manifest",
+              "relativeRoot": "proof",
+              "mediaType": "application/json",
+              "required": true,
+              "maximumBytes": 2097152
+            },
+            {
+              "logicalName": "package-report",
+              "relativeRoot": "proof",
+              "mediaType": "text/markdown",
+              "required": true,
+              "maximumBytes": 2097152
+            }
+          ],
+          "timeoutSeconds": 3600,
+          "coverageGate": null,
+          "coverageArtifactRetention": "managed"
+        }
+      ],
+      "obligations": [
+        {
+          "id": "packed-storage-0",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "packed-storage"
+          ],
+          "requiredAssertionId": "storage/published-cli@1"
+        },
+        {
+          "id": "packed-storage-1",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "packed-storage"
+          ],
+          "requiredAssertionId": "storage/byte-preservation@1"
+        },
+        {
+          "id": "packed-storage-2",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "packed-storage"
+          ],
+          "requiredAssertionId": "storage/explicit-retirement@1"
+        },
+        {
+          "id": "installed-consumer-0",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "installed-consumer"
+          ],
+          "requiredAssertionId": "consumer/package-identity@1"
+        },
+        {
+          "id": "installed-consumer-1",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "installed-consumer"
+          ],
+          "requiredAssertionId": "consumer/executed-tests@1"
+        },
+        {
+          "id": "installed-consumer-2",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "installed-consumer"
+          ],
+          "requiredAssertionId": "consumer/coverage-gate@1"
+        },
+        {
+          "id": "installed-consumer-3",
+          "riskClass": "repository-change",
+          "rationale": "Verify the declared native acceptance contract.",
+          "requiredProducerIds": [
+            "installed-consumer"
+          ],
+          "requiredAssertionId": "consumer/source-integrity@1"
+        },
+        {
+          "id": "solution-coverage-0",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/solution-complete@1"
+        },
+        {
+          "id": "solution-coverage-1",
+          "riskClass": "repository-change",
+          "rationale": "Require full-solution execution and unchanged 95/85 aggregate and patch gates.",
+          "requiredProducerIds": [
+            "solution-coverage"
+          ],
+          "requiredAssertionId": "coverage/thresholds@1"
+        },
+        {
+          "id": "package-checks-0",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/manifest@1"
+        },
+        {
+          "id": "package-checks-1",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/generated-docs@1"
+        },
+        {
+          "id": "package-checks-2",
+          "riskClass": "repository-change",
+          "rationale": "Verify package metadata, generated documentation, archives and installed consumer proofs.",
+          "requiredProducerIds": [
+            "package-checks"
+          ],
+          "requiredAssertionId": "package/archives-and-consumers@1"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "root-readme",
+      "pattern": "README.md",
+      "profileId": "no-evidence",
+      "precedence": 0
+    },
+    {
+      "id": "authored-docs",
+      "pattern": "docs/**/*.md",
+      "profileId": "no-evidence",
+      "precedence": 0
+    },
+    {
+      "id": "guides",
+      "pattern": "guides/**/*.md",
+      "profileId": "no-evidence",
+      "precedence": 0
+    },
+    {
+      "id": "start-here",
+      "pattern": "start-here/**/*.md",
+      "profileId": "no-evidence",
+      "precedence": 0
+    },
+    {
+      "id": "native-recipe",
+      "pattern": "tools/ForgeTrust.AppSurface.Evidence.Validation/README.md",
+      "profileId": "no-evidence",
+      "precedence": 0
+    },
+    {
+      "id": "storage-producer",
+      "pattern": "tools/ForgeTrust.AppSurface.Evidence.Validation/PackedStorageProducer.cs",
+      "profileId": "storage",
+      "precedence": 0
+    },
+    {
+      "id": "consumer-producer",
+      "pattern": "tools/ForgeTrust.AppSurface.Evidence.Validation/InstalledConsumerProducer.cs",
+      "profileId": "consumer",
+      "precedence": 0
+    },
+    {
+      "id": "consumer-options",
+      "pattern": "tools/ForgeTrust.AppSurface.Evidence.Validation/ConsumerValidationOptions.cs",
+      "profileId": "consumer",
+      "precedence": 0
+    },
+    {
+      "id": "consumer-fixture",
+      "pattern": "tools/ForgeTrust.AppSurface.Evidence.Validation/fixtures/**",
+      "profileId": "consumer",
+      "precedence": 0
+    },
+    {
+      "id": "package-index",
+      "pattern": "packages/**",
+      "profileId": "packages",
+      "precedence": 0
+    },
+    {
+      "id": "package-tool",
+      "pattern": "tools/ForgeTrust.AppSurface.PackageIndex/**",
+      "profileId": "packages",
+      "precedence": 0
+    },
+    {
+      "id": "package-readmes",
+      "pattern": "**/README.md",
+      "profileId": "packages",
+      "precedence": -10
+    },
+    {
+      "id": "source-code",
+      "pattern": "**/*.cs",
+      "profileId": "code",
+      "precedence": 0
+    },
+    {
+      "id": "project-files",
+      "pattern": "**/*.csproj",
+      "profileId": "code",
+      "precedence": 0
+    },
+    {
+      "id": "durable-template-tests",
+      "pattern": "Durable/ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/**",
+      "profileId": "code",
+      "precedence": 30
+    },
+    {
+      "id": "unit-tests",
+      "pattern": "**/*.Tests/**",
+      "profileId": "coverage",
+      "precedence": 20
+    },
+    {
+      "id": "integration-tests",
+      "pattern": "**/*.IntegrationTests/**",
+      "profileId": "coverage",
+      "precedence": 20
+    },
+    {
+      "id": "unit-test-readmes",
+      "pattern": "**/*.Tests/README.md",
+      "profileId": "coverage",
+      "precedence": 20
+    },
+    {
+      "id": "integration-test-readmes",
+      "pattern": "**/*.IntegrationTests/README.md",
+      "profileId": "coverage",
+      "precedence": 20
+    },
+    {
+      "id": "test-support",
+      "pattern": "tests/**",
+      "profileId": "coverage",
+      "precedence": 0
+    },
+    {
+      "id": "release-entries",
+      "pattern": "releases/unreleased.entries/**",
+      "profileId": "packages",
+      "precedence": 0
+    },
+    {
+      "id": "web-assets",
+      "pattern": "Web/**",
+      "profileId": "code",
+      "precedence": 10
+    },
+    {
+      "id": "web-unit-tests",
+      "pattern": "Web/**/*.Tests/**",
+      "profileId": "coverage",
+      "precedence": 20
+    },
+    {
+      "id": "web-integration-tests",
+      "pattern": "Web/**/*.IntegrationTests/**",
+      "profileId": "coverage",
+      "precedence": 20
+    },
+    {
+      "id": "web-test-readmes",
+      "pattern": "Web/**/*.Tests/README.md",
+      "profileId": "coverage",
+      "precedence": 20
+    },
+    {
+      "id": "web-integration-test-readmes",
+      "pattern": "Web/**/*.IntegrationTests/README.md",
+      "profileId": "coverage",
+      "precedence": 20
+    },
+    {
+      "id": "web-readmes",
+      "pattern": "Web/**/README.md",
+      "profileId": "packages",
+      "precedence": 0
+    },
+    {
+      "id": "coverage-core",
+      "pattern": "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/**",
+      "profileId": "native-acceptance",
+      "precedence": 0
+    },
+    {
+      "id": "coverage-cli",
+      "pattern": "Cli/ForgeTrust.AppSurface.Cli/**",
+      "profileId": "native-acceptance",
+      "precedence": 0
+    },
+    {
+      "id": "evidence-tool",
+      "pattern": "tools/ForgeTrust.AppSurface.Evidence.Validation/**",
+      "profileId": "native-acceptance",
+      "precedence": 0
+    }
+  ]
+}
