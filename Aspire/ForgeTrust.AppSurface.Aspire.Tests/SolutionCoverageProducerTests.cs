@@ -813,7 +813,7 @@ public sealed class SolutionCoverageProducerTests
             }
             await File.WriteAllTextAsync(Path.Join(output, "composed", "verification.json"), "{\"schemaVersion\":2}");
             async Task<string> Digest(string relative) => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
-                await File.ReadAllBytesAsync(Path.Join(output, relative))));
+                await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, relative))));
             var acceptance = new
             {
                 policyDigest = "policy",
