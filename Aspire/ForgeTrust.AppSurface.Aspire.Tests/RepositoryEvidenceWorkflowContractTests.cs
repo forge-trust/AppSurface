@@ -20,7 +20,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
-    public void NativeCollectorFilterMatchesThePolicyRecordedByTheAdapter()
+    public void NativeCollectorFilterMatchesTheAdapterDeclaration()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var adapter = File.ReadAllLines(Path.Join(repository, "tools",
@@ -31,9 +31,8 @@ public sealed class RepositoryEvidenceWorkflowContractTests
             .Trim().TrimEnd(';'));
         var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
         var collector = FindStep(job["steps"].AsSequence(), "Run coverage security contracts")["run"].AsScalar();
-        var filter = Regex.Match(collector, "--filter\\s+\"([^\"]+)\"");
+        var filter = Assert.Single(Regex.Matches(collector, "--filter\\s+\"([^\"]+)\"").Cast<Match>());
 
-        Assert.True(filter.Success);
         Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
         Assert.Equal(declaredFilter, filter.Groups[1].Value);
     }

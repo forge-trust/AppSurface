@@ -42,6 +42,7 @@ public sealed class CoverageFanInGitPatchPathTests
     [Theory]
     [InlineData("\"src/café-雪.cs\"", "src/café-雪.cs")]
     [InlineData("\"src/caf\\303\\251.cs\"", "src/café.cs")]
+    [InlineData("\"src/\\357\\277\\275.cs\"", "src/�.cs")]
     public void TryDecode_AcceptsUtf8LiteralAndOctalEncodedUnicode(string field, string expectedPath)
     {
         Assert.True(GitPatchPathHeader.TryDecode(field, out var path));
@@ -77,6 +78,17 @@ public sealed class CoverageFanInGitPatchPathTests
     {
         Assert.False(GitPatchPathHeader.TryDecode(field, out _));
         AssertPlannerRejects(field);
+    }
+
+    [Fact]
+    public void ResolvePatch_RejectsInvalidUtf8OctalPathWithThePathDiagnostic()
+    {
+        var patch = Encoding.ASCII.GetBytes("--- /dev/null\n+++ \"b/src/\\377.cs\"\n");
+
+        var error = Assert.Throws<EvidencePlanningException>(() =>
+            new EvidencePlanner().ResolvePatch(CreatePathPolicy(), patch));
+
+        Assert.Equal("ASEVD135", error.Code);
     }
 
     [Fact]

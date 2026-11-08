@@ -1,6 +1,6 @@
 # Issue 897 Python-to-C# test parity audit
 
-This is a source-level retirement audit for [`scripts/tests/test_coverage_fanin.py`](https://github.com/forge-trust/AppSurface/blob/3f9de9d585512dcc546d9d98f2706d0348e8f7e6/scripts/tests/test_coverage_fanin.py). It maps all 41 Python `test_*` methods to the current schema-v2 regressions in the [Coverage CLI test project](https://github.com/forge-trust/AppSurface/tree/main/Cli/ForgeTrust.AppSurface.Cli.Tests) and the related Aspire evidence tests. “Direct” means the inspected C# body asserts the behavior named by the Python test; “Partial” means it asserts a neighboring contract but leaves a specific assertion uncovered; “Changed” means v2 intentionally has a different contract. The initial audit was source-only. Later executable checks and remaining gaps are identified below.
+This is a source-level retirement audit for [`scripts/tests/test_coverage_fanin.py`](https://github.com/forge-trust/AppSurface/blob/3dd5ee652594f3179d654321121100d0baee7063/scripts/tests/test_coverage_fanin.py). It maps all 41 Python `test_*` methods to the current schema-v2 regressions in the [Coverage CLI test project](https://github.com/forge-trust/AppSurface/tree/main/Cli/ForgeTrust.AppSurface.Cli.Tests) and the related Aspire evidence tests. “Direct” means the inspected C# body asserts the behavior named by the Python test; “Partial” means it asserts a neighboring contract but leaves a specific assertion uncovered; “Changed” means v2 intentionally has a different contract. The initial audit was source-only. Later executable checks and remaining gaps are identified below.
 
 `CoverageFanInNativeWorkflowTests.Public_collect_and_capture_runs_primary_and_native_reports_through_strict_normalization` is a real collection fixture for the current host. `CoverageFanInParityTests.PortableThreePlatformCapturesImportComposeAcceptAndVerifyAgainstExactCurrentPolicy` uses portable synthetic captures for Linux, Windows, and Darwin. Neither source body establishes that native tests passed on any runner, much less all three. The historical `EvidenceCoverageFanInTests` suite targets the v1 verifier; its results do not establish v2 parity. `EvidenceCoverageFanInProducerTests` covers the v2 Aspire producer boundary, not shell-wrapper report publication.
 
@@ -61,7 +61,9 @@ matching source, SDK and workflow attempt. The complete primary solution passed 
 composition receipt included all three native captures. The gate accepted the result, and a separate verification
 command checked the composition and gate evidence.
 
-That evidence qualified the [Python producer](https://github.com/forge-trust/AppSurface/blob/b878b4b8d418bc4e21ce43a341c396d64c3cff28/scripts/coverage_fanin.py) and its mapped tests for retirement.
+That evidence qualified the [Python producer](https://github.com/forge-trust/AppSurface/blob/3dd5ee652594f3179d654321121100d0baee7063/scripts/coverage_fanin.py) and its mapped tests for retirement.
 The v1 verifier remains available for historical evidence. These qualifying runs predate deletion of the Python
 files; native package and repository validation must also pass on the final pull request head. The installed-package
 fixture demonstrates the workflow in an isolated solution. Adoption by a real downstream project is deferred.
+
+An earlier full-suite observation recorded a roughly 994-second hang in `Public_collect_and_capture_runs_primary_and_native_reports_through_strict_normalization`. It was not reproduced in the qualifying runs linked above; those successes do not establish that earlier hang's root cause.

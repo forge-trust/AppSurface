@@ -250,6 +250,7 @@ extend the existing aggregate and patch gates without changing their thresholds 
 [issue #897 design](./docs/designs/issue-897-native-coverage-fan-in.md) and
 [test parity audit](./docs/plans/issue-897-test-parity.md) record the migration contract and evidence limits;
 the audit links the Linux, Windows and macOS runs that qualified the legacy producer for removal.
+Those runs predate the deletion commit; the final pull request head must also pass the validation gates.
 
 The repository lane requires a non-sandboxed host by default. Set
 `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check
