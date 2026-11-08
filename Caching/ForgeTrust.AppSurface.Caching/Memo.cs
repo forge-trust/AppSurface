@@ -13,6 +13,7 @@ public sealed class Memo : IMemo, IDisposable
 {
     private readonly IMemoryCache _cache;
     private readonly ConcurrentDictionary<object, SemaphoreSlim> _locks = new();
+    private readonly ConcurrentDictionary<Task, byte> _backgroundRefreshes = new();
     private readonly TimeSpan _failureCacheDuration;
     private readonly Func<DateTimeOffset> _utcNow;
     private int _disposed;
@@ -95,7 +96,24 @@ public sealed class Memo : IMemo, IDisposable
     /// Thrown when <paramref name="failureCacheDuration"/> is less than or equal to <see cref="TimeSpan.Zero"/>.
     /// </exception>
     public Memo(IMemoryCache cache, TimeSpan failureCacheDuration)
-        : this(cache, failureCacheDuration, static () => DateTimeOffset.UtcNow)
+        : this(cache, failureCacheDuration, TimeProvider.System)
+    {
+    }
+
+    /// <summary>Initializes memoization with an explicit clock for absolute freshness and stale-window comparisons.</summary>
+    /// <param name="cache">The borrowed cache; its expiration clock must use the same time source.</param>
+    /// <param name="failureCacheDuration">The positive duration for caching a failed caller refresh.</param>
+    /// <param name="timeProvider">The clock used when storing and reading stale-while-revalidate timestamps.</param>
+    /// <exception cref="ArgumentNullException">The cache or clock is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The failure duration is not positive.</exception>
+    /// <remarks>
+    /// Existing constructors use <see cref="TimeProvider.System"/>. This overload does not replace the
+    /// underlying cache's expiration clock, create timers, or change any cache policy or cancellation token.
+    /// A custom clock must advance monotonically and be shared with the underlying cache. Use it for
+    /// deterministic fresh/stale/expired transitions, rather than relying on wall-clock scheduling delays.
+    /// </remarks>
+    public Memo(IMemoryCache cache, TimeSpan failureCacheDuration, TimeProvider timeProvider)
+        : this(cache, failureCacheDuration, GetUtcNow(cache, timeProvider), nameof(timeProvider))
     {
     }
 
@@ -107,9 +125,18 @@ public sealed class Memo : IMemo, IDisposable
     /// <exception cref="ArgumentOutOfRangeException">The failure duration is not positive.</exception>
     /// <remarks>This internal seam changes time observation only, never freshness, stale or failure durations.</remarks>
     internal Memo(IMemoryCache cache, TimeSpan failureCacheDuration, Func<DateTimeOffset> utcNow)
+        : this(cache, failureCacheDuration, utcNow, nameof(utcNow))
+    {
+    }
+
+    private Memo(
+        IMemoryCache cache,
+        TimeSpan failureCacheDuration,
+        Func<DateTimeOffset> utcNow,
+        string clockParameterName)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
+        _utcNow = utcNow ?? throw new ArgumentNullException(clockParameterName);
 
         if (failureCacheDuration <= TimeSpan.Zero)
         {
@@ -120,6 +147,13 @@ public sealed class Memo : IMemo, IDisposable
         }
 
         _failureCacheDuration = failureCacheDuration;
+    }
+
+    private static Func<DateTimeOffset> GetUtcNow(IMemoryCache cache, TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        return timeProvider.GetUtcNow;
     }
 
     // ── Zero arguments ──────────────────────────────────────────────────
@@ -1060,12 +1094,39 @@ public sealed class Memo : IMemo, IDisposable
         }
     }
 
-    private static void ObserveBackgroundRefresh(Task refreshTask)
+    /// <summary>Joins a snapshot of background refreshes already observed by completed stale reads.</summary>
+    /// <param name="cancellationToken">Cancels only this wait, without cancelling or detaching an original refresh.</param>
+    /// <returns>A task completing after every refresh in the snapshot has reached its original terminal state.</returns>
+    /// <exception cref="ObjectDisposedException">The memo has already been disposed.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    /// <remarks>
+    /// A joined refresh may have failed; stale-refresh errors remain observed, and expired callers still
+    /// receive their own factory failures. Stop new reads and await their accepted calls before using this
+    /// method for shutdown, then dispose the memo/cache. Refreshes registered later are not in this snapshot.
+    /// This method creates no timeout, changes no cache window and never supplies a successful cached value.
+    /// </remarks>
+    public Task DrainBackgroundRefreshesAsync(CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        var pending = _backgroundRefreshes.Keys.Select(static refresh => refresh.ContinueWith(
+            static completed => { _ = completed.Exception; },
+            CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default)).ToArray();
+        return Task.WhenAll(pending).WaitAsync(cancellationToken);
+    }
+
+    private void ObserveBackgroundRefresh(Task refreshTask)
+    {
+        _backgroundRefreshes.TryAdd(refreshTask, 0);
         _ = refreshTask.ContinueWith(
-            static task => _ = task.Exception,
+            static (task, state) =>
+            {
+                _ = task.Exception;
+                ((ConcurrentDictionary<Task, byte>)state!).TryRemove(task, out _);
+            },
+            _backgroundRefreshes,
             CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
     }
 

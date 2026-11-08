@@ -35,6 +35,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # Packed Cloud Tasks isolation proof archives the pinned baseline commit.
 
       - name: Verify package runner preparation guards
         run: python3 .github/tests/package_runner_capacity_tests.py
@@ -119,6 +120,7 @@ jobs:
             ${{ runner.temp }}/package-artifacts/package-validation-report.md
             ${{ runner.temp }}/package-artifacts/durable-template-consumer-proof.json
             ${{ runner.temp }}/package-artifacts/tailwind-package-consumer-proof.md
+            ${{ runner.temp }}/package-artifacts/cloudtasks-package-consumer-proof.md
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.md
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.evidence.json
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/NuGet.tool.config

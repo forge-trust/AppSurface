@@ -880,6 +880,7 @@ public sealed class DurableSchemaCommandTests
             .WithDatabase("appsurface_durable")
             .WithUsername("appsurface")
             .WithPassword("appsurface-test-password")
+            .WithCreateParameterModifier(PostgreSqlTestPortBindings.BindLocalDaemonToLoopback)
             .Build();
         await container.StartAsync();
 

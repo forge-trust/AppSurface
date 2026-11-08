@@ -224,6 +224,27 @@ public sealed class DocRouteIdentityCatalogTests
         Assert.Contains("literal-route.md", diagnostic.Cause, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void BuildRouteManifest_ShouldSkipRecoveryAliasesForReservedSourcePaths()
+    {
+        var catalog = CreateCatalog(
+            new DocNode(
+                "Guide",
+                "versions/switch/guide.md",
+                "<p>Guide</p>",
+                Metadata: new DocMetadata { CanonicalSlug = "guides/guide" }));
+
+        var manifest = catalog.BuildRouteManifest();
+
+        var guide = Assert.Single(manifest.Entries, entry => entry.SourcePath == "versions/switch/guide.md");
+        Assert.Equal("guides/guide", guide.CanonicalRoutePath);
+        Assert.Empty(guide.RecoveryAliases);
+        Assert.Equal(DocRouteResolutionKind.ReservedRoute, catalog.ResolvePublicRoute("versions/switch/guide.md").Kind);
+        Assert.DoesNotContain(
+            manifest.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocImplicitRecoveryAliasCollision);
+    }
+
     [Theory]
     [InlineData("_harvest")]
     [InlineData("_harvest/rebuild")]

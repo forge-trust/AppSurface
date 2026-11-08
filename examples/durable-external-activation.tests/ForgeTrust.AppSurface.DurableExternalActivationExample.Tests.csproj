@@ -35,6 +35,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Durable.CloudTasks.Tests" />
     <Using Include="Xunit" />
   </ItemGroup>
 

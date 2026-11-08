@@ -38,7 +38,7 @@ export class DialogResponseManager {
     private renderQueue: Promise<void> = Promise.resolve();
     private generation = 0;
 
-    constructor(private turbo: DialogTurbo | null) { }
+    constructor(private turbo: DialogTurbo | null, private beginStreamMutation?: (stream: Element) => (() => void) | undefined) { }
 
     /** Installs Turbo hooks once, alongside the core form-failure manager. */
     start() {
@@ -156,7 +156,9 @@ export class DialogResponseManager {
                 await before;
                 try {
                     if (generation !== this.generation || !this.allowTarget(element)) return;
-                    await selectedRender(element);
+                    const finish = this.beginStreamMutation?.(element);
+                    try { await selectedRender(element); }
+                    finally { finish?.(); }
                     this.focusValidation(element);
                 } finally { release(); }
             };

@@ -319,7 +319,13 @@ public sealed record EvidencePolicy(
     string Version,
     string ConservativeProfileId,
     IReadOnlyList<EvidenceProfile> Profiles,
-    IReadOnlyList<EvidencePolicyRule> Rules);
+    IReadOnlyList<EvidencePolicyRule> Rules)
+{
+    /// <summary>Combines distinct profiles selected by matched paths into one closed profile.</summary>
+    /// <remarks>Defaults to <see langword="false"/>, preserving the conservative fallback for multi-profile selections and omitting the property from canonical JSON.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool CombineProfiles { get; init; }
+}
 
 /// <summary>
 /// Captures the immutable result of policy resolution before resource or producer execution.

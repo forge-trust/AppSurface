@@ -19,3 +19,6 @@ docs/designs/issue-765-deterministic-retry-plans-autoplan.md|Runnable|2027-10-05
 docs/designs/issue-765-deterministic-retry-plans-autoplan.md|runnable|2027-10-05|Historical workspace paths retained in the approved plan and review record; not current product branding.
 docs/designs/issue-765-deterministic-retry-plans.md|runnable|2027-10-05|Historical workspace paths retained in the approved design record; not current product branding.
 .github/plans/issue-765-completion-audit.md|runnable|2027-10-05|Historical local worktree path retained as validation provenance; not current product branding.
+docs/designs/issue-183-concept-preserving-version-switching.md|Runnable|2027-11-01|Historical external review artifact paths retained as approval provenance; not current product branding.
+docs/designs/issue-183-concept-preserving-version-switching.md|runnable|2027-11-01|Historical workspace paths and ordinary executable-fixture wording retained in the approved plan and review record.
+docs/designs/issue-183-office-hours-report.md|Runnable|2027-11-01|Historical external review artifact paths retained in the approved office-hours record; not current product branding.

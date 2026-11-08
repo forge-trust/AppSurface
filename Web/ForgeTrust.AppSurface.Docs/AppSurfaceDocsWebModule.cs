@@ -174,7 +174,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             docsUrlBuilder.PublicOrigin,
             options.Versioning.MaxRewrittenFileSizeBytes,
             app.ApplicationServices.GetService<ILogger<AppSurfaceDocsPublishedTreeHandler>>(),
-            catalog.IsAliasNamespaceActive);
+            catalog.IsAliasNamespaceActive,
+            catalog.ConceptSwitching);
         if (catalog.IsAliasNamespaceActive)
         {
             app.UseAppSurfaceDocsAliases();
@@ -1034,6 +1035,9 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var versionRoot = $"{versionPrefix}/{{version}}";
         MapNamedPublishedTreeEndpoint(versionRoot);
         MapNamedPublishedTreeEndpoint($"{versionRoot}/{{**path}}");
+        MapNamedPublishedTreeEndpoint(TrimLeadingSlash(DocsUrlBuilder.JoinPath(urls.RouteRootPath, "versions/switch/{sourceKey}.html")));
+        MapNamedPublishedTreeEndpoint(TrimLeadingSlash(DocsUrlBuilder.JoinPath(urls.RouteRootPath, "versions/switch/runtime.js")));
+        MapNamedPublishedTreeEndpoint(TrimLeadingSlash(DocsUrlBuilder.JoinPath(urls.RouteRootPath, "versions/switch/switch.css")));
 
         void MapNamedPublishedTreeEndpoint(string pattern)
         {

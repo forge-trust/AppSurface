@@ -2,6 +2,13 @@
 
 For a checked-in executable example, see [native EvidenceHost acceptance](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). AppSurface uses that recipe to validate its packed storage CLI and installed-package consumer through the same explicit producer contracts available to applications.
 
+Its [shared local and CI policy recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development)
+shows the full changed-path selection loop: real PR diff, checked-in policy, selected coverage, package and native producers,
+retained plan and artifacts, and a gate that verifies the final manifest. The local command also includes
+staged, unstaged and untracked edits and skips native packing when it is unnecessary. Mixed profiles
+combine their required producers rather than forcing the full conservative set. Use `--scope coverage`
+or `--scope packages` to reproduce one CI lane locally; default `all` verifies the complete selection.
+
 This cookbook turns the [EvidenceHost guide](../start-here/evidencehost.md) into concrete CI patterns. The goal is not a higher coverage number. The goal is a visible, truthful claim that the changed risk was mediated.
 
 ## Documentation-only change

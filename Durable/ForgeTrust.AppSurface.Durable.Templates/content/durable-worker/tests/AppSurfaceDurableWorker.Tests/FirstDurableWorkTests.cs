@@ -68,7 +68,7 @@ public sealed class FirstDurableWorkTests
             var dispatcherConnection = fixture.DispatcherConnectionString;
             var runtimeConnection = fixture.RuntimeConnectionString;
             var activityExporter = new ActivityExporter();
-            var builder = WorkerApplication.CreateBuilder(["--urls", "http://127.0.0.1:0"]);
+            var builder = WorkerApplication.CreateBuilder(["--urls", "http://127.0.0.1:0", "--hostBuilder:reloadConfigOnChange=false"]);
             builder.Environment.EnvironmentName = Environments.Development;
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -595,7 +595,7 @@ public sealed class GeneratedActivationConcurrencyTests
             for (var host = 0; host < hostCount; host++)
             {
                 phase = "host-startup";
-                var builder = WorkerApplication.CreateBuilder(["--urls", "http://127.0.0.1:0"]);
+                var builder = WorkerApplication.CreateBuilder(["--urls", "http://127.0.0.1:0", "--hostBuilder:reloadConfigOnChange=false"]);
                 builder.Environment.EnvironmentName = Environments.Development;
                 builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {

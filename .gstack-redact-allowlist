@@ -1,0 +1,4 @@
+# Known-benign negative-test matches only; no actual credential or network access.
+# AcquisitionBoundaryTests rejects this embedded-userinfo authority before transport.
+https://user:password@repo.example.test
+password@repo.example.test

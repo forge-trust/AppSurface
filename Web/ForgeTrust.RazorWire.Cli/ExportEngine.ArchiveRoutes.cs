@@ -343,6 +343,11 @@ public partial class ExportEngine
         var aliasOwnerByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var mapping in mappings)
         {
+            if (IsReservedVersionSwitchRoute(mapping.CanonicalRoutePath))
+            {
+                ThrowArchiveRouteMappingFailure(context, "reserved-switch-namespace", mapping.Index);
+            }
+
             if (!canonicalOwnerByPath.TryAdd(mapping.CanonicalRoutePath, mapping.Index))
             {
                 ThrowArchiveRouteMappingFailure(context, "canonical-route-collision", mapping.Index);
@@ -353,6 +358,11 @@ public partial class ExportEngine
         {
             foreach (var aliasPath in mapping.AliasPaths)
             {
+                if (IsReservedVersionSwitchRoute(aliasPath))
+                {
+                    ThrowArchiveRouteMappingFailure(context, "reserved-switch-namespace", mapping.Index);
+                }
+
                 if (canonicalOwnerByPath.ContainsKey(aliasPath)
                     || !aliasOwnerByPath.TryAdd(aliasPath, mapping.Index))
                 {
@@ -380,6 +390,14 @@ public partial class ExportEngine
                 ThrowArchiveRouteMappingFailure(context, "artifact-canonical-collision", mapping.Index);
             }
         }
+    }
+
+    private static bool IsReservedVersionSwitchRoute(string routePath)
+    {
+        var fragmentIndex = routePath.IndexOf('#', StringComparison.Ordinal);
+        var logicalRoute = fragmentIndex < 0 ? routePath : routePath[..fragmentIndex];
+        return string.Equals(logicalRoute, "versions/switch", StringComparison.OrdinalIgnoreCase)
+               || logicalRoute.StartsWith("versions/switch/", StringComparison.OrdinalIgnoreCase);
     }
 
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]

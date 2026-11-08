@@ -36,6 +36,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Theming/ForgeTrust.AppSurface.Theming.csproj" />
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />

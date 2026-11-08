@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
@@ -10,6 +11,12 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 {
     private readonly string _root = CreatePrivateTestRoot();
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+    public DurableTemplateNativePostgreSqlTests(Xunit.Abstractions.ITestOutputHelper output)
+    {
+        _output = output;
+    }
 
     [Fact]
     public async Task StartProvesPrivateScramClusterAndProjectsSecretOnlyToPsqlEnvironment()
@@ -582,15 +589,14 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
             return;
         }
 
-        var scriptPath = Path.Join(_root, "cancel-initdb.sh");
-        var startedPath = Path.Join(_root, "cancel-initdb.started");
-        WriteExecutableScript(scriptPath,
-            "#!/bin/sh\n"
-            + "echo started > \"" + startedPath + "\"\n"
-            + "exec \"" + sleepPath + "\" 60\n");
+        // RunAsync starts the real child synchronously before yielding. This test
+        // cancels that live child; shell startup and marker polling are separate
+        // fixture concerns and can complete before the cancellation is exercised.
         var terminationVerified = false;
+        var liveProcessObserved = false;
         var runner = new NativePostgreSqlBootstrapRunner(async process =>
         {
+            liveProcessObserved = !process.HasExited;
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
@@ -602,18 +608,17 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         });
         using var cancellation = new CancellationTokenSource();
         var runTask = runner.RunAsync(
-            new NativePostgreSqlBootstrapRequest(scriptPath, [], _root, string.Empty, 3_000),
+            new NativePostgreSqlBootstrapRequest(sleepPath, ["60"], _root, string.Empty, 3_000),
             cancellation.Token);
 
         try
         {
-            Assert.True(
-                await WaitForFileAsync(startedPath, runTask, TimeSpan.FromSeconds(3)),
-                "The bootstrap shim did not start before the test deadline.");
+            Assert.False(runTask.IsCompleted, "The blocking bootstrap child exited before cancellation.");
             cancellation.Cancel();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
 
+            Assert.True(liveProcessObserved);
             Assert.True(terminationVerified);
         }
         finally
@@ -972,7 +977,25 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
                 new DateTimeOffset(process.StartTime.ToUniversalTime()).ToUnixTimeSeconds());
             File.WriteAllText(pidPath, RenderPostmasterPid(identity, dataDirectory, port));
 
-            Assert.Equal(identity, runtime.FindOwnedPostmaster(dataDirectory, executablePath, port));
+            var observedIdentity = runtime.FindOwnedPostmaster(dataDirectory, executablePath, port);
+            if (observedIdentity != identity)
+            {
+                // Failure-only evidence: never retry ownership verification or change its verdict.
+                try
+                {
+                    using var observation = Process.GetProcessById(process.Id);
+                    var exited = observation.HasExited;
+                    _output.WriteLine($"Owned process identity mismatch: expected={identity}; observed={observedIdentity}; exited={exited}; "
+                        + (exited
+                            ? $"exit-code={observation.ExitCode}"
+                            : $"name={observation.ProcessName}; executable={observation.MainModule?.FileName}; start={new DateTimeOffset(observation.StartTime.ToUniversalTime()).ToUnixTimeSeconds()}"));
+                }
+                catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    _output.WriteLine($"Owned process identity mismatch: expected={identity}; observed={observedIdentity}; diagnostic={exception.GetType().Name}");
+                }
+            }
+            Assert.Equal(identity, observedIdentity);
             Assert.True(runtime.IsSameProcessAlive(identity, executablePath));
             Assert.False(runtime.IsSameProcessAlive(
                 identity with { StartTimeUnixSeconds = identity.StartTimeUnixSeconds + 100 },
@@ -1613,30 +1636,60 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     [Fact]
     public async Task RelocatedOwnedParentRefusesStopUntilTheExactAncestorIsRestored()
     {
-        var parentPath = Path.Join(_root, "owned-parent");
-        Directory.CreateDirectory(parentPath);
-        using var fixture = new NativeClusterFixture(parentPath);
-        var cluster = await fixture.StartAsync();
-        var relocatedParent = Path.Join(_root, "relocated-parent");
-        Directory.Move(parentPath, relocatedParent);
+        // Keep PostgreSQL's socket path short even when the test runner uses a deeply nested TMPDIR.
+        var testRoot = OperatingSystem.IsLinux() ? CreatePrivateTestRoot("/tmp") : _root;
+        var ownsTestRoot = !StringComparer.Ordinal.Equals(testRoot, _root);
+        var parentPath = Path.Join(testRoot, "owned-parent");
         try
         {
-            var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(500).AsTask());
+            Directory.CreateDirectory(parentPath);
+            using (var fixture = new NativeClusterFixture(parentPath))
+            {
+                var cluster = await fixture.StartAsync();
+                if (!OperatingSystem.IsWindows())
+                {
+                    foreach (var port in new[] { 5432, 65535 })
+                    {
+                        var socketPath = Path.Join(cluster.OwnedRoot, "socket", $".s.PGSQL.{port}");
+                        Assert.True(Encoding.UTF8.GetByteCount(socketPath) <= 103,
+                            $"Socket path is {Encoding.UTF8.GetByteCount(socketPath)} bytes: {socketPath}");
+                    }
+                }
+                var relocatedParent = Path.Join(testRoot, "relocated-parent");
+                Directory.Move(parentPath, relocatedParent);
+                try
+                {
+                    var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(500).AsTask());
 
-            Assert.Equal("Native PostgreSQL owned root has a missing or reparse-point ancestor.", error.Message);
-            Assert.True(fixture.Runtime.ServerRunning);
-            Assert.True(Directory.Exists(Path.Join(relocatedParent, Path.GetFileName(cluster.OwnedRoot))));
-            Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+                    Assert.Equal("Native PostgreSQL owned root has a missing or reparse-point ancestor.", error.Message);
+                    Assert.True(fixture.Runtime.ServerRunning);
+                    Assert.True(Directory.Exists(Path.Join(relocatedParent, Path.GetFileName(cluster.OwnedRoot))));
+                    Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+                }
+                finally
+                {
+                    Directory.Move(relocatedParent, parentPath);
+                    await cluster.DisposeWithBudgetAsync(2_000);
+                }
+
+                Assert.False(fixture.Runtime.ServerRunning);
+                Assert.False(Directory.Exists(cluster.OwnedRoot));
+                Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+            }
         }
         finally
         {
-            Directory.Move(relocatedParent, parentPath);
-            await cluster.DisposeWithBudgetAsync(2_000);
+            if (ownsTestRoot && Directory.Exists(parentPath)
+                && !Directory.EnumerateFileSystemEntries(parentPath).Any())
+            {
+                Directory.Delete(parentPath);
+            }
+            if (ownsTestRoot && Directory.Exists(testRoot)
+                && !Directory.EnumerateFileSystemEntries(testRoot).Any())
+            {
+                Directory.Delete(testRoot);
+            }
         }
-
-        Assert.False(fixture.Runtime.ServerRunning);
-        Assert.False(Directory.Exists(cluster.OwnedRoot));
-        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
     }
 
     [Fact]
@@ -2240,9 +2293,10 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         }
     }
 
-    private static string CreatePrivateTestRoot()
+    private static string CreatePrivateTestRoot(string? temporaryOverride = null)
     {
-        var temporary = OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
+        var temporary = temporaryOverride
+            ?? (OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath()));
         var root = Path.Join(temporary, "apg" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(root);
         if (!OperatingSystem.IsWindows())

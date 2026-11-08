@@ -620,6 +620,16 @@ internal sealed partial class ReleaseDocsPublicationCommand : ReleaseCommandBase
     public string? ExpectedReleaseManifestSha256 { get; set; }
 
     /// <summary>
+    /// Gets the UTF-8 byte budget for each rewritten artifact generated or verified by docs publication.
+    /// </summary>
+    /// <remarks>
+    /// The same limit applies to existing rewritten HTML/search input, concept identity files, and each complete static switch
+    /// artifact. Raising it changes all of those limits together. Values must remain between 1 byte and 32 MiB.
+    /// </remarks>
+    [CommandOption("max-rewritten-file-size-bytes", Description = "Per-artifact UTF-8 limit for rewritten docs and switch output (default: 4194304; range: 1..33554432).")]
+    public long MaxRewrittenFileSizeBytes { get; set; } = ReleaseDocsPublication.DefaultMaxRewrittenFileSizeBytes;
+
+    /// <summary>
     /// Gets whether stable docs publication should promote the version to recommendedVersion.
     /// </summary>
     /// <remarks>
@@ -682,7 +692,8 @@ internal sealed partial class ReleaseDocsPublicationCommand : ReleaseCommandBase
                 ResolveRequiredPath(options.RepositoryRoot, PlanOutputPath, "release-docs-publication-plan-output-required", "--plan-output"),
                 ResolveOptionalPath(options.RepositoryRoot, SummaryOutputPath),
                 ExpectedReleaseManifestSha256,
-                ResolvePromoteRecommended());
+                ResolvePromoteRecommended(),
+                MaxRewrittenFileSizeBytes);
             var publication = new ReleaseDocsPublication(new ReleaseWorkspace(options.RepositoryRoot));
             var plan = await publication.CreateAsync(request, cancellationToken);
             await ReleaseDocsPublication.WriteOutputsAsync(plan, options.GitHubOutputPath, cancellationToken);

@@ -597,6 +597,13 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("publish-github-release:", publish, StringComparison.Ordinal);
         Assert.Contains("--dry-run", publish, StringComparison.Ordinal);
         Assert.Contains("docs-publication", publish, StringComparison.Ordinal);
+        Assert.Contains("--max-rewritten-file-size-bytes \"${max_rewritten_file_size_bytes}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("MAX_REWRITTEN_FILE_SIZE_BYTES: ${{ steps.docs.outputs.max_rewritten_file_size_bytes }}", publish, StringComparison.Ordinal);
+        Assert.Contains("--max-rewritten-file-size-bytes \"${MAX_REWRITTEN_FILE_SIZE_BYTES}\"", publish, StringComparison.Ordinal);
+        Assert.True(
+            publish.IndexOf("Create docs publication plan", StringComparison.Ordinal)
+                < publish.IndexOf("Create or reuse draft release and upload docs assets", StringComparison.Ordinal),
+            "Static publication validation must complete before the workflow uploads docs assets.");
         Assert.Contains("dotnet build ForgeTrust.AppSurface.slnx -c Release", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("dotnet build AppSurface.slnx", publish, StringComparison.Ordinal);
         Assert.Contains("Normalize release base ref", publish, StringComparison.Ordinal);

@@ -8,6 +8,31 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 public sealed class DocMetadataFactoryTests
 {
     [Fact]
+    public void CreateMarkdownMetadata_ShouldPreserveConceptIdThroughDefaultReconstruction()
+    {
+        var metadata = DocMetadataFactory.CreateMarkdownMetadata(
+            "guides/setup.md",
+            "Setup",
+            new DocMetadata { ConceptId = "guides.configuration.setup" },
+            null);
+
+        Assert.Equal("guides.configuration.setup", metadata.ConceptId);
+    }
+
+    [Fact]
+    public void CreateMarkdownMetadata_ShouldPreserveInvalidConceptIdAsFailureEvidence()
+    {
+        var metadata = DocMetadataFactory.CreateMarkdownMetadata(
+            "guides/setup.md",
+            "Setup",
+            new DocMetadata { ConceptIdIsInvalid = true },
+            null);
+
+        Assert.Null(metadata.ConceptId);
+        Assert.True(metadata.ConceptIdIsInvalid);
+    }
+
+    [Fact]
     public void CreateMarkdownMetadata_ShouldSetResolvedTitle_AndBuildBreadcrumbsFromMergedNavGroup()
     {
         var metadata = DocMetadataFactory.CreateMarkdownMetadata(

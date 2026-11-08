@@ -449,15 +449,7 @@ public sealed class NativeConsumerTamperTests
 
     private static void DeleteFixture(string parent)
     {
-        // Only this test's fresh root is eligible; Git marks its object files
-        // read-only on Windows, which otherwise masks the journey assertions.
-        foreach (var path in Directory.EnumerateFiles(parent, "*", SearchOption.AllDirectories))
-        {
-            var attributes = File.GetAttributes(path);
-            if (attributes.HasFlag(FileAttributes.ReadOnly))
-                File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
-        }
-        Directory.Delete(parent, recursive: true);
+        NativeEvidenceTestDirectory.Delete(parent);
     }
 
     private static async Task<Candidate> PrepareCandidateAsync(string repository, string parent, string dotnet)

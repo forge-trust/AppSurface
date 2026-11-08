@@ -163,7 +163,8 @@ internal static class ReleaseArchiveManifestWriter
             }
 
             if (segment.StartsWith(".", StringComparison.Ordinal)
-                && !string.Equals(path, ".appsurface-docs-route-manifest.json", StringComparison.Ordinal))
+                && !string.Equals(path, ".appsurface-docs-route-manifest.json", StringComparison.Ordinal)
+                && !string.Equals(path, ".appsurface-docs-concepts.json", StringComparison.Ordinal))
             {
                 return false;
             }

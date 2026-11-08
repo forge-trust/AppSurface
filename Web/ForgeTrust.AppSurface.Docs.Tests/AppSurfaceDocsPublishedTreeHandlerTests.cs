@@ -1243,6 +1243,28 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldServeNestedStylesheetsOnlyWhenExactBytesAreVerified()
+    {
+        // Regression: issue183 QA found root-export stylesheet URLs were denied after mounted rewriting.
+        const string path = "css/site.gen.css";
+        const string css = "body { color: navy; }";
+        var file = new TestFileInfo(path, Encoding.UTF8.GetByteCount(css),
+            () => new MemoryStream(Encoding.UTF8.GetBytes(css)));
+        var provider = new TestFileProvider((path, file));
+        var handler = CreateHandler([CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFileFromText(path, css))]);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/" + path);
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal("text/css", request.Response.ContentType);
+        Assert.Equal(css, ReadBody(request));
+
+        var tampered = new TestFileInfo(path, Encoding.UTF8.GetByteCount(css),
+            () => new MemoryStream(Encoding.UTF8.GetBytes("body { color: pink; }")));
+        var badProvider = new TestFileProvider((path, tampered));
+        var badHandler = CreateHandler([CreateVerifiedTestMount("/docs/v/1.2.3", badProvider, CreateArchiveFileFromText(path, css))]);
+        Assert.False(await badHandler.TryHandleAsync(CreateContext(HttpMethods.Get, "/docs/v/1.2.3/" + path)));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldNotApplyRewriteLimitToStaticAssets()
     {
         var fileInfo = new TestFileInfo(

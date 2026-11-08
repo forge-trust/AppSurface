@@ -10,6 +10,7 @@ using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -17,6 +18,15 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public class DocAggregatorTests : IDisposable
 {
+    private sealed class CacheClock : ISystemClock
+    {
+        private long _ticks = DateTimeOffset.UnixEpoch.Ticks;
+
+        public DateTimeOffset UtcNow => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+
+        public void Advance(TimeSpan elapsed) => Interlocked.Add(ref _ticks, elapsed.Ticks);
+    }
+
     private readonly IDocHarvester _harvesterFake;
     private readonly AppSurfaceDocsOptions _options;
     private readonly IWebHostEnvironment _envFake;
@@ -89,6 +99,183 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal("Fresh", secondResult.First().Title);
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
             .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldProjectActualMarkdownAuthoringAndKeepInvalidPrimaryEvidence()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_ConceptAuthoring",
+            Guid.NewGuid().ToString("N"));
+        var guidesRoot = TestPathUtils.PathUnder(repositoryRoot, "guides");
+        Directory.CreateDirectory(guidesRoot);
+        try
+        {
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "inline.md"),
+                "---\nconcept_id: guides.inline.primary\n---\n# Inline\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "inline.md.yml"),
+                "concept_id: guides.inline.sidecar\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "invalid-primary.md"),
+                "---\nconcept_id: 123\n---\n# Invalid Primary\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "invalid-primary.md.yml"),
+                "concept_id: guides.invalid.fallback\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "sidecar-only.md"),
+                "# Sidecar Only\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "sidecar-only.md.yml"),
+                "concept_id: guides.sidecar.only\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "absent.md"),
+                "# Absent\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "unsafe.md"),
+                "---\nconcept_id: '../private'\n---\n# Unsafe\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "duplicate-one.md"),
+                "---\nconcept_id: guides.shared\n---\n# Duplicate One\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "duplicate-two.md"),
+                "---\nconcept_id: guides.shared\n---\n# Duplicate Two\n");
+
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot }
+            };
+            var harvester = new MarkdownHarvester(
+                NullLogger<MarkdownHarvester>.Instance,
+                File.ReadAllTextAsync,
+                options);
+            var aggregator = new DocAggregator(
+                [harvester],
+                options,
+                _envFake,
+                _memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var pages = await aggregator.GetConceptExportPagesAsync();
+
+            var inline = Assert.Single(pages, page => page.Title == "Inline");
+            Assert.Equal("guides.inline.primary", inline.ConceptId);
+            Assert.False(inline.ConceptIdIsInvalid);
+
+            var invalidPrimary = Assert.Single(pages, page => page.Title == "Invalid Primary");
+            Assert.Null(invalidPrimary.ConceptId);
+            Assert.True(invalidPrimary.ConceptIdIsInvalid);
+
+            var sidecarOnly = Assert.Single(pages, page => page.Title == "Sidecar Only");
+            Assert.Equal("guides.sidecar.only", sidecarOnly.ConceptId);
+            Assert.False(sidecarOnly.ConceptIdIsInvalid);
+
+            var absent = Assert.Single(pages, page => page.Title == "Absent");
+            Assert.Null(absent.ConceptId);
+            Assert.False(absent.ConceptIdIsInvalid);
+
+            var unsafeId = Assert.Single(pages, page => page.Title == "Unsafe");
+            Assert.Null(unsafeId.ConceptId);
+            Assert.True(unsafeId.ConceptIdIsInvalid);
+
+            var duplicateIds = pages.Where(page => page.ConceptId == "guides.shared").ToArray();
+            Assert.Equal(2, duplicateIds.Length);
+            Assert.Equal(["Duplicate One", "Duplicate Two"], duplicateIds.Select(page => page.Title).Order().ToArray());
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldUseNodeTitleAndRejectUnexpectedRawConceptIds()
+    {
+        var node = new DocNode(
+            "Node title fallback",
+            "guides/plugin-page.md",
+            "<p>Content</p>",
+            Metadata: new DocMetadata { ConceptId = "../private" });
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([node]);
+
+        var page = Assert.Single(await _aggregator.GetConceptExportPagesAsync());
+
+        Assert.Equal("Node title fallback", page.Title);
+        Assert.Null(page.ConceptId);
+        Assert.True(page.ConceptIdIsInvalid);
+    }
+
+    [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldPreferAuthoredMetadataTitleOverNodeTitle()
+    {
+        var node = new DocNode(
+            "Node title",
+            "guides/metadata-title.md",
+            "<p>Content</p>",
+            Metadata: new DocMetadata { Title = "  Authored metadata title  " });
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([node]);
+
+        var page = Assert.Single(await _aggregator.GetConceptExportPagesAsync());
+
+        Assert.Equal("Authored metadata title", page.Title);
+    }
+
+    [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldUseLocalizedTitleAndLocaleFromResolvedVariant()
+    {
+        var node = new DocNode(
+            "Node title",
+            "guides/localized-title.md",
+            "<p>Content</p>",
+            Metadata: new DocMetadata
+            {
+                Title = "Authored metadata title",
+                Localization = new DocLocalizationMetadata
+                {
+                    Locale = "fr",
+                    TranslationKey = "guides.localized-title",
+                    LocalizedTitle = "Titre localisé"
+                }
+            });
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([node]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Localization = AppSurfaceDocsLocalizationFixture.CreateOptions()
+        };
+        var aggregator = new DocAggregator(
+            [_harvesterFake],
+            options,
+            _envFake,
+            _memo,
+            _sanitizerFake,
+            _loggerFake);
+
+        var page = Assert.Single(await aggregator.GetConceptExportPagesAsync());
+
+        Assert.Equal("Titre localisé", page.Title);
+        Assert.Equal("fr", page.Locale);
+    }
+
+    [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldRejectCanonicalPageWithoutAnyResolvedTitle()
+    {
+        var node = new DocNode(
+            "  ",
+            "guides/untitled.md",
+            "<p>Content</p>");
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([node]);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _aggregator.GetConceptExportPagesAsync());
+
+        Assert.Contains("Public canonical route 'guides/untitled' has no resolved export title.", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -424,8 +611,9 @@ public class DocAggregatorTests : IDisposable
                 return secondHarvestRelease.Task;
             });
 
-        using var cache = new MemoryCache(new MemoryCacheOptions());
-        using var memo = new Memo(cache);
+        var clock = new CacheClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        using var memo = new Memo(cache, TimeSpan.FromSeconds(2), () => clock.UtcNow);
         var aggregator = new DocAggregator(
             [harvester],
             new AppSurfaceDocsOptions
@@ -442,7 +630,8 @@ public class DocAggregatorTests : IDisposable
             _loggerFake);
 
         var first = await aggregator.GetDocsAsync();
-        await Task.Delay(cacheExpiration.Add(TimeSpan.FromMilliseconds(100)));
+        // Keep both expiration checks inside the stale window regardless of scheduling delays.
+        clock.Advance(cacheExpiration.Add(TimeSpan.FromMilliseconds(100)));
         var second = await aggregator.GetDocsAsync();
 
         Assert.Equal("Harvest 1", Assert.Single(first).Title);

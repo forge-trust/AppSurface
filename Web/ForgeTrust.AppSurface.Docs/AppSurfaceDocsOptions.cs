@@ -1216,14 +1216,17 @@ public sealed class AppSurfaceDocsVersioningOptions
     public string? TrustedReleaseRootPath { get; set; }
 
     /// <summary>
-    /// Gets or sets the maximum input size, in bytes, for request-time rewrites of published-tree HTML and search-index files.
+    /// Gets or sets the coupled per-artifact byte budget for published HTML/search input and concept-switch data and output.
     /// </summary>
     /// <remarks>
     /// The default is <see cref="DefaultMaxRewrittenFileSizeBytes"/> bytes. The value must be between
     /// <see cref="MinMaxRewrittenFileSizeBytes"/> and <see cref="MaxMaxRewrittenFileSizeBytes"/>. This limit applies
-    /// only to exported <c>.html</c> files and the root <c>search-index.json</c> file when a published release tree is
-    /// mounted through AppSurface Docs versioning. Static assets such as CSS, JavaScript, images, and fonts continue to
-    /// stream normally and are not capped by this option.
+    /// to exported <c>.html</c> files and the root <c>search-index.json</c> file, each optional concept index and
+    /// catalog-pinned legacy bridge, the complete added switch fragment including embedded incoming context data, and
+    /// each standalone version-choice page. Generated output is counted in UTF-8 bytes and rejected as a whole on
+    /// overflow. Raising this option also raises the existing HTML/search-input budget; it is not an aggregate catalog
+    /// or process-memory cap. Static CSS, JavaScript, image and font assets continue to stream normally. See the
+    /// <see href="https://github.com/forge-trust/AppSurface/blob/main/guides/version-switching.md#size-limits-and-overflow">version-switching size and overflow contract</see>.
     /// </remarks>
     public long MaxRewrittenFileSizeBytes { get; set; } = DefaultMaxRewrittenFileSizeBytes;
 }

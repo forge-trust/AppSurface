@@ -38,7 +38,7 @@ public sealed record EvidenceCoverageFanInResult(
     IReadOnlyDictionary<string, string> InputManifestHashes);
 
 /// <summary>Verifies the existing coverage fan-in receipt, its inputs, and gate outputs.</summary>
-public static class EvidenceCoverageFanIn
+public static partial class EvidenceCoverageFanIn
 {
     private const int Schema = 1;
     private const long MaxXml = 512L * 1024 * 1024;

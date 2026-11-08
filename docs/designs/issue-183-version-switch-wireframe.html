@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AppSurface #183 — Concept-preserving version switching</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 28px; background: #f5f5f5; color: #262626; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    h1 { margin: 0 0 6px; font-size: 24px; line-height: 1.35; letter-spacing: -.6px; }
+    .intro { max-width: 900px; margin: 0 0 22px; color: #555; }
+    .board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+    .state-title { margin: 0 0 8px; font-size: 16px; line-height: 1.5; }
+    .screen { height: 654px; border: 1px solid #999; background: white; }
+    .header { height: 62px; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #bbb; }
+    .brand { white-space: nowrap; font-size: 14px; }
+    .version { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+    select { padding: 5px; color: #222; border: 1px solid #999; border-radius: 2px; background: white; font: inherit; }
+    main { padding: 21px 18px; }
+    .crumb { margin: 0 0 22px; color: #666; font-size: 13px; }
+    .guide-title { margin: 0 0 13px; font-size: 24px; line-height: 1.3; letter-spacing: -.6px; }
+    p { margin: 0 0 18px; }
+    h3 { margin: 25px 0 10px; font-size: 18px; line-height: 1.4; }
+    a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+    .code { display: block; padding: 13px 10px; margin: 16px 0 18px; border: 1px solid #bbb; background: #f6f6f6; font: 13px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .notice { margin: 0 0 24px; padding: 14px; border: 1px solid #999; border-left: 3px solid #666; font-size: 13px; line-height: 1.5; }
+    .notice strong { display: block; margin-bottom: 6px; font-size: 14px; }
+    .notice p { margin: 0 0 8px; }
+    .small { color: #666; font-size: 13px; }
+    .actions { padding: 0; margin: 22px 0 0; list-style: none; }
+    .actions li { padding: 14px 0; border-top: 1px solid #ccc; }
+    .actions a { font-size: 14px; font-weight: 600; }
+    .actions span { display: block; margin-top: 3px; color: #666; font-size: 13px; }
+    .back { display: inline-block; margin-top: 49px; font-size: 13px; }
+    .annotation { margin: 12px 0 0; color: #555; font-size: 13px; line-height: 1.45; }
+    .footnote { margin: 22px 0 0; color: #555; font-size: 13px; line-height: 1.45; }
+    @media (max-width: 850px) { .board { grid-template-columns: 1fr; } .screen { height: auto; min-height: 620px; } }
+  </style>
+</head>
+<body>
+  <h1>Keep the concept when the version changes</h1>
+  <p class="intro">Rough interaction sketch for AppSurface #183. The version control stays beside the documentation identity; notices appear above the guide where readers will see them.</p>
+  <div class="board">
+    <section>
+      <h2 class="state-title">Starting guide</h2>
+      <div class="screen">
+        <header class="header">
+          <strong class="brand">AppSurface Docs</strong>
+          <label class="version">Version <select aria-label="Starting guide version"><option selected>1.8.7</option><option>2.0</option><option>1.0</option></select></label>
+        </header>
+        <main>
+          <p class="crumb">Guides / Configuration</p>
+          <h2 class="guide-title">Initial setup</h2>
+          <p>Configure your first application and verify that it starts with the settings you expect.</p>
+          <h3>Register configuration</h3>
+          <p>Add the configuration module, then declare the settings your application needs.</p>
+          <code class="code">dotnet run</code>
+          <p>Use a development settings file for the first run. Keep credentials in your configured secret store.</p>
+          <h3>Verify the result</h3>
+          <p>Start the example and check its configuration diagnostics.</p>
+        </main>
+      </div>
+      <p class="annotation">Choose another version while reading. No warning is needed for an unchanged counterpart.</p>
+    </section>
+    <section>
+      <h2 class="state-title">Matching concept, new location</h2>
+      <div class="screen">
+        <header class="header">
+          <strong class="brand">AppSurface Docs</strong>
+          <label class="version">Version <select aria-label="Moved guide version"><option>1.8.7</option><option selected>2.0</option><option>1.0</option></select></label>
+        </header>
+        <main>
+          <p class="crumb">Start here / Configuration</p>
+          <div class="notice" role="status">
+            <strong>This guide has a different location in 2.0</strong>
+            <p>You are reading the same concept at its new location. In 1.8.7, it was called “Initial setup.”</p>
+            <a href="#original">Return to Initial setup in 1.8.7</a>
+          </div>
+          <h2 class="guide-title">Getting started with configuration</h2>
+          <p>Set up configuration for an AppSurface application.</p>
+          <h3>Create the example</h3>
+          <p>Start with the example for this release, then declare your application settings.</p>
+          <code class="code">dotnet run</code>
+          <p class="small">Documentation for exact release 2.0</p>
+        </main>
+      </div>
+      <p class="annotation">A known relationship gets a clear notice. Links, search, and the guide remain in 2.0.</p>
+    </section>
+    <section>
+      <h2 class="state-title">No counterpart in the selected version</h2>
+      <div class="screen">
+        <header class="header">
+          <strong class="brand">AppSurface Docs</strong>
+          <label class="version">Version <select aria-label="Missing guide version"><option>1.8.7</option><option>2.0</option><option selected>1.0</option></select></label>
+        </header>
+        <main>
+          <p class="crumb">Documentation / 1.0</p>
+          <h2 class="guide-title">This guide is not available in 1.0</h2>
+          <p>“Initial setup” has no counterpart in this release. You are still browsing version 1.0.</p>
+          <h3>Continue in 1.0</h3>
+          <ul class="actions">
+            <li><a href="#section">Browse configuration guides</a><span>Start with the relevant section in 1.0.</span></li>
+            <li><a href="#search">Search documentation for 1.0</a><span>Find another guide within this release.</span></li>
+            <li><a href="#home">Open the 1.0 documentation home</a><span>Explore this version from its starting page.</span></li>
+          </ul>
+          <a class="back" href="#original">Return to Initial setup in 1.8.7</a>
+        </main>
+      </div>
+      <p class="annotation">A fallback is offered, never presented as the missing guide.</p>
+    </section>
+  </div>
+  <p class="footnote">If older release metadata cannot establish whether a counterpart exists, the recovery heading becomes “No known counterpart in 1.0” and explains that uncertainty. A failed or unavailable release gets its own availability message.</p>
+</body>
+</html>

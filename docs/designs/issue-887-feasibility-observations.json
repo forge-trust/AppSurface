@@ -1,0 +1,1245 @@
+{
+  "supersession": {
+    "status": "historical-observations-superseded-for-current-disposition",
+    "canonicalSources": {
+      "fixtureCard": "issue-887-feasibility-card.md",
+      "sourceOciBudgetProposal": "issue-887-source-oci-budget-proposal.md",
+      "feasibilityFindings": "issue-887-feasibility-findings.md"
+    },
+    "currentDisposition": "The historical pending 192 MiB source-member proposal is superseded by the approved 256 MiB source-only ceiling; final-image inspection remains 128 MiB and archive replacement remains 64 MiB. The historical local amd64 browser-readiness failure is superseded by the native amd64 retained full-gate pass. Original observations and values below remain unchanged."
+  },
+  "schema": "issue-887-private-feasibility-observations-v1",
+  "status": "arm64 full retained gate passed; amd64 full retained gate reached upgrade/restore but failed isolated-browser startup readiness under emulation; final feasibility remains incomplete",
+  "observedAt": "2026-10-24",
+  "supportedApiCommitted": false,
+  "publicationAuthorized": false,
+  "owner": "@akrock",
+  "ownerDecisions": {
+    "allListedRoles": "@akrock",
+    "micrometer": "Verify actual already-aligned 1.16.6 paths, no unused 1.16.3 copies"
+  },
+  "sourcePlatforms": [
+    {
+      "platform": "linux/arm64",
+      "manifest": "sha256:20874855592d23bc145f5e8b3ede829012014109905363f6c3eea7340fb708ba",
+      "config": "sha256:349d8b578ad46ca3b5548cf75160a3f7b1755bda82872ad3319e7d39d10b5119",
+      "engine_image_id": "sha256:20874855592d23bc145f5e8b3ede829012014109905363f6c3eea7340fb708ba",
+      "engine_mapping": "manifest-or-config ID checked against independently verified config fields and ordered rootfs diffIDs",
+      "captured_bytes": 195224828,
+      "files": 494,
+      "cli": {
+        "path": "bin/client/keycloak-admin-cli-26.7.2.jar",
+        "bytes": 6955728,
+        "sha256": "386a6d7a0fce7221ab7eb42853c8917e73d6f3c1504249599a61a0a8567a8e64"
+      },
+      "container_cleanup": "removed owned stopped container",
+      "copy_limitations": "Docker cp normalizes host owner IDs; this is captured source-byte feasibility, not a production OCI merge or ownership proof"
+    },
+    {
+      "platform": "linux/amd64",
+      "manifest": "sha256:eb81d22bb82bc358ee10bdd4ab15dea2caae0add01416a1b146e2c7c7eb9cfab",
+      "config": "sha256:93ea80b4686a152dd020d5efefcd18570e9079b3dddf69fac783024714ca923e",
+      "engine_image_id": "sha256:eb81d22bb82bc358ee10bdd4ab15dea2caae0add01416a1b146e2c7c7eb9cfab",
+      "engine_mapping": "manifest-or-config ID checked against independently verified config fields and ordered rootfs diffIDs",
+      "captured_bytes": 195224828,
+      "files": 494,
+      "cli": {
+        "path": "bin/client/keycloak-admin-cli-26.7.2.jar",
+        "bytes": 6955728,
+        "sha256": "386a6d7a0fce7221ab7eb42853c8917e73d6f3c1504249599a61a0a8567a8e64"
+      },
+      "container_cleanup": "removed owned stopped container",
+      "copy_limitations": "Docker cp normalizes host owner IDs; this is captured source-byte feasibility, not a production OCI merge or ownership proof"
+    }
+  ],
+  "runtimeOnlyProof": {
+    "status": "offline-runtime-proof-passed",
+    "seconds": 4.249,
+    "platforms": [
+      {
+        "platform": "linux/arm64",
+        "base_manifest": "eclipse-temurin@sha256:21a40fbc3e7d46fa48487450a01c3fd998012fc2659dd955afeb17663142844f",
+        "image_id": "sha256:6ad02c07cbc0c99b9606ff8316d8af05497def7c7f4be1b24dcd5983802d1463",
+        "packages": [
+          {
+            "path": "archives/openssl_3.5.5-1ubuntu3.7_arm64.deb",
+            "bytes": 1222930,
+            "sha256": "623ea7ec0eb80da3f40e89e3318a4e82d4c64146d206c90cabbce6998d822fa8"
+          },
+          {
+            "path": "archives/openssl-provider-legacy_3.5.5-1ubuntu3.7_arm64.deb",
+            "bytes": 38424,
+            "sha256": "757ec89120fe3f418a842342b3a0c596b89b0e3fb0ba770347dda1219f219bbd"
+          },
+          {
+            "path": "archives/libssl3t64_3.5.5-1ubuntu3.7_arm64.deb",
+            "bytes": 2769448,
+            "sha256": "9fe87b6beec5de636a70e4fb6076517a39f5053c7e23e628c9459b94f85c75ff"
+          }
+        ],
+        "network": "build RUN none; runtime none",
+        "scope": "runtime-only private feasibility, no final Keycloak/theme/security evidence"
+      },
+      {
+        "platform": "linux/amd64",
+        "base_manifest": "eclipse-temurin@sha256:d1d7f43094ea37e9ae77ea3ca40026bc1de1bf1dc2cad37b08d66b9a016a2ea6",
+        "image_id": "sha256:e63f9adf4ef35c852d75b3f00f29d09c77fa2ad0b9e375ae1a84c5f4eb88a2cc",
+        "packages": [
+          {
+            "path": "archives/openssl_3.5.5-1ubuntu3.7_amd64.deb",
+            "bytes": 1242886,
+            "sha256": "6965aafe69e0a49ef34d2e26f8e83d09d1c6037b7e9ee37f19b292a3c6851621"
+          },
+          {
+            "path": "archives/libssl3t64_3.5.5-1ubuntu3.7_amd64.deb",
+            "bytes": 2368026,
+            "sha256": "3ff73e121f6cd4f19e80ab4329dfd914108b3936c9db3708200203a9b245b34d"
+          },
+          {
+            "path": "archives/openssl-provider-legacy_3.5.5-1ubuntu3.7_amd64.deb",
+            "bytes": 39682,
+            "sha256": "51cf418571059831096abd40e0bd5debaa1ae48a6f8d87d9e4e5f7f12aa4db52"
+          }
+        ],
+        "network": "build RUN none; runtime none",
+        "scope": "runtime-only private feasibility, no final Keycloak/theme/security evidence"
+      }
+    ]
+  },
+  "artifactTargets": [
+    {
+      "artifact": "jackson-core",
+      "coordinate": "com.fasterxml.jackson.core:jackson-core:2.21.7::jar",
+      "destination": "/opt/keycloak/lib/lib/main/com.fasterxml.jackson.core.jackson-core-2.21.5.jar",
+      "original_sha256": "b64b5874162b503a0e58a8f7758266e8dd9f91bf49e3a59ae0b5f47589a231b7",
+      "replacement_sha256": "8c5623b98f32d5f7e1287ff61ed50e08ab7b11381e991fff89327faabba42261",
+      "already_aligned": false
+    },
+    {
+      "artifact": "jackson-databind",
+      "coordinate": "com.fasterxml.jackson.core:jackson-databind:2.21.7::jar",
+      "destination": "/opt/keycloak/lib/lib/main/com.fasterxml.jackson.core.jackson-databind-2.21.5.jar",
+      "original_sha256": "507418c0fafd38b2b2cfb704521630da613a8e4cc8381195a6f418017883e2c0",
+      "replacement_sha256": "1290c2795e93e8a6861a6c4d9ff0d844d32f5ea178362cb2721edf5561e828b1",
+      "already_aligned": false
+    },
+    {
+      "artifact": "mssql-jdbc",
+      "coordinate": "com.microsoft.sqlserver:mssql-jdbc:13.4.0.jre11::jar",
+      "destination": "/opt/keycloak/lib/lib/main/com.microsoft.sqlserver.mssql-jdbc-13.2.1.jre11.jar",
+      "original_sha256": "2d137aa308c78932878952fe3624ea090ecfe644414b8b23e71a305f425698c5",
+      "replacement_sha256": "e36f5237c1267983e5b88dc2169f6b9d7e50eceec6dc1ca31018e3877e14af66",
+      "already_aligned": false
+    },
+    {
+      "artifact": "freemarker",
+      "coordinate": "org.freemarker:freemarker:2.3.35::jar",
+      "destination": "/opt/keycloak/lib/lib/main/org.freemarker.freemarker-2.3.32.jar",
+      "original_sha256": "04d65ec1bde6cea20e3495d5e78ef96ab774d9936434861d3254bd88e7e94f92",
+      "replacement_sha256": "0fac87dddd78f1223139e8ef88e819c7f483c0a3835cdf5982ad5e4576d1d896",
+      "already_aligned": false
+    },
+    {
+      "artifact": "micrometer-commons",
+      "coordinate": "io.micrometer:micrometer-commons:1.16.6::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.micrometer.micrometer-commons-1.16.6.jar",
+      "original_sha256": "45aff76226830db257f4bc39a5bcff83d633e572fee9dc4e45cfa12af9a0a49a",
+      "replacement_sha256": "45aff76226830db257f4bc39a5bcff83d633e572fee9dc4e45cfa12af9a0a49a",
+      "already_aligned": true
+    },
+    {
+      "artifact": "micrometer-core",
+      "coordinate": "io.micrometer:micrometer-core:1.16.6::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.micrometer.micrometer-core-1.16.6.jar",
+      "original_sha256": "1957ef2deaffbc1fb98cebfd0f5b3109ecf19c994d7e5378598c20747ba8d68b",
+      "replacement_sha256": "1957ef2deaffbc1fb98cebfd0f5b3109ecf19c994d7e5378598c20747ba8d68b",
+      "already_aligned": true
+    },
+    {
+      "artifact": "micrometer-observation",
+      "coordinate": "io.micrometer:micrometer-observation:1.16.6::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.micrometer.micrometer-observation-1.16.6.jar",
+      "original_sha256": "4c0826d5e7c8522a8e111470b4e77f77b0a10f520eb5502ddd143fdbcedb2340",
+      "replacement_sha256": "4c0826d5e7c8522a8e111470b4e77f77b0a10f520eb5502ddd143fdbcedb2340",
+      "already_aligned": true
+    },
+    {
+      "artifact": "micrometer-registry-prometheus-simpleclient",
+      "coordinate": "io.micrometer:micrometer-registry-prometheus-simpleclient:1.16.6::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.micrometer.micrometer-registry-prometheus-simpleclient-1.16.6.jar",
+      "original_sha256": "5f665369724caa8ffbb3f83a492b02d1de17a1420758e4a55debcb6ee2bd5e2a",
+      "replacement_sha256": "5f665369724caa8ffbb3f83a492b02d1de17a1420758e4a55debcb6ee2bd5e2a",
+      "already_aligned": true
+    },
+    {
+      "artifact": "netty-buffer",
+      "coordinate": "io.netty:netty-buffer:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-buffer-4.1.136.Final.jar",
+      "original_sha256": "c88f13fc41156fde5df918c7b240038dfbe97ac57576163f208630391789b5d5",
+      "replacement_sha256": "f474b14c7734f15e0540394cb6f39d67777b7581a42919e4ac89d253d4efd929",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-codec",
+      "coordinate": "io.netty:netty-codec:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-codec-4.1.136.Final.jar",
+      "original_sha256": "2de4fc13005c7740b46427a47ee04265a19779c147d53e583f441889b1148159",
+      "replacement_sha256": "9987b6a660b0a6b1f0d791485dae33180b3d1c63687c006fe6d3fd025e9e3798",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-codec-dns",
+      "coordinate": "io.netty:netty-codec-dns:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-codec-dns-4.1.136.Final.jar",
+      "original_sha256": "89bddc4ec42756c41a0195a50a1323a324836162b6712a843c3de5c29096c93b",
+      "replacement_sha256": "2d9a33ce41bd9f6f607df95039e42518a1fca16f83c9bbfe72beb57df6e2489f",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-codec-haproxy",
+      "coordinate": "io.netty:netty-codec-haproxy:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-codec-haproxy-4.1.136.Final.jar",
+      "original_sha256": "841be7fc6f1c929ecc63c70a909e0df085b4e80e44680acf46708f0e93e68037",
+      "replacement_sha256": "5ffa58b94c5ac48fb7e41843c18acf7a268e90b5b85423987829c9291ce3a5df",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-codec-http",
+      "coordinate": "io.netty:netty-codec-http:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-codec-http-4.1.136.Final.jar",
+      "original_sha256": "ffd1e1b19a533bc6e47ef2cbc1290374ff4a7cb53a280defa3df392538214948",
+      "replacement_sha256": "0535bb5a736472bef5c948d15eb273c4ab9f796656fc7c5d6b982ad92bddbd49",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-codec-http2",
+      "coordinate": "io.netty:netty-codec-http2:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-codec-http2-4.1.136.Final.jar",
+      "original_sha256": "14f67ae095c056b062aa0ee2c7b01f6b78004cf3620a6e9061bcb637f079387a",
+      "replacement_sha256": "576ddcfb51b78e86f145c9a52b60e500b1a1d5a257cafec8aa5416ffba044b49",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-codec-socks",
+      "coordinate": "io.netty:netty-codec-socks:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-codec-socks-4.1.136.Final.jar",
+      "original_sha256": "341f47dbaac667a6e7e6cad4114218025f9755ced641bb0740fb69e34d29b421",
+      "replacement_sha256": "4a6190e08988c058bfeef2b5965e71946439c771abf721c68f4039b4e7b023e8",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-common",
+      "coordinate": "io.netty:netty-common:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-common-4.1.136.Final.jar",
+      "original_sha256": "e2f73be7ec359b46583ad875521137000eff520bafd320e730846ec9974f3be6",
+      "replacement_sha256": "d31926b01adcc07af86f5e27b81b6d6c115df17d366e835d1fc3f5a1924e7e52",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-handler",
+      "coordinate": "io.netty:netty-handler:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-handler-4.1.136.Final.jar",
+      "original_sha256": "54bb1a59f46a3aefd117942e6acee09e555b756776bad731fc06159d89c2da28",
+      "replacement_sha256": "d0e4c6ee4779f59f6ab2fb5d388e4f57147c82270164b37945764bb9bda96a44",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-handler-proxy",
+      "coordinate": "io.netty:netty-handler-proxy:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-handler-proxy-4.1.136.Final.jar",
+      "original_sha256": "47400551f0444dea33629ee0c52d4e30856b2ddf00b12adf1881902957e74cf2",
+      "replacement_sha256": "843de10c4cef34cbc1a5344090f1b57db532fbebf141559862da675f6b656df4",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-resolver",
+      "coordinate": "io.netty:netty-resolver:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-resolver-4.1.136.Final.jar",
+      "original_sha256": "e64972fec474f5b9bd086b738154d190a923e82c4923ac550aff4f5ea9e98600",
+      "replacement_sha256": "b4cf2aeedd9fc7c8c439bbfe574f63cfe5b83392e88bbc07ca0e8424b7cff955",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-resolver-dns",
+      "coordinate": "io.netty:netty-resolver-dns:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-resolver-dns-4.1.136.Final.jar",
+      "original_sha256": "9c05a9b18b5d54fcc1569c48b93958019cf3dde5ae7011f8a46451ee05e7daff",
+      "replacement_sha256": "898d63ca62ed68ff46543c5344f969424b417f1e8d082fe2bb0181ba10144194",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-transport",
+      "coordinate": "io.netty:netty-transport:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-transport-4.1.136.Final.jar",
+      "original_sha256": "b92881ea925721ed42fee5122a42b8bce4b84da737dbc3ca2d84dfaca52c28b6",
+      "replacement_sha256": "6251adc2a2921572382732a2db188d4f4f2251fd6ebb49c5d44bbf33d6bfb1a7",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-transport-classes-epoll",
+      "coordinate": "io.netty:netty-transport-classes-epoll:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-transport-classes-epoll-4.1.136.Final.jar",
+      "original_sha256": "f6a0b631b98667f131daf4ca07a9cae1072d58e259dcbc0f8c6a053d843449c6",
+      "replacement_sha256": "55049554b799dc8e53bf234fffa36e001f7b5b65c32994b9bd59fc6356f1c52f",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-transport-native-unix-common",
+      "coordinate": "io.netty:netty-transport-native-unix-common:4.1.137.Final::jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-transport-native-unix-common-4.1.136.Final.jar",
+      "original_sha256": "7e014c9b13defd9d254d4e5a5edd8ab6dde17533e1152f99699a6b28b2967a8a",
+      "replacement_sha256": "8056e7637f9948f953314894cf995ab664711b66c73c4cd5b593ae84f0b1048c",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-transport-native-epoll",
+      "coordinate": "io.netty:netty-transport-native-epoll:4.1.137.Final:linux-aarch_64:jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-transport-native-epoll-4.1.136.Final-linux-aarch_64.jar",
+      "original_sha256": "f264cf4bcc1e97ad148cd4f0d8777eacf404cd4ed80830de3f8a2359f60edc38",
+      "replacement_sha256": "82fb63a2dc90c0bddb81e04065a1c06fb4c5be722ad5d64b46491daf8b6f9a01",
+      "already_aligned": false
+    },
+    {
+      "artifact": "netty-transport-native-epoll",
+      "coordinate": "io.netty:netty-transport-native-epoll:4.1.137.Final:linux-x86_64:jar",
+      "destination": "/opt/keycloak/lib/lib/main/io.netty.netty-transport-native-epoll-4.1.136.Final-linux-x86_64.jar",
+      "original_sha256": "c3956f90241582bbbad5612c3159cffeb7c3533324759f3c3bd778ca9b176cae",
+      "replacement_sha256": "185db6053e0e9573d36fa4eb6567b26139afaa4daa7bf5a068e661568304542b",
+      "already_aligned": false
+    },
+    {
+      "artifact": "bcprov-jdk18on",
+      "coordinate": "org.bouncycastle:bcprov-jdk18on:1.85::jar",
+      "destination": "/opt/keycloak/lib/lib/main/org.bouncycastle.bcprov-jdk18on-1.84.jar",
+      "original_sha256": "64d6c5a6121fcd927152dd182cbed39afe0fda641a970d9bcc0c9cb1858b2731",
+      "replacement_sha256": "20af26bf6060bb8005cc2389916812c1e0e998dc48d2ced7131b89461b54cff7",
+      "already_aligned": false
+    },
+    {
+      "artifact": "bcprov-jdk18on",
+      "coordinate": "org.bouncycastle:bcprov-jdk18on:1.85::jar",
+      "destination": "/opt/keycloak/bin/client/lib/bcprov-jdk18on-1.84.jar",
+      "original_sha256": "64d6c5a6121fcd927152dd182cbed39afe0fda641a970d9bcc0c9cb1858b2731",
+      "replacement_sha256": "20af26bf6060bb8005cc2389916812c1e0e998dc48d2ced7131b89461b54cff7",
+      "already_aligned": false
+    },
+    {
+      "artifact": "bcpkix-jdk18on",
+      "coordinate": "org.bouncycastle:bcpkix-jdk18on:1.85::jar",
+      "destination": "/opt/keycloak/lib/lib/main/org.bouncycastle.bcpkix-jdk18on-1.84.jar",
+      "original_sha256": "c87f16ed9e5ec61bc94151e9f3646ac44e50cd448121ce84367fa4b7ec7ec1bb",
+      "replacement_sha256": "c9f82b2d4e99c4bbdfccf684e52cc06ea06a0b567bfd0d08f9c5a3f417055996",
+      "already_aligned": false
+    },
+    {
+      "artifact": "bcutil-jdk18on",
+      "coordinate": "org.bouncycastle:bcutil-jdk18on:1.85::jar",
+      "destination": "/opt/keycloak/lib/lib/main/org.bouncycastle.bcutil-jdk18on-1.84.jar",
+      "original_sha256": "b374e16963421fb9cfb01cc20d7ad8fd2f8b8188e3eef0ec0a8965e245f7619a",
+      "replacement_sha256": "590f55ed5d68529239898a4a5c4f730b6e37f45d1cfa3fbe51f8485abe32c42d",
+      "already_aligned": false
+    }
+  ],
+  "archive": {
+    "originalCliSha256": "386a6d7a0fce7221ab7eb42853c8917e73d6f3c1504249599a61a0a8567a8e64",
+    "repairedCliSha256": "1ab7c9dfd70bcf6d730da9dfd7f58c019c081c341da861497cdae6e4b35be327",
+    "unrelatedEntriesByteIdentical": 2926,
+    "selectedReplacementEntries": 1038,
+    "negativeControlsPassed": 9,
+    "manifestByteIdentical": true,
+    "jdkMultiReleaseObserved": false,
+    "jdkJarValidate": "nonzero on original and repaired core; FastDoubleSwar API differences, not claimed passing"
+  },
+  "combinedContextPrototype": {
+    "status": "combined-contexts-published",
+    "seconds": 17.207,
+    "contexts": [
+      {
+        "fixture": "neutral",
+        "platform": "linux/arm64",
+        "receipt_sha256": "109a1be5c2afa79832f84d7211382755f7b701a8045e2fe55981632e5f32c32b",
+        "files": 515,
+        "verified_bytes": 383010950,
+        "cli_sha256": "1ab7c9dfd70bcf6d730da9dfd7f58c019c081c341da861497cdae6e4b35be327"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/arm64",
+        "receipt_sha256": "2c69f62c382545df9cbf6bffd9af6d553dff27105da166791a5e78d4192ce452",
+        "files": 530,
+        "verified_bytes": 383423392,
+        "cli_sha256": "1ab7c9dfd70bcf6d730da9dfd7f58c019c081c341da861497cdae6e4b35be327"
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/amd64",
+        "receipt_sha256": "2cd1ede8c33a3343e4ad6c3b01be6645481803a5020e8cea3bd443d84642b47f",
+        "files": 515,
+        "verified_bytes": 384525889,
+        "cli_sha256": "1ab7c9dfd70bcf6d730da9dfd7f58c019c081c341da861497cdae6e4b35be327"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/amd64",
+        "receipt_sha256": "4245d1ea22503f6b88147431039dd1247094aaf632033491eec72f913d4d71d1",
+        "files": 530,
+        "verified_bytes": 384938331,
+        "cli_sha256": "1ab7c9dfd70bcf6d730da9dfd7f58c019c081c341da861497cdae6e4b35be327"
+      }
+    ],
+    "scope": "compiled private context materializer with owned local runtime/frontend OCI inputs; local-layout full builds still pending"
+  },
+  "registryDigestBuilds": {
+    "seconds": 125.685,
+    "cleanBuilds": 8,
+    "allRuntimeSmokeChecksPassed": true,
+    "wholeImageByteReproducibility": false,
+    "differenceObserved": "layer indexes6and7 differ; cause analysis pending; layer8 copied Keycloak payload identical per same fixture/platform",
+    "scope": "preliminary immutable-registry-reference builds, not the final closed-local-input proof"
+  },
+  "retainedFastGate": {
+    "command": "bash scripts/qa/run-keycloak-theme-gates.sh --fast --json",
+    "sourceRevision": "6623ffe5dd6f3eb454df609e1074407e0ae2e446",
+    "exitCode": 0,
+    "milliseconds": 156216
+  },
+  "remaining": [
+    "Clean exact-image retained upgrade/restore result and Skoolit amd64 browser/system proof",
+    "Full supported implementation, public caller tests, docs, enhancement, QA, exact unchanged solution coverage and draft PR",
+    "After authorized integration/publication only: clean published-byte consumer and downstream acceptance"
+  ],
+  "managedSignatures": {
+    "positiveActualReleases": 8,
+    "negativeControls": 2,
+    "dependency": "BouncyCastle.Cryptography2.7.0",
+    "buildWarnings": 0,
+    "scope": "signature verification only; historical snapshot validity remains an explicit host policy decision"
+  },
+  "managedSignedPackageChain": {
+    "packagesVerified": 6,
+    "platforms": [
+      "linux/arm64",
+      "linux/amd64"
+    ],
+    "negativeControls": 3,
+    "scope": "signed Release SHA256 -> exact Packages.gz -> exact captured deb bytes; embedded control/payload inventory proof in progress"
+  },
+  "closedLocalInputBuilds": {
+    "latestRun": "fe5f931af4c94fd5aac5dada98291218",
+    "successfulCleanBuildsAndSmokeChecks": 8,
+    "remainingBuilds": 0,
+    "resumedFrom": "dc4875143ef048dfa4035a38dbd6be18",
+    "regeneratedContextReceiptsUnchanged": true,
+    "scope": "two clean builds per fixture/platform, closed local OCI inputs; static/runtime system gates recorded separately",
+    "images": [
+      {
+        "fixture": "neutral",
+        "platform": "linux/arm64",
+        "attempt": 1,
+        "manifestDigest": "sha256:84ae40e6b2ba4317af8019343672eb2e8853112c5f9a7ad98e6111b57abdedba",
+        "contextReceiptSha256": "738c52cbf19cbee73abb935c9fd8f50eafbf0ba4485f63c133b4aa723b30ac0c"
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/arm64",
+        "attempt": 2,
+        "manifestDigest": "sha256:7925be0164eff381a1c3eae502b19ae7324ac70f832c0cd7e804432dd17dbce1",
+        "contextReceiptSha256": "738c52cbf19cbee73abb935c9fd8f50eafbf0ba4485f63c133b4aa723b30ac0c"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/arm64",
+        "attempt": 1,
+        "manifestDigest": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+        "contextReceiptSha256": "1ae53ec5e5dbb467c929247c10c897a3aa0a6076ce70f430b18ce8c9d3b4096e"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/arm64",
+        "attempt": 2,
+        "manifestDigest": "sha256:38614c4567b9977c3dd265c6cd90cf08827b58b7238c115ce4be043deebee26a",
+        "contextReceiptSha256": "1ae53ec5e5dbb467c929247c10c897a3aa0a6076ce70f430b18ce8c9d3b4096e"
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/amd64",
+        "attempt": 1,
+        "manifestDigest": "sha256:af053f9eea333d23bf3ca173d82dea783c29b091be586ef8a2de209df4b09c46",
+        "contextReceiptSha256": "323da9db2beeb48897017dc1bf8806ae2d54280929f5c87f4a456b8f547ef3ff"
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/amd64",
+        "attempt": 2,
+        "manifestDigest": "sha256:34d6366c071ce1cfd337899a5d7ecf83f98eaae6c1ed2e7f6fea2c051324e144",
+        "contextReceiptSha256": "323da9db2beeb48897017dc1bf8806ae2d54280929f5c87f4a456b8f547ef3ff"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/amd64",
+        "attempt": 1,
+        "manifestDigest": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+        "contextReceiptSha256": "5b067a35c870e41d21a08cf0b9198df357afa81795ca5f38fe30ace0c0a40d90"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/amd64",
+        "attempt": 2,
+        "manifestDigest": "sha256:d9ca10d09017817388003aa2d8153bf7d96f383bd2da66b79a680e5e5cc6e815",
+        "contextReceiptSha256": "5b067a35c870e41d21a08cf0b9198df357afa81795ca5f38fe30ace0c0a40d90"
+      }
+    ]
+  },
+  "boundedOciPrototype": {
+    "build": "passed; zero warnings/errors",
+    "whiteoutControls": "passed; lower-layer removal preserves current-layer entries",
+    "actualBoundedImageParse": "failed; no space left on device",
+    "scope": "no bounded inspector feasibility acceptance or passing security evidence"
+  },
+  "resourceRecovery": {
+    "ownedGeneratedPathsRemoved": 51,
+    "preserved": "all source/input captures, code, context manifests, reports and TestResults",
+    "freeBytesAfterCleanup": 4297539584,
+    "retainedScanMinimumFreeBytes": 10737418240,
+    "sharedPruneOrDockerRestartPerformed": false,
+    "latestFreeSpace": "13GiB at bounded health probe",
+    "dockerHealth": "HTTP500/ping timeout followed by a 15-second bounded info timeout despite recovered space",
+    "requiredDecision": "Restart Docker Desktop may interrupt unrelated running local containers; authorization requested"
+  },
+  "managedDebPayloads": {
+    "packagesVerified": 6,
+    "actualFinalImageRegularFileHashesMatched": 31,
+    "conffileHashesMatched": true,
+    "negativeControls": [
+      "wrong whole-package digest",
+      "wrong embedded control identity",
+      "compressed member cap"
+    ],
+    "dependency": "ZstdSharp.Port0.8.8",
+    "limitations": [
+      "Complete regular-payload dispositions and package inventories proved on retained superseded images; current final-image conformance still pending."
+    ],
+    "scope": "actual pinned package feasibility, not full parser/resource-hardening acceptance",
+    "decoderWindowBytes": 8388608,
+    "oversizedWindowNegative": "16MiB requested window rejected"
+  },
+  "rawTarPreflight": {
+    "controlsPassed": 11,
+    "oversizedMetadataRejectReadBytes": 512,
+    "scope": "raw header metadata/allocation bounds verified offline; current final-image conformance remains pending"
+  },
+  "offlineOsInventory": {
+    "status": "offline-os-inventory-proof-passed",
+    "platforms": [
+      {
+        "platform": "linux/arm64",
+        "base_manifest": "sha256:21a40fbc3e7d46fa48487450a01c3fd998012fc2659dd955afeb17663142844f",
+        "observed_image": "sha256:a73c67238c079f26bf2cc340ff778dc4583abb32688f1617cab2525367bb02ef",
+        "base_installed_packages": 140,
+        "final_installed_packages": 138,
+        "complete_installed_inventory_matches": true,
+        "signed_payload_regular_files": 247,
+        "exact_file_hashes_matched": 15,
+        "explicitly_excluded_files_absent": 232,
+        "dpkg_policy_sha256": "61159013263411a7c7a4157a6ddcd4eca3329ee698e508850070af11338098db",
+        "scope": "retained superseded image bytes; current empty-directory image conformance pending"
+      },
+      {
+        "platform": "linux/amd64",
+        "base_manifest": "sha256:d1d7f43094ea37e9ae77ea3ca40026bc1de1bf1dc2cad37b08d66b9a016a2ea6",
+        "observed_image": "sha256:f8d445feee547a2b6da1d6355498be7a6938379b03b439acc3e901d3fa2a5d70",
+        "base_installed_packages": 140,
+        "final_installed_packages": 138,
+        "complete_installed_inventory_matches": true,
+        "signed_payload_regular_files": 248,
+        "exact_file_hashes_matched": 16,
+        "explicitly_excluded_files_absent": 232,
+        "dpkg_policy_sha256": "61159013263411a7c7a4157a6ddcd4eca3329ee698e508850070af11338098db",
+        "scope": "retained superseded image bytes; current empty-directory image conformance pending"
+      }
+    ],
+    "scope": "complete regular payload dispositions and installed package-version inventory on retained superseded images; does not certify current final image or retained scan/browser gates"
+  },
+  "boundedOciOfflineInventory": {
+    "status": "bounded-offline-inventories-passed",
+    "images": [
+      {
+        "fixture": "neutral",
+        "platform": "linux/arm64",
+        "manifest": "sha256:ca0d5c09309505ca8c344e867700d5e6814e49e277b6b7669b57a668adbc3ff3",
+        "exit": 0,
+        "seconds": 2.894,
+        "resourceBudgets": {
+          "maxOciEntryBytes": 134217728,
+          "maxArchiveBytes": 1073741824,
+          "maxCompressedBlobBytes": 1073741824,
+          "maxExpandedLayerBytes": 2147483648,
+          "maxExpandedTotalBytes": 4294967296,
+          "maxMetadataJsonBytes": 1048576,
+          "maxLayers": 64,
+          "maxLayerMembers": 250000,
+          "maxTotalMembers": 1000000,
+          "maxRootEntries": 1000000,
+          "maxPathLength": 4096,
+          "maxProcessSeconds": 300,
+          "actualCompressedBlobBytes": 299845069,
+          "actualExpandedBytes": 566030336,
+          "elapsedSeconds": 2.8179221
+        },
+        "maximumObservedEntryBytes": 101048209,
+        "mergedPaths": 9708,
+        "scope": "retained superseded image; bounded content inventory only, no context conformance"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/arm64",
+        "manifest": "sha256:a73c67238c079f26bf2cc340ff778dc4583abb32688f1617cab2525367bb02ef",
+        "exit": 0,
+        "seconds": 2.891,
+        "resourceBudgets": {
+          "maxOciEntryBytes": 134217728,
+          "maxArchiveBytes": 1073741824,
+          "maxCompressedBlobBytes": 1073741824,
+          "maxExpandedLayerBytes": 2147483648,
+          "maxExpandedTotalBytes": 4294967296,
+          "maxMetadataJsonBytes": 1048576,
+          "maxLayers": 64,
+          "maxLayerMembers": 250000,
+          "maxTotalMembers": 1000000,
+          "maxRootEntries": 1000000,
+          "maxPathLength": 4096,
+          "maxProcessSeconds": 300,
+          "actualCompressedBlobBytes": 300243027,
+          "actualExpandedBytes": 566456320,
+          "elapsedSeconds": 2.8071562
+        },
+        "maximumObservedEntryBytes": 101048209,
+        "mergedPaths": 9728,
+        "scope": "retained superseded image; bounded content inventory only, no context conformance"
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/amd64",
+        "manifest": "sha256:b14aa24e94e7bd49b419e93d472e59f33ca0b90c9d7f34129d5ba07a2e00b078",
+        "exit": 0,
+        "seconds": 2.793,
+        "resourceBudgets": {
+          "maxOciEntryBytes": 134217728,
+          "maxArchiveBytes": 1073741824,
+          "maxCompressedBlobBytes": 1073741824,
+          "maxExpandedLayerBytes": 2147483648,
+          "maxExpandedTotalBytes": 4294967296,
+          "maxMetadataJsonBytes": 1048576,
+          "maxLayers": 64,
+          "maxLayerMembers": 250000,
+          "maxTotalMembers": 1000000,
+          "maxRootEntries": 1000000,
+          "maxPathLength": 4096,
+          "maxProcessSeconds": 300,
+          "actualCompressedBlobBytes": 301019800,
+          "actualExpandedBytes": 543620096,
+          "elapsedSeconds": 2.7106025
+        },
+        "maximumObservedEntryBytes": 101048097,
+        "mergedPaths": 9714,
+        "scope": "retained superseded image; bounded content inventory only, no context conformance"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/amd64",
+        "manifest": "sha256:f8d445feee547a2b6da1d6355498be7a6938379b03b439acc3e901d3fa2a5d70",
+        "exit": 0,
+        "seconds": 2.5,
+        "resourceBudgets": {
+          "maxOciEntryBytes": 134217728,
+          "maxArchiveBytes": 1073741824,
+          "maxCompressedBlobBytes": 1073741824,
+          "maxExpandedLayerBytes": 2147483648,
+          "maxExpandedTotalBytes": 4294967296,
+          "maxMetadataJsonBytes": 1048576,
+          "maxLayers": 64,
+          "maxLayerMembers": 250000,
+          "maxTotalMembers": 1000000,
+          "maxRootEntries": 1000000,
+          "maxPathLength": 4096,
+          "maxProcessSeconds": 300,
+          "actualCompressedBlobBytes": 301417767,
+          "actualExpandedBytes": 544046080,
+          "elapsedSeconds": 2.4197011
+        },
+        "maximumObservedEntryBytes": 101048097,
+        "mergedPaths": 9734,
+        "scope": "retained superseded image; bounded content inventory only, no context conformance"
+      }
+    ],
+    "wrongDiffIdRejected": true,
+    "negativeReportAbsent": true,
+    "scope": "all four retained superseded images; current final-image conformance/runtime gates still pending Docker recovery"
+  },
+  "preliminaryPrivatePackageClosure": {
+    "status": "private-packaged-consumer-passed",
+    "package": "Issue887.PrivateFeasibility/0.0.0-issue887.1",
+    "scope": "private local feed and empty consumer cache; unsupported prototype API, not published-byte proof or final image conformance",
+    "checks": [
+      "deterministic archive and preserved manifest",
+      "all29 materialized targets, captured runtime/frontend OCI inputs and empty directories",
+      "actual signature and wrong-signer rejection",
+      "all6 signed deb payloads and decoder bounds",
+      "bounded immutable OCI content inventory",
+      "wrong archive hash no output"
+    ],
+    "resolvedPackages": [
+      "BouncyCastle.Cryptography/2.7.0",
+      "Issue887.PrivateFeasibility/0.0.0-issue887.1",
+      "ZstdSharp.Port/0.8.8"
+    ],
+    "emptyOwnedCacheUsed": true,
+    "localFeedOnly": true,
+    "consumerOutsideCheckout": true,
+    "seconds": 9.613999999999999,
+    "packageSha256": "9276e5b9c184ba037814e83449464b45dd2573091ce6298a9392cbba275c8ca5",
+    "postCheckCorrection": "Canonical cache path matches; prior assertion incorrectly required a trailing directory separator. Consumer restore/execution both actually exited0."
+  },
+  "dockerRecoveryRecheck": {
+    "result": "15-second timeout",
+    "freeBytes": 11689492480,
+    "restartAuthorized": false,
+    "sharedPruneOrRestartPerformed": false
+  },
+  "dockerRecovery": {
+    "date": "2026-10-24",
+    "version": "29.7.2",
+    "health": "server/info and disposable pinned-image process passed; interrupted build export resumed successfully",
+    "restartPerformedByThisAgent": false,
+    "sharedPrunePerformed": false
+  },
+  "closedImageReproductionComparison": {
+    "fixture": "skoolit",
+    "platform": "linux/arm64",
+    "wholeImageByteReproducibility": false,
+    "layers": [
+      {
+        "ordinal": 6,
+        "changedPaths": 1,
+        "fields": [
+          "mtime"
+        ],
+        "changedPayloadPaths": []
+      },
+      {
+        "ordinal": 7,
+        "changedPaths": 38,
+        "fields": [
+          "mtime",
+          "sha256"
+        ],
+        "changedPayloadPaths": [
+          "var/cache/ldconfig/aux-cache",
+          "var/log/dpkg.log"
+        ]
+      },
+      {
+        "ordinal": 8,
+        "changedPaths": 1,
+        "fields": [
+          "mtime"
+        ],
+        "changedPayloadPaths": []
+      }
+    ],
+    "observedExplanation": "directory modification times, var/log/dpkg.log and var/cache/ldconfig/aux-cache differ; every copied Keycloak regular payload unchanged",
+    "scope": "actual comparison of two successful clean fixture images, no reproducibility guarantee"
+  },
+  "retainedScan": {
+    "tool": "Trivy0.70.0",
+    "toolSha256": "3122de2c39d6ae433c2355a87508fb18dca637cf7f149e0006b63ddefb0cdc52",
+    "policy": "CRITICAL,HIGH os,library; empty vulnerabilities ignore list unchanged",
+    "databases": {
+      "db/metadata.json": {
+        "Version": 2,
+        "NextUpdate": "2026-10-25T01:18:19.814880324Z",
+        "UpdatedAt": "2026-10-24T01:18:19.814880615Z",
+        "DownloadedAt": "2026-10-24T05:33:38.798795Z"
+      },
+      "java-db/metadata.json": {
+        "Version": 1,
+        "NextUpdate": "2026-10-27T01:07:32.115560063Z",
+        "UpdatedAt": "2026-10-24T01:07:32.115560183Z",
+        "DownloadedAt": "2026-10-24T05:34:34.61544Z"
+      }
+    },
+    "images": [
+      {
+        "fixture": "skoolit",
+        "platform": "linux/arm64",
+        "manifestDigest": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+        "configDigest": "sha256:8ac7347c912d9425c0bf95b04c35ae6fc9069ca94fdef9757a28771894ed1e64",
+        "rawExitCode": 0,
+        "blockingExitCode": 0,
+        "highCriticalFindings": 0
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/arm64",
+        "manifestDigest": "sha256:84ae40e6b2ba4317af8019343672eb2e8853112c5f9a7ad98e6111b57abdedba",
+        "configDigest": "sha256:92d7ffed647cc48747beb03e2ec175ac44e098705a2262121fe04c82f60f4043",
+        "rawExitCode": 0,
+        "blockingExitCode": 0,
+        "highCriticalFindings": 0
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/amd64",
+        "manifestDigest": "sha256:af053f9eea333d23bf3ca173d82dea783c29b091be586ef8a2de209df4b09c46",
+        "configDigest": "sha256:8c2d1d132e88f2f3656c979358b2b21ee012bf763caa2734a16f6a9fc3aa3576",
+        "rawExitCode": 0,
+        "blockingExitCode": 0,
+        "highCriticalFindings": 0
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/amd64",
+        "manifestDigest": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+        "configDigest": "sha256:ccfb1aebfe8daa256ddc03f84a94ded9bd78d7adb3c0ee9809d941779f756024",
+        "rawExitCode": 0,
+        "blockingExitCode": 0,
+        "highCriticalFindings": 0
+      }
+    ],
+    "scope": "actual final neutral and Skoolit images on both platforms; unchanged policy with zero findings on 2026-10-24; not a future advisory guarantee"
+  },
+  "currentBoundedOciConformance": {
+    "status": "oci-static-conformance-proof-passed",
+    "images": [
+      {
+        "platform": "linux/amd64",
+        "manifestDigest": "sha256:af053f9eea333d23bf3ca173d82dea783c29b091be586ef8a2de209df4b09c46",
+        "configDigest": "sha256:8c2d1d132e88f2f3656c979358b2b21ee012bf763caa2734a16f6a9fc3aa3576",
+        "contextFilesVerified": 495,
+        "contextDirectoriesVerified": 19,
+        "orderedLayerMembers": 9905,
+        "mergedPaths": 9716,
+        "resourceBudgets": {
+          "maxOciEntryBytes": 134217728,
+          "maxArchiveBytes": 1073741824,
+          "maxCompressedBlobBytes": 1073741824,
+          "maxExpandedLayerBytes": 2147483648,
+          "maxExpandedTotalBytes": 4294967296,
+          "maxMetadataJsonBytes": 1048576,
+          "maxLayers": 64,
+          "maxLayerMembers": 250000,
+          "maxTotalMembers": 1000000,
+          "maxRootEntries": 1000000,
+          "maxPathLength": 4096,
+          "maxProcessSeconds": 300,
+          "actualCompressedBlobBytes": 301019664,
+          "actualExpandedBytes": 543621120,
+          "elapsedSeconds": 3.8600471
+        }
+      },
+      {
+        "platform": "linux/arm64",
+        "manifestDigest": "sha256:84ae40e6b2ba4317af8019343672eb2e8853112c5f9a7ad98e6111b57abdedba",
+        "configDigest": "sha256:92d7ffed647cc48747beb03e2ec175ac44e098705a2262121fe04c82f60f4043",
+        "contextFilesVerified": 495,
+        "contextDirectoriesVerified": 19,
+        "orderedLayerMembers": 9898,
+        "mergedPaths": 9710,
+        "resourceBudgets": {
+          "maxOciEntryBytes": 134217728,
+          "maxArchiveBytes": 1073741824,
+          "maxCompressedBlobBytes": 1073741824,
+          "maxExpandedLayerBytes": 2147483648,
+          "maxExpandedTotalBytes": 4294967296,
+          "maxMetadataJsonBytes": 1048576,
+          "maxLayers": 64,
+          "maxLayerMembers": 250000,
+          "maxTotalMembers": 1000000,
+          "maxRootEntries": 1000000,
+          "maxPathLength": 4096,
+          "maxProcessSeconds": 300,
+          "actualCompressedBlobBytes": 299844811,
+          "actualExpandedBytes": 566031360,
+          "elapsedSeconds": 7.878932
+        }
+      },
+      {
+        "platform": "linux/amd64",
+        "manifestDigest": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+        "configDigest": "sha256:ccfb1aebfe8daa256ddc03f84a94ded9bd78d7adb3c0ee9809d941779f756024",
+        "contextFilesVerified": 509,
+        "contextDirectoriesVerified": 25,
+        "orderedLayerMembers": 9925,
+        "mergedPaths": 9736,
+        "resourceBudgets": {
+          "maxOciEntryBytes": 134217728,
+          "maxArchiveBytes": 1073741824,
+          "maxCompressedBlobBytes": 1073741824,
+          "maxExpandedLayerBytes": 2147483648,
+          "maxExpandedTotalBytes": 4294967296,
+          "maxMetadataJsonBytes": 1048576,
+          "maxLayers": 64,
+          "maxLayerMembers": 250000,
+          "maxTotalMembers": 1000000,
+          "maxRootEntries": 1000000,
+          "maxPathLength": 4096,
+          "maxProcessSeconds": 300,
+          "actualCompressedBlobBytes": 301417896,
+          "actualExpandedBytes": 544047104,
+          "elapsedSeconds": 3.4500295
+        }
+      },
+      {
+        "platform": "linux/arm64",
+        "manifestDigest": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+        "configDigest": "sha256:8ac7347c912d9425c0bf95b04c35ae6fc9069ca94fdef9757a28771894ed1e64",
+        "contextFilesVerified": 509,
+        "contextDirectoriesVerified": 25,
+        "orderedLayerMembers": 9918,
+        "mergedPaths": 9730,
+        "resourceBudgets": {
+          "maxOciEntryBytes": 134217728,
+          "maxArchiveBytes": 1073741824,
+          "maxCompressedBlobBytes": 1073741824,
+          "maxExpandedLayerBytes": 2147483648,
+          "maxExpandedTotalBytes": 4294967296,
+          "maxMetadataJsonBytes": 1048576,
+          "maxLayers": 64,
+          "maxLayerMembers": 250000,
+          "maxTotalMembers": 1000000,
+          "maxRootEntries": 1000000,
+          "maxPathLength": 4096,
+          "maxProcessSeconds": 300,
+          "actualCompressedBlobBytes": 300242986,
+          "actualExpandedBytes": 566457344,
+          "elapsedSeconds": 4.5247895
+        }
+      }
+    ],
+    "wrongDiffIdRejected": true,
+    "passingNegativeReportAbsent": true,
+    "scope": "actual four final manifests, captured-context file/directory conformance; retained runtime/release gates separate"
+  },
+  "currentOsInventory": {
+    "status": "current-final-offline-os-inventory-proof-passed",
+    "images": [
+      {
+        "fixture": "neutral",
+        "platform": "linux/arm64",
+        "image_id": "sha256:84ae40e6b2ba4317af8019343672eb2e8853112c5f9a7ad98e6111b57abdedba",
+        "immutable_manifest_binding": {
+          "receipt_image_id": "sha256:84ae40e6b2ba4317af8019343672eb2e8853112c5f9a7ad98e6111b57abdedba",
+          "archive_manifest_digest": "sha256:84ae40e6b2ba4317af8019343672eb2e8853112c5f9a7ad98e6111b57abdedba",
+          "report_manifest_digest": "sha256:84ae40e6b2ba4317af8019343672eb2e8853112c5f9a7ad98e6111b57abdedba",
+          "archive_config_digest": "sha256:92d7ffed647cc48747beb03e2ec175ac44e098705a2262121fe04c82f60f4043",
+          "report_config_digest": "sha256:92d7ffed647cc48747beb03e2ec175ac44e098705a2262121fe04c82f60f4043",
+          "matched": true
+        },
+        "regular_payload_files": 247,
+        "exact_hash_matches": 15,
+        "explicitly_excluded": 232,
+        "base_installed_inventory": 140,
+        "final_installed_inventory": 138,
+        "full_140_to_138_installed_inventory": true
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/arm64",
+        "image_id": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+        "immutable_manifest_binding": {
+          "receipt_image_id": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+          "archive_manifest_digest": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+          "report_manifest_digest": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+          "archive_config_digest": "sha256:8ac7347c912d9425c0bf95b04c35ae6fc9069ca94fdef9757a28771894ed1e64",
+          "report_config_digest": "sha256:8ac7347c912d9425c0bf95b04c35ae6fc9069ca94fdef9757a28771894ed1e64",
+          "matched": true
+        },
+        "regular_payload_files": 247,
+        "exact_hash_matches": 15,
+        "explicitly_excluded": 232,
+        "base_installed_inventory": 140,
+        "final_installed_inventory": 138,
+        "full_140_to_138_installed_inventory": true
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/amd64",
+        "image_id": "sha256:af053f9eea333d23bf3ca173d82dea783c29b091be586ef8a2de209df4b09c46",
+        "immutable_manifest_binding": {
+          "receipt_image_id": "sha256:af053f9eea333d23bf3ca173d82dea783c29b091be586ef8a2de209df4b09c46",
+          "archive_manifest_digest": "sha256:af053f9eea333d23bf3ca173d82dea783c29b091be586ef8a2de209df4b09c46",
+          "report_manifest_digest": "sha256:af053f9eea333d23bf3ca173d82dea783c29b091be586ef8a2de209df4b09c46",
+          "archive_config_digest": "sha256:8c2d1d132e88f2f3656c979358b2b21ee012bf763caa2734a16f6a9fc3aa3576",
+          "report_config_digest": "sha256:8c2d1d132e88f2f3656c979358b2b21ee012bf763caa2734a16f6a9fc3aa3576",
+          "matched": true
+        },
+        "regular_payload_files": 248,
+        "exact_hash_matches": 16,
+        "explicitly_excluded": 232,
+        "base_installed_inventory": 140,
+        "final_installed_inventory": 138,
+        "full_140_to_138_installed_inventory": true
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/amd64",
+        "image_id": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+        "immutable_manifest_binding": {
+          "receipt_image_id": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+          "archive_manifest_digest": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+          "report_manifest_digest": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+          "archive_config_digest": "sha256:ccfb1aebfe8daa256ddc03f84a94ded9bd78d7adb3c0ee9809d941779f756024",
+          "report_config_digest": "sha256:ccfb1aebfe8daa256ddc03f84a94ded9bd78d7adb3c0ee9809d941779f756024",
+          "matched": true
+        },
+        "regular_payload_files": 248,
+        "exact_hash_matches": 16,
+        "explicitly_excluded": 232,
+        "base_installed_inventory": 140,
+        "final_installed_inventory": 138,
+        "full_140_to_138_installed_inventory": true
+      }
+    ],
+    "scope": "signed .deb regular installed payload disposition and complete dpkg inventory independently checked on all four current final attempt-1 fixture/platform images; signed payload inventory profile is reused per architecture, while each archive and merged report is read and bound independently"
+  },
+  "gateIntegration": {
+    "status": "owner-approved; arm64 full retained gate passed; amd64 isolated-browser startup readiness failed",
+    "sourceScriptSha256": "9c46d7393478164fe8c13c0b978cb645b06a5c28e1aa60e4f7dd4c27535283fd",
+    "problem": "--all and --upgrade always build the legacy Dockerfile into the supplied tag before checking it; that replaces the captured-plan output",
+    "proposal": "issue-887-skoolit-prebuilt-gate-proposal.patch",
+    "proposalControlCasesPassed": 4,
+    "scope": "approved adapted full retained gate on exact captured-plan image tags; original captured source unchanged"
+  },
+  "fullGateRuns20261024": {
+    "argv": "bash scripts/qa/run-keycloak-theme-gates.sh --all --no-restore --no-build --resource-label skoolit.evidencehost.case=issue887 --defer-resource-cleanup --resource-manifest TestResults/issue887-full-gate-<run>.jsonl",
+    "environment": {
+      "SKOOLIT_KEYCLOAK_IMAGE": "exact platform tag per run",
+      "SKOOLIT_KEYCLOAK_PREBUILT_IMAGE_ID": "exact platform image ID per run"
+    },
+    "scriptSha256": "9c46d7393478164fe8c13c0b978cb645b06a5c28e1aa60e4f7dd4c27535283fd",
+    "resourceLabel": "skoolit.evidencehost.case=issue887",
+    "cleanup": "after read-only snapshots, only manifest-recorded containers and networks were removed; no shared Docker prune/restart",
+    "runs": [
+      {
+        "platform": "linux/arm64",
+        "imageTag": "appsurface-887-combined:dc4875143ef048dfa4035a38dbd6be18-skoolit-arm64-1",
+        "beforeImageId": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+        "afterImageId": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+        "runId": "arm64-20261024T071406Z-59409",
+        "exitCode": 0,
+        "elapsedSeconds": 596,
+        "phaseMilliseconds": {
+          "keycloak-fast": 27454,
+          "keycloak-image": 2133,
+          "keycloak-upgrade": 512785,
+          "keycloak-isolated-browser": 53921
+        },
+        "tests": {
+          "appHostPassed": 39,
+          "playwrightPassed": 37,
+          "failed": 0
+        },
+        "result": "keycloak-theme-gates-passed",
+        "metadata": ".gstack/tmp/issue-887/approved-full-gate-proof/arm64-20261024T071406Z-59409.metadata.txt",
+        "stdout": ".gstack/tmp/issue-887/approved-full-gate-proof/arm64-20261024T071406Z-59409.stdout.log",
+        "stderr": ".gstack/tmp/issue-887/approved-full-gate-proof/arm64-20261024T071406Z-59409.stderr.log",
+        "manifest": ".gstack/tmp/issue-887/skoolit-gates-source/TestResults/issue887-full-gate-arm64-20261024T071406Z-59409.jsonl"
+      },
+      {
+        "platform": "linux/amd64",
+        "imageTag": "appsurface-887-combined:fe5f931af4c94fd5aac5dada98291218-skoolit-amd64-1",
+        "beforeImageId": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+        "afterImageId": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+        "runId": "amd64-20261024T072424Z-74872",
+        "exitCode": 1,
+        "elapsedSeconds": 830,
+        "phaseMilliseconds": {
+          "keycloak-fast": 26639,
+          "keycloak-image": 8992,
+          "keycloak-upgrade": 731812,
+          "keycloak-isolated-browser": 62140
+        },
+        "tests": {
+          "appHostPassed": 39,
+          "playwrightPassed": 37,
+          "failed": 0
+        },
+        "result": "KEYCLOAK_THEME_GATES_ISOLATED_KEYCLOAK_NOT_READY",
+        "rootCause": {
+          "classification": "harness-fixture startup readiness mismatch under amd64 emulation",
+          "expected": "isolated-browser readiness within the unchanged 60-iteration/60-second loop",
+          "observed": "candidate container was still running Quarkus schema initialization; gate failed at 07:38:14Z, and the container logged database schema initialization at 07:38:28Z; post-failure readiness probe returned no HTTP response",
+          "durableState": "upgrade/restore phase passed; restored container public realm returned HTTP 200 and loginTheme keycloak.v2 in the read-only probe",
+          "assertionsChanged": false,
+          "assertionWaiver": false
+        },
+        "metadata": ".gstack/tmp/issue-887/approved-full-gate-proof/amd64-20261024T072424Z-74872.metadata.txt",
+        "stdout": ".gstack/tmp/issue-887/approved-full-gate-proof/amd64-20261024T072424Z-74872.stdout.log",
+        "stderr": ".gstack/tmp/issue-887/approved-full-gate-proof/amd64-20261024T072424Z-74872.stderr.log",
+        "manifest": ".gstack/tmp/issue-887/skoolit-gates-source/TestResults/issue887-full-gate-amd64-20261024T072424Z-74872.jsonl"
+      }
+    ],
+    "amd64BrowserOnlyRetry": {
+      "runId": "amd64-browser-20261024T074045Z-90314",
+      "exitCode": 1,
+      "elapsedSeconds": 72,
+      "imageTag": "appsurface-887-combined:fe5f931af4c94fd5aac5dada98291218-skoolit-amd64-1",
+      "imageId": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+      "error": "KEYCLOAK_THEME_GATES_ISOLATED_KEYCLOAK_NOT_READY",
+      "startup": {
+        "containerStartedAt": "2026-10-24T07:40:55.168076217Z",
+        "quarkusAugmentationCompletedAt": "2026-10-24T07:41:46.946Z",
+        "quarkusAugmentationSeconds": 43.074,
+        "serverDevModeAt": "2026-10-24T07:41:51.034Z",
+        "gateEndedAt": "2026-10-24T07:41:57Z",
+        "postFailureWellKnownHttp": 0,
+        "postFailureResponse": "empty reply from server"
+      },
+      "resourceObservation": {
+        "cpuPercent": 409.81,
+        "memory": "674.2MiB / 7.748GiB",
+        "memoryPercent": 8.5,
+        "pids": 41
+      },
+      "manifest": ".gstack/tmp/issue-887/skoolit-gates-source/TestResults/issue887-full-gate-amd64-browser-20261024T074045Z-90314.jsonl",
+      "classification": "repeatable retained readiness ceiling under amd64 emulation",
+      "next": "run the unchanged browser gate on a real amd64 host when available; do not prewarm, modify layers, increase timeout, change assertions, or retry again"
+    },
+    "historicalMalformedTargetAttempt": {
+      "runId": "arm64-20261024T071154Z-53581",
+      "imageTag": "tagappsurface-887-combined:dc4875143ef048dfa4035a38dbd6be18-skoolit-arm64-1",
+      "classification": "invalid exact-tag setup; same image ID but wrong requested tag spelling",
+      "countedAsGateResult": false,
+      "manifest": ".gstack/tmp/issue-887/skoolit-gates-source/TestResults/issue887-full-gate-arm64-20261024T071154Z-53581.jsonl"
+    }
+  },
+  "retainedSystemResume": {
+    "status": "superseded-by-approved-full-gate-receipts",
+    "date": "2026-10-24",
+    "fixture": "skoolit",
+    "platform": "linux/arm64",
+    "manifestDigest": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+    "isolatedBrowser": {
+      "exit": 0,
+      "milliseconds": 100492,
+      "script": "bash scripts/qa/run-keycloak-theme-gates.sh --isolated-browser --json",
+      "scope": "actual retained isolated browser/accessibility gate on exact image"
+    },
+    "upgradeRestore": "covered by fullGateRuns20261024 arm64 pass and amd64 pass before isolated-browser startup failure",
+    "amd64SystemGates": "full retained run reached isolated-browser and failed KEYCLOAK_THEME_GATES_ISOLATED_KEYCLOAK_NOT_READY",
+    "cleanup": "fullGateRuns20261024 manifests record all disposable resources; each manifest was cleaned after read-only snapshots",
+    "fullAllBlocker": "resolved by owner-approved prebuilt selection adaptation",
+    "next": "obtain native amd64 execution or separately approve a measured startup accommodation; do not change retained assertions or the 90-iteration loop"
+  },
+  "actualParserResourceMeasurement": {
+    "status": "actual-parser-resource-measurement-passed",
+    "manifest": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+    "archiveBytes": 300256768,
+    "maximumResidentSetBytes": 79249408,
+    "wallSeconds": 3.263,
+    "hostTool": "macOS /usr/bin/time -l",
+    "cacheAndConcurrency": "warm local export under concurrent Docker runtime/system proof; cold/p99 unknown",
+    "scope": "one actual full-conformance managed parser invocation; no aggregate SDK memory/disk enforcement, native Linux or concurrency guarantee"
+  },
+  "currentPrivateLiveProof": {
+    "status": "qualified-four-image-private-live-fixture-proof",
+    "proofs": [
+      {
+        "fixture": "neutral",
+        "platform": "linux/arm64",
+        "image_id": "sha256:84ae40e6b2ba4317af8019343672eb2e8853112c5f9a7ad98e6111b57abdedba",
+        "running_image_before_after_matches": true,
+        "admin_auth_and_theme_readback": "passed",
+        "wrong_credentials": "rejected",
+        "http_login_render_status": 200,
+        "scope": "HTTP rendering and real admin CLI auth/readback; actual browser/accessibility/upgrade/scan gates separate",
+        "login_sha256": "f1008c15a06b9fadee5f41abb11a4a68948ff192bafa37a5c1338967ed2a6edc"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/arm64",
+        "image_id": "sha256:b0061d58c10543370ec6f3d15fff7a67116c6bcd21468c37b6a80f751270ef79",
+        "running_image_before_after_matches": true,
+        "admin_auth_and_theme_readback": "passed",
+        "wrong_credentials": "rejected",
+        "http_login_render_status": 200,
+        "scope": "HTTP rendering and real admin CLI auth/readback; actual browser/accessibility/upgrade/scan gates separate",
+        "login_sha256": "3755a8d2813e6bc03e7c052bba2387bbbaa86686b5a54deddf10ac18ccff133b"
+      },
+      {
+        "fixture": "neutral",
+        "platform": "linux/amd64",
+        "image_id": "sha256:af053f9eea333d23bf3ca173d82dea783c29b091be586ef8a2de209df4b09c46",
+        "running_image_before_after_matches": true,
+        "admin_auth_and_theme_readback": "passed",
+        "wrong_credentials": "rejected",
+        "http_login_render_status": 200,
+        "scope": "HTTP rendering and real admin CLI auth/readback; actual browser/accessibility/upgrade/scan gates separate",
+        "login_sha256": "bf93cfbffc1b5fb7e789f782c3f9f1914f653e79f013fdd1b67ae7a0b8f3db63"
+      },
+      {
+        "fixture": "skoolit",
+        "platform": "linux/amd64",
+        "image_id": "sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2",
+        "running_image_before_after_matches": true,
+        "admin_auth_and_theme_readback": "passed",
+        "wrong_credentials": "rejected",
+        "http_login_render_status": 200,
+        "scope": "HTTP rendering and real admin CLI auth/readback; actual browser/accessibility/upgrade/scan gates separate",
+        "login_sha256": "90258717d426119df6fe805a4beb7d2ab21e80181363ef7e9dd8c4561ba2e502"
+      }
+    ],
+    "policy": {
+      "skoolit_ssl_fallback_removed": true,
+      "captured_realm_policy_preserved": true,
+      "exact_pkce_query": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM / S256",
+      "skoolit_redirect": "https://app-dev.getskoolit.com/signin-oidc"
+    },
+    "initial403": {
+      "classification": "original 403 cause not conclusively isolated; ambient proxy path is one plausible contributor",
+      "evidence": "strict loopback proxy-disabled client with retained HTTPS redirect and PKCE query returned HTTP200 on unchanged image/realm policy",
+      "initial_body_retained": false,
+      "limitation": "initial request omitted retained client query requirements and did not retain error body/headers; more than one harness factor changed, so proxy causation is not proven"
+    },
+    "arm64Run": "fd6dd594bcd443c48b717230e51cb1b7",
+    "amd64Run": "4cfc961bc9a742509f879173913ef8bd",
+    "amd64ResourceRevision": {
+      "startupDeadlineSeconds": 300,
+      "memoryBytes": 3221225472,
+      "cpus": 4,
+      "reason": "prior private120second/2CPU/1.5GiBstartup bounds did not permit Quarkus configuration preparation under emulation; exact image/policy unchanged",
+      "retainedGateTimeoutChanged": false
+    },
+    "scope": "real per-image CLI auth/readback/wrong credentials and HTTP render; not retained browser/upgrade/full-all proof"
+  },
+  "ownerDispositions20261024": {
+    "owner": "@akrock",
+    "source": "explicit human answers",
+    "prebuiltGate": "approved adaptation for exact-image proof and patch/validation inclusion in draft PR",
+    "historicalPolicy": "approved exact reviewed snapshot bytes/fingerprint only",
+    "resourceCeilings": "approved as recorded in fixture card",
+    "runtimeSystemGatesMandatory": true,
+    "publicationAuthorized": false
+  },
+  "originalSourceOciBudgetFinding": {
+    "status": "rejected-by-current-approved-limit",
+    "sourcePinsChanged": false,
+    "sourceArchiveIdentitiesAreOriginal": true,
+    "arm64Manifest": "sha256:20874855592d23bc145f5e8b3ede829012014109905363f6c3eea7340fb708ba",
+    "amd64Manifest": "sha256:eb81d22bb82bc358ee10bdd4ab15dea2caae0add01416a1b146e2c7c7eb9cfab",
+    "approvedPerMemberBytes": 134217728,
+    "observedArm64JdkModulesBytes": 155514630,
+    "observedAmd64JdkModulesBytes": 155560314,
+    "sourceFileComparisonPassed": false,
+    "wrongDiffIdControlReached": false,
+    "proposedSourceOnlyBytes": 201326592,
+    "proposalApplied": false,
+    "decision": "pending explicit owner disposition",
+    "finalImageLimitBytes": 134217728,
+    "archiveExpandedEntryLimitBytes": 67108864,
+    "acquisitionSeconds": 9.406516833,
+    "proofBuildExit": 0,
+    "proofRunExit": 134,
+    "scope": "immutable raw graph recovery passed; full source parser proof failed at its retained per-entry limit before selected output; no SDK support claim"
+  }
+}

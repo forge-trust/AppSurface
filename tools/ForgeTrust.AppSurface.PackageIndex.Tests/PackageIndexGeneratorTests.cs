@@ -2091,6 +2091,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-smoke"), defaults.SmokeWorkDirectory);
         Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-smoke-report.md"), defaults.SmokeReportPath);
         Assert.Null(defaults.PackageVersion);
+        Assert.Null(defaults.CloudTasksBaselineRef);
 
         var parsed = CommandLineOptions.Parse(
             [
@@ -2102,6 +2103,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "--artifacts-input", "packages-in",
                 "--artifact-manifest", "artifact-manifest.json",
                 "--package-version", "0.0.0-ci.99",
+                "--cloudtasks-baseline-ref", "origin/main",
                 "--report", "package-report.md",
                 "--coverage-proof-work-dir", "coverage-proof",
                 "--coverage-proof-report", "coverage-proof.md",
@@ -2133,6 +2135,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "smoke")), parsed.SmokeWorkDirectory);
         Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "smoke-report.md")), parsed.SmokeReportPath);
         Assert.Equal("0.0.0-ci.99", parsed.PackageVersion);
+        Assert.Equal("origin/main", parsed.CloudTasksBaselineRef);
+        Assert.Equal("origin/main", parsed.CreatePackageArtifactRequest().CloudTasksBaselineRef);
 
         var absoluteManifest = TestPathUtils.PathUnder(_repositoryRoot, "abs", "manifest.yml");
         var absoluteOutput = TestPathUtils.PathUnder(_repositoryRoot, "abs", "chooser.md");
@@ -2326,6 +2330,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     [Theory]
     [InlineData("--manifest")]
     [InlineData("--native-pg-bin")]
+    [InlineData("--cloudtasks-baseline-ref")]
     [InlineData("--durable-template-evidence")]
     [InlineData("--coverage-proof-work-dir")]
     [InlineData("--coverage-proof-report")]

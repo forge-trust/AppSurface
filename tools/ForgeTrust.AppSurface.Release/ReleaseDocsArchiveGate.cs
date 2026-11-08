@@ -616,6 +616,16 @@ internal static class ReleaseDocsArchiveGate
         return true;
     }
 
+    /// <summary>Verifies an exact tree for static serving-output generation without assigning derived bytes an archive pin.</summary>
+    /// <param name="exactTreePath">Catalog-resolved original verification input tree.</param>
+    /// <param name="expectedManifestSha256">Exact release-manifest digest pinned by the catalog.</param>
+    /// <param name="issue">Safe operator-facing reason when verification fails.</param>
+    /// <returns>Whether every manifest-listed file, frozen route manifest, and serveable path passed the archive gate.</returns>
+    internal static bool TryVerifyArchiveForStaticPublication(string exactTreePath, string expectedManifestSha256, out string? issue)
+    {
+        return TryVerifyArchive(exactTreePath, expectedManifestSha256, out _, out issue);
+    }
+
     /// <summary>
     /// Creates the physical-path coverage set for a release manifest under the filesystem's casing rules.
     /// </summary>
@@ -829,7 +839,8 @@ internal static class ReleaseDocsArchiveGate
                               || segment == "."
                               || segment == ".."
                               || (segment.StartsWith(".", StringComparison.Ordinal)
-                                  && !string.Equals(path, RouteManifestFileName, StringComparison.Ordinal)))
+                                  && !string.Equals(path, RouteManifestFileName, StringComparison.Ordinal)
+                                  && !string.Equals(path, ".appsurface-docs-concepts.json", StringComparison.Ordinal)))
             .Any();
         if (hasUnsafeSegment)
         {

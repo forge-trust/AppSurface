@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="AngleSharp" />
     <PackageReference Include="CliFx" />
     <PackageReference Include="Markdig" />
     <PackageReference Include="YamlDotNet" />

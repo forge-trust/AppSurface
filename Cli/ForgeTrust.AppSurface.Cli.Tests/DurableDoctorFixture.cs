@@ -588,6 +588,7 @@ internal sealed class DurableDoctorFixture : IAsyncDisposable
             .WithDatabase("appsurface_durable")
             .WithUsername("appsurface")
             .WithPassword("appsurface-test-password")
+            .WithCreateParameterModifier(PostgreSqlTestPortBindings.BindLocalDaemonToLoopback)
             .WithResourceMapping(recipePath, "/tmp")
             .WithCleanUp(true)
             .Build();

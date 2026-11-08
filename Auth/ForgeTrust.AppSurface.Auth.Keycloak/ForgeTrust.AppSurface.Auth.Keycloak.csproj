@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageDescription>Captured, verified Keycloak security recipes, deterministic archive transformation, and exact-image inspection without Aspire dependencies.</PackageDescription>
+    <PackageTags>appsurface;dotnet;authentication;keycloak;oci</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Keycloak.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests" />
+    <PackageReference Include="BouncyCastle.Cryptography" />
+    <PackageReference Include="ZstdSharp.Port" />
+  </ItemGroup>
+</Project>

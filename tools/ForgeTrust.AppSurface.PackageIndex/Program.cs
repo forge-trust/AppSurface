@@ -77,6 +77,9 @@ internal static class Program
           --repository-id <id> --producer-run-id <id> --producer-attempt <n> --source-commit <sha>
                                 Optional verify-packages producer identity; all four are required together. Build verifier with /p:SourceRevisionId=<sha>.
           Tailwind commands accept --mode local|release|producer-binding|aggregate|publish-preflight|validate-publication-start and the explicit producer, invocation, aggregate, receipt, and directory bindings in docs/tailwind-artifact-provenance.md.
+          --cloudtasks-baseline-ref <ref>
+                                Optional historical Cloud Tasks acceptance baseline: unique merge-base of this ref and candidate commit.
+                                Omit for ordinary verification against the candidate committed source snapshot; missing history fails.
           --report <path>       Package artifact report path. Defaults to artifacts/package-validation-report.md.
           --coverage-proof-work-dir <path>
                                 Isolated packaged coverage CLI proof work directory. Defaults to <artifacts-output>/coverage-cli-consumer-proof.
@@ -587,6 +590,7 @@ internal static class Program
 /// <param name="DurableTemplateEvidenceDirectory">Trusted exact-ID OS receipt directory required for template publication.</param>
 /// <param name="NativePgBin">Optional resolved native PostgreSQL tool directory for installed-template smoke.</param>
 /// <param name="PreflightCandidateReceiptPath">Retained candidate proof receipt required by production smoke-install.</param>
+/// <param name="CloudTasksBaselineRef">Optional fetched target ref for historical Cloud Tasks acceptance; omitted uses the candidate source commit.</param>
 internal sealed record CommandLineOptions(
     PackageIndexRequest Request,
     string ArtifactsOutputPath,
@@ -611,7 +615,7 @@ internal sealed record CommandLineOptions(
     string? PreflightRunId,
     string? PreflightArtifactId,
     string? PreflightCandidateReceiptPath,
-    string? DurableTemplateEvidenceDirectory = null, string? NativePgBin = null)
+    string? DurableTemplateEvidenceDirectory = null, string? NativePgBin = null, string? CloudTasksBaselineRef = null)
 {
     /// <summary>
     /// Parses path-related CLI options into a resolved chooser request.
@@ -650,6 +654,7 @@ internal sealed record CommandLineOptions(
         string? preflightCandidateReceiptPath = null;
         string? durableTemplateEvidenceDirectory = null;
         string? nativePgBin = null;
+        string? cloudTasksBaselineRef = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -762,6 +767,12 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
+            if (string.Equals(argument, "--cloudtasks-baseline-ref", StringComparison.Ordinal))
+            {
+                cloudTasksBaselineRef = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
             if (string.Equals(argument, "--base-ref", StringComparison.Ordinal))
             {
                 baseRef = ReadRequiredValue(args, ref index, argument);
@@ -868,7 +879,8 @@ internal sealed record CommandLineOptions(
             preflightArtifactId,
             resolvedPreflightCandidateReceiptPath,
             durableTemplateEvidenceDirectory is null ? null : ResolvePath(durableTemplateEvidenceDirectory, repoRoot, durableTemplateEvidenceDirectory),
-            nativePgBin is null ? null : ResolvePath(nativePgBin, repoRoot, nativePgBin));
+            nativePgBin is null ? null : ResolvePath(nativePgBin, repoRoot, nativePgBin),
+            cloudTasksBaselineRef);
     }
 
     /// <summary>
@@ -898,7 +910,8 @@ internal sealed record CommandLineOptions(
             tailwind?.RepositoryId,
             tailwind?.ProducerRunId,
             tailwind?.ProducerAttempt,
-            tailwind?.SourceCommit);
+            tailwind?.SourceCommit,
+            CloudTasksBaselineRef);
     }
 
     /// <summary>

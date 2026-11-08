@@ -1,4 +1,5 @@
 import { DialogResponseManager } from './dialog-responses';
+import { installSwrRenderGuard } from './swr-render-guard';
 
 /**
  * RazorWire Core Client Runtime
@@ -2787,7 +2788,7 @@ declare const Turbo: TurboRuntime | undefined;
     // Initialize
     const runtimeConfig = readRuntimeConfig();
     installVisitStreamAction();
-    const dialogResponseManager = new DialogResponseManager(resolveTurbo());
+    const dialogResponseManager = new DialogResponseManager(resolveTurbo(), installSwrRenderGuard());
     dialogResponseManager.start();
     const connectionManager = new ConnectionManager(runtimeConfig);
     const localTimeFormatter = new LocalTimeFormatter();

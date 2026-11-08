@@ -194,6 +194,20 @@ class NestedCollectionConsumerTests(unittest.TestCase):
             self.assertIn("still contains a source ProjectReference", result.stderr)
             self.assertEqual(project_path.read_text(encoding="utf-8"), original)
 
+    def test_rewrite_rejects_an_unrecognized_source_import(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            project_path = self.write_project(pathlib.Path(directory_name))
+            original = project_path.read_text(encoding="utf-8").replace(
+                "</Project>", '  <Import Project="../../tools/Other.targets" />\n</Project>'
+            )
+            project_path.write_text(original, encoding="utf-8")
+
+            result = self.run_rewrite(project_path)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("still contains a source Import", result.stderr)
+            self.assertEqual(project_path.read_text(encoding="utf-8"), original)
+
     def test_rewrite_rejects_a_missing_required_package_source_reference(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             project_path = self.write_project(

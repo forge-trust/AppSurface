@@ -610,8 +610,10 @@ public sealed class RazorWireFormLoadingPlaywrightTests
             await Assertions.Expect(page.Locator("[data-rw-loading-fallback]")).ToBeVisibleAsync();
             Assert.Equal("suppress", await page.Locator("html").GetAttributeAsync("data-rw-loading-turbo-bar"));
 
+            // Arm the observer before continuing the response so navigation cannot outrun subscription.
+            var navigation = page.WaitForURLAsync("**/Navigation");
             releaseVisit.TrySetResult();
-            await page.WaitForURLAsync("**/Navigation");
+            await navigation;
         }
         finally
         {

@@ -12,6 +12,7 @@ internal static class ExportDeploymentExtras
         "/_redirects",
         "/_headers",
         "/.appsurface-docs-route-manifest.json",
+        "/.appsurface-docs-concepts.json",
         "/.appsurface-docs-release-manifest.json"
     };
 
