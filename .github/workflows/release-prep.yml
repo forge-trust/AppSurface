@@ -43,6 +43,15 @@ jobs:
       contents: read
 
     steps:
+      - name: Verify cache access is disabled
+        run: |
+          set -euo pipefail
+          printf 'ACTIONS_CACHE_MODE=%s\n' "${ACTIONS_CACHE_MODE:-<unset>}"
+          if [[ "${ACTIONS_CACHE_MODE:-}" != "none" ]]; then
+            echo "Release Prep requires ACTIONS_CACHE_MODE=none; refusing to execute base-ref-controlled tooling." >&2
+            exit 1
+          fi
+
       - name: Validate trusted release base
         env:
           BASE_REF: ${{ inputs.base-ref }}
