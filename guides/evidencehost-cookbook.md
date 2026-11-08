@@ -1,6 +1,6 @@
 # EvidenceHost Cookbook
 
-For a checked-in executable example, see [native EvidenceHost acceptance](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). AppSurface uses that recipe to validate its packed storage CLI and installed-package consumer through the same explicit producer contracts available to applications.
+The repository validation tool has two distinct uses. Its [direct package recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys) validates a supplied package outside EvidenceHost and writes `native-validation-receipt.json`, with no EvidenceHost claim or gate authority. AppSurface's [policy-backed local and CI workflow](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) selects changed-path coverage, package checks and native acceptance through the checked-in policy and emits the manifest used by the repository evidence gate.
 
 Its [shared local and CI policy recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development)
 shows the full changed-path selection loop: real PR diff, checked-in policy, selected coverage, package and native producers,
@@ -10,6 +10,10 @@ combine their required producers rather than forcing the full conservative set. 
 or `--scope packages` to reproduce one CI lane locally; default `all` verifies the complete selection.
 
 This cookbook turns the [EvidenceHost guide](../start-here/evidencehost.md) into concrete CI patterns. The goal is not a higher coverage number. The goal is a visible, truthful claim that the changed risk was mediated.
+
+## Direct package validation
+
+Use the [direct `--package` recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys) when the question is whether a particular packed CLI package passes its fixed storage or installed-consumer journeys. It emits a digest-checked `native-validation-receipt.json`, not an EvidenceHost manifest; its `evidence-plan.json` describes the recipe but does not grant a claim. Use the policy-backed `--operation local` or `run` path when the result must satisfy the repository's changed-path manifest gate.
 
 ## Documentation-only change
 
@@ -91,6 +95,8 @@ if (manifest.ClaimKind != EvidenceClaimKind.TargetedComplete)
 ### HTTP readiness in an ordinary Aspire test
 
 For one profile-based AppHost test, prefer the [typed readiness fixture](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture). It composes the existing `CreateAsync` or `CreateConfiguredAsync` builder with native resource health, one named endpoint, and one status-only HTTP probe. The fixture owns the returned builder and application lifecycle; `Application` and `Endpoint` are borrowed for assertions. Do not build or dispose the borrowed application separately.
+
+The [Aspire AppHost example's native readiness theory](../examples/aspire-apphost/README.md#deterministic-profile-test) uses this path in an ordinary test. It emits no EvidenceHost manifest or claim; a status check proves only the declared readiness condition.
 
 Use [Aspire's native health wait](https://learn.microsoft.com/dotnet/aspire/testing/accessing-resources) alone when resource health is enough. Use [native Aspire HTTP health checks](https://aspire.dev/reference/api/csharp/aspire.hosting/resourcebuilderextensions/methods/) when their configured endpoint/status condition already meets the test's need. The shared [standalone readiness probe](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md#httpreadinessprobewaitasync) is for an already-owned `HttpClient` and endpoint. None of these status checks replaces a body assertion, browser journey, or business readiness predicate.
 

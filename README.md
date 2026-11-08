@@ -87,6 +87,9 @@ or a quickstart that left you stuck. The [contributor guide](./CONTRIBUTING.md) 
 Run `task` to list the [repository tasks](./CONTRIBUTING.md#repository-tasks) for building, testing, and
 verifying a change. Report vulnerabilities through the [private security reporting process](./SECURITY.md).
 
+For a supplied packed CLI, use the [direct package validation recipe](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys).
+Its native receipt describes the fixed package journeys and grants no EvidenceHost claim or gate authority.
+
 <a id="coverage-efficiency-evidence-for-issue-728"></a>
 
 If you're investigating a slow coverage run, see the [coverage timing workflow](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-efficiency-evidence-workflow).
