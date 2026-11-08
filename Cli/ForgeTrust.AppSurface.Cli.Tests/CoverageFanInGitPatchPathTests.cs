@@ -108,10 +108,7 @@ public sealed class CoverageFanInGitPatchPathTests
     [InlineData("\\b", true)]
     public void PlannerNeverReassignsEscapedSourceToTheUnescapedCoveredPath(string escape, bool distinctPathAccepted)
     {
-        var policy = new EvidencePolicy("path-contract", "1", "all",
-            [new EvidenceProfile("all", EvidenceProfileScope.Targeted, [],
-                [new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["behavior"], [], 60)],
-                [new EvidenceObligation("coverage", "behavior", "Path policy", ["coverage"], "behavior")])], []);
+        var policy = CreatePathPolicy();
         var patch = Encoding.UTF8.GetBytes("--- /dev/null\n+++ \"b/src/Widget.cs" + escape + "\"\n");
         var planner = new EvidencePlanner();
         if (distinctPathAccepted)
@@ -127,6 +124,64 @@ public sealed class CoverageFanInGitPatchPathTests
         }
     }
 
+    [Theory]
+    [InlineData("src/café-雪.cs")]
+    [InlineData("src/literal-�.cs")]
+    public void ResolvePatch_PreservesValidUnicodePathAndExactPatchIdentity(string path)
+    {
+        var patch = Encoding.UTF8.GetBytes(
+            $"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n");
+
+        var plan = new EvidencePlanner().ResolvePatch(CreatePathPolicy(), patch);
+
+        Assert.Equal("all", plan.Profile.Id);
+        Assert.Equal(path, Assert.Single(plan.ChangedPaths).Path);
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(patch)), plan.PatchSha256);
+    }
+
+    [Fact]
+    public void ResolvePatch_RejectsInvalidUtf8InPathBeforeSelectionWithoutEchoingPatchText()
+    {
+        var patch = CreatePatchWithInvalidUtf8(
+            "diff --git a/src/File.cs b/src/File.cs\n--- a/src/File.cs\n+++ b/src/untrusted-path-",
+            0xff,
+            "-marker.cs\n");
+
+        var error = Assert.Throws<EvidencePlanningException>(() =>
+            new EvidencePlanner().ResolvePatch(CreatePathPolicy(), patch));
+
+        Assert.Equal("ASEVD136", error.Code);
+        Assert.DoesNotContain("untrusted-path-", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolvePatch_RejectsInvalidUtf8InHunkContextWithoutEchoingPatchText()
+    {
+        var patch = CreatePatchWithInvalidUtf8(
+            "diff --git a/src/File.cs b/src/File.cs\n--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1 +1 @@ ",
+            0xff,
+            "untrusted-hunk-marker\n-old\n+new\n");
+
+        var error = Assert.Throws<EvidencePlanningException>(() =>
+            new EvidencePlanner().ResolvePatch(CreatePathPolicy(), patch));
+
+        Assert.Equal("ASEVD136", error.Code);
+        Assert.DoesNotContain("untrusted-hunk-marker", error.Message, StringComparison.Ordinal);
+    }
+
+    private static byte[] CreatePatchWithInvalidUtf8(string prefix, byte invalidByte, string suffix)
+    {
+        var bytes = Encoding.UTF8.GetBytes(prefix).ToList();
+        bytes.Add(invalidByte);
+        bytes.AddRange(Encoding.UTF8.GetBytes(suffix));
+        return bytes.ToArray();
+    }
+
+    private static EvidencePolicy CreatePathPolicy() => new("path-contract", "1", "all",
+        [new EvidenceProfile("all", EvidenceProfileScope.Targeted, [],
+            [new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["behavior"], [], 60)],
+            [new EvidenceObligation("coverage", "behavior", "Path policy", ["coverage"], "behavior")])], []);
+
     private static void AssertPlannerPath(string field, string expected)
     {
         var path = Assert.Single(EvidenceUnifiedDiffReader.Read("--- /dev/null\n+++ " + field + "\n"));
@@ -138,6 +193,6 @@ public sealed class CoverageFanInGitPatchPathTests
     {
         var error = Assert.Throws<EvidencePlanningException>(() =>
             EvidenceUnifiedDiffReader.Read("--- /dev/null\n+++ " + field + "\n"));
-        Assert.Equal("ASEVD133", error.Code);
+        Assert.Equal("ASEVD135", error.Code);
     }
 }

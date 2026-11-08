@@ -18,9 +18,9 @@ public sealed class EvidencePlanner
     public EvidencePlan Resolve(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths)
         => ResolveCore(policy, changedPaths, null);
 
-    /// <summary>Resolves a plan that also binds the exact unified patch captured by the caller.</summary>
+    /// <summary>Resolves a plan that also binds the exact, strictly decoded UTF-8 patch captured by the caller.</summary>
     /// <param name="policy">Versioned consumer policy.</param>
-    /// <param name="patch">Exact UTF-8 unified patch bytes; copied before parsing and hashing. At most 20 MiB.</param>
+    /// <param name="patch">Exact UTF-8 unified patch bytes; copied before strict decoding, parsing, and hashing. Invalid UTF-8 fails with ASEVD136. At most 20 MiB.</param>
     /// <param name="additionalPaths">Optional normalized paths considered alongside paths read from the patch.</param>
     /// <returns>A plan whose digest covers the patch identity as well as policy selection.</returns>
     public EvidencePlan ResolvePatch(EvidencePolicy policy, ReadOnlyMemory<byte> patch,
@@ -30,7 +30,20 @@ public sealed class EvidencePlanner
             throw new EvidencePlanningException("ASEVD101", "Evidence planning requires a bounded, nonempty patch.",
                 "Provide a unified patch no larger than 20 MiB, or plan from explicit paths only.");
         var snapshot = patch.ToArray();
-        var patchPaths = EvidenceUnifiedDiffReader.Read(Encoding.UTF8.GetString(snapshot));
+        string diff;
+        try
+        {
+            diff = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(snapshot);
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD136",
+                "The unified patch contains invalid UTF-8 bytes.",
+                "Supply a valid UTF-8 unified patch.");
+        }
+
+        var patchPaths = EvidenceUnifiedDiffReader.Read(diff);
         return ResolveCore(policy, (additionalPaths ?? []).Concat(patchPaths).ToArray(),
             Convert.ToHexStringLower(SHA256.HashData(snapshot)));
     }
@@ -581,7 +594,7 @@ public static class EvidenceUnifiedDiffReader
     private static string? ReadDiffPath(string value, bool stripGitPrefix)
     {
         if (!GitPatchPathHeader.TryDecode(value.TrimEnd('\r'), out var path))
-            throw new EvidencePlanningException("ASEVD133", "A Git patch path header is invalid.",
+            throw new EvidencePlanningException("ASEVD135", "A Git patch path header is invalid.",
                 "Supply an unmodified Git unified patch with UTF-8 paths.");
         if (path == "/dev/null")
         {

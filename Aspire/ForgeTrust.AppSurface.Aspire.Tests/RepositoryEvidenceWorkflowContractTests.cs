@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Testing;
 using YamlDotNet.RepresentationModel;
 
@@ -15,6 +17,25 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         _workflow = LoadWorkflow(repository, "native-evidence-validation.yml");
         _buildWorkflow = LoadWorkflow(repository, "build.yml");
         _packageWorkflow = LoadWorkflow(repository, "package-gate.yml");
+    }
+
+    [Fact]
+    public void NativeCollectorFilterMatchesThePolicyRecordedByTheAdapter()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var adapter = File.ReadAllLines(Path.Join(repository, "tools",
+            "ForgeTrust.AppSurface.Coverage.Dogfood", "Program.cs"));
+        var declaration = Assert.Single(adapter, line =>
+            line.TrimStart().StartsWith("internal const string NativeFilter = ", StringComparison.Ordinal));
+        var declaredFilter = JsonSerializer.Deserialize<string>(declaration[(declaration.IndexOf('=') + 1)..]
+            .Trim().TrimEnd(';'));
+        var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
+        var collector = FindStep(job["steps"].AsSequence(), "Run coverage security contracts")["run"].AsScalar();
+        var filter = Regex.Match(collector, "--filter\\s+\"([^\"]+)\"");
+
+        Assert.True(filter.Success);
+        Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
+        Assert.Equal(declaredFilter, filter.Groups[1].Value);
     }
 
     [Fact]

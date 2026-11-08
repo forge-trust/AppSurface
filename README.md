@@ -249,7 +249,7 @@ fan-in guide](./guides/coverage-fan-in.md) documents the matching-source and SDK
 extend the existing aggregate and patch gates without changing their thresholds or scope. The
 [issue #897 design](./docs/designs/issue-897-native-coverage-fan-in.md) and
 [test parity audit](./docs/plans/issue-897-test-parity.md) record the migration contract and evidence limits;
-actual Linux, Windows and macOS execution must pass before the legacy producer is retired.
+the audit links the Linux, Windows and macOS runs that qualified the legacy producer for removal.
 
 The repository lane requires a non-sandboxed host by default. Set
 `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check

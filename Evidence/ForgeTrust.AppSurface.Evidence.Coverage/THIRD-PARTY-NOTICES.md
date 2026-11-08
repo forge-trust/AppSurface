@@ -8,7 +8,8 @@ ForgeTrust.AppSurface.Evidence.Coverage includes the following third-party paylo
 - Version: `5.5.10`
 - License: Apache-2.0
 - Project: https://github.com/danielpalme/ReportGenerator
-- Packaged payload path: `tools/net10.0/any/appsurface-coverage-runtime/reportgenerator/5.5.10/net10.0/`
+- Packaged payload path: `tools/net10.0/any/reportgenerator/5.5.10/net10.0/`
+- Consumer output path: `appsurface-coverage-runtime/reportgenerator/5.5.10/net10.0/`
 
 ReportGenerator is redistributed inside the private AppSurface coverage support package so first-party fan-in collection can normalize coverage from the package-owned runtime without relying on a consumer's global tool installation or NuGet cache.
 
