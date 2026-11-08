@@ -1,6 +1,8 @@
-# Repository EvidenceHost acceptance
+# Repository EvidenceHost acceptance and package validation
 
-This repository tool uses the public [EvidenceHost lifecycle](../../start-here/evidencehost.md) to validate AppSurface itself. It runs explicit producers against a supplied CLI package, checks published behavior independently, and emits a canonical plan and manifest. Use it when changing [coverage storage](../../guides/coverage-storage.md), package installation, or the native Evidence execution facilities.
+This executable has two distinct validation workflows. Policy-backed `--operation local`, `local-plan`, `plan`, `run`, and `verify` use the checked-in repository policy and EvidenceHost where applicable; execution writes or verifies an `EvidenceManifest` for the selected claims. CI's separate `--operation collect` snapshots event changes for that workflow. The ordinary direct package recipe below runs fixed package journeys outside EvidenceHost and writes `native-validation-receipt.json`; that receipt has no EvidenceHost claim, eligibility, or authority. Use the policy-backed workflow for changed-path CI evidence, and the direct recipe when validating a supplied package. Both can help when changing [coverage storage](../../guides/coverage-storage.md), package installation, or native Evidence facilities.
+
+An empty local inventory or the direct package receipt is not a policy-backed empty-profile result. Policy-selected execution can produce the manifest and claim consumed by the repository evidence gate; `verify` checks that manifest.
 
 ## Local development
 
@@ -297,7 +299,9 @@ the checkout, event inputs, candidate package and manifests within the current r
 inconsistency, not artifact origin. It does not aggregate manifests across jobs or replace existing
 [coverage fan-in](../../guides/coverage-fan-in.md).
 
-## Run the acceptance journeys
+## Run the direct package journeys
+
+Use this mode to validate one candidate CLI package without selecting the repository policy or entering EvidenceHost. It runs only the selected fixed package producers and cannot satisfy the repository's EvidenceHost manifest gate.
 
 Build a candidate CLI package with its real source commit in NuGet repository metadata. Select an absolute .NET SDK host path. Invoke the tool from the checkout:
 
@@ -308,11 +312,11 @@ dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configura
   --dotnet /absolute/dotnet --output /absolute/fresh-evidence
 ```
 
-On Windows, supply absolute Windows paths to the same options. The tool passes arguments directly to processes and does not interpolate a shell command. `--help` lists all options. `--mode storage` selects the packed storage journey, `--mode consumer` selects the installed consumer, and the default `all` requires both to pass.
+This direct mode is selected when no `--operation` option is supplied. On Windows, supply absolute Windows paths to the same options. The tool passes arguments directly to processes and does not interpolate a shell command. `--help` lists all options. `--mode storage` selects the packed storage journey, `--mode consumer` selects the installed consumer, and the default `all` requires both to pass. `--repository` defaults to the current checkout; `--scratch-parent` defaults to the platform temporary directory; `--maximum-scratch-bytes` defaults to 2 GiB per producer and `--minimum-free-bytes` to 1 GiB. `--consumer-profile` and `--fan-in-request` add the explicitly supplied consumer or native fan-in input described below.
 
-The storage producer extracts the package into an owned workspace and verifies its package ID, exact version and source metadata. It then runs read-only status, first and repeated merge, invalid input, maintenance preview, pin, restore, overwrite refusal, unpin, and explicit expiry. Hashes of the published original-file inventory must match restored bytes; current and restored outputs must survive maintenance. Regenerated metadata is checked under its documented contract rather than treated as an original archived file.
+The storage producer has a 600-second declared deadline. It extracts the package into an owned workspace and verifies its package ID, exact version and source metadata. It then runs read-only status, first and repeated merge, invalid input, maintenance preview, pin, restore, overwrite refusal, unpin, and explicit expiry. Hashes of the published original-file inventory must match restored bytes; current and restored outputs must survive maintenance. Regenerated metadata is checked under its documented contract rather than treated as an original archived file.
 
-The consumer producer installs the supplied package in an isolated tool directory and cache, verifies installed bytes, and collects fresh Release coverage and JUnit results from the checked-in two-project consumer. Every required project and test fragment must execute successfully. Overall coverage must pass 95% line and 85% branch with zero tolerance. Report, manifest, log and timing readers must still work, and source/settings integrity must remain unchanged. This fixture proves the repeatable consumer recipe; it does not claim to have executed an arbitrary external application's tests.
+The installed-consumer producer has a 1,800-second declared deadline. It installs the supplied package in an isolated tool directory and cache, verifies installed bytes, and collects fresh Release coverage and JUnit results from the checked-in two-project consumer. Every required project and test fragment must execute successfully. Overall coverage must pass 95% line and 85% branch with zero tolerance. Report, manifest, log and timing readers must still work, and source/settings integrity must remain unchanged. This fixture proves the repeatable consumer recipe; it does not claim to have executed an arbitrary external application's tests.
 
 ## External consumer profile
 
@@ -337,17 +341,37 @@ The source repository is read for identity/integrity and cloned into scratch. Th
 
 ## Storage and lifetime
 
-`--maximum-scratch-bytes` defaults to 2 GiB per producer and `--minimum-free-bytes` to 1 GiB. The native [workspace budget](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#owned-workspaces-and-command-budgets) checks before commands and during execution. Measurements are sampled, so a child can allocate between checks; this is not an operating-system disk quota. A budget failure must stop the command and prevent a complete claim. Entry/depth limits also bound filesystem inspection.
+`--maximum-scratch-bytes` defaults to 2 GiB per producer and `--minimum-free-bytes` to 1 GiB. The native [workspace budget](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#owned-workspaces-and-command-budgets) checks before commands and during execution. Measurements are sampled, so a child can allocate between checks; this is not an operating-system disk quota. A budget failure stops the affected journey. Entry/depth limits also bound filesystem inspection.
 
 Candidate JSON readers also enforce cumulative byte limits: 1 MiB for the consumer's `coverage-gate.json` and 16 MiB for the storage run's `.appsurface-coverage-run.json`. Missing, empty, linked, oversized or invalid JSON fails acceptance. These bounds apply before parsing and throughout reading, with cancellation checks; they do not trim evidence or relax coverage requirements.
 
-`--scratch-parent` must already exist and defaults to the platform temporary directory. Each producer owns a fresh random child. Cleanup removes only that child after checking its ownership and rejecting links. Durable `--output` must be fresh and outside scratch, and remains caller-owned. If cleanup cannot complete, EvidenceHost records an incomplete result. Use trusted local workspaces; path checks do not provide an adversarial filesystem sandbox.
+`--scratch-parent` must already exist and defaults to the platform temporary directory. Each direct recipe producer owns a fresh random child. Cleanup removes only that child after checking its ownership and rejecting links. Durable `--output` must be fresh and outside scratch, and remains caller-owned. Cleanup failure makes the direct receipt unsuccessful; policy-backed EvidenceHost execution records an incomplete manifest when it can safely finish. Use trusted local workspaces; path checks do not provide an adversarial filesystem sandbox.
 
-## Evidence and claims
+The direct runner executes selected producers sequentially. Built-in deadlines are 600 seconds for `packed-storage` and 1,800 seconds for `installed-consumer`; an optional `native-fan-in` producer has a 300-second deadline. After cancellation or a deadline, it allows up to 10 seconds for the running callback to join. It disposes producers in reverse registration order, with up to 10 seconds per disposal, then verifies the declared artifacts and their hashes. If work remains live past its allowance, the runner stops further disposal, artifact hashing, and receipt publication because live work could still mutate its artifacts. A completed cleanup failure is recorded and makes the receipt unsuccessful.
 
-The output contains `evidence-plan.json`, `evidence-manifest.json` and bounded declared artifacts beneath `artifacts/PRODUCER/`. The manifest includes artifact hashes, producer assertions, lifecycle timing and cleanup status. Verify it through [the native contracts](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) or `appsurface evidence verify`. Verification detects internal inconsistency; obtain artifacts and trusted inputs through an appropriate CI channel because hashes are not independent attestation.
+## Direct receipt and exit status
 
-Only `TargetedComplete` returns exit zero. Missing prerequisites, failed assertions, incomplete output capture, timeouts and failed cleanup prevent success. Cancellation returns a nonzero exit. Each journey retains its scope: passing the fixture is not a replacement for the full solution or an external consumer's required gates.
+The direct recipe writes `evidence-plan.json`, its declared journey artifacts under `artifacts/`, and `native-validation-receipt.json`; it does not write `evidence-manifest.json`. The plan describes the fixed package recipe but does not grant a claim. The version-1 receipt explicitly records `EvidenceHostClaim: "none"`, `EvidenceHostEligibility: "none"`, and `EvidenceHostProofProduced: false`. It is internally digest-checked and capped at 4 MiB; each journey diagnostic is capped at 2,048 characters. The `native-fan-in` failure artifact keeps its existing 1,024-character diagnostic payload cap; the larger receipt field preserves that payload together with the fixed context prefix.
+
+The internal `NativeValidationReceiptCodec` seals and verifies this format against the original selection plan. Receipt fields are:
+
+| Fields | Meaning and constraints |
+| --- | --- |
+| `SchemaVersion`, `ReceiptType` | Exactly `1` and `appsurface-native-validation-receipt`. Unknown versions or members are rejected by the receipt reader. |
+| `RunOutcome` | `passed`, `failed`, or `cancelled`, consistent with every selected journey, cleanup, and caller cancellation. |
+| `ProfileId`, `PlanDigest`, `InputDigest` | Selected profile plus SHA-256 identities for the canonical plan and supplied package/settings. They describe recipe inputs, not authenticated provenance. |
+| `Journeys` | One ordered row per declared producer: declared/satisfied assertions, declared slots, written artifacts, terminal outcome, bounded diagnostic, and nonnegative elapsed milliseconds. A pass requires every declared assertion and required slot. |
+| `CleanupCompleted`, `CleanupDiagnostic`, `CallerCancellationRequested` | Final ownership/cancellation results. Successful cleanup has no diagnostic; failed cleanup prevents a passed run. |
+| `EvidenceHostClaim`, `EvidenceHostEligibility`, `EvidenceHostProofProduced` | Always `none`, `none`, and `false`. Verification rejects authority-bearing values. |
+| `ReceiptDigest` | SHA-256 of canonical receipt JSON with this field empty. Verification also checks the original plan and declaration identities. |
+
+Exit zero means every selected journey passed, every declared assertion and required artifact was present and verified, and cleanup completed. A failure returns 1; cancellation returns 130 after joined work and cleanup when possible and records a cancelled receipt. Work that does not join prevents receipt publication. This receipt is not accepted by `appsurface evidence verify` or the repository manifest gate; use the policy-backed `--operation` workflow for those claims.
+
+## Policy-backed EvidenceHost manifests and claims
+
+For policy-backed execution, the output contains `evidence-plan.json`, `evidence-manifest.json` and bounded declared artifacts beneath `artifacts/PRODUCER/`. The manifest includes artifact hashes, producer assertions, lifecycle timing and cleanup status. Verify it through [the native contracts](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) or `appsurface evidence verify`. Verification detects internal inconsistency; obtain artifacts and trusted inputs through an appropriate CI channel because hashes are not independent attestation.
+
+A verified `TargetedComplete` result or an explicitly selected `NoEvidenceRequired` profile returns exit zero. Missing prerequisites, failed assertions, incomplete output capture, timeouts and failed cleanup prevent success. Cancellation returns a nonzero exit. Each journey retains its scope: passing the fixture is not a replacement for the full solution or an external consumer's required gates.
 
 ## Verified native coverage fan-in
 

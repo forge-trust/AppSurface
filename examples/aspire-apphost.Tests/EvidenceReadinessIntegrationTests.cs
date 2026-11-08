@@ -1,7 +1,9 @@
 using Aspire.Hosting;
+using Aspire.Hosting.Testing;
 using AspireAppHostExample;
-using ForgeTrust.AppSurface.Evidence.Aspire;
-using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Aspire.Testing;
+using ForgeTrust.AppSurface.Evidence.Readiness;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AspireAppHostExample.Tests;
 
@@ -11,54 +13,37 @@ public sealed class EvidenceReadinessIntegrationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task EvidenceHost_NativeHttpReadinessRunsProducerAndDisposesItsSingleLease(bool customClient)
+    public async Task OrdinaryNativeHttpReadiness_VerifiesStatusAndDisposesItsApplicationAndClient(bool customClient)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
-        {
-            Args = [],
-            AssemblyName = typeof(ExampleModule).Assembly.GetName().Name,
-            ProjectDirectory = Projects.AspireAppHostExample.ProjectPath,
-            DisableDashboard = true,
-        });
-        builder.AddProject<Projects.WebAppExample>("web").WithHttpEndpoint();
-        await using var application = await EvidenceAspireApplication.StartAsync(builder, timeout.Token);
         var createdClients = 0;
         var disposedClients = 0;
-        var options = customClient ? new EvidenceAspireHttpReadinessOptions
+        DistributedApplication application;
+        await using (var builder = await AppSurfaceAspireTestingBuilder.CreateAsync<
+            Projects.AspireAppHostExample, ExampleModule, QaProfile>(timeout.Token))
         {
-            CreateProbeClient = endpoint =>
+            await using (application = await builder.BuildAsync(timeout.Token))
             {
-                createdClients++;
-                return new HttpClient(new ObservedClientHandler(() => disposedClients++)) { BaseAddress = endpoint };
-            },
-        } : null;
-        var readiness = application.CreateHttpReadiness("web", "web", "http", "/", TimeSpan.FromMinutes(1), options);
-        var producer = new HttpConditionProducer();
-        var plan = new EvidencePlan(
-            "1.0", "readiness-example", "policy-digest", "diff-digest",
-            new EvidenceProfile(
-                "http-condition", EvidenceProfileScope.Targeted,
-                [new EvidenceResourceDeclaration("web", "aspire_http", 90, [])],
-                [new EvidenceProducerDeclaration("http-condition", "assertion", "1.0.0", ["web"], ["http-condition@1"], [], 30)],
-                [new EvidenceObligation("http-condition", "example", "Verify the declared HTTP condition.", ["http-condition"], "http-condition@1")]),
-            [new NormalizedDiffPath("examples/web-app/Program.cs")], ["http-condition"], "plan-digest");
-        await using var host = EvidenceHostBootstrap.Create(plan, registration =>
-        {
-            registration.AddResource(readiness);
-            registration.AddProducer(producer);
-        });
+                await application.StartAsync(timeout.Token);
+                await application.ResourceNotifications.WaitForResourceHealthyAsync("web", timeout.Token);
+                var endpoint = application.GetEndpoint("web", "http");
+                using var client = customClient
+                    ? CreateObservedClient(endpoint)
+                    : application.CreateHttpClient("web", "http");
+                await HttpReadinessProbe.WaitAsync(client, endpoint, "/", TimeSpan.FromMinutes(1),
+                    cancellationToken: timeout.Token);
+            }
 
-        var manifest = await host.RunAsync(cancellationToken: timeout.Token);
-
-        Assert.Equal(EvidenceResourceOutcome.Ready, Assert.Single(manifest.ResourceResults).Outcome);
-        Assert.Equal(EvidenceProducerOutcome.Passed, Assert.Single(manifest.ProducerResults).Outcome);
-        Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
-        Assert.True(manifest.Metrics.CleanupCompleted);
-        Assert.Equal(1, producer.Runs);
+            Assert.Throws<ObjectDisposedException>(() => application.Services.GetRequiredService<IServiceScopeFactory>());
+        }
         Assert.Equal(customClient ? 1 : 0, createdClients);
         Assert.Equal(createdClients, disposedClients);
-        Assert.Throws<ObjectDisposedException>(() => application.CreateHealthReadiness("web", "web"));
+
+        HttpClient CreateObservedClient(Uri endpoint)
+        {
+            createdClients++;
+            return new HttpClient(new ObservedClientHandler(() => disposedClients++)) { BaseAddress = endpoint };
+        }
     }
 
     private sealed class ObservedClientHandler(Action disposed) : DelegatingHandler(new SocketsHttpHandler())
@@ -70,16 +55,4 @@ public sealed class EvidenceReadinessIntegrationTests
         }
     }
 
-    private sealed class HttpConditionProducer : IEvidenceProducer
-    {
-        public string Id => "http-condition";
-        public int Runs { get; private set; }
-
-        public ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Runs++;
-            return ValueTask.FromResult(new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["http-condition@1"]));
-        }
-    }
 }

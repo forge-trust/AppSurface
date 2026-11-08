@@ -36,11 +36,14 @@ public sealed class NativeEvidenceProgramTests
 
             Assert.Equal(1, result.ExitCode);
             var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
-            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
-            Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
-            var producer = Assert.Single(manifest.ProducerResults, item => item.ProducerId == "native-fan-in");
-            Assert.Equal(EvidenceProducerOutcome.Failed, producer.Outcome);
+            var receipt = NativeValidationReceiptCodec.Deserialize(await File.ReadAllBytesAsync(Path.Join(output, "native-validation-receipt.json")));
+            Assert.True(NativeValidationReceiptCodec.Verify(plan, receipt));
+            Assert.Equal("failed", receipt.RunOutcome);
+            Assert.Equal("none", receipt.EvidenceHostClaim);
+            Assert.Equal("none", receipt.EvidenceHostEligibility);
+            Assert.False(receipt.EvidenceHostProofProduced);
+            var producer = Assert.Single(receipt.Journeys, item => item.ProducerId == "native-fan-in");
+            Assert.Equal("failed", producer.Outcome);
             Assert.Empty(producer.SatisfiedAssertionIds);
             using var artifact = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(output, "artifacts/native-fan-in/proof/result.json")));
             Assert.False(artifact.RootElement.GetProperty("verified").GetBoolean());
@@ -48,7 +51,7 @@ public sealed class NativeEvidenceProgramTests
             Assert.Equal(longPath ? expected[..1024] : expected, diagnostic);
             Assert.DoesNotContain(fixture.Repository, diagnostic, StringComparison.Ordinal);
             Assert.Equal("Native coverage fan-in verification failed: " + diagnostic, producer.Diagnostic);
-            Assert.True(manifest.Metrics.CleanupCompleted);
+            Assert.True(receipt.CleanupCompleted);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -69,7 +72,7 @@ public sealed class NativeEvidenceProgramTests
         var result = await InvokeAsync(["--help"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("AppSurface EvidenceHost acceptance", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("AppSurface package recipes and repository EvidenceHost operations", result.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("--scope all|native|coverage|packages", result.StandardOutput, StringComparison.Ordinal);
     }
 
@@ -166,6 +169,7 @@ public sealed class NativeEvidenceProgramTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("No local changes", result.StandardOutput, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Join(output, "proof", "evidence-manifest.json")));
+        Assert.False(File.Exists(Path.Join(output, "native-validation-receipt.json")));
     }
 
     [Fact]
@@ -243,7 +247,7 @@ public sealed class NativeEvidenceProgramTests
             var result = await InvokeAsync(args.ToArray());
 
             Assert.Equal(1, result.ExitCode);
-            Assert.Contains("Native validation failed", result.StandardError, StringComparison.Ordinal);
+            Assert.Contains("Validation failed", result.StandardError, StringComparison.Ordinal);
             Assert.Contains(failure switch
             {
                 "dirty" => "InvalidOperationException",
@@ -269,7 +273,7 @@ public sealed class NativeEvidenceProgramTests
         var result = await InvokeAsync(commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("Native validation failed", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("Validation failed", result.StandardError, StringComparison.Ordinal);
         Assert.Contains("ArgumentException", result.StandardError, StringComparison.Ordinal);
     }
 
@@ -310,7 +314,7 @@ public sealed class NativeEvidenceProgramTests
                 "--source-commit", "source", "--dotnet", ResolveDotnetHost(), "--output", output], cancellation.Token);
 
             Assert.True(result.ExitCode == 130, result.StandardError);
-            Assert.Contains("Native validation cancelled", result.StandardError, StringComparison.Ordinal);
+            Assert.Contains("Validation cancelled", result.StandardError, StringComparison.Ordinal);
             Assert.False(Directory.Exists(output));
         }
         finally { Directory.Delete(root, recursive: true); }
@@ -319,7 +323,7 @@ public sealed class NativeEvidenceProgramTests
     [Theory]
     [InlineData("storage")]
     [InlineData("consumer")]
-    public async Task MinimalCandidate_ProducesNativePlanAndManifestThroughOrchestration(string mode)
+    public async Task MinimalCandidate_ProducesRecipeReceiptThroughInternalOrchestration(string mode)
     {
         var root = Directory.CreateTempSubdirectory("appsurface-native-program-plan-").FullName;
         try
@@ -333,7 +337,14 @@ public sealed class NativeEvidenceProgramTests
 
             Assert.Equal(1, result.ExitCode);
             Assert.True(File.Exists(Path.Join(output, "evidence-plan.json")));
-            Assert.True(File.Exists(Path.Join(output, "evidence-manifest.json")));
+            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
+            var receipt = NativeValidationReceiptCodec.Deserialize(await File.ReadAllBytesAsync(Path.Join(output, "native-validation-receipt.json")));
+            Assert.True(NativeValidationReceiptCodec.Verify(plan, receipt));
+            Assert.Equal("failed", receipt.RunOutcome);
+            Assert.Equal("none", receipt.EvidenceHostClaim);
+            Assert.Equal("none", receipt.EvidenceHostEligibility);
+            Assert.False(receipt.EvidenceHostProofProduced);
+            Assert.False(File.Exists(Path.Join(output, "evidence-manifest.json")));
             Assert.Contains(mode == "storage" ? "packed-storage" : "installed-consumer", result.StandardOutput, StringComparison.Ordinal);
         }
         finally { Directory.Delete(root, recursive: true); }
@@ -342,7 +353,7 @@ public sealed class NativeEvidenceProgramTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task FanInRequest_AddsRequiredNativeVerificationToTheManifest(bool tampered)
+    public async Task FanInRequest_AddsRequiredNativeVerificationToTheRecipeReceipt(bool tampered)
     {
         using var fixture = new EvidenceCoverageFanInTests.FanInFixture();
         await fixture.WriteMinimalBundleAsync();
@@ -367,12 +378,15 @@ public sealed class NativeEvidenceProgramTests
 
             Assert.Equal(1, result.ExitCode); // Invalid storage package must still prevent completion.
             var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
-            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
-            Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-            var native = Assert.Single(manifest.ProducerResults, producer => producer.ProducerId == "native-fan-in");
-            Assert.Equal(tampered ? EvidenceProducerOutcome.Failed : EvidenceProducerOutcome.Passed, native.Outcome);
+            var receipt = NativeValidationReceiptCodec.Deserialize(await File.ReadAllBytesAsync(Path.Join(output, "native-validation-receipt.json")));
+            Assert.True(NativeValidationReceiptCodec.Verify(plan, receipt));
+            var native = Assert.Single(receipt.Journeys, producer => producer.ProducerId == "native-fan-in");
+            Assert.Equal(tampered ? "failed" : "passed", native.Outcome);
             Assert.Equal(tampered ? [] : new[] { "coverage/verified-native-fan-in@1" }, native.SatisfiedAssertionIds);
-            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.Equal("failed", receipt.RunOutcome); // Invalid storage package must still prevent success.
+            Assert.Equal("none", receipt.EvidenceHostClaim);
+            Assert.Equal("none", receipt.EvidenceHostEligibility);
+            Assert.False(receipt.EvidenceHostProofProduced);
             Assert.True(File.Exists(Path.Join(output, "artifacts/native-fan-in/proof/result.json")));
         }
         finally { Directory.Delete(root, recursive: true); }

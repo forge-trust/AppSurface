@@ -19,6 +19,7 @@ ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a li
 If you are deciding which package to install first, start with the [AppSurface package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
 For cross-release Docs identity, authoring, publication, and recovery, use the [concept-preserving version-switching guide](./guides/version-switching.md).
 If your CI gate should distinguish an explicit low-risk change from an incomplete test run, start with the [EvidenceHost guide](./start-here/evidencehost.md).
+To validate a supplied packed CLI outside that policy workflow, use the [direct package recipe](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys); its native receipt has no EvidenceHost claim or gate authority.
 For bounded HTTP readiness in tests, see the [EvidenceHost readiness choices](./start-here/evidencehost.md#aspire-http-readiness).
 
 For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
@@ -134,7 +135,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 ### [EvidenceHost](./start-here/evidencehost.md)
 
 - [**EvidenceHost guide**](./start-here/evidencehost.md) – Contract-first changed-risk planning so CI can require meaningful coverage or E2E evidence without turning an intentionally low-risk change or an incomplete test profile into a misleading coverage claim.
-- [**Repository EvidenceHost acceptance**](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) – AppSurface's own solution coverage, package checks, packed CLI and installed-consumer journeys, selected locally and in CI by the same checked-in policy and gated on verified manifests. Start with the [local evidence command](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) for current branch and working-tree changes.
+- [**Repository EvidenceHost workflow**](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) – AppSurface's own solution coverage, package checks, packed CLI and installed-consumer journeys, selected locally and in CI by the same checked-in policy and gated on verified manifests. The tool also provides a separate [direct package recipe](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys) that writes `native-validation-receipt.json` without an EvidenceHost claim or gate authority.
 - [**ForgeTrust.AppSurface.Evidence.Contracts**](./Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) – Versioned plans, producers, manifests, claims, and canonical digest verification.
 - [**ForgeTrust.AppSurface.Evidence.Planner**](./Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) – Deterministic explicit-diff policy resolution with conservative fallback and ambiguity rejection.
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate, explicit consumer-owned lifecycle for Aspire readiness and browser/E2E producers; it is never mixed into normal application startup.
