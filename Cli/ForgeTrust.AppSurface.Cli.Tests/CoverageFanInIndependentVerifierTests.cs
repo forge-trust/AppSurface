@@ -1099,7 +1099,7 @@ public sealed class CoverageFanInIndependentVerifierTests
     [InlineData("\"b/src/Vertical\\vWidget.cs\"")]
     [InlineData("\"b/src/Form\\fWidget.cs\"")]
     [InlineData("\"b/src/Bad\\qWidget.cs\"")]
-    public void VerifyGatesRejectsUnsupportedEscapedPathsWithoutTrustingReceipt(string path)
+    public void VerifyGatesRejectsEscapedPathsWhoseDeclaredMeasurementsDoNotMatchCoveredSource(string path)
     {
         var coverage = AggregateCoverage();
         var diff = FileDiff(path, "@@ -1 +1 @@\n-old\n+new");
@@ -1497,6 +1497,28 @@ public sealed class CoverageFanInIndependentVerifierTests
             patchLine = new { diffBase = "base", changed = 1, measurable = 1, covered = patchLineCovered, percent = patchLineCovered * 100m },
             patchBranch = new { diffBase = "base", changed = 1, measurable = patchBranchMeasurable, covered = patchBranchCovered, percent = branchPercent }
         }));
+    }
+
+    [Theory]
+    [InlineData("a")]
+    [InlineData("b")]
+    [InlineData("t")]
+    [InlineData("n")]
+    [InlineData("v")]
+    [InlineData("f")]
+    [InlineData("r")]
+    [InlineData("000")]
+    public void VerifyGates_RejectsEscapedControlSuffixInsteadOfAliasingCoveredSource(string escape)
+    {
+        var coverage = AggregateCoverage();
+        var diff = "diff --git a/src/Widget.cs b/src/Widget.cs\n--- a/src/Widget.cs\n+++ \"b/src/Widget.cs\\"
+            + escape + "\"\n@@ -0,0 +1 @@\n+changed\n";
+        using var primaryGate = Gate(coverage, isPrimary: true, diffText: diff);
+        using var composedGate = Gate(coverage, isPrimary: false, diffText: diff);
+        using var policy = PatchPolicy();
+
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
+            primaryGate.RootElement, composedGate.RootElement, policy.RootElement, coverage, coverage, diff));
     }
 
     private static JsonDocument PatchPolicy() => JsonDocument.Parse("""

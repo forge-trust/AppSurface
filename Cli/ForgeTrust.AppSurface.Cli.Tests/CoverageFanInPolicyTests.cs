@@ -218,6 +218,57 @@ public sealed class CoverageFanInPolicyTests
     public void LosslessLongDecodingRejectsWrongTypesRangesAndFractions(string json)
         => Assert.Throws<JsonException>(() => CoveragePolicyEncoding.Decode<long>(Utf8(json)));
 
+    [Theory]
+    [InlineData("-1e1001")]
+    [InlineData("1e-1001")]
+    [InlineData("1e2147483648")]
+    [InlineData("1e-2147483649")]
+    public void LosslessDecimalDecodingRejectsExponentsBeyondTheBoundedWireContract(string json)
+        => Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Decode<decimal>(Utf8(json)));
+
+    [Theory]
+    [InlineData("\\uDE80")]
+    [InlineData("\\uD83D")]
+    [InlineData("\\uD83Dx")]
+    [InlineData("\\uD83D\\n")]
+    [InlineData("\\uD83D\\u0041")]
+    [InlineData("\\uD83D\\uD83D")]
+    public void UnicodeWireStringsRejectUnpairedSurrogatesBeforePolicyDeserialization(string escaped)
+        => Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Decode<CoverageRunIdentity>(Utf8(
+            PolicyJsonRun(escaped))));
+
+    private static string PolicyJsonRun(string escapedScope) =>
+        "{\"producerSystem\":\"local\",\"runScope\":\"" + escapedScope + "\",\"runId\":\"run-1\",\"attempt\":1}";
+
+    [Theory]
+    [InlineData("checks\\Unit.csproj")]
+    [InlineData("/checks/Unit.csproj")]
+    [InlineData("checks//Unit.csproj")]
+    [InlineData("checks/../Unit.csproj")]
+    [InlineData("checks/Unit.csproj ")]
+    [InlineData("checks/Unit.csproj.")]
+    [InlineData("checks/Unit.csproj:")]
+    [InlineData("checks/Unit.csproj?")]
+    [InlineData("checks/Unit.csproj*")]
+    [InlineData("checks/Unit.csproj|")]
+    [InlineData("checks/Unit.csproj<")]
+    [InlineData("checks/Unit.csproj>")]
+    [InlineData("checks/Unit.csproj\"")]
+    public void PolicyProjectPathsRejectNonportableFileSpellings(string project)
+        => Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(Policy() with
+        { TestProjects = [project] }));
+
+    [Fact]
+    public void PolicyProjectPathLengthAcceptsTheExactLimitAndRejectsTheNextCharacter()
+    {
+        var maximum = "checks/" + new string('a', 4082) + ".csproj";
+        Assert.Equal(4096, maximum.Length);
+        Assert.Equal(maximum, Assert.Single(CoveragePolicyEncoding.Freeze(Policy() with
+        { TestProjects = [maximum] }).TestProjects));
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(Policy() with
+        { TestProjects = [maximum + "x"] }));
+    }
+
     [Fact]
     public void UnicodeWireStringsRetainPairedSurrogatesAndOrdinaryEscapes()
     {

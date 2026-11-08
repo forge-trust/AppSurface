@@ -11,6 +11,42 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageFanInWorkflowTests
 {
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task PublicAcceptBindsTheDeclaredPatchSnapshotBeforePublishing(bool matchingHash, bool uppercase)
+    {
+        using var fixture = await Fixture.Create();
+        await fixture.SelectPatch();
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        var patch = await GitDiffReader.ReadDiffAsync(fixture.Repository, "HEAD^", CancellationToken.None);
+        var expectedHash = Hash(System.Text.Encoding.UTF8.GetBytes(patch));
+
+        var result = await CoverageFanIn.AcceptAsync(fixture.Accept() with
+        { ExpectedPatchSha256 = matchingHash ? uppercase ? expectedHash.ToUpperInvariant() : expectedHash : new string('0', 64) });
+
+        if (matchingHash)
+        {
+            Assert.Equal(CoverageOperationOutcome.Succeeded, result.Outcome);
+            Assert.True(result.Accepted);
+            Assert.True(result.Verified);
+            Assert.Equal("PatchAccepted", result.PatchOutcome);
+            using var receipt = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Accepted, "acceptance.json")));
+            Assert.Equal(expectedHash, receipt.RootElement.GetProperty("diffSha256").GetString());
+        }
+        else
+        {
+            Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+            Assert.False(result.Accepted);
+            Assert.False(result.Verified);
+            Assert.False(result.Effects.OutputCreated);
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "ASCOV302");
+            Assert.False(Directory.Exists(fixture.Accepted));
+        }
+    }
+
     [Fact]
     public async Task PublicWorkflowKeepsCaptureCompositionBaselineAcceptanceAndReadOnlyValiditySeparate()
     {
