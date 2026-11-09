@@ -13,6 +13,8 @@ public sealed class CoverageFanInScriptTests
     [InlineData("rejected", "HEAD~1", 1, 2)]
     [InlineData("aggregate-rejected", "HEAD~1", 1, 2)]
     [InlineData("aggregate-rejected", "", 1, 1)]
+    [InlineData("canonical-aggregate-rejected", "HEAD~1", 7, 2)]
+    [InlineData("canonical-patch-rejected", "HEAD~1", 9, 2)]
     [InlineData("accepted", "", 0, 1)]
     [InlineData("invalid", "HEAD~1", 2, 0)]
     public async Task NativeWrapperRetainsCanonicalReportsAndNeverTurnsAdapterRefusalIntoSuccess(
@@ -68,15 +70,21 @@ public sealed class CoverageFanInScriptTests
             printf '%s\n%s\n' "$input" "$output" >> "$FIXTURE_GATE_CALLS"
             mkdir -p "$output"
             passed=true
-            if [[ "$patch" == true && "$FIXTURE_OUTCOME" == rejected ]]; then passed=false; fi
-            if [[ "$patch" == false && "$FIXTURE_OUTCOME" == aggregate-rejected ]]; then passed=false; fi
+            if [[ "$patch" == true && ( "$FIXTURE_OUTCOME" == rejected || "$FIXTURE_OUTCOME" == canonical-patch-rejected ) ]]; then passed=false; fi
+            if [[ "$patch" == false && ( "$FIXTURE_OUTCOME" == aggregate-rejected || "$FIXTURE_OUTCOME" == canonical-aggregate-rejected ) ]]; then passed=false; fi
             printf '{"passed":%s}' "$passed" > "$output/coverage-gate.json"
             printf '# Gate: %s\n' "$passed" > "$output/coverage-gate.md"
             if [[ "$patch" == true ]]; then
               printf '{}' > "$output/coverage-patch-targets.json"
               printf '# Targets\n' > "$output/coverage-patch-targets.md"
             fi
-            [[ "$passed" == true ]]
+            if [[ "$passed" == false ]]; then
+              case "$FIXTURE_OUTCOME" in
+                canonical-aggregate-rejected) exit 7 ;;
+                canonical-patch-rejected) exit 9 ;;
+                *) exit 1 ;;
+              esac
+            fi
             """);
         File.SetUnixFileMode(adapter, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         File.SetUnixFileMode(cli, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -105,6 +113,15 @@ public sealed class CoverageFanInScriptTests
         Assert.Equal(expectedGateCalls * 2, calls.Length);
         Assert.Equal(expectedGateCalls > 0, File.Exists(Path.Join(coverage, "aggregate-gate", "coverage-gate.json")));
         Assert.Equal(expectedGateCalls == 2, File.Exists(Path.Join(coverage, "coverage-gate.json")));
+        if (outcome.StartsWith("canonical-", StringComparison.Ordinal))
+        {
+            Assert.True(File.Exists(Path.Join(dogfood, "accepted", "acceptance.json")));
+            Assert.False(File.Exists(Path.Join(dogfood, "accepted", "rejection.json")));
+            using var aggregate = JsonDocument.Parse(File.ReadAllBytes(
+                Path.Join(coverage, "aggregate-gate", "coverage-gate.json")));
+            Assert.Equal(outcome != "canonical-aggregate-rejected",
+                aggregate.RootElement.GetProperty("passed").GetBoolean());
+        }
         if (expectedGateCalls == 2)
         {
             Assert.Equal(Path.Join(dogfood, "composed", "coverage.cobertura.xml"), calls[2]);
@@ -113,7 +130,8 @@ public sealed class CoverageFanInScriptTests
             Assert.True(File.Exists(Path.Join(coverage, "coverage-patch-targets.json")));
             Assert.True(File.Exists(Path.Join(coverage, "coverage-patch-targets.md")));
             using var report = JsonDocument.Parse(File.ReadAllBytes(Path.Join(coverage, "coverage-gate.json")));
-            Assert.Equal(outcome != "rejected", report.RootElement.GetProperty("passed").GetBoolean());
+            Assert.Equal(outcome is not ("rejected" or "canonical-patch-rejected"),
+                report.RootElement.GetProperty("passed").GetBoolean());
         }
     }
 }
