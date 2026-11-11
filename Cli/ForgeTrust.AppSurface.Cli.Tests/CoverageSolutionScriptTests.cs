@@ -238,7 +238,8 @@ public sealed class CoverageSolutionScriptTests
         var coverageJob = (YamlMappingNode)jobs.Children[new YamlScalarNode("coverage-security-platform")];
         Assert.Equal("Coverage security contracts (${{ matrix.os }})", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("name")]).Value);
         Assert.Equal("${{ matrix.os }}", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("runs-on")]).Value);
-        Assert.Equal("20", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("timeout-minutes")]).Value);
+        Assert.Equal("${{ matrix.os == 'macos-latest' && 30 || 20 }}",
+            ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("timeout-minutes")]).Value);
 
         var steps = (YamlSequenceNode)coverageJob.Children[new YamlScalarNode("steps")];
         var runCoverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
