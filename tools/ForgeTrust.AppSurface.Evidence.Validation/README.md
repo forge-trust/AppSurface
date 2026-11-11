@@ -159,7 +159,7 @@ Collection uses the CLI's [longest-first schedule](../../Cli/ForgeTrust.AppSurfa
 for non-exclusive projects. Exclusive suites still run first in stable input order. Optional
 `--coverage-schedule-timings <timings.json>` forwards duration hints to `coverage run --schedule-timings`;
 without history, unknown projects keep input order. The
-[history helper](../../.github/scripts/coverage-schedule-history.py) reads the newest available
+[history helper](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/coverage-schedule-history.py) reads the newest available
 `coverage-schedule-timings` artifact from successful `build.yml` push runs on the default branch of this repository.
 Fork PRs, other events and mismatched head repositories are never eligible. Only main push
 collections publish this advisory artifact; it becomes eligible for reuse only after the full workflow succeeds. The history lookup has a 45-second total API budget. API failures, expired/missing artifacts or invalid bounded
