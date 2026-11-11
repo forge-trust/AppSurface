@@ -93,6 +93,33 @@ dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configura
 
 The C# repository evidence tool uses the shared [evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) and compares the working tree with `origin/main` by default. `local-plan` prints the selected profile, producers, and obligations; `local` executes and verifies the selected evidence on the current OS. Add `--base <revision>` to select another comparison base, or `--scope all|native|coverage|packages` to plan or run one lane. Use `all` for the complete local policy selection; a scoped pass closes only its selected lane. `selection.json` exposes `requiresNativeCoverage` from the root policy selection. Test-only changes use the direct patch gate; source-code changes combine coverage and package checks, with native fan-in on PRs. Package checks may still be affected by ignored local artifacts in inspected paths; ignore status does not skip a package failure. See the [coverage fan-in guide](./guides/coverage-fan-in.md) and the [validation tool reference](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) for coverage gates, evidence output, and CI behavior. The standalone `coverage-solution.sh` remains an unconditional compatibility command; it is not the current `build.yml` evidence path.
 
+### Documentation publishing and recovery
+
+The [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml)
+exports and validates docs on pull requests. Pushes to `main` and manual runs selecting `main` also
+hydrate release archives, upload the `github-pages` artifact, and publish it. Manual runs on other
+branches validate the export without publishing. Both the build workflow and the
+[release publisher](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/release-publish.yml)
+share a `github-pages` deployment concurrency group across runs and let an active deployment finish
+before the next one starts; builds and exports can still run in parallel. The
+[concurrency queue](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+uses `queue: max` so a new build does not replace a pending release deployment. GitHub allows up to
+100 pending jobs in that group; job readiness determines queue order, so an older commit can still
+publish later if its export takes longer.
+
+The Pages artifact is retained for seven days so a failed deployment can be retried without
+rebuilding the docs. If `deploy-appsurface-docs` times out in `syncing_files` after a successful
+export, inspect its logs and [GitHub Status](https://www.githubstatus.com/) before rerunning the
+deployment job. The pinned [deploy-pages action](https://github.com/actions/deploy-pages) caps its
+timeout at ten minutes; a larger timeout input cannot extend that limit.
+
+If the artifact has expired, rerun `export-appsurface-docs` and its dependent deployment from the
+current `main` run, or start a fresh manual run with `gh workflow run build.yml --ref main`.
+See [rerunning jobs](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/re-running-workflows-and-jobs)
+for the Actions UI and CLI options. Check that the selected commit is still the intended published
+version before retrying an older run. Repeated synchronization timeouts with a valid artifact need
+Pages service investigation; deployment serialization does not resolve a backend outage.
+
 ### CI test-result diagnostics
 
 The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) resolves the shared evidence policy first. Coverage selections run full solution coverage and a separate packed Durable consumer proof. The native coverage-security matrix and PR fan-in run only when the root policy selection includes coverage plus another producer; test-only selections use the direct patch gate. The consumer

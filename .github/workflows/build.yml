@@ -840,7 +840,7 @@ jobs:
             --strict
 
       - name: Hydrate release-pinned docs archives
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
         env:
           GH_TOKEN: ${{ github.token }}
           PAGES_ROOT: ${{ runner.temp }}/appsurface-docs-pages
@@ -903,16 +903,22 @@ jobs:
           fi
 
       - name: Upload Pages artifact
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ runner.temp }}/appsurface-docs-pages
           include-hidden-files: true
+          retention-days: 7
 
   deploy-appsurface-docs:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     needs: export-appsurface-docs
     runs-on: ubuntu-latest
+    # Share the Pages deployment lock across runs without interrupting file synchronization.
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+      queue: max
     permissions:
       pages: write
       id-token: write

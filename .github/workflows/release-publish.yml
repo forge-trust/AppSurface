@@ -379,6 +379,7 @@ jobs:
         with:
           path: ${{ steps.docs.outputs.pages_staging_root }}
           include-hidden-files: true
+          retention-days: 7
 
   deploy-docs-pages:
     if: ${{ github.repository == 'forge-trust/AppSurface' }}
@@ -387,6 +388,11 @@ jobs:
       - publish-docs-archive
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Use the same Pages deployment lock as build.yml.
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+      queue: max
     permissions:
       pages: write # Required to publish the verified Pages artifact.
       id-token: write # Required by deploy-pages to mint the GitHub Pages deployment token.

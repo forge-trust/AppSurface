@@ -5,6 +5,9 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class DocsExportWorkflowContractTests
 {
+    private const string PagesPublishCondition =
+        "${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}";
+
     [Fact]
     public void BuildWorkflow_Should_Run_AppSurface_Docs_Export_On_PullRequests_And_Guard_Pages_Deploy()
     {
@@ -17,6 +20,7 @@ public sealed class DocsExportWorkflowContractTests
             .ToArray();
 
         Assert.Contains("main", pullRequestBranches);
+        Assert.Contains("workflow_dispatch", ScalarKeys(on));
 
         var jobs = GetMapping(root, "jobs");
         var exportJob = GetMapping(jobs, "export-appsurface-docs");
@@ -76,13 +80,55 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Contains("--output \"$RUNNER_TEMP/appsurface-docs-pages\"", exportRun, StringComparison.Ordinal);
         Assert.Contains("--public-origin https://forge-trust.com", exportRun, StringComparison.Ordinal);
 
+        var hydrateStep = FindStep(steps, "Hydrate release-pinned docs archives");
+        Assert.Equal(PagesPublishCondition, GetScalar(hydrateStep, "if"));
+
         var uploadStep = FindStep(steps, "Upload Pages artifact");
-        Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(uploadStep, "if"));
+        Assert.Equal(PagesPublishCondition, GetScalar(uploadStep, "if"));
         Assert.Equal("actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9", GetScalar(uploadStep, "uses"));
-        Assert.Equal("${{ runner.temp }}/appsurface-docs-pages", GetScalar(GetMapping(uploadStep, "with"), "path"));
+        var uploadOptions = GetMapping(uploadStep, "with");
+        Assert.Equal("${{ runner.temp }}/appsurface-docs-pages", GetScalar(uploadOptions, "path"));
+        Assert.Equal("true", GetScalar(uploadOptions, "include-hidden-files"));
+        Assert.Equal("7", GetScalar(uploadOptions, "retention-days"));
 
         var deployJob = GetMapping(jobs, "deploy-appsurface-docs");
-        Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(deployJob, "if"));
+        Assert.Equal(PagesPublishCondition, GetScalar(deployJob, "if"));
+    }
+
+    [Theory]
+    [InlineData("build.yml", "deploy-appsurface-docs", "export-appsurface-docs")]
+    [InlineData("release-publish.yml", "deploy-docs-pages", "publish-docs-archive")]
+    public void Pages_Workflows_Should_Share_A_Deployment_Lock_Without_Cancelling_Active_Runs(
+        string fileName,
+        string deployJobName,
+        string exportJobName)
+    {
+        var workflow = LoadWorkflow(fileName);
+        var root = (YamlMappingNode)workflow.Documents[0].RootNode;
+        var jobs = GetMapping(root, "jobs");
+        var deployJob = GetMapping(jobs, deployJobName);
+
+        var needs = GetChild(deployJob, "needs");
+        var dependencies = needs is YamlSequenceNode sequence
+            ? sequence.Select(GetScalar)
+            : [GetScalar(needs)];
+        Assert.Contains(exportJobName, dependencies);
+
+        var concurrency = GetMapping(deployJob, "concurrency");
+        Assert.Equal("github-pages", GetScalar(concurrency, "group"));
+        Assert.Equal("false", GetScalar(concurrency, "cancel-in-progress"));
+        Assert.Equal("max", GetScalar(concurrency, "queue"));
+
+        var permissions = GetMapping(deployJob, "permissions");
+        Assert.Equal("write", GetScalar(permissions, "pages"));
+        Assert.Equal("write", GetScalar(permissions, "id-token"));
+        var environment = GetMapping(deployJob, "environment");
+        Assert.Equal("github-pages", GetScalar(environment, "name"));
+        Assert.Equal("${{ steps.deployment.outputs.page_url }}", GetScalar(environment, "url"));
+
+        var exportSteps = GetSequence(GetMapping(jobs, exportJobName), "steps").Cast<YamlMappingNode>();
+        var uploadStep = FindStep(exportSteps, "Upload Pages artifact");
+        Assert.Equal("7", GetScalar(GetMapping(uploadStep, "with"), "retention-days"));
     }
 
     [Fact]
