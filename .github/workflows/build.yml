@@ -192,7 +192,7 @@ jobs:
     if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' }}
     # Leave time for the native suite, candidate installation, and evidence upload.
     # The test command still uses a separate two-minute hang detector.
-    timeout-minutes: 20
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 30 || 20 }}
     strategy:
       fail-fast: false
       matrix:
