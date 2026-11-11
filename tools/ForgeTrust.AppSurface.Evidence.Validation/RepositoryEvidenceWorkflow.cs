@@ -69,12 +69,22 @@ internal static class RepositoryEvidenceWorkflow
             var dotnet = Path.GetFullPath(Required(options, "--dotnet"));
             if (!File.Exists(dotnet)) throw new ArgumentException("The selected dotnet host does not exist.");
             var repository = Path.GetFullPath(options.GetValueOrDefault("--repository", Directory.GetCurrentDirectory()));
+            string? coverageCli = null;
+            if (options.TryGetValue("--coverage-cli", out var selectedCoverageCli))
+            {
+                if (!Path.IsPathFullyQualified(selectedCoverageCli) || !File.Exists(selectedCoverageCli))
+                    throw new ArgumentException("The selected coverage CLI must be an existing absolute executable.");
+                coverageCli = Path.GetFullPath(selectedCoverageCli);
+            }
+            var nativeCoverageDirectory = options.GetValueOrDefault("--native-coverage-directory");
+            if (!string.IsNullOrWhiteSpace(nativeCoverageDirectory) && coverageCli is null)
+                throw new ArgumentException("Native coverage requires --coverage-cli with the installed candidate executable.");
             if (RequiresPackage(plan.Profile))
                 settings = new ValidationSettings(repository, Path.GetFullPath(Required(options, "--package")), Required(options, "--version"),
                     Required(options, "--source-commit"), dotnet,
                     Path.GetFullPath(options.GetValueOrDefault("--scratch-parent", Path.GetTempPath())), output);
             checks = new RepositoryCheckSettings(repository, dotnet, output,
-                options.GetValueOrDefault("--diff-base"), options.GetValueOrDefault("--native-coverage-directory"), options.GetValueOrDefault("--diff-file"))
+                options.GetValueOrDefault("--diff-base"), nativeCoverageDirectory, options.GetValueOrDefault("--diff-file"), coverageCli)
             { VerifyLocalSourceAsync = verifyLocalSourceAsync };
         }
 
@@ -259,7 +269,7 @@ internal static class RepositoryEvidenceWorkflow
         string[] selected = operation switch
         {
             "plan" => ["--output"],
-            "run" => ["--plan", "--output", "--package", "--version", "--source-commit", "--dotnet", "--scratch-parent", "--repository", "--diff-base", "--diff-file", "--native-coverage-directory"],
+            "run" => ["--plan", "--output", "--package", "--version", "--source-commit", "--dotnet", "--scratch-parent", "--repository", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli"],
             _ => ["--plan", "--manifest", "--artifact-root"],
         };
         if (options.Keys.Except(common.Concat(selected), StringComparer.Ordinal).Any())

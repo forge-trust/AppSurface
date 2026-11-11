@@ -55,6 +55,11 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var expected = ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx"));
             if (expected.Count == 0) throw new InvalidDataException("The solution contains no test projects.");
             var nativeFanIn = !string.IsNullOrWhiteSpace(_settings.NativeCoverageDirectory);
+            if (_settings.CoverageCliPath is { } coverageCli
+                && (!Path.IsPathFullyQualified(coverageCli) || !File.Exists(coverageCli)))
+                throw new InvalidOperationException("The installed coverage CLI must be an existing absolute executable.");
+            if (nativeFanIn && string.IsNullOrWhiteSpace(_settings.CoverageCliPath))
+                throw new InvalidOperationException("Native fan-in requires the installed candidate --coverage-cli.");
             if (!string.IsNullOrWhiteSpace(_settings.DiffFile) && _settings.VerifyLocalSourceAsync is null)
                 throw new InvalidDataException("A local patch requires in-process source verification; use the local operation.");
             if (nativeFanIn && (string.IsNullOrWhiteSpace(_settings.DiffBase) || !string.IsNullOrWhiteSpace(_settings.DiffFile)))
@@ -68,15 +73,18 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             Directory.CreateDirectory(coverage);
 
             stage = "collection";
-            List<string> runArgs =
-            [
+            List<string> runArgs = _settings.CoverageCliPath is null
+            ? [
                 "run", "--project", Path.Join(root, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"),
                 "--configuration", "Release", "--", "coverage", "run", "--solution", Path.Join(root, "ForgeTrust.AppSurface.slnx"),
                 "--output", coverage, "--configuration", "Release", "--parallelism", "2",
-            ];
+            ]
+            : ["coverage", "run", "--solution", Path.Join(root, "ForgeTrust.AppSurface.slnx"),
+                "--output", coverage, "--configuration", "Release", "--parallelism", "2"];
             foreach (var project in ExclusiveProjects) { runArgs.Add("--exclusive-test-project"); runArgs.Add(project); }
             runArgs.AddRange(["--logger", "console;verbosity=normal", "--test-results", "junit", "--slow-test-diagnostics", "--require-non-sandbox"]);
-            await ExecuteAsync("coverage-run", runArgs, root, proof, cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync("coverage-run", runArgs, root, proof, cancellationToken,
+                _settings.CoverageCliPath ?? _settings.DotnetPath).ConfigureAwait(false);
             var report = Path.Join(coverage, "coverage.cobertura.xml");
             var timings = Path.Join(coverage, "timings.json");
             ValidateTimings(timings, expected);
@@ -88,40 +96,44 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var aggregateGate = Path.Join(coverage, "aggregate-gate");
             var aggregateJson = Path.Join(aggregateGate, "coverage-gate.json");
             Directory.CreateDirectory(aggregateGate);
-            var aggregateArgs = GateArgs(report, root, aggregateGate, null, null, patch: false);
-            await ExecuteAsync("aggregate-gate", aggregateArgs, root, proof, cancellationToken).ConfigureAwait(false);
+            var aggregateArgs = GateArgs(report, root, aggregateGate, null, null, patch: false,
+                installed: _settings.CoverageCliPath is not null);
+            await ExecuteAsync("aggregate-gate", aggregateArgs, root, proof, cancellationToken,
+                _settings.CoverageCliPath ?? _settings.DotnetPath).ConfigureAwait(false);
             ValidateGate(aggregateJson, patch: false);
 
             string? patchJson = null;
+            string? nativeProofHash = null;
             if (nativeFanIn)
             {
-                // Native receipts are composed and verified by the shared fan-in contract before the aggregate claim is emitted.
                 stage = "native-fan-in";
-                var primaryCapture = Path.Join(output, "coverage-fanin");
-                var composed = Path.Join(output, "coverage-fanin-composed");
+                var fanInOutput = Path.Join(output, "coverage-fanin");
                 var nativeDirs = Directory.GetDirectories(_settings.NativeCoverageDirectory!).Order(StringComparer.Ordinal).ToArray();
                 if (nativeDirs.Length != 3) throw new InvalidDataException("Exactly three native coverage captures are required.");
                 var run = WorkflowRun();
                 if (run.Values.Any(string.IsNullOrWhiteSpace) || string.IsNullOrWhiteSpace(_settings.DiffBase))
                     throw new InvalidDataException("Native fan-in requires complete workflow provenance and a pinned diff base.");
-                var captureRequest = new EvidenceCoverageCaptureRequest(root, primaryCapture, report, null, timings,
-                    "solution", commit, tree, sdk, "Release", run, Environment.GetEnvironmentVariable("RUNNER_OS") switch { "Linux" => "Linux", "Windows" => "Windows", _ => "Darwin" }, expected.ToHashSet(StringComparer.Ordinal));
-                await EvidenceCoverageFanIn.CaptureAsync(captureRequest, cancellationToken).ConfigureAwait(false);
+                var dogfoodArgs = new List<string>
+                {
+                    "run", "--project", Path.Join(root, "tools", "ForgeTrust.AppSurface.Coverage.Dogfood", "ForgeTrust.AppSurface.Coverage.Dogfood.csproj"),
+                    "--configuration", "Release", "--", "--operation", "fanin", "--repository", root,
+                    "--cli", _settings.CoverageCliPath!, "--output", fanInOutput, "--configuration", "Release",
+                    "--primary", report, "--timings", timings, "--native-inputs", _settings.NativeCoverageDirectory!,
+                    "--diff-base", _settings.DiffBase!, "--run-scope", run["GITHUB_REPOSITORY"]!,
+                    "--run-id", run["GITHUB_RUN_ID"]!, "--attempt", run["GITHUB_RUN_ATTEMPT"]!,
+                };
+                await ExecuteAsync("coverage-fanin", dogfoodArgs, root, proof, cancellationToken, _settings.DotnetPath).ConfigureAwait(false);
+                nativeProofHash = await ValidateNativeFanInAsync(fanInOutput, commit, tree, sdk, run, cancellationToken).ConfigureAwait(false);
                 var primaryGateDir = Path.Join(coverage, "primary-gate");
+                Directory.CreateDirectory(primaryGateDir);
                 var primaryGate = Path.Join(primaryGateDir, "coverage-gate.json");
-                var primaryPaths = Path.Join(composed, "primary-paths.cobertura.xml");
+                File.Copy(Path.Join(fanInOutput, "accepted", "primary-gate.json"), primaryGate, overwrite: false);
                 var patchGateDir = Path.Join(coverage, "patch-gate");
-                var composedGate = Path.Join(patchGateDir, "coverage-gate.json");
-                var request = new EvidenceCoverageFanInRequest(primaryCapture, nativeDirs, composed, root, Path.Join(root, "ForgeTrust.AppSurface.slnx"),
-                    expected.ToHashSet(StringComparer.Ordinal), commit, tree, sdk, "Release", run, primaryGate, composedGate, _settings.DiffBase!);
-                await EvidenceCoverageFanIn.ComposeAsync(request, cancellationToken).ConfigureAwait(false);
-                Directory.CreateDirectory(Path.GetDirectoryName(primaryGate)!);
-                await ExecuteAsync("primary-gate", GateArgs(primaryPaths, root, primaryGateDir, _settings.DiffBase, null, patch: false), root, proof, cancellationToken).ConfigureAwait(false);
                 Directory.CreateDirectory(patchGateDir);
-                await ExecuteAsync("patch-gate", GateArgs(Path.Join(composed, "coverage.cobertura.xml"), root, patchGateDir, _settings.DiffBase, null, patch: true), root, proof, cancellationToken).ConfigureAwait(false);
-                var verified = await EvidenceCoverageFanIn.VerifyAsync(request, cancellationToken).ConfigureAwait(false);
-                if (!verified.Verified) throw new InvalidDataException("Native coverage fan-in did not verify.");
-                patchJson = composedGate;
+                patchJson = Path.Join(patchGateDir, "coverage-gate.json");
+                File.Copy(Path.Join(fanInOutput, "accepted", "composed-gate.json"), patchJson, overwrite: false);
+                ValidateGate(primaryGate, patch: false);
+                ValidateGate(patchJson, patch: true);
             }
             else if (!string.IsNullOrWhiteSpace(_settings.DiffBase) || !string.IsNullOrWhiteSpace(_settings.DiffFile))
             {
@@ -129,7 +141,9 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 var patchGate = Path.Join(coverage, "patch-gate");
                 patchJson = Path.Join(patchGate, "coverage-gate.json");
                 Directory.CreateDirectory(patchGate);
-                await ExecuteAsync("patch-gate", GateArgs(report, root, patchGate, _settings.DiffBase, _settings.DiffFile, patch: true), root, proof, cancellationToken).ConfigureAwait(false);
+                await ExecuteAsync("patch-gate", GateArgs(report, root, patchGate, _settings.DiffBase, _settings.DiffFile,
+                    patch: true, installed: _settings.CoverageCliPath is not null), root, proof, cancellationToken,
+                    _settings.CoverageCliPath ?? _settings.DotnetPath).ConfigureAwait(false);
                 ValidateGate(patchJson, patch: true);
             }
 
@@ -147,6 +161,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 sdk,
                 configuration = "Release",
                 fullSolution = true,
+                nativeFanInProofSha256 = nativeProofHash,
                 testProjects = expected.Order(StringComparer.Ordinal).ToArray(),
                 reportSha256 = await HashFileAsync(report, cancellationToken),
                 aggregateGatePassed = true,
@@ -166,9 +181,9 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         }
     }
 
-    private async Task ExecuteAsync(string name, IReadOnlyList<string> args, string root, List<CommandProof> proof, CancellationToken ct)
+    private async Task ExecuteAsync(string name, IReadOnlyList<string> args, string root, List<CommandProof> proof, CancellationToken ct, string? executable = null)
     {
-        var result = await _command(new EvidenceCommandRequest(_settings.DotnetPath, args, root, TimeSpan.FromMinutes(90))
+        var result = await _command(new EvidenceCommandRequest(executable ?? _settings.DotnetPath, args, root, TimeSpan.FromMinutes(90))
         { MaximumOutputBytes = 16 * 1024 * 1024, Environment = _settings.CommandEnvironment }, ct).ConfigureAwait(false);
         proof.Add(new(name, result.ExitCode, result.ElapsedMilliseconds, result.OutputTruncated, Hash(result.StandardOutput), Hash(result.StandardError)));
         await File.WriteAllTextAsync(Path.Join(_settings.OutputDirectory, "coverage", name + ".log"),
@@ -221,10 +236,11 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 throw new InvalidDataException("A solution test project did not complete with coverage artifacts.");
     }
 
-    private static List<string> GateArgs(string report, string root, string output, string? diffBase, string? diffFile, bool patch)
+    private static List<string> GateArgs(string report, string root, string output, string? diffBase, string? diffFile, bool patch, bool installed)
     {
-        var args = new List<string> { "run", "--project", Path.Join(root, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"), "--configuration", "Release", "--no-build", "--no-restore", "--", "coverage", "gate",
-            "--coverage", report, "--repository-root", root, "--output", output, "--min-line", patch ? "0" : "95", "--min-branch", patch ? "0" : "85", "--tolerance", "0.5", "--no-github-summary" };
+        var args = installed ? new List<string> { "coverage", "gate" } : new List<string> { "run", "--project", Path.Join(root, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"), "--configuration", "Release", "--no-build", "--no-restore", "--", "coverage", "gate" };
+        args.AddRange([
+            "--coverage", report, "--repository-root", root, "--output", output, "--min-line", patch ? "0" : "95", "--min-branch", patch ? "0" : "85", "--tolerance", "0.5", "--no-github-summary"]);
         if (!string.IsNullOrWhiteSpace(diffBase) && string.IsNullOrWhiteSpace(diffFile))
             args.AddRange(["--diff-base", diffBase, "--diff-label", diffBase]);
         if (!string.IsNullOrWhiteSpace(diffBase) || !string.IsNullOrWhiteSpace(diffFile))
@@ -236,6 +252,59 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             args.AddRange(["--min-patch-line", "95", "--min-patch-branch", "85"]);
         }
         return args;
+    }
+
+    /// <summary>Requires the installed adapter's delivered acceptance and separate verification, retaining their artifact binding.</summary>
+    private static async Task<string> ValidateNativeFanInAsync(string output, string commit, string tree, string sdk,
+        IReadOnlyDictionary<string, string?> run, CancellationToken cancellationToken)
+    {
+        string? policyDigest = null;
+        foreach (var operation in new[] { "accept", "verify" })
+        {
+            using var document = ReadJson(Path.Join(output, operation + "-result.json"), MaxJson);
+            var terminal = document.RootElement;
+            var result = terminal.GetProperty("result");
+            var delivery = terminal.GetProperty("delivery");
+            if (terminal.GetProperty("schemaVersion").GetInt32() != 2
+                || terminal.GetProperty("operation").GetString() != operation
+                || terminal.GetProperty("status").GetString() != "succeeded"
+                || terminal.GetProperty("operationOutcome").GetString() != "succeeded"
+                || !delivery.GetProperty("resultFileCommitted").GetBoolean()
+                || result.GetProperty("operation").GetString() != operation
+                || !result.GetProperty("verified").GetBoolean()
+                || (operation == "accept" && !result.GetProperty("accepted").GetBoolean())
+                || !result.GetProperty("effects").GetProperty("cleanupComplete").GetBoolean()
+                || result.GetProperty("patchOutcome").GetString() != "PatchAccepted"
+                || result.GetProperty("evaluationIntent").GetString() != "currentTrustedRun")
+                throw new InvalidDataException("Native acceptance or independent verification did not complete and deliver its result.");
+            var digest = result.GetProperty("policyDigest").GetString();
+            if (string.IsNullOrWhiteSpace(digest) || (policyDigest is not null && digest != policyDigest))
+                throw new InvalidDataException("Native acceptance and verification refer to different policies.");
+            policyDigest = digest;
+        }
+        var accepted = Path.Join(output, "accepted");
+        using var acceptance = ReadJson(Path.Join(accepted, "acceptance.json"), MaxJson);
+        var receipt = acceptance.RootElement;
+        var source = receipt.GetProperty("source");
+        var workflow = receipt.GetProperty("run");
+        if (receipt.GetProperty("policyDigest").GetString() != policyDigest
+            || source.GetProperty("commit").GetString() != commit || source.GetProperty("tree").GetString() != tree
+            || source.GetProperty("sdk").GetString() != sdk || source.GetProperty("configuration").GetString() != "Release"
+            || workflow.GetProperty("runScope").GetString() != run["GITHUB_REPOSITORY"]
+            || workflow.GetProperty("runId").GetString() != run["GITHUB_RUN_ID"]
+            || workflow.GetProperty("attempt").GetInt32() != int.Parse(run["GITHUB_RUN_ATTEMPT"]!, System.Globalization.CultureInfo.InvariantCulture))
+            throw new InvalidDataException("Native acceptance does not bind the current source and workflow attempt.");
+        // The installed verifier owns semantic composition, custody and denominator checks.
+        // Bind its retained receipts and the two reports copied into EvidenceHost's artifact slots.
+        foreach (var (property, file) in new[]
+        {
+            ("primaryGateSha256", Path.Join(accepted, "primary-gate.json")),
+            ("composedGateSha256", Path.Join(accepted, "composed-gate.json")),
+            ("compositionReceiptSha256", Path.Join(output, "composed", "verification.json")),
+        })
+            if (receipt.GetProperty(property).GetString() != await HashFileAsync(file, cancellationToken).ConfigureAwait(false))
+                throw new InvalidDataException("Native acceptance differs from its retained gate or composition receipt.");
+        return await HashFileAsync(Path.Join(accepted, "acceptance.json"), cancellationToken).ConfigureAwait(false);
     }
 
     private static void ValidateGate(string path, bool patch)

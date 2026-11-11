@@ -6,6 +6,7 @@ using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -156,6 +157,64 @@ public sealed class CoverageGateTests
         }
     }
 
+    [Theory]
+    [InlineData("Café.cs", true)]
+    [InlineData("Widget File.cs", false)]
+    public async Task ExecuteAsync_MeasuresPatchForRealGitPath(string fileName, bool quoted)
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-path-");
+        var sourcePath = TestPathUtils.PathUnder(temp.Path, "b", fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
+        await File.WriteAllTextAsync(sourcePath, "base\n");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "config", "core.quotePath", quoted ? "true" : "false");
+        await RunGitAsync(temp.Path, "config", "core.precomposeUnicode", "true");
+        await RunGitAsync(temp.Path, "config", "diff.noprefix", "true");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        await File.AppendAllTextAsync(sourcePath, "changed\n");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "change");
+
+        var diff = await GitDiffReader.ReadDiffAsync(temp.Path, "HEAD~1", CancellationToken.None);
+        Assert.Contains(quoted ? "+++ \"b/b/Caf\\303\\251.cs\"" : $"+++ b/b/{fileName}\t",
+            diff, StringComparison.Ordinal);
+        var coverage = temp.WriteCoverage($"""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="2" branches-valid="2">
+              <packages><package name="Example"><classes>
+                <class name="Example.Subject" filename="b/{fileName}"><lines>
+                  <line number="2" hits="1" branch="true" condition-coverage="100% (2/2)" />
+                </lines></class>
+              </classes></package></packages>
+            </coverage>
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            MinLine = 0,
+            MinBranch = 0,
+            DiffBase = "HEAD~1",
+            MinPatchLine = 100,
+            MinPatchBranch = 100,
+            RepositoryRoot = temp.Path,
+            NoGithubSummary = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        using var report = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json")));
+        Assert.Equal(1, report.RootElement.GetProperty("patchLine").GetProperty("changed").GetInt32());
+        Assert.Equal(1, report.RootElement.GetProperty("patchLine").GetProperty("measurable").GetInt32());
+        Assert.Equal(1, report.RootElement.GetProperty("patchBranch").GetProperty("changed").GetInt32());
+        Assert.Equal(2, report.RootElement.GetProperty("patchBranch").GetProperty("measurable").GetInt32());
+        Assert.Equal(100m, report.RootElement.GetProperty("patchLine").GetProperty("percent").GetDecimal());
+        Assert.Equal(100m, report.RootElement.GetProperty("patchBranch").GetProperty("percent").GetDecimal());
+    }
+
     [Fact]
     public async Task ExecuteAsync_ParsesMixedCaseMeasurablePatchLineMode_WhenDiffBaseIsConfigured()
     {
@@ -212,6 +271,26 @@ public sealed class CoverageGateTests
         {
             Directory.SetCurrentDirectory(previous);
         }
+    }
+
+    [Fact]
+    public async Task GitDiffReader_UsesOriginalPinnedCommitWhenLocalReplacementExists()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-replace-");
+        var source = Path.Join(temp.Path, "Decision.cs");
+        await File.WriteAllTextAsync(source, "baseline\n");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        await File.AppendAllTextAsync(source, "changed\n");
+        await RunGitAsync(temp.Path, "commit", "-am", "change");
+        await RunGitAsync(temp.Path, "replace", "HEAD", "HEAD~1");
+
+        var patch = await GitDiffReader.ReadDiffAsync(temp.Path, "HEAD~1", CancellationToken.None);
+
+        Assert.Contains("+changed", patch, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2445,6 +2524,60 @@ public sealed class CoverageGateTests
         Assert.Contains("--diff-base 'origin/main'", exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(@"a/\\..\\Unrepresentable.cs", @"b/\\..\\Unrepresentable.cs")]
+    [InlineData(@"a/\\Leading.cs", @"b/\\Leading.cs")]
+    [InlineData(@"a/Prefix\\Interior.cs", @"b/Prefix\\Interior.cs")]
+    public async Task CoverageGateEvaluator_RejectsGitPathsWithLiteralBackslash_WithDiagnostic(
+        string oldDiffPath,
+        string newDiffPath)
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-malformed-git-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages><package name="Example"><classes>
+                <class name="Example.Z" filename="src/Z.cs"><lines>
+                  <line number="1" hits="0" />
+                </lines></class>
+              </classes></package></packages>
+            </coverage>
+            """);
+        var diff = $$"""
+            diff --git "{{oldDiffPath}}" "{{newDiffPath}}"
+            index 0000000..1111111 100644
+            --- "{{oldDiffPath}}"
+            +++ "{{newDiffPath}}"
+            @@ -0,0 +1,1 @@
+            +unrepresentable
+            diff --git a/src/Z.cs b/src/Z.cs
+            index 0000000..1111111 100644
+            --- a/src/Z.cs
+            +++ b/src/Z.cs
+            @@ -0,0 +1,1 @@
+            +uncovered
+            """;
+        var parsed = PatchCoverageEvaluator.ParseChangedLinesDetailed(diff);
+        Assert.Equal(PatchDiffParseStatus.Malformed, parsed.Status);
+        Assert.Empty(parsed.ChangedLines);
+        Assert.DoesNotContain("src/Z.cs", parsed.ChangedLines.Keys);
+
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(temp.Path, "origin/main", 100, _ => Task.FromResult(diff)));
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None));
+
+        Assert.Contains("ASCOV015", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--diff-base 'origin/main'", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("path that cannot be represented safely", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ExecuteAsync_RejectsMultipleDiffSources_WithDiagnostic()
     {
@@ -3272,6 +3405,86 @@ public sealed class CoverageGateTests
     }
 
     [Theory]
+    [InlineData("0000..e69d", true)]
+    [InlineData("0000..e69de2", true)]
+    [InlineData("0000000..e69de29", true)]
+    [InlineData("e69de29..0000000", true)]
+    [InlineData("0000..473a", true)]
+    [InlineData("0000..473a0", true)]
+    [InlineData("473a0f4..0000000", true)]
+    [InlineData("000..e69d", false)]
+    [InlineData("000..473a", false)]
+    [InlineData("0000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c53910", false)]
+    [InlineData("0000000..473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a3037218130", false)]
+    [InlineData("0000000000000000000000000000000000000000000..e69de29", false)]
+    [InlineData("00000000000000000000000000000000000000000000000000000000000000000..473a0f4", false)]
+    [InlineData("0000000..aaaaaaaa", false)]
+    [InlineData("0000000..1111111", false)]
+    [InlineData("1111111..0000000", false)]
+    public void ParseChangedLinesDetailed_RecognizesOnlyValidEmptyBlobIndexAbbreviations(
+        string indexRange,
+        bool isEmptyBlobIndex)
+    {
+        var result = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
+            diff --git a/src/Empty.cs b/src/Empty.cs
+            new file mode 100644
+            index {indexRange}
+            """);
+
+        Assert.Equal(
+            isEmptyBlobIndex ? PatchDiffParseStatus.ValidNoAddedLines : PatchDiffParseStatus.Malformed,
+            result.Status);
+        Assert.Empty(result.ChangedLines);
+    }
+
+    [Fact]
+    public void ParseChangedLinesDetailed_RecognizesFullSha1AndSha256EmptyBlobIds()
+    {
+        const string emptyBlobSha1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+        const string emptyBlobSha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
+
+        var sha1 = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
+            diff --git a/src/Empty.cs b/src/Empty.cs
+            new file mode 100644
+            index {new string('0', emptyBlobSha1.Length)}..{emptyBlobSha1}
+            """);
+        var sha256 = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
+            diff --git a/src/Empty.cs b/src/Empty.cs
+            new file mode 100644
+            index {new string('0', emptyBlobSha256.Length)}..{emptyBlobSha256}
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.ValidNoAddedLines, sha1.Status);
+        Assert.Empty(sha1.ChangedLines);
+        Assert.Equal(PatchDiffParseStatus.ValidNoAddedLines, sha256.Status);
+        Assert.Empty(sha256.ChangedLines);
+    }
+
+    [Fact]
+    public void ParseChangedLinesDetailed_ContinuesAfterSha256EmptyFileEntriesToCoveredHunk()
+    {
+        var result = PatchCoverageEvaluator.ParseChangedLinesDetailed("""
+            diff --git a/src/EmptyAdded.cs b/src/EmptyAdded.cs
+            new file mode 100644
+            index 0000000..473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813
+            diff --git a/src/EmptyDeleted.cs b/src/EmptyDeleted.cs
+            deleted file mode 100644
+            index 473a0f4..0000000
+            diff --git a/src/Changed.cs b/src/Changed.cs
+            index 1111111..2222222 100644
+            --- a/src/Changed.cs
+            +++ b/src/Changed.cs
+            @@ -1,1 +1,2 @@
+             existing
+            +covered
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.ValidWithAddedLines, result.Status);
+        Assert.Single(result.ChangedLines);
+        Assert.Contains(2, result.ChangedLines["src/Changed.cs"]);
+    }
+
+    [Theory]
     [InlineData("/etc/passwd")]
     [InlineData("C:\\\\outside\\\\Foo.cs")]
     [InlineData("./")]
@@ -3332,6 +3545,53 @@ public sealed class CoverageGateTests
 
         Assert.Contains("ASCOV010", exception.Message, StringComparison.Ordinal);
         Assert.Contains("HEAD^1", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadDiffAsync_RejectsOptionLikeBaseWithoutWritingOutsideReports()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-git-options-");
+        File.WriteAllText(Path.Join(temp.Path, "Sample.cs"), "public class Sample { }\n");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        var destination = Path.Join(temp.Path, "unexpected-output");
+
+        await Assert.ThrowsAsync<CommandException>(() => GitDiffReader.ReadDiffAsync(
+            temp.Path, "--output=" + destination, CancellationToken.None));
+
+        Assert.False(File.Exists(destination));
+        Assert.False(File.Exists(destination + "...HEAD"));
+    }
+
+    [Fact]
+    public async Task ReadDiffAsync_UsesCommittedTextWithoutRunningConfiguredTextConverter()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-git-textconv-");
+        var sample = Path.Join(temp.Path, "Sample.cs");
+        var marker = Path.Join(temp.Path, "converter-called");
+        File.WriteAllText(Path.Join(temp.Path, ".gitattributes"), "*.cs diff=fixture\n");
+        File.WriteAllText(sample, "// before\n");
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "config", "diff.fixture.textconv", "echo invoked > converter-called #");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        await File.WriteAllTextAsync(sample, "// after\n");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "change");
+
+        var diff = await GitDiffReader.ReadDiffAsync(temp.Path, "HEAD^1", CancellationToken.None);
+
+        Assert.False(File.Exists(marker));
+        Assert.Contains("-// before", diff, StringComparison.Ordinal);
+        Assert.Contains("+// after", diff, StringComparison.Ordinal);
+
+        await RunGitAsync(temp.Path, "diff", "--textconv", "HEAD^1...HEAD", "--");
+        Assert.True(File.Exists(marker));
     }
 
     [Fact]

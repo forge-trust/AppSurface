@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Testing;
 using YamlDotNet.RepresentationModel;
 
@@ -15,6 +17,24 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         _workflow = LoadWorkflow(repository, "native-evidence-validation.yml");
         _buildWorkflow = LoadWorkflow(repository, "build.yml");
         _packageWorkflow = LoadWorkflow(repository, "package-gate.yml");
+    }
+
+    [Fact]
+    public void NativeCollectorFilterMatchesTheAdapterDeclaration()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var adapter = File.ReadAllLines(Path.Join(repository, "tools",
+            "ForgeTrust.AppSurface.Coverage.Dogfood", "Program.cs"));
+        var declaration = Assert.Single(adapter, line =>
+            line.TrimStart().StartsWith("internal const string NativeFilter = ", StringComparison.Ordinal));
+        var declaredFilter = JsonSerializer.Deserialize<string>(declaration[(declaration.IndexOf('=') + 1)..]
+            .Trim().TrimEnd(';'));
+        var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
+        var collector = FindStep(job["steps"].AsSequence(), "Run coverage security contracts")["run"].AsScalar();
+        var filter = Assert.Single(Regex.Matches(collector, "--filter\\s+\"([^\"]+)\"").Cast<Match>());
+
+        Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
+        Assert.Equal(declaredFilter, filter.Groups[1].Value);
     }
 
     [Fact]
@@ -137,10 +157,11 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.DoesNotContain("python", preflightRun, StringComparison.OrdinalIgnoreCase);
 
         var coverageSecurity = jobs["coverage-security-platform"].AsMapping();
-        Assert.Equal(["coverage-evidence-plan"], coverageSecurity["needs"].AsSequence().Select(node => node.AsScalar()));
+        Assert.Equal(["coverage-evidence-plan", "coverage-cli-candidate"], coverageSecurity["needs"].AsSequence().Select(node => node.AsScalar()));
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true'", coverageSecurity["if"].AsScalar());
         var capture = FindStep(coverageSecurity["steps"].AsSequence(), "Attest successful native coverage evidence")["run"].AsScalar();
-        Assert.Contains("--operation capture-native", capture);
+        Assert.Contains("'--operation', 'native'", capture);
+        Assert.Contains("'--cli', $env:COVERAGE_CLI_PATH", capture);
         Assert.DoesNotContain("python", capture, StringComparison.OrdinalIgnoreCase);
 
         var build = jobs["build"].AsMapping();
@@ -159,6 +180,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("--operation run --scope coverage", command);
         Assert.Contains("--operation verify --scope coverage", command);
         Assert.Contains("--native-coverage-directory", command);
+        Assert.Contains("--coverage-cli \"$COVERAGE_CLI_PATH\"", command);
         Assert.Contains("jq -r '.requiresCoverage'", command);
         Assert.Contains("jq -r '.requiresNativeCoverage'", command);
         Assert.Contains("GITHUB_EVENT_NAME" + "\" == \"pull_request\"", command);
@@ -177,7 +199,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_coverage == 'true'", coverageUpload["if"].AsScalar());
         var coverageUploadFiles = coverageUpload["with"].AsMapping()["files"].AsScalar();
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true'", coverageUploadFiles);
-        Assert.Contains("coverage-fanin-composed/coverage.cobertura.xml", coverageUploadFiles);
+        Assert.Contains("coverage-fanin/composed/coverage.cobertura.xml", coverageUploadFiles);
         Assert.Contains("coverage/coverage.cobertura.xml", coverageUploadFiles);
 
         var manifestGate = jobs["coverage-manifest-gate"].AsMapping();
@@ -191,6 +213,56 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("needs.coverage-security-platform.result != 'success'", failGate["if"].AsScalar());
         Assert.Contains("needs.coverage-security-platform.result != 'skipped'", failGate["if"].AsScalar());
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true'", FindStep(gateSteps, "Confirm the selected coverage evidence gate passed")["if"].AsScalar());
+    }
+
+    [Fact]
+    public void InstalledCoverageCandidateAndConsumersUseTheSameEventHead()
+    {
+        var expected = "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
+        var jobs = _buildWorkflow["jobs"].AsMapping();
+        Assert.Equal(expected, _buildWorkflow["env"].AsMapping()["COVERAGE_SOURCE_COMMIT"].AsScalar());
+        foreach (var name in new[] { "coverage-cli-candidate", "coverage-security-platform", "build" })
+        {
+            var job = jobs[name].AsMapping();
+            var checkout = FindStep(job["steps"].AsSequence(), "Checkout code")["with"].AsMapping();
+            Assert.Equal(expected, checkout["ref"].AsScalar());
+            Assert.Equal("0", checkout["fetch-depth"].AsScalar());
+            if (name == "coverage-cli-candidate")
+            {
+                Assert.Contains("requires_coverage == 'true'", job["if"].AsScalar());
+                var pack = FindStep(job["steps"].AsSequence(), "Pack source and SDK bound candidate CLI")["run"].AsScalar();
+                Assert.Contains("test \"$source_commit\" = \"$COVERAGE_SOURCE_COMMIT\"", pack);
+            }
+            else
+            {
+                Assert.Contains("coverage-cli-candidate", job["needs"].AsSequence().Select(node => node.AsScalar()));
+                var install = FindStep(job["steps"].AsSequence(), "Verify and install candidate CLI")["run"].AsScalar();
+                Assert.Contains("$manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT", install);
+                Assert.Contains("$manifest.commit -ne $commit", install);
+                Assert.Contains("$manifest.tree -ne $tree", install);
+            }
+        }
+        Assert.Equal("${{ needs.coverage-evidence-plan.outputs.diff_base }}",
+            jobs["coverage-security-platform"].AsMapping()["env"].AsMapping()["COVERAGE_GATE_DIFF_BASE"].AsScalar());
+    }
+
+    [Fact]
+    public void SelectedNativePackagesRetainInstalledCoverageAndMetadataRejectionProofs()
+    {
+        var steps = NativeJob["steps"].AsSequence();
+        var pack = FindStep(steps, "Pack selected native producer input");
+        var proof = FindStep(steps, "Prove installed neutral coverage package and published application");
+        var rejection = FindStep(steps, "Reject case-varied engine version skew before proof output");
+        Assert.True(IndexOf(steps, pack) < IndexOf(steps, proof));
+        Assert.True(IndexOf(steps, proof) < IndexOf(steps, rejection));
+        foreach (var step in new[] { proof, rejection })
+            Assert.Contains("steps.pack.outcome == 'success'", step["if"].AsScalar());
+        Assert.Contains("--package-proof", proof["run"].AsScalar());
+        Assert.Contains("/p:RepositoryCommit=$env:SOURCE_COMMIT", proof["run"].AsScalar());
+        Assert.Contains("$LASTEXITCODE -eq 0 -or (Test-Path $output)", rejection["run"].AsScalar());
+        var upload = FindStep(steps, "Preserve evidence inputs, plan, proof, and artifacts")["with"].AsMapping()["path"].AsScalar();
+        Assert.Contains("native-coverage-library-proof/proof.json", upload);
+        Assert.Contains("native-coverage-library-proof/published-proof/runs/**", upload);
     }
 
     [Fact]

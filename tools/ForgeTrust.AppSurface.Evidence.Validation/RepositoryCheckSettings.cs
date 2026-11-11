@@ -7,8 +7,9 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 /// <param name="DiffBase">Pinned comparison commit for coverage; null means aggregate-only baseline.</param>
 /// <param name="NativeCoverageDirectory">Optional same-run native capture parent for cross-platform patch fan-in.</param>
 /// <param name="DiffFile">Immutable local patch snapshot including working-tree and untracked edits, when present.</param>
+/// <param name="CoverageCliPath">Optional absolute installed CLI executable for collection and coverage gates; required with native fan-in.</param>
 internal sealed record RepositoryCheckSettings(string RepositoryRoot, string DotnetPath, string OutputDirectory,
-    string? DiffBase = null, string? NativeCoverageDirectory = null, string? DiffFile = null)
+    string? DiffBase = null, string? NativeCoverageDirectory = null, string? DiffFile = null, string? CoverageCliPath = null)
 {
     /// <summary>
     /// Verifies the local source and policy digest captured by <see cref="LocalEvidenceWorkflow"/>.

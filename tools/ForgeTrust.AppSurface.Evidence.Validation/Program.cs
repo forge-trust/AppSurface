@@ -45,8 +45,10 @@ internal static class Program
                 [--scope all|native|coverage|packages]
                 plan/run: --output <fresh-directory>
                 run: [--repository <checkout>] [--dotnet <absolute-host>]
+                [--coverage-cli <absolute-installed-appsurface>]
                 run coverage: [--diff-base <commit>] [--diff-file <snapshot.patch>]
                 [--native-coverage-directory <same-run-native-captures>]
+                Native fan-in requires --coverage-cli; without it, coverage uses the source CLI through --dotnet.
                 verify: --manifest <proof/evidence-manifest.json> --artifact-root <proof/artifacts>
 
                 Native coverage capture: --operation capture-native --repository <checkout>
@@ -152,7 +154,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--report", "--raw-report"];
+        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli", "--report", "--raw-report"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)

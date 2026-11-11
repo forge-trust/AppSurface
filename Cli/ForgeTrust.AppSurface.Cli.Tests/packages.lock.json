@@ -822,6 +822,7 @@
           "ForgeTrust.AppSurface.Config.LocalSecrets": "[0.1.0, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Coverage": "[0.1.0, )",
           "ForgeTrust.AppSurface.Deployment.GcpCloudRun": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
           "ForgeTrust.AppSurface.Durable.PostgreSql": "[0.1.0, )",
@@ -871,6 +872,12 @@
           "CliWrap": "[3.10.1, )",
           "Microsoft.Extensions.Hosting": "[10.0.8, )",
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
+        }
+      },
+      "forgetrust.appsurface.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.deployment": {
@@ -942,6 +949,7 @@
         "type": "Project",
         "dependencies": {
           "Aspire.Hosting": "[13.4.4, 14.0.0)",
+          "ForgeTrust.AppSurface.Coverage": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }

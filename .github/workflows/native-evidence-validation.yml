@@ -128,6 +128,48 @@ jobs:
           $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
           dotnet $validation --operation verify --scope native --policy .github/evidence.policy.json --changed-paths $changedPaths --plan $planPath --manifest (Join-Path $proofPath 'evidence-manifest.json') --artifact-root (Join-Path $proofPath 'artifacts')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove installed neutral coverage package and published application
+        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ steps.diff.outputs.source_commit }}
+        run: |
+          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
+          $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-library-feed'
+          $proof = Join-Path $env:RUNNER_TEMP 'native-coverage-library-proof'
+          New-Item -ItemType Directory -Path $feed -Force | Out-Null
+          Copy-Item (Join-Path $env:EVIDENCE_ROOT "feed/ForgeTrust.AppSurface.Cli.$version.nupkg") $feed
+          dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet pack Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release -- --package-proof --feed $feed --version $version --output $proof --dotnet (Get-Command dotnet).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Reject case-varied engine version skew before proof output
+        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
+          $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-invalid-metadata'
+          $output = Join-Path $env:RUNNER_TEMP 'native-coverage-invalid-proof'
+          New-Item -ItemType Directory -Path $feed | Out-Null
+          # These are metadata-only admission fixtures. The canonical exact edge must
+          # not hide a case-varied, open engine edge in another framework group.
+          foreach ($id in @('ForgeTrust.AppSurface.Coverage', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Cli')) {
+            $dependencies = ''
+            if ($id -eq 'ForgeTrust.AppSurface.Coverage') {
+              $dependencies = "<dependencies><group targetFramework='net10.0'><dependency id='ForgeTrust.AppSurface.Evidence.Coverage' version='[$version]' /></group><group targetFramework='net9.0'><dependency id='forgetrust.appsurface.evidence.coverage' version='$version' /></group></dependencies>"
+            }
+            $metadata = "<package xmlns='http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd'><metadata><id>$id</id><version>$version</version>$dependencies</metadata></package>"
+            $archive = [System.IO.Compression.ZipFile]::Open((Join-Path $feed "$id.$version.nupkg"), [System.IO.Compression.ZipArchiveMode]::Create)
+            try {
+              $writer = [System.IO.StreamWriter]::new($archive.CreateEntry("$id.nuspec").Open())
+              try { $writer.Write($metadata) } finally { $writer.Dispose() }
+            } finally { $archive.Dispose() }
+          }
+          $diagnostic = & dotnet tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/Release/net10.0/ForgeTrust.AppSurface.Coverage.Dogfood.dll --package-proof --feed $feed --version $version --output $output --dotnet (Get-Command dotnet).Source 2>&1
+          if ($LASTEXITCODE -eq 0 -or (Test-Path $output) -or !($diagnostic -match 'ASCOV312 Packed coverage proof failed')) { throw 'Invalid engine metadata passed admission or created proof output, or the proof runner failed to execute.' }
+          exit 0
       - name: Test native lifecycle contracts for selected producers
         id: lifecycle
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.plan.outcome == 'success' && steps.plan.outputs.has_producers == 'true' }}
@@ -135,7 +177,7 @@ jobs:
         run: |
           dotnet restore Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~EvidenceCoverageFanInCollectionTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests|FullyQualifiedName~RepositoryEvidenceWorkflowTests|FullyQualifiedName~RepositoryGitChangesTests|FullyQualifiedName~RepositoryEvidenceWorkflowContractTests|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~NativeEvidenceProgramTests|FullyQualifiedName~PackageChecksProducerTests|FullyQualifiedName~SolutionCoverageProducerTests'
+          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~EvidenceCoverageFanInProducerTests|FullyQualifiedName~EvidenceCoverageFanInCollectionTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests|FullyQualifiedName~RepositoryEvidenceWorkflowTests|FullyQualifiedName~RepositoryGitChangesTests|FullyQualifiedName~RepositoryEvidenceWorkflowContractTests|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~NativeEvidenceProgramTests|FullyQualifiedName~PackageChecksProducerTests|FullyQualifiedName~SolutionCoverageProducerTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve evidence inputs, plan, proof, and artifacts
         id: upload
@@ -143,7 +185,12 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-evidence-${{ matrix.os }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
+          path: |
+            ${{ runner.temp }}/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
+            ${{ runner.temp }}/native-coverage-library-proof/proof.json
+            ${{ runner.temp }}/native-coverage-library-proof/*.log
+            ${{ runner.temp }}/native-coverage-library-proof/direct/runs/**
+            ${{ runner.temp }}/native-coverage-library-proof/published-proof/runs/**
           if-no-files-found: warn
           retention-days: 7
       - name: Write lane summary
