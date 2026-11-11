@@ -23,7 +23,6 @@ public sealed class CoverageFanInComposerTests
                         new XAttribute("number", 1), new XAttribute("hits", 1), new XAttribute("branch", "false")))))))));
         var raw = Report(rawFilename, source);
         var normalized = Report(normalizedFilename, source);
-        CoverageFanInComposer.ValidateNormalization(raw, normalized, repository);
         var composed = CoverageFanInComposer.Compose([(raw, repository), (normalized, repository)]);
         Assert.Equal("src/Widget.cs", Assert.Single(composed.Descendants("class")).Attribute("filename")?.Value);
         raw.Root!.Element("sources")!.Add(new XElement("source", repository + "/different"));
@@ -142,6 +141,39 @@ public sealed class CoverageFanInComposerTests
         Assert.Equal("6", composed.Root.Attribute("lines-covered")?.Value);
         Assert.Equal("8", composed.Root.Attribute("branches-valid")?.Value);
         Assert.Equal("2", composed.Root.Attribute("branches-covered")?.Value);
+    }
+
+    [Fact]
+    public void Compose_DuplicatePrimaryAndCanonicalCollectorKeepOriginalAggregateCoverage()
+    {
+        const string root = "/agent/work";
+        var raw = XDocument.Parse("""
+            <coverage lines-covered="49" lines-valid="50" branches-covered="98" branches-valid="100">
+              <packages><package name="P"><classes>
+                <class name="A" filename="src/A.cs"><lines>
+                  <line number="1" hits="0" branch="true" condition-coverage="0% (0/2)"/>
+                </lines></class>
+                <class name="B" filename="src/A.cs"><lines>
+                  <line number="1" hits="1" branch="true" condition-coverage="100% (2/2)"/>
+                </lines></class>
+                <class name="Other" filename="src/A.cs"><lines/></class>
+              </classes></package></packages>
+            </coverage>
+            """);
+        raw.Descendants("class").Last().Element("lines")!.Add(Enumerable.Range(2, 48).Select(number =>
+            new XElement("line", new XAttribute("number", number), new XAttribute("hits", 1),
+                new XAttribute("branch", "true"), new XAttribute("condition-coverage", "100% (2/2)"))));
+        var primary = new XDocument(raw);
+        var collector = new XDocument(raw);
+        var originalPrimary = new XDocument(primary);
+
+        var composed = CoverageFanInComposer.Compose([(primary, root), (collector, root)]);
+
+        Assert.Equal("49", composed.Root!.Attribute("lines-covered")?.Value);
+        Assert.Equal("50", composed.Root.Attribute("lines-valid")?.Value);
+        Assert.Equal("98", composed.Root.Attribute("branches-covered")?.Value);
+        Assert.Equal("100", composed.Root.Attribute("branches-valid")?.Value);
+        Assert.True(XNode.DeepEquals(originalPrimary, primary));
     }
 
     [Theory]
@@ -333,170 +365,6 @@ public sealed class CoverageFanInComposerTests
     }
 
     [Fact]
-    public void ValidateNormalization_ShouldAcceptGoldenClassFoldWithEveryMethodObservationPreserved()
-    {
-        var raw = MethodNormalizationRaw();
-        var normalized = MethodNormalizationGolden();
-        var rawBefore = new XDocument(raw);
-        var normalizedBefore = new XDocument(normalized);
-
-        CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot);
-
-        Assert.Equal(2, raw.Descendants("class").Count());
-        Assert.Single(normalized.Descendants("class"));
-        Assert.True(XNode.DeepEquals(rawBefore, raw));
-        Assert.True(XNode.DeepEquals(normalizedBefore, normalized));
-    }
-
-    [Fact]
-    public void CollectorMethodProjectionDiscardsReconstructedRangesAndRetainsExactOriginalRecords()
-    {
-        var raw = MethodNormalizationRaw();
-        var normalized = MethodNormalizationGolden();
-        foreach (var method in normalized.Descendants("method")) method.SetAttributeValue("name", "reconstructed");
-        var projected = CoverageFanInComposer.RetainCollectorMethods(raw, normalized, WindowsRoot);
-
-        CoverageFanInComposer.ValidateNormalization(raw, projected, WindowsRoot);
-        CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, projected, WindowsRoot);
-        Assert.Equal(raw.Descendants("method").Select(x => x.ToString(SaveOptions.DisableFormatting)),
-            projected.Descendants("method").Select(x => x.ToString(SaveOptions.DisableFormatting)));
-        Assert.All(normalized.Descendants("method"), method => Assert.Equal("reconstructed", method.Attribute("name")!.Value));
-        var changedHits = new XDocument(projected);
-        changedHits.Descendants("method").First().Descendants("line").First().SetAttributeValue("hits", "9");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, changedHits, WindowsRoot));
-        var changedOwner = new XDocument(projected);
-        changedOwner.Descendants("class").First(cls => cls.Element("methods") is not null).SetAttributeValue("name", "WrongOwner");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, changedOwner, WindowsRoot));
-        normalized.Descendants("class").Single().SetAttributeValue("filename", "src/Missing.cs");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.RetainCollectorMethods(raw, normalized, WindowsRoot));
-    }
-
-    [Theory]
-    [InlineData("drop-method")]
-    [InlineData("drop-method-point")]
-    [InlineData("change-method-hit-state")]
-    [InlineData("promote-uncovered-method-point")]
-    [InlineData("change-method-branches")]
-    [InlineData("drop-empty-method")]
-    public void ValidateNormalization_ShouldRejectLostOrChangedMethodObservations(string mutation)
-    {
-        var raw = MethodNormalizationRaw();
-        var normalized = MethodNormalizationGolden();
-        var methods = normalized.Descendants("method").ToArray();
-        switch (mutation)
-        {
-            case "drop-method":
-                methods[0].Remove();
-                break;
-            case "drop-method-point":
-                methods[0].Element("lines")!.Elements("line").Last().Remove();
-                break;
-            case "change-method-hit-state":
-                methods[1].Element("lines")!.Element("line")!.SetAttributeValue("hits", "0");
-                break;
-            case "promote-uncovered-method-point":
-                methods[2].Element("lines")!.Element("line")!.SetAttributeValue("hits", "4");
-                break;
-            case "change-method-branches":
-                methods[1].Element("lines")!.Element("line")!.SetAttributeValue("condition-coverage", "100% (2/2)");
-                break;
-            case "drop-empty-method":
-                normalized.Descendants("method").Single(method => method.Attribute("name")?.Value == "Empty").Remove();
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(mutation));
-        }
-
-        Assert.Throws<InvalidDataException>(() =>
-            CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
-    }
-
-    [Theory]
-    [InlineData("missing-number")]
-    [InlineData("malformed-number")]
-    [InlineData("nonpositive-number")]
-    [InlineData("missing-hits")]
-    [InlineData("negative-hits")]
-    [InlineData("branch-without-counter")]
-    [InlineData("malformed-branch-counter")]
-    [InlineData("zero-branch-denominator")]
-    [InlineData("covered-exceeds-valid")]
-    [InlineData("branch-counter-overflow")]
-    public void ValidateNormalization_ShouldRejectMalformedMethodPoints(string mutation)
-    {
-        var raw = MethodNormalizationRaw();
-        var normalized = MethodNormalizationGolden();
-        var line = mutation is "branch-without-counter" or "malformed-branch-counter"
-            or "zero-branch-denominator" or "covered-exceeds-valid" or "branch-counter-overflow"
-            ? normalized.Descendants("method").Single(method => method.Attribute("signature")?.Value == "(int)")
-                .Element("lines")!.Element("line")!
-            : normalized.Descendants("method").First().Element("lines")!.Elements("line").First();
-        switch (mutation)
-        {
-            case "missing-number":
-                line.Attribute("number")!.Remove();
-                break;
-            case "malformed-number":
-                line.SetAttributeValue("number", "ten");
-                break;
-            case "nonpositive-number":
-                line.SetAttributeValue("number", "0");
-                break;
-            case "missing-hits":
-                line.Attribute("hits")!.Remove();
-                break;
-            case "negative-hits":
-                line.SetAttributeValue("hits", "-1");
-                break;
-            case "branch-without-counter":
-                line.SetAttributeValue("condition-coverage", null);
-                break;
-            case "malformed-branch-counter":
-                line.SetAttributeValue("condition-coverage", "50% (one/2)");
-                break;
-            case "zero-branch-denominator":
-                line.SetAttributeValue("condition-coverage", "0% (0/0)");
-                break;
-            case "covered-exceeds-valid":
-                line.SetAttributeValue("condition-coverage", "100% (2/1)");
-                break;
-            case "branch-counter-overflow":
-                line.SetAttributeValue("condition-coverage", "100% (9223372036854775808/9223372036854775808)");
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(mutation));
-        }
-
-        Assert.Throws<InvalidDataException>(() =>
-            CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
-    }
-
-    [Theory]
-    [InlineData("null-filename")]
-    [InlineData("missing-root-counter")]
-    [InlineData("negative-root-counter")]
-    public void ValidateNormalization_ShouldRejectInvalidMethodOrBranchRootEvidence(string mutation)
-    {
-        var raw = MethodNormalizationRaw();
-        var normalized = MethodNormalizationGolden();
-        if (mutation == "null-filename")
-        {
-            raw.Descendants("class").First().Attribute("filename")!.Remove();
-        }
-        else if (mutation == "missing-root-counter")
-        {
-            raw.Root!.Attribute("branches-valid")!.Remove();
-        }
-        else
-        {
-            raw.Root!.SetAttributeValue("branches-valid", "-1");
-        }
-
-        Assert.Throws<InvalidDataException>(() =>
-            CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
-    }
-
-    [Fact]
     public void NormalizePaths_ShouldConvertWindowsAndPosixRootsToPortableRelativePaths()
     {
         var windows = XDocument.Parse("""
@@ -554,66 +422,6 @@ public sealed class CoverageFanInComposerTests
             CoverageFanInComposer.NormalizePaths(document, sourceRoot));
 
         Assert.Equal("Coverage path is invalid.", error.Message);
-    }
-
-    [Fact]
-    public void ValidateNormalization_ShouldRetainEveryRawSourcePointAndObservedHit()
-    {
-        var raw = XDocument.Parse("""
-            <coverage branches-valid="1"><packages><package name="P"><classes>
-              <class name="Raw" filename="C:\agent\work\src\A.cs"><lines>
-                <line number="7" hits="2" branch="true" condition-coverage="0% (0/1)" />
-                <line number="8" hits="0" branch="false" />
-              </lines></class>
-            </classes></package></packages></coverage>
-            """);
-        var normalized = XDocument.Parse("""
-            <coverage branches-valid="1"><packages><package name="P"><classes>
-              <class name="Folded" filename="src/A.cs"><lines>
-                <line number="7" hits="3" branch="true" condition-coverage="0% (0/1)" />
-                <line number="8" hits="0" branch="false" />
-              </lines></class>
-            </classes></package></packages></coverage>
-            """);
-
-        CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot);
-
-        var missingPoint = new XDocument(normalized);
-        missingPoint.Descendants("line").Last().Remove();
-        Assert.Throws<InvalidDataException>(() =>
-            CoverageFanInComposer.ValidateNormalization(raw, missingPoint, WindowsRoot));
-
-        normalized.Descendants("line").First().SetAttributeValue("hits", "0");
-        Assert.Throws<InvalidDataException>(() =>
-            CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
-        normalized.Descendants("line").First().SetAttributeValue("hits", "3");
-        normalized.Root!.SetAttributeValue("branches-valid", "0");
-        Assert.Throws<InvalidDataException>(() =>
-            CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
-    }
-
-    [Theory]
-    [InlineData(0, 1)]
-    [InlineData(1, -1)]
-    public void ValidateNormalization_ShouldRejectNonPositiveRawLineNumbersAndNegativeHits(long number, long hits)
-    {
-        var raw = XDocument.Parse($"""
-            <coverage branches-valid="0"><packages><package name="P"><classes>
-              <class name="Raw" filename="C:\agent\work\src\A.cs"><lines>
-                <line number="{number}" hits="{hits}" branch="false" />
-              </lines></class>
-            </classes></package></packages></coverage>
-            """);
-        var normalized = XDocument.Parse($"""
-            <coverage branches-valid="0"><packages><package name="P"><classes>
-              <class name="Folded" filename="src/A.cs"><lines>
-                <line number="{number}" hits="{hits}" branch="false" />
-              </lines></class>
-            </classes></package></packages></coverage>
-            """);
-
-        Assert.Throws<InvalidDataException>(() =>
-            CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
     }
 
     [Fact]
@@ -822,7 +630,7 @@ public sealed class CoverageFanInComposerTests
     }
 
     [Fact]
-    public void CompositionAndNormalizationRetainMethodsWithoutOptionalNamesOrSignatures()
+    public void CompositionRetainsMethodsWithoutOptionalNamesOrSignatures()
     {
         var raw = XDocument.Parse("""
             <coverage branches-valid="0"><packages><package name="P"><classes><class name="A" filename="src/A.cs">
@@ -830,8 +638,7 @@ public sealed class CoverageFanInComposerTests
               <lines><line number="1" hits="1" /></lines>
             </class></classes></package></packages></coverage>
             """);
-        var retained = CoverageFanInComposer.RetainCollectorMethods(raw, raw, WindowsRoot);
-        CoverageFanInComposer.ValidateNormalization(raw, retained, WindowsRoot);
+        var retained = CoverageFanInComposer.Compose([(raw, WindowsRoot)]);
         var composed = CoverageFanInComposer.Compose([(raw, WindowsRoot), (retained, WindowsRoot)]);
         var method = Assert.Single(composed.Descendants("method"));
         Assert.Equal(string.Empty, method.Attribute("name")!.Value);
@@ -870,50 +677,6 @@ public sealed class CoverageFanInComposerTests
         Assert.True(XNode.DeepEquals(before, raw));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void NormalizationRetainsHitObservedAfterAnUncoveredDuplicateRegardlessOfRecordOrder(bool reverse)
-    {
-        var raw = XDocument.Parse("""
-            <coverage lines-valid="2" lines-covered="1" branches-valid="0" branches-covered="0">
-              <sources><source>src</source></sources><packages><package name="P"><classes>
-                <class name="A" filename="A.cs"><lines><line number="1" hits="0"/><line number="1" hits="3"/></lines></class>
-              </classes></package></packages>
-            </coverage>
-            """);
-        if (reverse)
-            raw.Descendants("class").Single().Element("lines")!.ReplaceNodes(raw.Descendants("line").Reverse().ToArray());
-        var normalized = new XDocument(raw);
-        CoverageFanInComposer.NormalizePaths(normalized, WindowsRoot);
-
-        Assert.Equal("src/A.cs", normalized.Descendants("class").Single().Attribute("filename")!.Value);
-        CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot);
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, WindowsRoot);
-
-        foreach (var line in normalized.Descendants("line")) line.SetAttributeValue("hits", "0");
-        normalized.Root!.SetAttributeValue("lines-covered", "0");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.ValidateNormalization(raw, normalized, WindowsRoot));
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, WindowsRoot));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void CollectorMethodProjectionRejectsMissingFileIdentityWithoutMutatingEitherInput(bool missingRawFilename)
-    {
-        var raw = MethodNormalizationRaw();
-        var normalized = MethodNormalizationGolden();
-        (missingRawFilename ? raw : normalized).Descendants("class").First().Attribute("filename")!.Remove();
-        var rawBefore = new XDocument(raw);
-        var normalizedBefore = new XDocument(normalized);
-
-        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.RetainCollectorMethods(raw, normalized, WindowsRoot));
-
-        Assert.True(XNode.DeepEquals(rawBefore, raw));
-        Assert.True(XNode.DeepEquals(normalizedBefore, normalized));
-    }
-
     private static (long Covered, long Valid) ParseBranchCounts(string value)
     {
         var open = value.IndexOf('(');
@@ -922,32 +685,6 @@ public sealed class CoverageFanInComposerTests
         return (long.Parse(value.AsSpan(open + 1, slash - open - 1), System.Globalization.CultureInfo.InvariantCulture),
             long.Parse(value.AsSpan(slash + 1, close - slash - 1), System.Globalization.CultureInfo.InvariantCulture));
     }
-
-    private static XDocument MethodNormalizationRaw() => XDocument.Parse("""
-        <coverage branches-valid="1"><packages><package name="P"><classes>
-          <class name="First" filename="C:\agent\work\src\A.cs"><lines><line number="1" hits="0" branch="false" /></lines><methods>
-            <method name="Run" signature="()"><lines><line number="10" hits="0" branch="false" /><line number="10" hits="2" branch="false" /></lines></method>
-            <method name="Run" signature="(int)"><lines><line number="11" hits="1" branch="true" condition-coverage="50% (1/2)" /></lines></method>
-            <method name="Run" signature="()"><lines><line number="12" hits="0" branch="false" /></lines></method>
-            <method name="Empty" signature="()"><lines /></method>
-          </methods></class>
-          <class name="Second" filename="src/A.cs"><lines><line number="2" hits="1" branch="false" /></lines><methods>
-            <method name="Run" signature="()"><lines><line number="13" hits="3" branch="false" /></lines></method>
-          </methods></class>
-        </classes></package></packages></coverage>
-        """);
-
-    private static XDocument MethodNormalizationGolden() => XDocument.Parse("""
-        <coverage branches-valid="1"><packages><package name="P"><classes>
-          <class name="Folded" filename="src/A.cs"><lines><line number="1" hits="0" branch="false" /><line number="2" hits="1" branch="false" /></lines><methods>
-            <method name="Run" signature="()"><lines><line number="10" hits="0" branch="false" /><line number="10" hits="7" branch="false" /></lines></method>
-            <method name="Run" signature="(int)"><lines><line number="11" hits="9" branch="true" condition-coverage="50% (1/2)" /></lines></method>
-            <method name="Run" signature="()"><lines><line number="12" hits="0" branch="false" /></lines></method>
-            <method name="Empty" signature="()"><lines /></method>
-            <method name="Run" signature="()"><lines><line number="13" hits="3" branch="false" /></lines></method>
-          </methods></class>
-        </classes></package></packages></coverage>
-        """);
 
     private static XDocument ValidReport() => XDocument.Parse("""
         <coverage><packages><package name="P"><classes>

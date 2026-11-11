@@ -21,9 +21,19 @@ public sealed class RazorWireFormInteractionsQaRegressionTests
         // Found by /qa on 2026-07-18.
         // Report: .gstack/qa-reports/qa-report-127-0-0-1-6196-2026-07-18.md
         await using var context = await _fixture.Browser.NewContextAsync();
+        await RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync(context);
         var page = await context.NewPageAsync();
 
         await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/FormInteractions");
+        await page.WaitForFunctionAsync(
+            """
+            () => window.RazorWire?.formInteractionsManager
+              && document.querySelector('[data-rw-form-interactions-enhanced="true"]')
+            """);
+        Assert.Equal(
+            1,
+            await page.Locator("script[src*='/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js']").CountAsync());
+
         await page.ClickAsync("[data-rw-form-collection-duplicate]");
         await page.WaitForSelectorAsync("input[name='Actions[1].Title']");
         await page.ClickAsync("[data-rw-form-collection-add]");

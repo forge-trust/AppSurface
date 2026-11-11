@@ -154,168 +154,6 @@ public sealed class CoverageFanInIndependentVerifierTests
                 [(malformed, SourceRoot)], new XDocument(malformed), new XDocument(malformed)));
     }
 
-    [Fact]
-    public void VerifyNormalization_AllowsPathRewriteButRejectsInventedHitsBranchesAndPoints()
-    {
-        const string rawText = """
-            <coverage lines-covered="0" lines-valid="2" branches-covered="1" branches-valid="2">
-              <packages><package name="Generated"><classes>
-                <class name="CompilerGenerated" filename="C:\agent\work\obj\Generated.cs">
-                  <lines><line number="7" hits="0" branch="true" condition-coverage="50% (1/2)" /><line number="8" hits="0" branch="false" /></lines>
-                </class>
-              </classes></package></packages>
-            </coverage>
-            """;
-        const string normalizedText = """
-            <coverage lines-covered="0" lines-valid="2" branches-covered="1" branches-valid="2">
-              <packages><package name="Generated"><classes>
-                <class name="RewrittenCompilerType" filename="obj/Generated.cs">
-                  <lines><line number="7" hits="0" branch="true" condition-coverage="50% (1/2)" /><line number="8" hits="0" branch="false" /></lines>
-                </class>
-              </classes></package></packages>
-            </coverage>
-            """;
-        var raw = XDocument.Parse(rawText);
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, XDocument.Parse(normalizedText), SourceRoot);
-
-        var inventedHit = XDocument.Parse(normalizedText);
-        var firstLine = inventedHit.Descendants("line").First();
-        firstLine.SetAttributeValue("hits", "1");
-        inventedHit.Root!.SetAttributeValue("lines-covered", "1");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, inventedHit, SourceRoot));
-
-        var promotedPartialBranch = XDocument.Parse(normalizedText);
-        promotedPartialBranch.Descendants("line").First().SetAttributeValue("condition-coverage", "100% (2/2)");
-        promotedPartialBranch.Root!.SetAttributeValue("branches-covered", "2");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, promotedPartialBranch, SourceRoot));
-
-        var inventedPoint = XDocument.Parse(normalizedText);
-        inventedPoint.Descendants("lines").Single().Add(new XElement("line", new XAttribute("number", 9),
-            new XAttribute("hits", 0), new XAttribute("branch", "false")));
-        inventedPoint.Root!.SetAttributeValue("lines-valid", "3");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, inventedPoint, SourceRoot));
-    }
-
-    [Fact]
-    public void VerifyNormalization_ResolvesPosixSourcesAndAbsoluteNormalizerPaths()
-    {
-        const string root = "/private/var/tmp/repo";
-        var raw = CoverageWithSource("/", "private/var/tmp/repo/Consumer.Alpha/AlphaDecision.cs");
-        var normalized = CoverageWithSource("/", "/private/var/tmp/repo/Consumer.Alpha/AlphaDecision.cs");
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, root);
-
-        var composed = CoverageWithFilename("Consumer.Alpha/AlphaDecision.cs");
-        CoverageFanInIndependentVerifier.VerifyComposition([(raw, root)], composed, composed);
-    }
-
-    [Fact]
-    public void VerifyNormalization_ResolvesWindowsSourcesAndAbsoluteNormalizerPathsCrossPlatform()
-    {
-        const string root = @"C:\agent\work";
-        var raw = CoverageWithSource(@"C:\agent", @"work\Consumer.Alpha\AlphaDecision.cs");
-        var normalized = CoverageWithSource(root, @"C:\agent\work\Consumer.Alpha\AlphaDecision.cs");
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, root);
-
-        var composed = CoverageWithFilename("Consumer.Alpha/AlphaDecision.cs");
-        CoverageFanInIndependentVerifier.VerifyComposition([(raw, root)], composed, composed);
-    }
-
-    [Fact]
-    public void VerifyNormalization_AllowsClassFoldingWhileRetainingMethodOccurrencesAndPoints()
-    {
-        var (raw, normalized) = MethodNormalizationGoldens();
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, "/private/var/tmp/repo");
-    }
-
-    [Theory]
-    [InlineData("empty-method")]
-    [InlineData("method-name")]
-    [InlineData("overload-signature")]
-    [InlineData("repeated-method")]
-    [InlineData("repeated-line")]
-    [InlineData("hit")]
-    [InlineData("branch-counts")]
-    public void VerifyNormalization_RejectsChangedMethodEvidenceWithoutChangingClassTotals(string mutation)
-    {
-        var (raw, normalized) = MethodNormalizationGoldens();
-        var folded = normalized.Descendants("class").Single();
-        var runMethods = folded.Descendants("method").Where(x => (string?)x.Attribute("name") == "Run"
-            && (string?)x.Attribute("signature") == "()").ToArray();
-        switch (mutation)
-        {
-            case "empty-method":
-                folded.Descendants("method").Single(x => (string?)x.Attribute("name") == "Empty").Remove();
-                break;
-            case "method-name":
-                runMethods[0].SetAttributeValue("name", "Renamed");
-                break;
-            case "overload-signature":
-                folded.Descendants("method").Single(x => (string?)x.Attribute("signature") == "(int)")
-                    .SetAttributeValue("signature", "(long)");
-                break;
-            case "repeated-method":
-                runMethods[1].Remove();
-                break;
-            case "repeated-line":
-                runMethods[0].Element("lines")!.Elements("line").Last().Remove();
-                break;
-            case "hit":
-                runMethods[0].Element("lines")!.Elements("line").First().SetAttributeValue("hits", "0");
-                break;
-            case "branch-counts":
-                runMethods[0].Element("lines")!.Elements("line").First()
-                    .SetAttributeValue("condition-coverage", "0% (0/2)");
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(mutation));
-        }
-
-        Assert.Equal("1", normalized.Root!.Attribute("lines-covered")?.Value);
-        Assert.Equal("2", normalized.Root.Attribute("lines-valid")?.Value);
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            raw, normalized, "/private/var/tmp/repo"));
-    }
-
-    [Fact]
-    public void VerifyNormalization_RejectsPathMismatchAndOutsideOrAmbiguousSources()
-    {
-        const string posixRoot = "/private/var/tmp/repo";
-        var posixRaw = CoverageWithSource("/", "private/var/tmp/repo/Consumer.Alpha/AlphaDecision.cs");
-        var posixMismatch = CoverageWithSource("/", "/private/var/tmp/repo/Consumer.Beta/AlphaDecision.cs");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            posixRaw, posixMismatch, posixRoot));
-
-        AssertInvalidSourceResolution("/private/var/tmp/repo", "", "src/AlphaDecision.cs");
-        AssertInvalidSourceResolution("/private/var/tmp/repo", "/outside/repo", "src/AlphaDecision.cs");
-        AssertInvalidSourceResolution("/private/var/tmp/repo", "/private/var/tmp/repo", "../outside.cs");
-        AssertInvalidSourceResolution("/private/var/tmp/repo",
-            ["/private/var/tmp/repo/Consumer.Alpha", "/private/var/tmp/repo/Consumer.Beta"], "AlphaDecision.cs");
-
-        const string windowsRoot = @"C:\agent\work";
-        var windowsRaw = CoverageWithSource(@"C:\agent", @"work\Consumer.Alpha\AlphaDecision.cs");
-        var windowsMismatch = CoverageWithSource(windowsRoot, @"C:\agent\work\Consumer.Beta\AlphaDecision.cs");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            windowsRaw, windowsMismatch, windowsRoot));
-
-        AssertInvalidSourceResolution(windowsRoot, "", @"src\AlphaDecision.cs");
-        AssertInvalidSourceResolution(windowsRoot, @"D:\outside\repo", @"src\AlphaDecision.cs");
-        AssertInvalidSourceResolution(windowsRoot, windowsRoot, @"..\outside.cs");
-        AssertInvalidSourceResolution(windowsRoot,
-            [@"C:\agent\work\Consumer.Alpha", @"C:\agent\work\Consumer.Beta"], "AlphaDecision.cs");
-    }
-
-    private static void AssertInvalidSourceResolution(string root, string source, string filename)
-    {
-        var report = CoverageWithSource(source, filename);
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(report, report, root));
-    }
-
-    private static void AssertInvalidSourceResolution(string root, string[] sources, string filename)
-    {
-        var report = CoverageWithSources(sources, filename);
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(report, report, root));
-    }
-
     private static XDocument CoverageWithSource(string source, string filename) => CoverageWithSources([source], filename);
 
     private static XDocument CoverageWithSources(string[] sources, string filename) => new(
@@ -336,56 +174,6 @@ public sealed class CoverageFanInIndependentVerifierTests
                     new XAttribute("filename", filename), new XElement("lines",
                         new XElement("line", new XAttribute("number", 1), new XAttribute("hits", 1),
                             new XAttribute("branch", "false")))))))));
-
-    private static (XDocument Raw, XDocument Normalized) MethodNormalizationGoldens() =>
-        (XDocument.Parse("""
-            <coverage lines-covered="1" lines-valid="2" branches-covered="0" branches-valid="0">
-              <sources><source>/</source></sources>
-              <packages><package name="Generated"><classes>
-                <class name="CompilerGeneratedA" filename="private/var/tmp/repo/Consumer.Alpha/AlphaDecision.cs">
-                  <methods>
-                    <method name="Run" signature="()"><lines>
-                      <line number="7" hits="2" branch="true" condition-coverage="50% (1/2)" />
-                      <line number="7" hits="0" branch="false" />
-                    </lines></method>
-                    <method name="Run" signature="(int)"><lines>
-                      <line number="8" hits="0" branch="false" />
-                    </lines></method>
-                    <method name="Empty" signature="()" />
-                  </methods>
-                  <lines><line number="100" hits="1" branch="false" /><line number="101" hits="0" branch="false" /></lines>
-                </class>
-                <class name="CompilerGeneratedB" filename="private/var/tmp/repo/Consumer.Alpha/AlphaDecision.cs">
-                  <methods><method name="Run" signature="()"><lines>
-                    <line number="7" hits="0" branch="true" condition-coverage="0% (0/1)" />
-                  </lines></method></methods>
-                  <lines />
-                </class>
-              </classes></package></packages>
-            </coverage>
-            """), XDocument.Parse("""
-            <coverage lines-covered="1" lines-valid="2" branches-covered="0" branches-valid="0">
-              <sources><source>/</source></sources>
-              <packages><package name="Generated"><classes>
-                <class name="RewrittenCompilerType" filename="/private/var/tmp/repo/Consumer.Alpha/AlphaDecision.cs">
-                  <methods>
-                    <method name="Run" signature="()"><lines>
-                      <line number="7" hits="2" branch="true" condition-coverage="50% (1/2)" />
-                      <line number="7" hits="0" branch="false" />
-                    </lines></method>
-                    <method name="Run" signature="(int)"><lines>
-                      <line number="8" hits="0" branch="false" />
-                    </lines></method>
-                    <method name="Empty" signature="()" />
-                    <method name="Run" signature="()"><lines>
-                      <line number="7" hits="0" branch="true" condition-coverage="0% (0/1)" />
-                    </lines></method>
-                  </methods>
-                  <lines><line number="100" hits="1" branch="false" /><line number="101" hits="0" branch="false" /></lines>
-                </class>
-              </classes></package></packages>
-            </coverage>
-            """));
 
     [Fact]
     public void VerifyGates_RecomputesDiffSnapshotAndPatchArithmeticForBothReports()
@@ -533,55 +321,8 @@ public sealed class CoverageFanInIndependentVerifierTests
         var raw = CoverageWithSource(source, filename);
         var normalized = CoverageWithFilename("src/Widget.cs");
 
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, sourceRoot);
+        CoverageFanInIndependentVerifier.VerifyNativeCollection([(raw, sourceRoot)], normalized);
         CoverageFanInIndependentVerifier.VerifyComposition([(raw, sourceRoot)], normalized, normalized);
-    }
-
-    [Theory]
-    [InlineData("relative/repo", "src", "Widget.cs")]
-    [InlineData(@"\\server", "src", "Widget.cs")]
-    [InlineData(@"\\server\share\repo", @"\\other\share\repo", "src/Widget.cs")]
-    [InlineData(@"\\server\share\repo", @"\\server\other\repo", "src/Widget.cs")]
-    [InlineData(@"\\server\share\repo", @"\\server\share\repository", "src/Widget.cs")]
-    [InlineData("/work/repo", "/work", "repo")]
-    [InlineData("/work/repo", "/work/repo", "/outside/Widget.cs")]
-    [InlineData("/work/repo", "/work/repo", "src//Widget.cs")]
-    [InlineData("/work/repo", "/work/repo", "src/./Widget.cs")]
-    [InlineData("/work/repo", "/work/repo", "src/Widget:stream")]
-    [InlineData("/work/repo", "/work/repo", "src/\0Widget.cs")]
-    public void VerifyNormalization_RejectsMalformedOrForeignPortableSourcePaths(
-        string sourceRoot, string source, string filename)
-    {
-        var raw = CoverageWithSource(source, filename);
-        var normalized = CoverageWithFilename("src/Widget.cs");
-
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            raw, normalized, sourceRoot));
-    }
-
-    [Theory]
-    [InlineData(false, "number", "not-a-number")]
-    [InlineData(false, "hits", "2147483648")]
-    [InlineData(true, "number", "0")]
-    [InlineData(true, "hits", "-1")]
-    [InlineData(true, "hits", "2147483648")]
-    public void VerifyNormalization_RejectsMalformedPointNumbersBeforeComparingFidelity(
-        bool methodPoint, string attribute, string value)
-    {
-        var raw = CoverageWithFilename("src/Widget.cs");
-        var normalized = new XDocument(raw);
-        var cls = normalized.Descendants("class").Single();
-        var point = cls.Element("lines")!.Element("line")!;
-        if (methodPoint)
-        {
-            point = new XElement(point);
-            cls.Add(new XElement("methods", new XElement("method", new XAttribute("name", "Run"),
-                new XAttribute("signature", "()"), new XElement("lines", point))));
-        }
-        point.SetAttributeValue(attribute, value);
-
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            raw, normalized, SourceRoot));
     }
 
     [Theory]
@@ -862,70 +603,6 @@ public sealed class CoverageFanInIndependentVerifierTests
     }
 
     [Fact]
-    public void VerifyNormalization_RejectsRawRootCounterOutsideObservedPointBoundary()
-    {
-        var (raw, normalized) = MethodNormalizationGoldens();
-        raw.Root!.SetAttributeValue("lines-valid", int.MaxValue);
-
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            raw, normalized, "/private/var/tmp/repo"));
-    }
-
-    [Fact]
-    public void VerifyNormalization_RejectsReducedPointDenominatorDespiteUnchangedAggregateTotals()
-    {
-        var raw = XDocument.Parse("""
-            <coverage lines-covered="2" lines-valid="2" branches-covered="3" branches-valid="4">
-              <packages><package name="Core"><classes><class name="Widget" filename="src/Widget.cs"><lines>
-                <line number="1" hits="1" branch="true" condition-coverage="50% (1/2)" />
-                <line number="2" hits="1" branch="true" condition-coverage="100% (2/2)" />
-              </lines></class></classes></package></packages>
-            </coverage>
-            """);
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, new XDocument(raw), SourceRoot);
-
-        var normalized = new XDocument(raw);
-        var points = normalized.Descendants("line").ToArray();
-        points[0].SetAttributeValue("condition-coverage", "0% (0/1)");
-        points[1].SetAttributeValue("condition-coverage", "100% (3/3)");
-
-        // Both reports still total 3/4, and neither point's covered ratio improves.
-        // Moving a denominator to another point must not conceal a dropped branch.
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            raw, normalized, SourceRoot));
-    }
-
-    [Fact]
-    public void VerifyNormalization_AllowsConservativeFoldedDuplicatesWithoutInventingMethodFacts()
-    {
-        var raw = XDocument.Parse("""
-            <coverage lines-valid="1" lines-covered="1" branches-valid="3" branches-covered="1">
-              <packages><package name="P"><classes><class name="Generated" filename="src/A.cs">
-                <methods><method name="Run" signature="()"><lines><line number="1" hits="1" branch="true" condition-coverage="50% (1/2)"/></lines></method></methods>
-                <lines><line number="1" hits="1" branch="true" condition-coverage="50% (1/2)"/></lines>
-              </class></classes></package></packages>
-            </coverage>
-            """);
-        var normalized = XDocument.Parse("""
-            <coverage lines-valid="2" lines-covered="2" branches-valid="6" branches-covered="2">
-              <packages><package name="P"><classes>
-                <class name="A" filename="src/A.cs"><methods><method name="Run" signature="()"><lines><line number="1" hits="1" branch="true" condition-coverage="50% (1/2)"/></lines></method></methods><lines><line number="1" hits="1" branch="true" condition-coverage="33.3% (1/3)"/></lines></class>
-                <class name="A.Nested" filename="src/A.cs"><lines><line number="1" hits="1" branch="true" condition-coverage="33.3% (1/3)"/></lines></class>
-              </classes></package></packages>
-            </coverage>
-            """);
-
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, SourceRoot);
-        var promoted = new XDocument(normalized);
-        foreach (var cls in promoted.Descendants("class"))
-            cls.Element("lines")!.Element("line")!.SetAttributeValue("condition-coverage", "100% (3/3)");
-        promoted.Root!.SetAttributeValue("branches-covered", "6");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, promoted, SourceRoot));
-        normalized.Descendants("method").Single().Remove();
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, SourceRoot));
-    }
-
-    [Fact]
     public void VerifyGates_RejectsForgedPassAndReducedPatchBranchDenominator()
     {
         var primaryCoverage = AggregateCoverage();
@@ -1056,9 +733,6 @@ public sealed class CoverageFanInIndependentVerifierTests
             null!, [], [(null!, SourceRoot)], [(report, " ")]
         })
             Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyComposition(inputs, report, report));
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(null!, report, SourceRoot));
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(report, null!, SourceRoot));
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(report, report, " "));
         using var timings = JsonDocument.Parse("{}");
         foreach (var inventory in new IReadOnlyList<string>[] { null!, [], [" "], ["same", "same"] })
             Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyPrimaryInventory(timings.RootElement, inventory, "Release", "collector"));
@@ -1196,65 +870,6 @@ public sealed class CoverageFanInIndependentVerifierTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public void VerifyNormalizationAndCollectorMethods_PreserveOptionalMethodIdentityFields(
-        bool hasName, bool hasSignature)
-    {
-        var raw = CoverageWithFilename("src/Widget.cs");
-        var method = new XElement("method", new XElement("lines",
-            new XElement("line", new XAttribute("number", 1), new XAttribute("hits", 2),
-                new XAttribute("branch", "false"))));
-        if (hasName) method.SetAttributeValue("name", "Run");
-        if (hasSignature) method.SetAttributeValue("signature", "()");
-        raw.Descendants("class").Single().Add(new XElement("methods", method));
-        var normalized = new XDocument(raw);
-        CoverageFanInIndependentVerifier.VerifyComposition([(raw, SourceRoot)], normalized, normalized);
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, SourceRoot);
-        CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, normalized, SourceRoot);
-
-        var changed = normalized.Descendants("method").Single();
-        if (!hasName) changed.SetAttributeValue("name", "InventedName");
-        else if (!hasSignature) changed.SetAttributeValue("signature", "(int)");
-        else changed.SetAttributeValue("name", "Renamed");
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            raw, normalized, SourceRoot));
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyCollectorMethods(
-            raw, normalized, SourceRoot));
-    }
-
-    [Theory]
-    [InlineData("missing-method")]
-    [InlineData("renamed-method")]
-    [InlineData("changed-numeric-hits")]
-    [InlineData("extra-method-only-owner")]
-    public void VerifyCollectorMethods_RejectsCountOrExactFactChangesUnderOriginalClassOwners(string mutation)
-    {
-        var raw = XDocument.Parse(PrimaryPathsGolden);
-        raw.Descendants("method").First().Element("lines")!.Element("line")!.SetAttributeValue("hits", "2");
-        var normalized = new XDocument(raw);
-        CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, normalized, SourceRoot);
-        var first = normalized.Descendants("method").First();
-        switch (mutation)
-        {
-            case "missing-method": first.Remove(); break;
-            case "renamed-method": first.SetAttributeValue("name", "Other"); break;
-            case "changed-numeric-hits": first.Element("lines")!.Element("line")!.SetAttributeValue("hits", "3"); break;
-            case "extra-method-only-owner":
-                normalized.Descendants("classes").Single().Add(new XElement("class",
-                    new XAttribute("name", "Extra"), new XAttribute("filename", "src/Extra.cs"),
-                    new XElement("methods", new XElement(first))));
-                break;
-            default: throw new ArgumentOutOfRangeException(nameof(mutation));
-        }
-
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyCollectorMethods(
-            raw, normalized, SourceRoot));
-    }
-
-    [Theory]
     [InlineData("/", "/Widget.cs")]
     [InlineData(@"C:\", @"C:\Widget.cs")]
     [InlineData(@"\\server\share\", @"\\server\share\Widget.cs")]
@@ -1264,25 +879,8 @@ public sealed class CoverageFanInIndependentVerifierTests
         var raw = CoverageWithFilename(filename);
         var normalized = CoverageWithFilename("Widget.cs");
 
-        CoverageFanInIndependentVerifier.VerifyNormalization(raw, normalized, sourceRoot);
+        CoverageFanInIndependentVerifier.VerifyNativeCollection([(raw, sourceRoot)], normalized);
         CoverageFanInIndependentVerifier.VerifyComposition([(raw, sourceRoot)], normalized, normalized);
-    }
-
-    [Theory]
-    [InlineData("/", "/")]
-    [InlineData("/repo", "/repo")]
-    [InlineData(@"C:\repo", @"C:\repo")]
-    [InlineData(@"C:\repo", @"c:\repo\Widget.cs")]
-    [InlineData(@"\\server\share\repo", @"\\server\share")]
-    [InlineData(@"\\server\share\repo", @"\\server\share\repository\Widget.cs")]
-    public void VerifyNormalization_RejectsRootObjectsAndNonmatchingAbsoluteRootIdentities(
-        string sourceRoot, string filename)
-    {
-        var raw = CoverageWithFilename(filename);
-        var normalized = CoverageWithFilename("Widget.cs");
-
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(
-            raw, normalized, sourceRoot));
     }
 
     [Theory]
@@ -1386,20 +984,6 @@ public sealed class CoverageFanInIndependentVerifierTests
         using var doubleCounted = WithJsonValue(composedGate, "patchLine.changed", "2");
         Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyGates(
             primaryGate.RootElement, doubleCounted.RootElement, policy.RootElement, coverage, coverage, diff));
-    }
-
-    [Fact]
-    public void VerifyNormalizationRejectsMethodOnlyEvidenceEvenWhenBothDocumentsAgree()
-    {
-        var raw = XDocument.Parse(PrimaryPathsGolden);
-        raw.Descendants("class").Single().Element("lines")!.RemoveNodes();
-        raw.Root!.SetAttributeValue("lines-valid", "0");
-        raw.Root.SetAttributeValue("lines-covered", "0");
-        raw.Root.SetAttributeValue("branches-valid", "0");
-        raw.Root.SetAttributeValue("branches-covered", "0");
-
-        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyNormalization(raw, new XDocument(raw), SourceRoot));
-        Assert.Throws<InvalidDataException>(() => CoverageFanInComposer.ValidateNormalization(raw, new XDocument(raw), SourceRoot));
     }
 
     private static string FileDiff(string newPath, string hunk) => $"""

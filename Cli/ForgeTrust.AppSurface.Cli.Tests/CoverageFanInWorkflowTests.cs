@@ -12,6 +12,138 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageFanInWorkflowTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativeCaptureUsesOriginalOwnersAndCannotInflatePatchAcceptance(bool provideNormalizedCompatibilityInput)
+    {
+        using var fixture = await Fixture.Create();
+        await fixture.SelectPatch();
+        var supplement = new CoverageSupplement("native", Fixture.CurrentPlatform, "Category=fast");
+        fixture.SetSupplements([supplement]);
+        var raw = CollectorOwnerReport();
+        raw.Save(fixture.Report);
+        var original = Path.Join(Path.GetDirectoryName(fixture.Report)!, "original.xml");
+        raw.Save(original);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        var normalized = new System.Xml.Linq.XDocument(raw);
+        SwapCollectorOwners(normalized);
+        normalized.Save(fixture.Report);
+        var native = Path.Join(fixture.Temp.Path, "native");
+        var captured = await CoverageFanIn.CaptureAsync(new(fixture.Policy, fixture.Repository, native, supplement.Id,
+            CoveragePath: provideNormalizedCompatibilityInput ? fixture.Report : null, RawCoveragePath: original));
+        Assert.Equal(CoverageOperationOutcome.Succeeded, captured.Outcome);
+        Assert.Equal(File.ReadAllBytes(original), File.ReadAllBytes(Path.Join(native, "collector.cobertura.xml")));
+        var projection = System.Xml.Linq.XDocument.Load(Path.Join(native, "coverage.cobertura.xml"));
+        Assert.Equal("98", projection.Root!.Attribute("branches-covered")!.Value);
+        Assert.Equal("0", projection.Descendants("class").Single(c => c.Attribute("name")!.Value == "A")
+            .Element("lines")!.Element("line")!.Attribute("hits")!.Value);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.ComposeAsync(fixture.Compose() with { SupplementaryCaptureDirectories = [native] })).Outcome);
+
+        var accepted = await CoverageFanIn.AcceptAsync(fixture.Accept() with { SupplementaryCaptureDirectories = [native] });
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, accepted.Outcome);
+        Assert.Contains(accepted.Diagnostics, d => d.Code == "ASCOV307");
+        Assert.False(accepted.Accepted);
+        Assert.False(accepted.Verified);
+        Assert.True(accepted.Effects.GenerationCommitted);
+        Assert.False(File.Exists(Path.Join(fixture.Accepted, "acceptance.json")));
+        using var gate = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Accepted, "composed-gate.json")));
+        Assert.Equal(2, gate.RootElement.GetProperty("patchBranch").GetProperty("covered").GetInt32());
+        Assert.Equal(4, gate.RootElement.GetProperty("patchBranch").GetProperty("measurable").GetInt32());
+        Assert.Equal(CoverageOperationOutcome.Rejected,
+            (await CoverageFanIn.VerifyAsync(fixture.Verify() with { SupplementaryCaptureDirectories = [native] })).Outcome);
+    }
+
+    [Theory]
+    [InlineData("exact")]
+    [InlineData("class-swap")]
+    [InlineData("duplicate")]
+    [InlineData("method-owner")]
+    [InlineData("summary")]
+    public async Task PortableSingleV2CaptureRequiresExactOriginalProjectionDespiteMatchingTransportHashes(string mutation)
+    {
+        using var fixture = await Fixture.Create();
+        var supplement = new CoverageSupplement("native", Fixture.CurrentPlatform, "Category=fast");
+        fixture.SetSupplements([supplement]);
+        var raw = CollectorOwnerReport();
+        raw.Descendants("class").First().Add(new System.Xml.Linq.XElement("methods",
+            new System.Xml.Linq.XElement("method", new System.Xml.Linq.XAttribute("name", "Run"),
+                new System.Xml.Linq.XAttribute("signature", "()"),
+                new System.Xml.Linq.XElement("lines", new System.Xml.Linq.XElement("line",
+                    new System.Xml.Linq.XAttribute("number", 1), new System.Xml.Linq.XAttribute("hits", 0))))));
+        raw.Save(fixture.Report);
+        var capture = await fixture.CaptureSupplement(supplement, "native");
+        var transported = fixture.CopyDirectory(capture, "transport");
+        var path = Path.Join(transported, "coverage.cobertura.xml");
+        var projection = System.Xml.Linq.XDocument.Load(path);
+        var owners = projection.Descendants("class").Where(c => c.Attribute("name")!.Value is "A" or "B").ToArray();
+        switch (mutation)
+        {
+            case "class-swap": SwapCollectorOwners(projection); break;
+            case "duplicate":
+                owners[0].Element("lines")!.Add(new System.Xml.Linq.XElement(owners[1].Element("lines")!.Element("line")!));
+                projection.Root!.SetAttributeValue("lines-valid", 51);
+                projection.Root.SetAttributeValue("lines-covered", 50);
+                projection.Root.SetAttributeValue("branches-valid", 102);
+                projection.Root.SetAttributeValue("branches-covered", 100);
+                break;
+            case "method-owner":
+                var methods = owners[0].Element("methods")!;
+                methods.Remove(); owners[1].AddFirst(methods);
+                break;
+            case "summary": projection.Root!.SetAttributeValue("branches-covered", 100); break;
+        }
+        projection.Save(path);
+        var manifestPath = Path.Join(transported, "manifest.json");
+        var manifest = JsonNode.Parse(File.ReadAllBytes(manifestPath))!;
+        manifest["files"]!["coverage.cobertura.xml"] = Hash(File.ReadAllBytes(path));
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+        var before = Snapshot(transported);
+        var output = Path.Join(fixture.Temp.Path, "imported");
+
+        var result = await CoverageFanIn.CaptureAsync(new(fixture.Policy, fixture.Repository, output, supplement.Id,
+            ImportDirectory: transported, OriginalSourceRoot: manifest["sourceRoot"]!.GetValue<string>()));
+
+        Assert.Equal(mutation == "exact" ? CoverageOperationOutcome.Succeeded : CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.Equal(before, Snapshot(transported));
+        Assert.False(result.Accepted);
+        Assert.False(result.Verified);
+        Assert.Equal(mutation == "exact", Directory.Exists(output));
+        if (mutation == "exact")
+            Assert.Equal(File.ReadAllBytes(Path.Join(transported, "collector.cobertura.xml")),
+                File.ReadAllBytes(Path.Join(output, "collector.cobertura.xml")));
+    }
+
+    private static System.Xml.Linq.XDocument CollectorOwnerReport()
+    {
+        var report = System.Xml.Linq.XDocument.Parse("""
+            <coverage lines-covered="49" lines-valid="50" branches-covered="98" branches-valid="100">
+              <packages><package name="P"><classes>
+                <class name="A" filename="src/Example.cs"><lines><line number="1" hits="0" branch="true" condition-coverage="0% (0/2)"/></lines></class>
+                <class name="B" filename="src/Example.cs"><lines><line number="1" hits="1" branch="true" condition-coverage="100% (2/2)"/></lines></class>
+                <class name="Other" filename="src/Example.cs"><lines/></class>
+              </classes></package></packages>
+            </coverage>
+            """);
+        report.Descendants("class").Last().Element("lines")!.Add(Enumerable.Range(2, 48).Select(n =>
+            new System.Xml.Linq.XElement("line", new System.Xml.Linq.XAttribute("number", n),
+                new System.Xml.Linq.XAttribute("hits", 1), new System.Xml.Linq.XAttribute("branch", "true"),
+                new System.Xml.Linq.XAttribute("condition-coverage", "100% (2/2)"))));
+        return report;
+    }
+
+    private static void SwapCollectorOwners(System.Xml.Linq.XDocument document)
+    {
+        var points = new[] { "A", "B" }.Select(name => document.Descendants("class")
+            .Single(c => c.Attribute("name")!.Value == name).Element("lines")!.Element("line")!).ToArray();
+        points[0].SetAttributeValue("hits", 1);
+        points[0].SetAttributeValue("condition-coverage", "100% (2/2)");
+        points[1].SetAttributeValue("hits", 0);
+        points[1].SetAttributeValue("condition-coverage", "0% (0/2)");
+    }
+
+    [Theory]
     [InlineData(true, false)]
     [InlineData(true, true)]
     [InlineData(false, false)]
@@ -45,6 +177,85 @@ public sealed class CoverageFanInWorkflowTests
             Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "ASCOV302");
             Assert.False(Directory.Exists(fixture.Accepted));
         }
+    }
+
+    [Theory]
+    [InlineData("capture")]
+    [InlineData("compose")]
+    [InlineData("accept")]
+    public async Task ReplaceOwnedRejectsMissingOutputWithoutBlockingAFreshRetry(string operation)
+    {
+        using var fixture = await Fixture.Create();
+        if (operation != "capture")
+            Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        if (operation == "accept")
+            Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        var output = operation switch
+        {
+            "capture" => fixture.Captured,
+            "compose" => fixture.Composed,
+            "accept" => fixture.Accepted,
+            _ => throw new ArgumentOutOfRangeException(nameof(operation))
+        };
+        ValueTask<CoverageFanInResult> Invoke(CoverageOutputMode mode) => operation switch
+        {
+            "capture" => CoverageFanIn.CaptureAsync(fixture.Capture() with { OutputMode = mode }),
+            "compose" => CoverageFanIn.ComposeAsync(fixture.Compose() with { OutputMode = mode }),
+            "accept" => CoverageFanIn.AcceptAsync(fixture.Accept() with { OutputMode = mode }),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation))
+        };
+
+        var refused = await Invoke(CoverageOutputMode.ReplaceOwned);
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, refused.Outcome);
+        Assert.False(refused.Effects.OutputCreated);
+        Assert.False(refused.Effects.GenerationCommitted);
+        Assert.True(refused.Effects.CleanupComplete);
+        Assert.False(Directory.Exists(output));
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await Invoke(CoverageOutputMode.Fresh)).Outcome);
+        Assert.True(File.Exists(Path.Join(output, "generation.json")));
+    }
+
+    [Fact]
+    public async Task OwnedAcceptanceReplacementRetainsNumericRejectionAndCanRecover()
+    {
+        using var fixture = await Fixture.Create();
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.CaptureAsync(fixture.Capture())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.ComposeAsync(fixture.Compose())).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.AcceptAsync(fixture.Accept())).Outcome);
+        var original = File.ReadAllText(fixture.Report);
+        File.WriteAllText(fixture.Report, original.Replace("hits=\"1\"", "hits=\"0\"", StringComparison.Ordinal)
+            .Replace("lines-covered=\"1\"", "lines-covered=\"0\"", StringComparison.Ordinal)
+            .Replace("line-rate=\"1\"", "line-rate=\"0\"", StringComparison.Ordinal));
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.CaptureAsync(fixture.Capture() with { OutputMode = CoverageOutputMode.ReplaceOwned })).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.ComposeAsync(fixture.Compose() with { OutputMode = CoverageOutputMode.ReplaceOwned })).Outcome);
+
+        var refused = await CoverageFanIn.AcceptAsync(fixture.Accept() with { OutputMode = CoverageOutputMode.ReplaceOwned });
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, refused.Outcome);
+        Assert.Contains(refused.Diagnostics, diagnostic => diagnostic.Code == "ASCOV307");
+        Assert.False(refused.Accepted);
+        Assert.False(refused.Verified);
+        Assert.False(refused.Effects.OutputCreated);
+        Assert.True(refused.Effects.GenerationCommitted);
+        Assert.True(refused.Effects.CleanupComplete);
+        Assert.True(File.Exists(Path.Join(fixture.Accepted, "primary-gate.json")));
+        Assert.True(File.Exists(Path.Join(fixture.Accepted, "rejection.json")));
+        Assert.False(File.Exists(Path.Join(fixture.Accepted, "acceptance.json")));
+        using (var marker = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Accepted, "generation.json"))))
+            Assert.Equal("rejected-gates", marker.RootElement.GetProperty("stage").GetString());
+
+        File.WriteAllText(fixture.Report, original);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.CaptureAsync(fixture.Capture() with { OutputMode = CoverageOutputMode.ReplaceOwned })).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.ComposeAsync(fixture.Compose() with { OutputMode = CoverageOutputMode.ReplaceOwned })).Outcome);
+        Assert.Equal(CoverageOperationOutcome.Succeeded,
+            (await CoverageFanIn.AcceptAsync(fixture.Accept() with { OutputMode = CoverageOutputMode.ReplaceOwned })).Outcome);
+        Assert.False(File.Exists(Path.Join(fixture.Accepted, "rejection.json")));
+        Assert.Equal(CoverageOperationOutcome.Succeeded, (await CoverageFanIn.VerifyAsync(fixture.Verify())).Outcome);
     }
 
     [Fact]

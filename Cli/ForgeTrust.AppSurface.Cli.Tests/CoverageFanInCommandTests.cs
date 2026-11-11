@@ -257,6 +257,9 @@ public sealed class CoverageFanInCommandTests
         var validImport = new CoverageCaptureRequest(policy, root.Path, "fresh", "native", ImportDirectory: "download",
             OriginalSourceRoot: "/producer");
         CoverageFanInRequestReader.ValidateOperationRequest(new("capture", validImport));
+        var singleOriginal = validImport with { ImportDirectory = null, OriginalSourceRoot = null, RawCoveragePath = "raw.xml" };
+        CoverageFanInRequestReader.ValidateOperationRequest(new("capture", singleOriginal));
+        CoverageFanInRequestReader.ValidateOperationRequest(new("capture", singleOriginal with { CoveragePath = "legacy.xml" }));
         foreach (var invalid in new[]
         {
             validImport with { ProducerId = "undeclared" }, validImport with { OriginalSourceRoot = null },

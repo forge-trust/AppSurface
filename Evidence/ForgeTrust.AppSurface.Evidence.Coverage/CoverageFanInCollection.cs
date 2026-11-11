@@ -41,7 +41,6 @@ internal static partial class CoverageFanInEngine
         if (!result.Success) throw new InvalidDataException("Required collection did not complete.");
         await writers.Output.WriteLineAsync("Coverage collection completed; validating retained producer evidence.").ConfigureAwait(false);
         await VerifySourceAsync(r, token, collecting: true).ConfigureAwait(false);
-        string? raw = null;
         string? timingsHash = null;
         IReadOnlyDictionary<string, string>? reportHashes = null;
         IReadOnlyDictionary<string, string>? rawSet = null;
@@ -49,14 +48,13 @@ internal static partial class CoverageFanInEngine
         {
             var reports = FindNativeReports(collection, projects, r.Expected, token, hash => timingsHash = hash,
                 hashes => reportHashes = hashes);
-            if (projects.Length == 1) raw = reports[projects[0]];
-            else rawSet = reports;
+            rawSet = reports;
         }
         var captureRequest = r with
         {
             CoveragePath = rawSet is null ? result.CoveragePath : null,
             TimingsPath = producer is null || rawSet is not null ? Path.Join(collection, "timings.json") : null,
-            RawCoveragePath = raw,
+            RawCoveragePath = null,
             RawCoveragePaths = rawSet
         };
         using var io = new CoverageFanInIO(r.Expected.Bounds, token);

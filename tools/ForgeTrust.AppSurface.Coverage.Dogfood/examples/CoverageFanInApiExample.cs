@@ -46,7 +46,7 @@ public static class CoverageFanInApiExample
                 TimingsPath: timingsPath),
             cancellationToken);
 
-    /// <summary>Captures normalized native coverage together with its retained original collector report.</summary>
+    /// <summary>Captures native measurements from the original collector report; the normalized path is a bounded XML compatibility input.</summary>
     public static ValueTask<CoverageFanInResult> CaptureNativeAsync(
         CoverageFanInPolicy policy,
         string repositoryRoot,
@@ -66,10 +66,10 @@ public static class CoverageFanInApiExample
             cancellationToken);
 
     /// <summary>
-    /// Captures a multi-project native supplement from its exact project-to-original-report inventory and
+    /// Captures one or more native test projects from the exact project-to-original-report inventory and
     /// complete successful collection timings. The capture retains byte-exact originals as
     /// <c>collector-0000.cobertura.xml</c>, <c>collector-0001.cobertura.xml</c>, and so on, plus
-    /// <c>collector-inventory.json</c> and <c>timings.json</c>; its normalized projection is derived from
+    /// <c>collector-inventory.json</c> and <c>timings.json</c>; its portable projection is derived from
     /// those originals and independently verified.
     /// </summary>
     /// <remarks>
@@ -77,7 +77,7 @@ public static class CoverageFanInApiExample
     /// project's original collector attachment. The capture orders index records ordinally. Native inventories
     /// support at most 9,995 projects because the unchanged 10,000-file storage inventory also reserves entries for the
     /// projection, timings, index, manifest, and completion marker. Use <see cref="CaptureNativeAsync"/>
-    /// for a single-project supplement.
+    /// when a single-project caller has no collection timings. The indexed form also supports one project.
     /// </remarks>
     public static ValueTask<CoverageFanInResult> CaptureNativeSetAsync(
         CoverageFanInPolicy policy,

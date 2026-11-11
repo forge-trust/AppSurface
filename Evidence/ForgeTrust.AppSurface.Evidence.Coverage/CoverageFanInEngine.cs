@@ -137,12 +137,14 @@ internal static partial class CoverageFanInEngine
                 if (r.CoveragePath is not null || r.TimingsPath is not null || r.RawCoveragePath is not null || r.RawCoveragePaths is not null
                     || string.IsNullOrWhiteSpace(r.OriginalSourceRoot)) throw new ArgumentException("Import selectors conflict.");
             }
-            else if ((r.RawCoveragePaths is null ? string.IsNullOrWhiteSpace(r.CoveragePath) : r.CoveragePath is not null)
+            else if (r.OriginalSourceRoot is not null
                 || (r.ProducerId == "primary"
-                ? r.TimingsPath is null || r.RawCoveragePath is not null || r.RawCoveragePaths is not null
-                : r.RawCoveragePaths is not null
-                    ? r.RawCoveragePath is not null || r.TimingsPath is null
-                    : r.RawCoveragePath is null || r.TimingsPath is not null))
+                    ? string.IsNullOrWhiteSpace(r.CoveragePath) || string.IsNullOrWhiteSpace(r.TimingsPath)
+                        || r.RawCoveragePath is not null || r.RawCoveragePaths is not null
+                    : r.RawCoveragePaths is not null
+                        ? r.CoveragePath is not null || r.RawCoveragePath is not null || string.IsNullOrWhiteSpace(r.TimingsPath)
+                        : string.IsNullOrWhiteSpace(r.RawCoveragePath) || r.TimingsPath is not null
+                            || r.CoveragePath is not null && string.IsNullOrWhiteSpace(r.CoveragePath)))
                 throw new ArgumentException("Producer inputs incomplete.");
         }
         if (operation is "compose" or "accept" or "verify")

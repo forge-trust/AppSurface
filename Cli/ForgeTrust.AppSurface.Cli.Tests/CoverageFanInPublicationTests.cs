@@ -204,6 +204,37 @@ public sealed class CoverageFanInPublicationTests
     }
 
     [Fact]
+    public async Task ReplacementRequiresAnExistingGenerationBeforeCreatingDirectPublicationOutput()
+    {
+        using var fixture = new Fixture();
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.PublishAsync(replaceOwned: true));
+
+        Assert.False(Directory.Exists(fixture.Output));
+        await fixture.PublishAsync();
+        Assert.True(File.Exists(Path.Join(fixture.Output, CoverageFanInIO.CompletionName)));
+    }
+
+    [Theory]
+    [InlineData("capture", "composition")]
+    [InlineData("composition", "acceptance")]
+    [InlineData("acceptance", "capture")]
+    [InlineData("capture", "rejected-gates")]
+    [InlineData("rejected-gates", "composition")]
+    public async Task ReplacementPreservesOutputsFromAnotherPublicationPurpose(string originalStage, string replacementStage)
+    {
+        using var fixture = new Fixture();
+        await fixture.PublishAsync(stage: originalStage);
+        var before = Directory.EnumerateFiles(fixture.Output).ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.PublishAsync(stage: replacementStage, replaceOwned: true));
+
+        Assert.Equal(before.Keys.Order(StringComparer.Ordinal),
+            Directory.EnumerateFiles(fixture.Output).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        foreach (var (name, bytes) in before) Assert.Equal(bytes, File.ReadAllBytes(Path.Join(fixture.Output, name)));
+    }
+
+    [Fact]
     public async Task ForeignOutputIsPreservedWhenReplacementIsRequested()
     {
         using var fixture = new Fixture();

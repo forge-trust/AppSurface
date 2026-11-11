@@ -491,13 +491,14 @@ internal static class CoverageFanInRequestReader
                         || capture.TimingsPath is not null || capture.RawCoveragePath is not null || capture.RawCoveragePaths is not null)
                         throw new CoverageFanInCliInputException();
                 }
-                else if ((capture.RawCoveragePaths is null ? !HasText(capture.CoveragePath) : capture.CoveragePath is not null)
-                    || capture.OriginalSourceRoot is not null
+                else if (capture.OriginalSourceRoot is not null
                     || (capture.ProducerId == "primary"
-                        ? !HasText(capture.TimingsPath) || capture.RawCoveragePath is not null || capture.RawCoveragePaths is not null
+                        ? !HasText(capture.CoveragePath) || !HasText(capture.TimingsPath)
+                            || capture.RawCoveragePath is not null || capture.RawCoveragePaths is not null
                         : capture.RawCoveragePaths is not null
-                            ? !HasText(capture.TimingsPath) || capture.RawCoveragePath is not null
-                            : !HasText(capture.RawCoveragePath) || capture.TimingsPath is not null))
+                            ? capture.CoveragePath is not null || !HasText(capture.TimingsPath) || capture.RawCoveragePath is not null
+                            : !HasText(capture.RawCoveragePath) || capture.TimingsPath is not null
+                                || capture.CoveragePath is not null && !HasText(capture.CoveragePath)))
                 {
                     throw new CoverageFanInCliInputException();
                 }

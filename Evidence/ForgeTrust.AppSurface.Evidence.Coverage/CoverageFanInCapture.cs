@@ -30,23 +30,31 @@ internal static partial class CoverageFanInEngine
         }
         else
         {
-            document = io.Xml(io.Read(r.CoveragePath!, xml: true), allowInertGeneratorDoctype: true);
-            var auxiliaryName = r.ProducerId == "primary" ? "timings.json" : "collector.cobertura.xml";
-            var auxiliary = io.Read(r.ProducerId == "primary" ? r.TimingsPath! : r.RawCoveragePath!, xml: r.ProducerId != "primary");
-            auxiliaryFiles = new(StringComparer.Ordinal) { [auxiliaryName] = auxiliary };
             if (r.ProducerId == "primary")
-                CoverageFanInComposer.ValidatePrimaryTimings(Parse(auxiliary), r.Expected.TestProjects, r.Expected.Configuration,
+            {
+                document = io.Xml(io.Read(r.CoveragePath!, xml: true), allowInertGeneratorDoctype: true);
+                var timings = io.Read(r.TimingsPath!);
+                CoverageFanInComposer.ValidatePrimaryTimings(Parse(timings), r.Expected.TestProjects, r.Expected.Configuration,
                     r.Expected.Instrumentation.GetProperty("driver").GetString()!);
+                auxiliaryFiles = new(StringComparer.Ordinal) { ["timings.json"] = timings };
+            }
             else
             {
-                if (NativeProjects(r).Length != 1) throw new InvalidDataException("Multiple native projects require indexed originals and timings.");
-                var raw = io.Xml(auxiliary, allowInertGeneratorDoctype: true);
-                document = CoverageFanInComposer.RetainCollectorMethods(raw, document, Full(r.RepositoryRoot));
-                CoverageFanInComposer.ValidateNormalization(raw, document, Full(r.RepositoryRoot));
-                CoverageFanInIndependentVerifier.VerifyNormalization(raw, document, Full(r.RepositoryRoot));
-                CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, document, Full(r.RepositoryRoot));
+                if (NativeProjects(r).Length != 1)
+                    throw new InvalidDataException("Multiple native projects require indexed originals and timings.");
+                // The former normalized selector remains a bounded XML compatibility input.
+                // It cannot change the original collector's ownership or measured facts.
+                if (r.CoveragePath is not null)
+                    _ = io.Xml(io.Read(r.CoveragePath, xml: true), allowInertGeneratorDoctype: true);
+                var original = io.Read(r.RawCoveragePath!, xml: true);
+                var raw = io.Xml(original, allowInertGeneratorDoctype: true);
+                var originals = new[] { (raw, Full(r.RepositoryRoot)) };
+                document = CoverageFanInComposer.Compose(originals);
+                CoverageFanInIndependentVerifier.VerifyNativeCollection(originals, document);
+                auxiliaryFiles = new(StringComparer.Ordinal) { ["collector.cobertura.xml"] = original };
             }
         }
+
         // Validate measurable points even for a capture that will not be composed in this invocation.
         _ = CoverageFanInComposer.Compose([(document, Full(r.RepositoryRoot))]);
         var coverage = io.EncodeXml(document);
@@ -147,8 +155,9 @@ internal static partial class CoverageFanInEngine
         else if (!auxiliaryFiles.ContainsKey("collector-inventory.json"))
         {
             var raw = io.Xml(auxiliaryFiles["collector.cobertura.xml"], allowInertGeneratorDoctype: true);
-            CoverageFanInIndependentVerifier.VerifyNormalization(raw, document, sourceRoot);
-            CoverageFanInIndependentVerifier.VerifyCollectorMethods(raw, document, sourceRoot);
+            // Legacy single-report wire inventory remains readable only when its stored
+            // projection is exactly derivable from original collector ownership and facts.
+            CoverageFanInIndependentVerifier.VerifyNativeCollection([(raw, sourceRoot)], document);
         }
         var payloadNames = auxiliaryFiles.Keys.Append(CoverageName).Append(ManifestName).ToArray();
         if (localCustody) VerifyGeneration(r, io, directory, "capture", payloadNames);

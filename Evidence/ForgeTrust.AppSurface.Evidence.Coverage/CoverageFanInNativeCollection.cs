@@ -22,7 +22,7 @@ internal static partial class CoverageFanInEngine
     {
         var projects = NativeProjects(request);
         var paths = request.RawCoveragePaths!;
-        if (projects.Length < 2 || paths.Count != projects.Length || !paths.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(projects)
+        if (projects.Length < 1 || paths.Count != projects.Length || !paths.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(projects)
             || paths.Values.Select(Full).Distinct(StringComparer.OrdinalIgnoreCase).Count() != paths.Count)
             throw new InvalidDataException("Native original report inventory differs.");
         var timings = io.Read(request.TimingsPath!);
@@ -37,7 +37,7 @@ internal static partial class CoverageFanInEngine
             files.Add(CollectorName(index), bytes);
             documents.Add((io.Xml(bytes, allowInertGeneratorDoctype: true), root));
         }
-        // The multi-report native representation is composed from original collector records.
+        // Every indexed native representation is composed from original collector records.
         // ReportGenerator's combined method reconstruction is not the oracle for this projection.
         var document = CoverageFanInComposer.Compose(documents);
         CoverageFanInIndependentVerifier.VerifyNativeCollection(documents, document);
@@ -54,7 +54,7 @@ internal static partial class CoverageFanInEngine
         string directory, XDocument document, string sourceRoot, JsonElement files)
     {
         var projects = NativeProjects(request);
-        if (projects.Length < 2) throw new InvalidDataException("Indexed native capture requires multiple projects.");
+        if (projects.Length < 1) throw new InvalidDataException("Indexed native capture requires a nonempty project inventory.");
         var expected = new[] { CoverageName, "collector-inventory.json", "timings.json" }
             .Concat(Enumerable.Range(0, projects.Length).Select(CollectorName)).ToArray();
         ExactProperties(files, expected);

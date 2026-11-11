@@ -151,109 +151,6 @@ internal static class CoverageFanInComposer
     }
 
     /// <summary>
-    /// Verifies that normalization retains every raw source point and observed hit without shrinking branches.
-    /// </summary>
-    /// <param name="raw">Original collector report.</param>
-    /// <param name="normalized">Report produced by the configured normalizer.</param>
-    /// <param name="sourceRoot">Explicit absolute source root for both reports.</param>
-    /// <exception cref="InvalidDataException">Normalization removed a point or observed hit, or reduced branch points.</exception>
-    internal static void ValidateNormalization(XDocument raw, XDocument normalized, string sourceRoot)
-    {
-        ArgumentNullException.ThrowIfNull(raw);
-        ArgumentNullException.ThrowIfNull(normalized);
-        var portableRoot = ParseSourceRoot(sourceRoot);
-        var rawObservations = ReadLineObservations(raw, portableRoot);
-        var normalizedObservations = ReadLineObservations(normalized, portableRoot);
-
-        if (rawObservations.Count == 0
-            || rawObservations.Any(observation =>
-                !normalizedObservations.TryGetValue(observation.Key, out var normalizedHit)
-                || observation.Value && !normalizedHit)
-            || ReadRootCounter(raw, "branches-valid") > ReadRootCounter(normalized, "branches-valid"))
-        {
-            throw InvalidCoverageData();
-        }
-        var rawMethods = ReadMethodObservations(raw, portableRoot);
-        var normalizedMethods = ReadMethodObservations(normalized, portableRoot);
-        static Dictionary<(string File, string Name, string Signature, string Points), int> Inventory(
-            Dictionary<NormalizationMethodIdentity, Dictionary<LineIdentity, LineFact>> methods) => methods
-            .GroupBy(method => (method.Key.File, method.Key.Name, method.Key.Signature,
-                string.Join(';', method.Value.OrderBy(point => point.Key.Number).ThenBy(point => point.Key.Occurrence)
-                    .Select(point => FormattableString.Invariant($"{point.Key.Number},{point.Key.Occurrence},{(point.Value.Hits > 0 ? 1 : 0)},{point.Value.BranchesCovered},{point.Value.BranchesValid}")))))
-            .ToDictionary(group => group.Key, group => group.Count());
-        var expectedMethods = Inventory(rawMethods);
-        var observedMethods = Inventory(normalizedMethods);
-        if (expectedMethods.Count != observedMethods.Count || expectedMethods.Any(method =>
-            !observedMethods.TryGetValue(method.Key, out var count) || count != method.Value))
-            throw InvalidCoverageData();
-    }
-
-    /// <summary>Retains original method records when ReportGenerator folds generated classes or expands method ranges.</summary>
-    /// <remarks>The collector remains the method oracle. Normalized class points are checked separately; this
-    /// projection never invents method hits or uses ReportGenerator's reconstructed method ranges.</remarks>
-    internal static XDocument RetainCollectorMethods(XDocument raw, XDocument normalized, string sourceRoot)
-    {
-        var portableRoot = ParseSourceRoot(sourceRoot);
-        var result = new XDocument(normalized);
-        var destinations = GetClasses(result).GroupBy(c => (
-            Package: c.Ancestors("package").First().Attribute("name")?.Value ?? string.Empty,
-            Class: c.Attribute("name")?.Value ?? string.Empty,
-            File: ResolveFilename(result, c.Attribute("filename")?.Value ?? throw InvalidCoveragePath(), portableRoot)))
-            .ToDictionary(group => group.Key, group => new Queue<XElement>(group));
-        var files = destinations.Keys.Select(key => key.File).ToHashSet(StringComparer.Ordinal);
-        foreach (var sourceClass in GetClasses(result)) sourceClass.Elements("methods").Remove();
-        foreach (var sourceClass in GetClasses(raw))
-        {
-            var methods = sourceClass.Elements("methods").Elements("method").ToArray();
-            if (methods.Length == 0) continue;
-            var file = ResolveFilename(raw, sourceClass.Attribute("filename")?.Value ?? throw InvalidCoveragePath(), portableRoot);
-            if (!files.Contains(file)) throw InvalidCoverageData();
-            var packageName = sourceClass.Ancestors("package").First().Attribute("name")?.Value ?? string.Empty;
-            var className = sourceClass.Attribute("name")?.Value ?? string.Empty;
-            XElement destination;
-            if (destinations.TryGetValue((packageName, className, file), out var owners) && owners.Count > 0)
-                destination = owners.Dequeue();
-            else
-            {
-                // Keep original ownership even when the normalizer folds this class. This
-                // method-only record adds no aggregate class points or branch denominator.
-                destination = new XElement("class", new XAttribute("name", className), new XAttribute("filename", file),
-                    new XElement("lines"));
-                result.Root!.Element("packages")!.Add(new XElement("package", new XAttribute("name", packageName),
-                    new XElement("classes", destination)));
-            }
-            var container = destination.Element("methods");
-            if (container is null) { container = new XElement("methods"); destination.AddFirst(container); }
-            container.Add(methods.Select(method => new XElement(method)));
-        }
-        return result;
-    }
-
-    /// <summary>Retains overloads, repeated methods and every method point across permitted class folding.</summary>
-    private static Dictionary<NormalizationMethodIdentity, Dictionary<LineIdentity, LineFact>> ReadMethodObservations(
-        XDocument document, PortableRoot sourceRoot)
-    {
-        var methods = new Dictionary<NormalizationMethodIdentity, Dictionary<LineIdentity, LineFact>>();
-        var occurrences = new Dictionary<(string File, string Name, string Signature), int>();
-        foreach (var sourceClass in GetClasses(document))
-        {
-            var file = ResolveFilename(document, sourceClass.Attribute("filename")?.Value ?? throw InvalidCoveragePath(), sourceRoot);
-            foreach (var method in sourceClass.Elements("methods").Elements("method"))
-            {
-                var name = method.Attribute("name")?.Value ?? string.Empty;
-                var signature = method.Attribute("signature")?.Value ?? string.Empty;
-                var key = (file, name, signature);
-                var occurrence = occurrences.GetValueOrDefault(key);
-                occurrences[key] = checked(occurrence + 1);
-                var lines = new Dictionary<LineIdentity, LineFact>();
-                _ = ObserveLines(method.Element("lines"), lines);
-                methods.Add(new(file, name, signature, occurrence), lines);
-            }
-        }
-        return methods;
-    }
-
-    /// <summary>
     /// Requires timings to prove successful execution of the exact declared primary test inventory.
     /// </summary>
     /// <param name="timings">Parsed primary coverage timings document.</param>
@@ -517,53 +414,6 @@ internal static class CoverageFanInComposer
         return (covered, valid);
     }
 
-    private static Dictionary<LinePointIdentity, bool> ReadLineObservations(XDocument document, PortableRoot sourceRoot)
-    {
-        var observations = new Dictionary<LinePointIdentity, bool>();
-        foreach (var sourceClass in GetClasses(document))
-        {
-            var filename = sourceClass.Attribute("filename")?.Value;
-            if (filename is null)
-            {
-                throw InvalidCoveragePath();
-            }
-
-            var relativeFilename = ResolveFilename(document, filename, sourceRoot);
-            var lines = sourceClass.Element("lines");
-            if (lines is null)
-            {
-                continue;
-            }
-
-            foreach (var line in lines.Elements("line"))
-            {
-                var number = ReadLineInteger(line, "number");
-                var hits = ReadLineInteger(line, "hits");
-                if (number <= 0 || hits < 0)
-                {
-                    throw InvalidCoverageData();
-                }
-
-                var key = new LinePointIdentity(relativeFilename, number);
-                observations[key] = (observations.TryGetValue(key, out var previous) && previous) || hits > 0;
-            }
-        }
-
-        return observations;
-    }
-
-    private static long ReadRootCounter(XDocument document, string name)
-    {
-        if (document.Root is null
-            || !long.TryParse(document.Root.Attribute(name)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
-            || value < 0)
-        {
-            throw InvalidCoverageData();
-        }
-
-        return value;
-    }
-
     private static long ReadLineInteger(XElement line, string name)
     {
         if (!long.TryParse(line.Attribute(name)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
@@ -658,7 +508,6 @@ internal static class CoverageFanInComposer
         return matches.Single();
     }
 
-    private readonly record struct NormalizationMethodIdentity(string File, string Name, string Signature, int Occurrence);
 
     private static string NormalizeFilename(string filename, PortableRoot sourceRoot)
     {
@@ -811,7 +660,6 @@ internal static class CoverageFanInComposer
 
     private readonly record struct LineIdentity(long Number, int Occurrence);
 
-    private readonly record struct LinePointIdentity(string Filename, long Number);
 
     private readonly record struct LineFact(long Hits, long BranchesCovered, long BranchesValid);
 

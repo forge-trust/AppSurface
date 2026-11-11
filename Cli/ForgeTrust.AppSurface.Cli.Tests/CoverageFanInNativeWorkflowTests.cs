@@ -220,7 +220,7 @@ public sealed class CoverageFanInNativeWorkflowTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Public_collect_and_capture_runs_primary_and_native_reports_through_strict_normalization(bool useAllNative)
+    public async Task Public_collect_and_capture_runs_primary_normalization_and_exact_native_collector_projection(bool useAllNative)
     {
         using var fixture = await Fixture.CreateAsync();
         var policy = await fixture.PolicyAsync(useAllNative);
@@ -260,8 +260,7 @@ public sealed class CoverageFanInNativeWorkflowTests
         Assert.Equal(CoverageObservation.CollectedExecution, native.Observation);
         Assert.False(native.Accepted);
         Assert.True(native.Effects.GenerationCommitted);
-        Assert.Contains(native.Artifacts, artifact => artifact.Role ==
-            (useAllNative ? "collector-inventory.json" : "collector.cobertura.xml"));
+        Assert.Contains(native.Artifacts, artifact => artifact.Role == "collector-inventory.json");
 
         var composition = await CoverageFanIn.ComposeAsync(new CoverageComposeRequest(
             policy, fixture.Repository, fixture.PrimaryCapture, [fixture.NativeCapture], fixture.Composition));
@@ -272,17 +271,17 @@ public sealed class CoverageFanInNativeWorkflowTests
         Assert.DoesNotContain("private-test-output-sentinel", progress.ToString());
         Assert.DoesNotContain(fixture.Repository, progress.ToString());
 
-        // Capture checks normalization, and composition independently reloads the exact native
-        // inventory before comparing concrete collector and package-owned ReportGenerator points.
+        // Capture projects original collector records, and every later operation reloads and
+        // independently verifies that exact inventory for one or multiple native projects.
         var attachments = Directory.EnumerateFiles(fixture.NativeCollection, "coverage.cobertura.xml", SearchOption.AllDirectories)
             .Where(path => path.Contains("collector-results", StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (useAllNative)
         {
-            Assert.Equal(2, attachments.Length);
+            Assert.Equal(useAllNative ? 2 : 1, attachments.Length);
             using var inventory = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.NativeCapture, "collector-inventory.json")));
             Assert.Equal(1, inventory.RootElement.GetProperty("schemaVersion").GetInt32());
             var entries = inventory.RootElement.GetProperty("reports").EnumerateArray().ToArray();
-            Assert.Equal(fixture.TestProjects, entries.Select(entry => entry.GetProperty("project").GetString()).ToArray());
+            var expectedProjects = useAllNative ? fixture.TestProjects : [fixture.TestProjects[0]];
+            Assert.Equal(expectedProjects, entries.Select(entry => entry.GetProperty("project").GetString()).ToArray());
             using var timings = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.NativeCapture, "timings.json")));
             var executions = timings.RootElement.GetProperty("projects").EnumerateArray()
                 .ToDictionary(entry => entry.GetProperty("project").GetString()!, StringComparer.Ordinal);
@@ -290,7 +289,7 @@ public sealed class CoverageFanInNativeWorkflowTests
             {
                 var name = "collector-" + index.ToString("D4", System.Globalization.CultureInfo.InvariantCulture) + ".cobertura.xml";
                 Assert.Equal(name, entries[index].GetProperty("file").GetString());
-                var invocation = executions[fixture.TestProjects[index]].GetProperty("invocationDirectory").GetString()!;
+                var invocation = executions[expectedProjects[index]].GetProperty("invocationDirectory").GetString()!;
                 var attachment = Assert.Single(Directory.EnumerateFiles(
                     TestPathUtils.PathUnder(fixture.NativeCollection, invocation), "coverage.cobertura.xml", SearchOption.AllDirectories));
                 Assert.Equal(File.ReadAllBytes(attachment), File.ReadAllBytes(Path.Join(fixture.NativeCapture, name)));
@@ -327,19 +326,7 @@ public sealed class CoverageFanInNativeWorkflowTests
             Assert.True(verified.Verified);
             Assert.True(verified.Effects.Imported);
             Assert.False(verified.PrimaryImported);
-            return;
         }
-        var rawPath = Assert.Single(attachments);
-        var raw = XDocument.Load(rawPath).Root!;
-        Assert.Equal(File.ReadAllBytes(rawPath), File.ReadAllBytes(Path.Join(fixture.NativeCapture, "collector.cobertura.xml")));
-        using var nativeManifest = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.NativeCapture, "manifest.json")));
-        Assert.Equal("appsurface-coverage-merge", nativeManifest.RootElement.GetProperty("policy")
-            .GetProperty("instrumentation").GetProperty("normalization").GetString());
-        var normalized = XDocument.Load(Path.Join(fixture.NativeCapture, "coverage.cobertura.xml")).Root!;
-        foreach (var counter in new[] { "lines-covered", "lines-valid", "branches-covered", "branches-valid" })
-            Assert.Equal(raw.Attribute(counter)?.Value, normalized.Attribute(counter)?.Value);
-        Assert.True(int.Parse(normalized.Attribute("lines-valid")!.Value,
-            System.Globalization.CultureInfo.InvariantCulture) > 0);
     }
 
     private sealed class Fixture : IDisposable

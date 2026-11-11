@@ -45,6 +45,7 @@ internal static class CoverageFanInPublication
             ?? throw new DirectoryNotFoundException("Publication parent must already exist.");
         var existed = parent.EnumerateArtifactEntries(100000).Any(x => x.Name == namePart);
         if (existed && !replaceOwned && heldOutputLease is null) throw new IOException("Fresh publication destination already exists.");
+        if (!existed && replaceOwned) throw new InvalidDataException("Owned replacement requires an existing generation.");
         using var root = existed ? CoverageRunOutputLease.AcquireArtifactDirectory(output, false, true)
             ?? throw new IOException("Publication output unavailable.")
             : parent.CreateArtifactDirectory(namePart, onCreated: onCreated);
@@ -171,7 +172,7 @@ internal static class CoverageFanInPublication
         token.ThrowIfCancellationRequested();
         var run = store.GetCurrentRun(output) ?? throw new InvalidDataException("Unregistered output cannot be replaced.");
         if (run.ManifestBase.OutputIdentity != root.ArtifactDirectoryIdentity
-            || run.ManifestBase.Provenance?.ConfigurationFingerprint != "coverage-fanin-v2:" + stage)
+            || !IsCompatiblePurpose(run.ManifestBase.Provenance?.ConfigurationFingerprint, stage))
             throw new InvalidDataException("Output purpose or physical registration differs.");
         var expected = run.Inventory.Select(x => x.Path).ToHashSet(StringComparer.Ordinal);
         expected.Add(".appsurface-coverage-operation.lock");
@@ -197,11 +198,19 @@ internal static class CoverageFanInPublication
         using var markerFile = root.OpenArtifactFile(CoverageFanInIO.CompletionName, false);
         using var marker = JsonDocument.Parse(markerFile);
         if (marker.RootElement.GetProperty("schemaVersion").GetInt32() != 2
-            || marker.RootElement.GetProperty("stage").GetString() != stage
+            || "coverage-fanin-v2:" + marker.RootElement.GetProperty("stage").GetString()
+                != run.ManifestBase.Provenance?.ConfigurationFingerprint
             || marker.RootElement.GetProperty("generation").GetString() != run.ManifestBase.RunId
             || marker.RootElement.GetProperty("physicalIdentity").GetString() != root.ArtifactDirectoryIdentity)
             throw new InvalidDataException("Prior completion metadata differs.");
         return run;
     }
+    // Acceptance and numeric rejection are terminal states of the same gate-evaluation purpose.
+    // The exact prior stage remains bound to its private registration and hashed completion marker.
+    private static bool IsCompatiblePurpose(string? fingerprint, string stage) =>
+        fingerprint == "coverage-fanin-v2:" + stage
+        || ((stage is "acceptance" or "rejected-gates")
+            && (fingerprint is "coverage-fanin-v2:acceptance" or "coverage-fanin-v2:rejected-gates"));
+
     private sealed record PayloadFact(long Length, string Sha256);
 }

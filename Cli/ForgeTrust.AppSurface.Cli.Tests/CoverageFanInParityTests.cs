@@ -120,7 +120,7 @@ public sealed class CoverageFanInParityTests
     }
 
     [Fact]
-    public async Task NativeCaptureRejectsMissingRawCollectorAndEmptyReportBeforeOutputCreation()
+    public async Task NativeCaptureRejectsMissingOrEmptyRawCollectorBeforeOutputCreation()
     {
         using var fixture = await Fixture.CreateAsync();
         var platform = OperatingSystem.IsMacOS() ? "Darwin" : OperatingSystem.IsWindows() ? "Windows" : "Linux";
@@ -134,9 +134,28 @@ public sealed class CoverageFanInParityTests
         var emptyReport = fixture.Temp.WriteFile("producer/empty.xml", "<coverage />");
         var emptyOutput = Path.Join(fixture.Temp.Path, "empty-report");
         var empty = await CoverageFanIn.CaptureAsync(new(fixture.Policy, fixture.Repository,
-            emptyOutput, supplement.Id, CoveragePath: emptyReport, RawCoveragePath: fixture.Report));
+            emptyOutput, supplement.Id, CoveragePath: fixture.Report, RawCoveragePath: emptyReport));
         Assert.Equal(CoverageOperationOutcome.Rejected, empty.Outcome);
         Assert.False(Directory.Exists(emptyOutput));
+    }
+
+    [Fact]
+    public async Task NativeCaptureAcceptsEmptyNormalizedCompatibilityInputWhenOriginalCollectorIsValid()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var platform = OperatingSystem.IsMacOS() ? "Darwin" : OperatingSystem.IsWindows() ? "Windows" : "Linux";
+        var supplement = fixture.Policy.Supplements.Single(x => x.Platform == platform);
+        var compatibility = fixture.Temp.WriteFile("producer/compatibility.xml", "<coverage />");
+        var output = Path.Join(fixture.Temp.Path, "raw-owned");
+
+        var result = await CoverageFanIn.CaptureAsync(new(fixture.Policy, fixture.Repository, output, supplement.Id,
+            CoveragePath: compatibility, RawCoveragePath: fixture.Report));
+
+        Assert.Equal(CoverageOperationOutcome.Succeeded, result.Outcome);
+        Assert.True(result.Effects.GenerationCommitted);
+        Assert.Equal(File.ReadAllBytes(fixture.Report), File.ReadAllBytes(Path.Join(output, "collector.cobertura.xml")));
+        Assert.False(result.Accepted);
+        Assert.False(result.Verified);
     }
 
     [Fact]

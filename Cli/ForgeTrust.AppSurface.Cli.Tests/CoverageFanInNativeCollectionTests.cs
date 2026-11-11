@@ -23,6 +23,7 @@ public sealed class CoverageFanInNativeCollectionTests
     [InlineData("one-original")]
     [InlineData("empty-original")]
     [InlineData("null-originals")]
+    [InlineData("no-originals")]
     [InlineData("malformed-point")]
     [InlineData("original-negative-covered")]
     public void NativeVerifierIndependentlyChecksEveryOriginalAgainstHandAuthoredConservativeGolden(string mutation)
@@ -67,6 +68,7 @@ public sealed class CoverageFanInNativeCollectionTests
             case "one-original": originals = [(missed, root)]; break;
             case "empty-original": originals = [(missed, root), (XDocument.Parse("<coverage/>"), root)]; break;
             case "null-originals": originals = null!; break;
+            case "no-originals": originals = []; break;
             case "malformed-point": partial.Descendants("method").Single().Element("lines")!.Element("line")!.SetAttributeValue("hits", "2147483648"); break;
             case "original-negative-covered": partial.Root!.SetAttributeValue("lines-covered", "-1"); break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation));

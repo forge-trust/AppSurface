@@ -15,7 +15,7 @@ public enum CoverageOutputMode
 {
     /// <summary>Require a fresh destination.</summary>
     Fresh,
-    /// <summary>Replace only compatible registered, unmodified output.</summary>
+    /// <summary>Require an existing compatible registered, unmodified generation; never create a missing destination.</summary>
     ReplaceOwned
 }
 /// <summary>Original observation, independent of local import or evaluation.</summary>
@@ -76,18 +76,29 @@ public sealed record CoverageFanInPolicy(CoverageSourceIdentity Source, Coverage
     IReadOnlyList<string> TestProjects, IReadOnlyList<CoverageSupplement> Supplements, CoverageGatePolicy Gate,
     CoverageInstrumentation? Instrumentation = null, CoverageOperationLimits? Limits = null);
 
-/// <summary>Capture a successful trusted producer, or explicitly materialize portable v2 evidence into fresh custody.</summary>
+/// <summary>Capture successful trusted producer artifacts, native collector facts, or portable v2 evidence into local custody.</summary>
+/// <remarks>
+/// Supply exactly one input form: a normalized primary report and its successful timings; a single-project native
+/// capture with <see cref="RawCoveragePath"/>, optional <see cref="CoveragePath"/>, and no timings; an indexed native
+/// capture with <see cref="RawCoveragePaths"/> and <see cref="TimingsPath"/>, but no <see cref="CoveragePath"/>; or
+/// a portable-v2 import with no report or timing selectors. Native measurements are derived from original collector
+/// class and method facts. A supplied <see cref="CoveragePath"/> on a single-project native capture is bounded
+/// compatibility input, not the measurement source. Raw collector root summaries remain in the byte-exact originals,
+/// but canonical native root totals derive from serialized class-line points; method points are retained for patch measurement. The primary aggregate gate remains
+/// based on the exact original normalized primary root counters. Every native capture is independently checked
+/// against its retained original collector report or reports before publication.
+/// </remarks>
 /// <param name="Policy">Trusted complete policy.</param>
 /// <param name="RepositoryRoot">Matching clean local Git source.</param>
 /// <param name="OutputDirectory">Fresh owned capture destination, unless replacement is explicitly requested.</param>
 /// <param name="ProducerId">primary, or an exact supplementary producer ID.</param>
-/// <param name="CoveragePath">Successful normalized Cobertura report; absent for import or indexed native capture.</param>
-/// <param name="TimingsPath">Complete successful primary or indexed native inventory; absent for single-report native/import.</param>
-/// <param name="RawCoveragePath">Original collector bytes for a single-project native producer; absent for primary/import/indexed native.</param>
-/// <param name="ImportDirectory">Explicit portable capture to validate/materialize; mutually exclusive with report paths.</param>
+/// <param name="CoveragePath">Required normalized Cobertura report for a primary capture; optional bounded-XML compatibility input only for single-project native capture. Absent for indexed native capture and import. Never a native measurement source.</param>
+/// <param name="TimingsPath">Required successful timings for primary capture and complete successful inventory for indexed native capture. Absent for single-project native capture and import.</param>
+/// <param name="RawCoveragePath">Required original collector bytes for a native producer declaring exactly one test project in the single-report form. Absent for primary, indexed native capture, and import.</param>
+/// <param name="ImportDirectory">Explicit portable capture to validate/materialize. Mutually exclusive with <paramref name="CoveragePath"/>, <paramref name="TimingsPath"/>, <paramref name="RawCoveragePath"/>, and <paramref name="RawCoveragePaths"/>.</param>
 /// <param name="OriginalSourceRoot">Exact original root mapping for imported evidence.</param>
 /// <param name="OutputMode">Fresh-only default.</param>
-/// <param name="RawCoveragePaths">For a native inventory with multiple projects, exact project-to-original-collector paths instead of RawCoveragePath. Requires complete TimingsPath.</param>
+/// <param name="RawCoveragePaths">Indexed native original collector reports keyed by the exact declared project identities. Requires a complete <paramref name="TimingsPath"/>, supports one or more projects, and excludes <paramref name="CoveragePath"/> and <paramref name="RawCoveragePath"/>. Collection always uses this indexed form, including for one project.</param>
 public sealed record CoverageCaptureRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string OutputDirectory, string ProducerId, string? CoveragePath = null, string? TimingsPath = null,
     string? RawCoveragePath = null, string? ImportDirectory = null, string? OriginalSourceRoot = null,

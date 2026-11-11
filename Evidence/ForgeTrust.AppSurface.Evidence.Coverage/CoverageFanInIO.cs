@@ -198,6 +198,7 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
         CoverageRunOutputLease.ValidateArtifactComponent(name);
         var present = parent.EnumerateArtifactEntries(100000).Any(x => x.Name == name);
         if (present && !replaceOwned) throw new IOException("Fresh output already exists.");
+        if (!present && replaceOwned) throw new InvalidDataException("Owned replacement requires an existing generation.");
         var root = present ? CoverageRunOutputLease.AcquireArtifactDirectory(output, false, true)
             ?? throw new IOException("Output is unavailable.") : parent.CreateArtifactDirectory(name, onCreated: onCreated);
         _roots.Add(output, root);

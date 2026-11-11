@@ -16,17 +16,16 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 internal static class CoverageFanInIndependentVerifier
 {
     private const string CompositionError = "Coverage composition failed independent verification.";
-    private const string NormalizationError = "Coverage normalization failed independent verification.";
     private const string InventoryError = "Primary coverage inventory failed independent verification.";
     private const string GateError = "Coverage gates failed independent verification.";
 
-    /// <summary>Derives a multi-project native projection solely from original collector records.</summary>
+    /// <summary>Derives any nonempty native projection solely from original collector records.</summary>
     internal static void VerifyNativeCollection(IReadOnlyList<(XDocument Document, string SourceRoot)> originals,
         XDocument projection)
     {
         try
         {
-            Require(originals.Count > 1, CompositionError);
+            Require(originals is { Count: > 0 }, CompositionError);
             var expected = new SortedDictionary<ClassId, ClassFacts>(ClassIdComparer.Instance);
             foreach (var original in originals)
             {
@@ -87,45 +86,6 @@ internal static class CoverageFanInIndependentVerifier
         }
         catch (InvalidDataException) { throw; }
         catch (Exception ex) when (IsMalformedInput(ex)) { throw new InvalidDataException(CompositionError); }
-    }
-
-    /// <summary>Checks that native normalization retains original class and method observations.</summary>
-    internal static void VerifyNormalization(XDocument raw, XDocument normalized, string sourceRoot)
-    {
-        try
-        {
-            Require(raw is not null && normalized is not null && !string.IsNullOrWhiteSpace(sourceRoot), NormalizationError);
-            var before = ReadObservations(raw, sourceRoot);
-            var after = ReadObservations(normalized, sourceRoot, NormalizationError);
-            var rawMethods = ReadMethodObservations(raw, sourceRoot);
-            var normalizedMethods = ReadMethodObservations(normalized, sourceRoot);
-            Require(before.Count > 0 && before.Count == after.Count, NormalizationError);
-            Require(MethodObservationsEqual(rawMethods, normalizedMethods), NormalizationError);
-            foreach (var (key, point) in before)
-            {
-                Require(after.TryGetValue(key, out var retained) && retained.Hit == point.Hit
-                    && retained.BranchValid >= point.BranchValid
-                    && (point.BranchValid == 0 ? retained.BranchCovered == 0
-                        : (long)retained.BranchCovered * point.BranchValid
-                            <= (long)point.BranchCovered * retained.BranchValid), NormalizationError);
-            }
-            var rawRoot = Root(raw, NormalizationError);
-            var normalizedRoot = Root(normalized, NormalizationError);
-            CheckRootTotals(normalized, ReadSnapshot(normalized, sourceRoot, NormalizationError), NormalizationError);
-            foreach (var dimension in new[] { "lines", "branches" })
-            {
-                var rawValid = Counter(rawRoot, dimension + "-valid");
-                var rawCovered = Counter(rawRoot, dimension + "-covered");
-                var normalizedValid = Counter(normalizedRoot, dimension + "-valid");
-                var normalizedCovered = Counter(normalizedRoot, dimension + "-covered");
-                Require(rawValid >= 0 && rawCovered >= 0 && rawCovered <= rawValid
-                    && normalizedValid >= rawValid && normalizedCovered >= 0 && normalizedCovered <= normalizedValid
-                    && (rawValid == 0 ? normalizedCovered == 0
-                        : (long)normalizedCovered * rawValid <= (long)rawCovered * normalizedValid), NormalizationError);
-            }
-        }
-        catch (InvalidDataException) { throw; }
-        catch (Exception ex) when (IsMalformedInput(ex)) { throw new InvalidDataException(NormalizationError); }
     }
 
     /// <summary>Requires one successful, complete timing entry for every trusted test project.</summary>
@@ -600,106 +560,6 @@ internal static class CoverageFanInIndependentVerifier
             && Counter(root, "branches-covered") == lines.Sum(x => x.BranchCovered), error);
     }
 
-    private static Dictionary<(string File, int Number), Observation> ReadObservations(
-        XDocument document, string? root, string error = NormalizationError)
-    {
-        var result = new Dictionary<(string, int), Observation>();
-        foreach (var element in Root(document, error).Descendants().Where(x => x.Name.LocalName == "class"))
-        {
-            var filename = RequiredAttribute(element, "filename");
-            var file = root is null ? NormalizeRelative(filename, error)
-                : ResolveSourcePath(document, filename, root, error);
-            foreach (var line in element.Elements().Where(x => x.Name.LocalName == "lines").Elements().Where(x => x.Name.LocalName == "line"))
-            {
-                var key = (file, Integer(RequiredAttribute(line, "number")));
-                var hits = Integer(RequiredAttribute(line, "hits"));
-                var branch = ReadBranches(line);
-                var observation = new Observation(hits > 0, branch.Covered, branch.Valid);
-                if (result.TryGetValue(key, out var old))
-                    result[key] = new(old.Hit || hits > 0, checked(old.BranchCovered + branch.Covered),
-                        checked(old.BranchValid + branch.Valid));
-                else result.Add(key, observation);
-            }
-        }
-        return result;
-    }
-
-    private static Dictionary<MethodRecordId, SortedDictionary<LineId, Observation>> ReadMethodObservations(
-        XDocument document, string sourceRoot)
-    {
-        var result = new Dictionary<MethodRecordId, SortedDictionary<LineId, Observation>>();
-        var occurrences = new Dictionary<(string File, string Name, string Signature), int>();
-        foreach (var element in Root(document, NormalizationError).Descendants().Where(x => x.Name.LocalName == "class"))
-        {
-            var filename = RequiredAttribute(element, "filename");
-            var file = ResolveSourcePath(document, filename, sourceRoot, NormalizationError);
-            foreach (var method in element.Elements().Where(x => x.Name.LocalName == "methods")
-                .Elements().Where(x => x.Name.LocalName == "method"))
-            {
-                var name = method.Attribute("name")?.Value ?? string.Empty;
-                var signature = method.Attribute("signature")?.Value ?? string.Empty;
-                var methodBase = (file, name, signature);
-                var occurrence = occurrences.GetValueOrDefault(methodBase);
-                occurrences[methodBase] = occurrence + 1;
-                var id = new MethodRecordId(file, name, signature, occurrence);
-                var points = new SortedDictionary<LineId, Observation>();
-                var lineOccurrences = new Dictionary<int, int>();
-                foreach (var line in method.Elements().Where(x => x.Name.LocalName == "lines")
-                    .Elements().Where(x => x.Name.LocalName == "line"))
-                {
-                    var number = Integer(RequiredAttribute(line, "number"));
-                    var hits = Integer(RequiredAttribute(line, "hits"));
-                    Require(number > 0 && hits >= 0, NormalizationError);
-                    var lineOccurrence = lineOccurrences.GetValueOrDefault(number);
-                    lineOccurrences[number] = lineOccurrence + 1;
-                    var branches = ReadBranches(line);
-                    Require(points.TryAdd(new(number, lineOccurrence), new(hits > 0, branches.Covered, branches.Valid)),
-                        NormalizationError);
-                }
-                Require(result.TryAdd(id, points), NormalizationError);
-            }
-        }
-        return result;
-    }
-
-    private static bool MethodObservationsEqual(
-        IReadOnlyDictionary<MethodRecordId, SortedDictionary<LineId, Observation>> expected,
-        IReadOnlyDictionary<MethodRecordId, SortedDictionary<LineId, Observation>> actual)
-    {
-        static Dictionary<(string, string, string, string), int> Count(
-            IReadOnlyDictionary<MethodRecordId, SortedDictionary<LineId, Observation>> methods)
-        {
-            var counts = new Dictionary<(string, string, string, string), int>();
-            foreach (var (method, points) in methods)
-            {
-                var encoded = new StringBuilder();
-                foreach (var (line, point) in points)
-                    encoded.Append(CultureInfo.InvariantCulture,
-                        $"{line.Number}:{line.Occurrence}:{point.Hit}:{point.BranchCovered}:{point.BranchValid};");
-                var identity = (method.File, method.Name, method.Signature, encoded.ToString());
-                counts[identity] = checked(counts.GetValueOrDefault(identity) + 1);
-            }
-            return counts;
-        }
-        var original = Count(expected);
-        var retained = Count(actual);
-        return original.Count == retained.Count && original.All(item => retained.TryGetValue(item.Key, out var count)
-            && count == item.Value);
-    }
-
-    /// <summary>Checks exact collector class ownership and numeric method facts after normalization projection.</summary>
-    internal static void VerifyCollectorMethods(XDocument raw, XDocument normalized, string sourceRoot)
-    {
-        var original = ReadSnapshot(raw, sourceRoot).Classes;
-        var retained = ReadSnapshot(normalized, sourceRoot).Classes;
-        foreach (var (identity, facts) in original.Where(item => item.Value.Methods.Count > 0))
-            Require(retained.TryGetValue(identity, out var other) && facts.Methods.Count == other.Methods.Count
-                && facts.Methods.All(method => other.Methods.TryGetValue(method.Key, out var points)
-                    && PointMapsEqual(method.Value, points)), NormalizationError);
-        Require(original.Values.Sum(facts => facts.Methods.Count) == retained.Values.Sum(facts => facts.Methods.Count),
-            NormalizationError);
-    }
-
     private static string ResolveSourcePath(XDocument document, string filename, string sourceRoot, string error)
     {
         var trustedRoot = ParsePortablePath(sourceRoot, error);
@@ -898,8 +758,6 @@ internal static class CoverageFanInIndependentVerifier
     }
     private sealed record PatchLine(bool Covered, int BranchCovered, int BranchValid);
     private sealed record PatchMetrics(int LineCovered, int LineMeasurable, int BranchCovered, int BranchMeasurable);
-    private readonly record struct Observation(bool Hit, int BranchCovered, int BranchValid);
-    private readonly record struct MethodRecordId(string File, string Name, string Signature, int Occurrence);
     private enum PortablePathKind { Relative, Posix, Drive, Unc }
     private sealed record PortablePath(PortablePathKind Kind, string Root, string[] Segments);
     private sealed record Snapshot(SortedDictionary<ClassId, ClassFacts> Classes);
