@@ -91,11 +91,11 @@ public sealed class DocsExportWorkflowContractTests
         var workflow = LoadBuildWorkflow();
         var root = (YamlMappingNode)workflow.Documents[0].RootNode;
         var jobs = GetMapping(root, "jobs");
-        var buildJob = GetMapping(jobs, "build");
+        var buildJob = GetMapping(jobs, "coverage-collection");
         var buildSteps = GetSequence(buildJob, "steps")
             .Cast<YamlMappingNode>()
             .ToArray();
-        var coverageStep = FindStep(buildSteps, "Run solution coverage and gate");
+        var coverageStep = FindStep(buildSteps, "Collect solution coverage");
         var coverageEnv = GetMapping(coverageStep, "env");
         Assert.Equal(
             "${{ runner.temp }}/docs-outline-layout-evidence",

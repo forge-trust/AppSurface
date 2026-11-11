@@ -253,7 +253,12 @@ The repository lane requires a non-sandboxed host by default. Set
 deliberately leaves ordinary CI and container hosts valid; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
 
 The policy-selected coverage producer writes to the printed run's `proof/coverage` directory
-(CI uses `TestResults/coverage-evidence/coverage`). The compatibility wrapper has the same collection
+(CI uses `TestResults/coverage-evidence/coverage`). CI overlaps collection with native and packed-consumer
+checks, then verifies same-attempt collection and all existing gates in the final `build` job. Non-exclusive
+projects use longest-first scheduling with optional advisory main-branch timing history; exclusive suites
+retain their ordering. Docs export runs alongside validation, and Pages deployment waits for acceptance.
+See the [CI collection and scheduling contract](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#ci-collection-overlap-and-scheduling)
+for handoff provenance, fallback behavior and full-workflow reruns. The compatibility wrapper has the same collection
 and threshold behavior and uses the fixed `TestResults/coverage-merged` paths listed below:
 
 - Runs each solution test project.

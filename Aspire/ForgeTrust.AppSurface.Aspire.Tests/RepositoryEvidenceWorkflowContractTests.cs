@@ -70,6 +70,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
         Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
         Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
+        Assert.Contains("SolutionCoverageHandoffTests", testCommand);
 
         var producer = FindStep(steps, "Run selected evidence producers");
         Assert.Contains("steps.plan.outcome == 'success'", producer["if"].AsScalar());
@@ -182,7 +183,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
 
         var manifestGate = jobs["coverage-manifest-gate"].AsMapping();
         Assert.Equal("${{ always() }}", manifestGate["if"].AsScalar());
-        Assert.Equal(["coverage-evidence-plan", "coverage-security-platform", "build"],
+        Assert.Equal(["coverage-evidence-plan", "coverage-security-platform", "packed-durable-consumers", "coverage-collection", "build"],
             manifestGate["needs"].AsSequence().Select(node => node.AsScalar()));
         var gateSteps = manifestGate["steps"].AsSequence();
         var failGate = FindStep(gateSteps, "Fail unless planning, selected native evidence, and the build passed");
@@ -191,6 +192,53 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("needs.coverage-security-platform.result != 'success'", failGate["if"].AsScalar());
         Assert.Contains("needs.coverage-security-platform.result != 'skipped'", failGate["if"].AsScalar());
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true'", FindStep(gateSteps, "Confirm the selected coverage evidence gate passed")["if"].AsScalar());
+    }
+
+    [Fact]
+    public void CollectionOverlapsNativeAndPackedChecksWhileFinalAcceptanceStillRequiresBoth()
+    {
+        var jobs = _buildWorkflow["jobs"].AsMapping();
+        var collection = jobs["coverage-collection"].AsMapping();
+        Assert.Equal(["coverage-evidence-plan"], collection["needs"].AsSequence().Select(node => node.AsScalar()));
+        var steps = collection["steps"].AsSequence();
+        var collect = FindStep(steps, "Collect solution coverage");
+        Assert.Contains("requires_coverage == 'true'", collect["if"].AsScalar());
+        Assert.Contains("--operation collect-coverage", collect["run"].AsScalar());
+        Assert.Contains("--coverage-schedule-timings", collect["run"].AsScalar());
+        Assert.DoesNotContain("--native-coverage-directory", collect["run"].AsScalar());
+        var history = FindStep(steps, "Restore advisory coverage scheduling history");
+        Assert.True(IndexOf(steps, history) < IndexOf(steps, collect));
+        Assert.Equal("${{ github.event.repository.default_branch }}", history["env"].AsMapping()["GITHUB_DEFAULT_BRANCH"].AsScalar());
+        var upload = FindStep(steps, "Preserve same-attempt coverage collection");
+        Assert.Contains("success()", upload["if"].AsScalar());
+        Assert.Equal("solution-coverage-collection-${{ github.run_attempt }}", upload["with"].AsMapping()["name"].AsScalar());
+        var build = jobs["build"].AsMapping();
+        Assert.Contains("coverage-collection", build["needs"].AsSequence().Select(node => node.AsScalar()));
+        Assert.Contains("needs.coverage-collection.result == 'success'", build["if"].AsScalar());
+        Assert.Contains("needs.packed-durable-consumers.result == 'success'", build["if"].AsScalar());
+        var gateSteps = build["steps"].AsSequence();
+        var download = FindStep(gateSteps, "Download same-attempt coverage collection");
+        Assert.Equal(upload["with"].AsMapping()["name"].AsScalar(), download["with"].AsMapping()["name"].AsScalar());
+        Assert.DoesNotContain(new YamlScalarNode("run-id"), download["with"].AsMapping().Children.Keys);
+        Assert.Contains("--coverage-collection", FindStep(gateSteps, "Run solution coverage and gate")["run"].AsScalar());
+        var finalSteps = jobs["coverage-manifest-gate"].AsMapping()["steps"].AsSequence();
+        var failure = FindStep(finalSteps, "Fail unless planning, selected native evidence, and the build passed")["if"].AsScalar();
+        Assert.Contains("needs.coverage-collection.result != 'success'", failure);
+        Assert.Contains("needs.packed-durable-consumers.result != 'success'", failure);
+        var timings = FindStep(steps, "Publish advisory coverage scheduling timings");
+        Assert.Contains("github.event_name == 'push'", timings["if"].AsScalar());
+        Assert.Contains("github.ref == 'refs/heads/main'", timings["if"].AsScalar());
+    }
+
+    [Fact]
+    public void DocsExportOverlapsBuildButDeploymentWaitsForAllPreviouslyRequiredAcceptance()
+    {
+        var jobs = _buildWorkflow["jobs"].AsMapping();
+        Assert.DoesNotContain(new YamlScalarNode("needs"), jobs["export-appsurface-docs"].AsMapping().Children.Keys);
+        var deploy = jobs["deploy-appsurface-docs"].AsMapping();
+        Assert.Equal(["export-appsurface-docs", "build", "coverage-manifest-gate"],
+            deploy["needs"].AsSequence().Select(node => node.AsScalar()));
+        Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", deploy["if"].AsScalar());
     }
 
     [Fact]

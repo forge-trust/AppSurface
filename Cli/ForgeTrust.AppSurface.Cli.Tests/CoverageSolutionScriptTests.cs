@@ -107,12 +107,12 @@ public sealed class CoverageSolutionScriptTests
         var build = (YamlMappingNode)jobs.Children[new YamlScalarNode("build")];
         var dependencies = (YamlSequenceNode)build.Children[new YamlScalarNode("needs")];
         Assert.Equal(
-            new[] { "coverage-evidence-plan", "coverage-security-platform", "packed-durable-consumers" },
+            new[] { "coverage-evidence-plan", "coverage-security-platform", "packed-durable-consumers", "coverage-collection" },
             dependencies.Children.Cast<YamlScalarNode>().Select(node => node.Value));
         Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
         var buildCondition = ((YamlScalarNode)build.Children[new YamlScalarNode("if")]).Value!;
         Assert.Equal(
-            "${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && needs.packed-durable-consumers.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result == 'skipped')) }}",
+            "${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && needs.packed-durable-consumers.result == 'success' && needs.coverage-collection.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result == 'skipped')) }}",
             buildCondition);
 
         var packed = (YamlMappingNode)jobs.Children[new YamlScalarNode("packed-durable-consumers")];
