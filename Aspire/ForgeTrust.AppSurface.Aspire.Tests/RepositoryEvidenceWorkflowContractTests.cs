@@ -89,6 +89,8 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("RepositoryGitChangesTests", testCommand);
         Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
         Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
+        Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", testCommand);
+        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests'", testCommand);
         Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
 
         var producer = FindStep(steps, "Run selected evidence producers");

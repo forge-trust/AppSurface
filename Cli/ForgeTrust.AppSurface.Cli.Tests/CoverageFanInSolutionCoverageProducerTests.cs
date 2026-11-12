@@ -5,10 +5,12 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Validation;
 using ForgeTrust.AppSurface.Testing;
 
-namespace ForgeTrust.AppSurface.Aspire.Tests;
+namespace ForgeTrust.AppSurface.Cli.Tests;
 
-[Collection("Native evidence program")]
-public sealed class SolutionCoverageProducerTests
+// Keep the orchestration contracts in the native coverage collector's test project.
+// Retained collector method records must observe these branches, not just the normalized primary report.
+[Collection("CoverageGate process state")]
+public sealed class CoverageFanInSolutionCoverageProducerTests
 {
     [Fact]
     public async Task ProduceAsync_RejectsInvalidProducerContextBeforeRunningCommands()
