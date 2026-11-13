@@ -4,3 +4,5 @@
 The [CLI bundle trust boundary](../../Aspire/ForgeTrust.AppSurface.Aspire/README.md#apphost-project-references)
 is separate from the application NuGet graph: DCP and Dashboard are version-pinned through the SDK's
 CLI selection, rather than hash-pinned and audited as RID-specific application NuGet packages.
+
+The [Durable worker template](../../Durable/ForgeTrust.AppSurface.Durable.Templates/README.md) also coordinates its OpenTelemetry pins with the upgraded package graph, preserving strict restore of generated consumers.
