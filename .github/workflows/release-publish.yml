@@ -134,6 +134,9 @@ jobs:
           dotnet-version: |
             10.0.402
 
+      - name: Prepare pinned Aspire CLI bundle
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
+
       - name: Build AppSurface Docs exporter
         run: dotnet build ForgeTrust.AppSurface.slnx -c Release
 

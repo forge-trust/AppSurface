@@ -23,6 +23,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     [InlineData("code-quality.yml", "dotnet-format", "Build project")]
     [InlineData("package-gate.yml", "package-gate", "Run and verify scoped package evidence")]
     [InlineData("build.yml", "coverage-collection", "Verify Durable template release artifact transport")]
+    [InlineData("package-artifacts.yml", "package-artifacts", "Verify package artifacts")]
+    [InlineData("nuget-prerelease-publish.yml", "pack-and-verify", "Verify package artifacts")]
+    [InlineData("nuget-stable-publish.yml", "pack-and-verify", "Verify package artifacts")]
+    [InlineData("release-publish.yml", "publish-docs-archive", "Build AppSurface Docs exporter")]
     public void FullSolutionWorkersPrepareTheSdkPairedAspireBundleBeforeBuilding(string workflow, string job, string firstBuild)
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
@@ -36,6 +40,8 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.False(prepare.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
         if (workflow == "package-gate.yml")
             Assert.Equal("${{ steps.plan.outputs.requires_package_checks == 'true' }}", prepare["if"].AsScalar());
+        if (workflow is "nuget-prerelease-publish.yml" or "nuget-stable-publish.yml")
+            Assert.Equal(FindStep(steps, firstBuild)["if"].AsScalar(), prepare["if"].AsScalar());
     }
 
     [Fact]

@@ -257,6 +257,10 @@ jobs:
           pnpm --dir Web run assets:test
           pnpm --dir Web run assets:verify
 
+      - name: Prepare pinned Aspire CLI bundle
+        if: ${{ steps.recovery.outputs.producer_found != 'true' }}
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
+
       - name: Verify package artifacts
         if: ${{ steps.recovery.outputs.producer_found != 'true' }}
         env:
