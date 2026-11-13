@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Validation;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
@@ -174,7 +175,7 @@ public sealed class SolutionCoverageHandoffTests
     {
         using var fixture = new Fixture();
         await fixture.WriteAsync();
-        var destination = Path.Join(fixture.Root, relativeDestination.Replace('/', Path.DirectorySeparatorChar));
+        var destination = TestPathUtils.PathUnder(fixture.Root, relativeDestination.Replace('/', Path.DirectorySeparatorChar));
 
         var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ImportAsync(destination));
 
