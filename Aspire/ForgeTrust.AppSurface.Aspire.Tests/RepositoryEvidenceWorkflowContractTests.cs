@@ -27,6 +27,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     [InlineData("nuget-prerelease-publish.yml", "pack-and-verify", "Verify package artifacts")]
     [InlineData("nuget-stable-publish.yml", "pack-and-verify", "Verify package artifacts")]
     [InlineData("release-publish.yml", "publish-docs-archive", "Build AppSurface Docs exporter")]
+    [InlineData("coverage-efficiency.yml", "capture-evidence", "Capture coverage efficiency evidence")]
     public void FullSolutionWorkersPrepareTheSdkPairedAspireBundleBeforeBuilding(string workflow, string job, string firstBuild)
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
