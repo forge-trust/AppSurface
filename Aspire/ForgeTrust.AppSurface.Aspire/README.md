@@ -18,7 +18,9 @@ It also does not configure application-side OpenTelemetry exporters. Use [`Forge
 
 For deterministic tests of profile-based AppHosts, use [`ForgeTrust.AppSurface.Aspire.Testing`](../ForgeTrust.AppSurface.Aspire.Testing/README.md). Its [configured graph-only proof](../ForgeTrust.AppSurface.Aspire.Testing/README.md#configured-graph-only-proof) shows how to inject per-call constructor inputs before profile activation and inspect annotations without starting resources. Native AppHosts that build directly from [`DistributedApplication.CreateBuilder(args)`](https://learn.microsoft.com/dotnet/api/aspire.hosting.distributedapplication.createbuilder) should continue using [Aspire's native testing API](https://learn.microsoft.com/dotnet/aspire/testing/overview).
 
-The packed `ForgeTrust.AppSurface.Aspire.Testing` dependency graph promotes `MessagePack` to a minimum of **2.5.303** to avoid [GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h). Consumer central package overrides must preserve this floor; keep NuGet audit enabled for ongoing checks of the resolved graph.
+The Aspire 13.6.5 dependency graph requires `MessagePack` **2.5.307**. The earlier **2.5.303** pin was the patched 2.x release for [GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h) at the time of that security update; preserve the current 2.5.307 transitive requirement in consumer central package overrides. Keep strict NuGet audit enabled for ongoing checks of the resolved graph.
+
+The coordinated Aspire **13.6.5** patch line is the supported minimum for the AppHost SDK, `Aspire.Hosting`, and `Aspire.Hosting.Testing`. This floor includes the fix for [GHSA-f7vh-h5g3-7jrh](https://github.com/dotnet/announcements/issues/503). Keep strict NuGet vulnerability auditing enabled; the patched minimum does not replace ongoing audit of the complete resolved dependency graph. The package minimum remains open-ended, so later consumer-selected versions are allowed but require compatibility proof.
 
 For files stored in the source repository, see [Repository-relative assets](#repository-relative-assets) for the root-selection contract and a component example.
 
@@ -186,7 +188,7 @@ public sealed class WebAppEnvironmentComponent : IAspireComponent<ProjectResourc
 
 ## Dependency Security
 
-The repository [centrally pins MessagePack](../../Directory.Packages.props) to **2.5.303** for Aspire's transitive [StreamJsonRpc](https://www.nuget.org/packages/StreamJsonRpc) dependency. This is the patched 2.x release for [GHSA-qhrr-8q5h-9q3h](https://github.com/MessagePack-CSharp/MessagePack-CSharp/security/advisories/GHSA-qhrr-8q5h-9q3h), which prevents nested containers from reusing trailing bytes to justify excessive allocations. Keep this security floor when updating Aspire; an Aspire update alone does not guarantee a patched MessagePack resolution. A future move to MessagePack 3.x requires **3.1.9** or later for the same fix. Regenerate the affected NuGet lock files, including the `linux-x64` and `osx-arm64` AppHost variants, after changing the pin.
+The repository's earlier central pin of MessagePack **2.5.303** addressed [GHSA-qhrr-8q5h-9q3h](https://github.com/MessagePack-CSharp/MessagePack-CSharp/security/advisories/GHSA-qhrr-8q5h-9q3h), which prevents nested containers from reusing trailing bytes to justify excessive allocations. Aspire 13.6.5 now requires **2.5.307** transitively through [StreamJsonRpc](https://www.nuget.org/packages/StreamJsonRpc); retain that current minimum in consumer overrides and continue strict NuGet auditing. A future move to MessagePack 3.x requires **3.1.9** or later for the same security fix. Regenerate affected NuGet lock files, including the `linux-x64` and `osx-arm64` AppHost variants, after changing the pin.
 
 ## AppHost Project References
 
@@ -194,7 +196,7 @@ Aspire AppHost projects treat most `ProjectReference` entries as resources and g
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
-  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.4" />
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.6.5" />
   <ItemGroup>
     <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="../web-app/WebAppExample.csproj" AspireProjectMetadataTypeName="WebAppExample" />
@@ -218,7 +220,7 @@ For example, `aspire run --apphost examples/aspire-apphost/AspireAppHostExample.
 
 Deployment AppHosts must preserve Aspire's original arguments. Call `DistributedApplication.CreateBuilder(args)` directly; do not route `aspire publish` or `aspire do` through the local `AspireProfile`/CliFx command path.
 
-This preview supports the coordinated Aspire AppHost SDK, `Aspire.Hosting`, and Aspire CLI **13.4.4** patch line. The deployment-pipeline APIs are experimental and isolated inside the package adapter. Use the matching CLI for publish and named-step proof; advancing Aspire requires a package release with compile, packed-consumer, `--list-steps`, publish, and targeted `do` verification before consumers upgrade.
+This preview supports the coordinated Aspire AppHost SDK, `Aspire.Hosting`, and Aspire CLI **13.6.5** patch line. The deployment-pipeline APIs are experimental and isolated inside the package adapter. Use the matching CLI for publish and named-step proof; later consumer-selected versions remain allowed but require compile, packed-consumer, `--list-steps`, publish, and targeted `do` compatibility verification.
 
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);

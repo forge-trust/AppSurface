@@ -1,6 +1,6 @@
 # Packed typed readiness consumer
 
-This prepared .NET 10 Aspire AppHost project restores the locally packed `ForgeTrust.AppSurface.Aspire.Testing` package with Aspire 13.4.4, builds a public AppHost marker/module/profile, and runs the complete `AppSurfaceAspireTestFixture.StartAsync` call from that package. The profile adds a local executable resource that serves `/healthz`; Aspire's native DCP starts and health-checks that process before the fixture returns the named HTTP endpoint.
+This prepared .NET 10 Aspire AppHost project currently targets `ForgeTrust.AppSurface.Aspire.Testing` with the coordinated Aspire 13.6.5 baseline and runs the complete `AppSurfaceAspireTestFixture.StartAsync` call from the packed package. It builds a public AppHost marker/module/profile; the profile adds a local executable resource that serves `/healthz`, which Aspire's native DCP starts and health-checks before the fixture returns the named HTTP endpoint. The checked-in historical run result described below used 13.4.4 and does not establish a 13.6.5 runtime proof.
 
 The program contains two executable, version-bound startup-call equivalences for the pinned Skoolit source commit `a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e`:
 
@@ -33,7 +33,7 @@ The equivalence is native Aspire startup/readiness only. Browser execution, auth
 
 Aspire allocates the executable's HTTP target port and injects it through `PORT`. The health server binds only to `127.0.0.1` at that port; it does not require port 8080 to be available or listen on external network interfaces.
 
-Prerequisites are a clean committed repository checkout, the .NET 10 SDK, network access to NuGet.org for Aspire dependencies, and an OS-supported Aspire 13.4.4 AppHost/DCP runtime. This fixture graph contains an executable resource and does not require a container image. The repository script retains the generated feed and restore/build/run logs under `.gstack/tmp/issue-867-readiness-consumers`; use its `packageVersion`, `sourceCommit`, `sourceTree`, and `feed` values for the exact local install:
+The historical run result used a clean committed repository checkout, the .NET 10 SDK, network access to NuGet.org for Aspire dependencies, and an OS-supported Aspire 13.4.4 AppHost/DCP runtime. The current consumer contract targets 13.6.5; the earlier result does not establish that runtime proof. This fixture graph contains an executable resource and does not require a container image. The repository script retains the generated feed and restore/build/run logs under `.gstack/tmp/issue-867-readiness-consumers`; use its `packageVersion`, `sourceCommit`, `sourceTree`, and `feed` values for the exact local install:
 
 ```sh
 dotnet add package ForgeTrust.AppSurface.Aspire.Testing \
