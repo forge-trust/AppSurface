@@ -8,3 +8,5 @@ CLI selection, rather than hash-pinned and audited as RID-specific application N
 The [Durable worker template](../../Durable/ForgeTrust.AppSurface.Durable.Templates/README.md) also coordinates its OpenTelemetry pins with the upgraded package graph, preserving strict restore of generated consumers.
 
 The [historical compatibility consumers](../../Durable/compatibility/README.md) retain their exact published dependency graph through local central pins, so current dependency upgrades do not change the old-version proof. Their locked restore, audit and compatibility assertions remain enabled.
+
+Full-solution CI workers prepare the SDK-paired CLI bundle before parallel builds, with visible setup diagnostics and unchanged build, formatting, native-readiness and coverage requirements.

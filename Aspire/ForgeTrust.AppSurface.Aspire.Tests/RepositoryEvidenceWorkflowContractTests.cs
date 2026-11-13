@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using ForgeTrust.AppSurface.Testing;
 using YamlDotNet.RepresentationModel;
 
@@ -15,6 +16,25 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         _workflow = LoadWorkflow(repository, "native-evidence-validation.yml");
         _buildWorkflow = LoadWorkflow(repository, "build.yml");
         _packageWorkflow = LoadWorkflow(repository, "package-gate.yml");
+    }
+
+    [Theory]
+    [InlineData("code-quality.yml", "dotnet-format", "Build project")]
+    [InlineData("package-gate.yml", "package-gate", "Run and verify scoped package evidence")]
+    [InlineData("build.yml", "coverage-collection", "Verify Durable template release artifact transport")]
+    public void FullSolutionWorkersPrepareTheSdkPairedAspireBundleBeforeBuilding(string workflow, string job, string firstBuild)
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var document = LoadWorkflow(repository, workflow);
+        var steps = document["jobs"].AsMapping()[job].AsMapping()["steps"].AsSequence();
+        var prepare = FindStep(steps, "Prepare pinned Aspire CLI bundle");
+        Assert.True(IndexOf(steps, prepare) < IndexOf(steps, FindStep(steps, firstBuild)));
+        var appHost = XDocument.Load(TestPathUtils.PathUnder(repository, "examples", "aspire-apphost", "AspireAppHostExample.csproj"));
+        var version = (string)appHost.Descendants("Sdk").Single(sdk => (string?)sdk.Attribute("Name") == "Aspire.AppHost.Sdk").Attribute("Version")!;
+        Assert.Equal($"dnx --yes aspire.cli@{version} -- setup --install-path \"$HOME/.aspire\" --non-interactive", prepare["run"].AsScalar());
+        Assert.False(prepare.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        if (workflow == "package-gate.yml")
+            Assert.Equal("${{ steps.plan.outputs.requires_package_checks == 'true' }}", prepare["if"].AsScalar());
     }
 
     [Fact]

@@ -593,6 +593,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: Web/pnpm-lock.yaml
 
+      - name: Prepare pinned Aspire CLI bundle
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
+
       - name: Verify Tailwind release artifact transport
         run: python3 .github/tests/tailwind_workflow_transport_tests.py
 

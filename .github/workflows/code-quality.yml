@@ -61,6 +61,9 @@ jobs:
             echo "| Locked restore duration | ${restore_seconds}s |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Prepare pinned Aspire CLI bundle
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
+
       - name: Build project
         run: dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore
 
