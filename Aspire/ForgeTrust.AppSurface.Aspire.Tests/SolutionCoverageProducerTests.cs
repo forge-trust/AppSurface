@@ -183,8 +183,11 @@ public sealed class SolutionCoverageProducerTests
                 NativeCoverageDirectory: defect == "native" ? "native" : null, DiffFile: defect == "local-patch" ? "patch" : null)
             { CoverageCollectionDirectory = defect == "collection" ? "previous" : null };
             if (defect == "dirty") fixture.GitStatusResponses.Enqueue(" M source.cs");
+            var collectionCommands = 0;
             var collector = fixture.CreateWithSettings(settings, async (request, _) =>
             {
+                Assert.Contains("--solution", request.Arguments);
+                collectionCommands++;
                 if (defect == "failed-command") return new EvidenceCommandResult(1, "", "failed", 1);
                 await fixture.CompleteCommandAsync(request);
                 if (defect == "incomplete")
@@ -192,8 +195,14 @@ public sealed class SolutionCoverageProducerTests
                 return Success();
             });
 
-            await Assert.ThrowsAnyAsync<Exception>(() => collector.CollectAsync(CancellationToken.None));
+            if (defect == "failed-command")
+                await Assert.ThrowsAsync<InvalidOperationException>(() => collector.CollectAsync(CancellationToken.None));
+            else if (defect is "dirty" or "incomplete")
+                await Assert.ThrowsAsync<InvalidDataException>(() => collector.CollectAsync(CancellationToken.None));
+            else
+                await Assert.ThrowsAsync<ArgumentException>(() => collector.CollectAsync(CancellationToken.None));
 
+            Assert.Equal(defect is "failed-command" or "incomplete" ? 1 : 0, collectionCommands);
             Assert.False(File.Exists(Path.Join(output, "coverage", "collection-receipt.json")));
             Assert.Empty(fixture.Writer.WrittenArtifacts);
         });
@@ -563,6 +572,41 @@ public sealed class SolutionCoverageProducerTests
         Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
         Assert.Empty(result.SatisfiedAssertionIds);
         Assert.Empty(commands);
+    }
+
+    [Fact]
+    public async Task ProduceAsync_RejectsCollectedCiCoverageForLocalPatch()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var collection = TestPathUtils.PathUnder(fixture.Root, "collection");
+            var collector = fixture.CreateWithSettings(new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, collection),
+                async (request, _) =>
+                {
+                    await fixture.CompleteCommandAsync(request);
+                    return Success();
+                });
+            await collector.CollectAsync(CancellationToken.None);
+            var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output,
+                DiffFile: TestPathUtils.PathUnder(fixture.Root, "local.patch"))
+            {
+                CoverageCollectionDirectory = collection,
+                VerifyLocalSourceAsync = _ => Task.CompletedTask,
+            };
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                commands.Add(request);
+                await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            await AssertFailedWithoutClaimsAsync(fixture, result, "collection");
+            Assert.DoesNotContain(commands, command => command.Arguments.Contains("--solution") || command.Arguments.Contains("gate"));
+        });
     }
 
     [Fact]

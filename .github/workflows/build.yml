@@ -532,6 +532,7 @@ jobs:
       contents: read
       actions: read
     env:
+      CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
     steps:
@@ -682,6 +683,38 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Publish bounded test-result and slow-test diagnostics summary
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
+        run: |
+          diagnostics_markdown="$RUNNER_TEMP/solution-coverage-collection/coverage/slow-test-diagnostics.md"
+          summary_preview_maximum_bytes=65536
+          if [[ -f "$diagnostics_markdown" ]]; then
+            diagnostics_bytes="$(wc -c < "$diagnostics_markdown")"
+            if (( diagnostics_bytes <= summary_preview_maximum_bytes )); then
+              cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+            else
+              head -c "$summary_preview_maximum_bytes" "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+              {
+                echo
+                echo
+                echo "> Test-result and slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`coverage-collection-diagnostics\` artifact for the complete report."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            {
+              echo "## Slow-test diagnostics"
+              echo
+              echo "No slow-test diagnostics Markdown artifact was generated."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload test results to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && env.CODECOV_TOKEN_PRESENT == 'true' }}
+        with:
+          files: '${{ runner.temp }}/solution-coverage-collection/coverage/junit-*.xml'
+          report_type: test_results
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   build:
     needs: [coverage-evidence-plan, coverage-security-platform, packed-durable-consumers, coverage-collection]
@@ -813,45 +846,12 @@ jobs:
             TestResults/coverage-evidence/evidence-summary.md
           if-no-files-found: warn
 
-      - name: Publish bounded test-result and slow-test diagnostics summary
-        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
-        run: |
-          diagnostics_markdown="TestResults/coverage-evidence/coverage/slow-test-diagnostics.md"
-          summary_preview_maximum_bytes=65536
-          if [[ -f "$diagnostics_markdown" ]]; then
-            diagnostics_bytes="$(wc -c < "$diagnostics_markdown")"
-            if (( diagnostics_bytes <= summary_preview_maximum_bytes )); then
-              cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
-            else
-              head -c "$summary_preview_maximum_bytes" "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
-              {
-                echo
-                echo
-                echo "> Test-result and slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`test-result-diagnostics\` artifact for the complete report."
-              } >> "$GITHUB_STEP_SUMMARY"
-            fi
-          else
-            {
-              echo "## Slow-test diagnostics"
-              echo
-              echo "No slow-test diagnostics Markdown artifact was generated."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: ${{ success() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
           files: ${{ github.event_name == 'pull_request' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && 'TestResults/coverage-evidence/coverage-fanin-composed/coverage.cobertura.xml' || 'TestResults/coverage-evidence/coverage/coverage.cobertura.xml' }}
           disable_search: true
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Upload test results to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && env.CODECOV_TOKEN_PRESENT == 'true' }}
-        with:
-          files: 'TestResults/coverage-evidence/coverage/junit-*.xml'
-          report_type: test_results
           token: ${{ secrets.CODECOV_TOKEN }}
 
   coverage-manifest-gate:

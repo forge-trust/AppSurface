@@ -85,10 +85,10 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("Publish bounded test-result and slow-test diagnostics summary", workflow, StringComparison.Ordinal);
         Assert.Contains("test-result-diagnostics", workflow, StringComparison.Ordinal);
         Assert.Contains("TestResults/coverage-evidence/**", workflow, StringComparison.Ordinal);
-        Assert.Contains("TestResults/coverage-evidence/coverage/junit-*.xml", workflow, StringComparison.Ordinal);
-        Assert.Contains("TestResults/coverage-evidence/coverage/slow-test-diagnostics.md", workflow, StringComparison.Ordinal);
+        Assert.Contains("${{ runner.temp }}/solution-coverage-collection/coverage/junit-*.xml", workflow, StringComparison.Ordinal);
+        Assert.Contains("$RUNNER_TEMP/solution-coverage-collection/coverage/slow-test-diagnostics.md", workflow, StringComparison.Ordinal);
         Assert.Contains("Test-result and slow-test diagnostics were truncated in this summary", workflow, StringComparison.Ordinal);
-        Assert.Contains("Download the \\`test-result-diagnostics\\` artifact for the complete report.", workflow, StringComparison.Ordinal);
+        Assert.Contains("Download the \\`coverage-collection-diagnostics\\` artifact for the complete report.", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("render-junit-test-summary.py", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("TEST_RESULT_SUMMARY", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("coverage run \\", workflow, StringComparison.Ordinal);
@@ -174,8 +174,23 @@ public sealed class CoverageSolutionScriptTests
             ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("files")]).Value);
         Assert.Equal("true", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("disable_search")]).Value);
 
-        var testResults = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+        var collection = (YamlMappingNode)jobs.Children[new YamlScalarNode("coverage-collection")];
+        var collectionSteps = (YamlSequenceNode)collection.Children[new YamlScalarNode("steps")];
+        var collectionEnvironment = (YamlMappingNode)collection.Children[new YamlScalarNode("env")];
+        Assert.Equal("${{ secrets.CODECOV_TOKEN != '' }}", ((YamlScalarNode)collectionEnvironment.Children[new YamlScalarNode("CODECOV_TOKEN_PRESENT")]).Value);
+        var testResults = Assert.Single(collectionSteps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload test results to Codecov");
+        Assert.DoesNotContain(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload test results to Codecov");
+        var testResultsWith = (YamlMappingNode)testResults.Children[new YamlScalarNode("with")];
+        Assert.Equal("${{ runner.temp }}/solution-coverage-collection/coverage/junit-*.xml", ((YamlScalarNode)testResultsWith.Children[new YamlScalarNode("files")]).Value);
+        Assert.Equal("test_results", ((YamlScalarNode)testResultsWith.Children[new YamlScalarNode("report_type")]).Value);
+        var summary = Assert.Single(collectionSteps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Publish bounded test-result and slow-test diagnostics summary");
+        Assert.Equal("${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}",
+            ((YamlScalarNode)summary.Children[new YamlScalarNode("if")]).Value);
+        Assert.DoesNotContain(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Publish bounded test-result and slow-test diagnostics summary");
         Assert.Equal(
             "${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && env.CODECOV_TOKEN_PRESENT == 'true' }}",
             ((YamlScalarNode)testResults.Children[new YamlScalarNode("if")]).Value);

@@ -78,7 +78,7 @@ internal static class RepositoryEvidenceWorkflow
             {
                 VerifyLocalSourceAsync = verifyLocalSourceAsync,
                 CoverageCollectionDirectory = options.GetValueOrDefault("--coverage-collection"),
-                CoverageScheduleTimingsPath = options.GetValueOrDefault("--coverage-schedule-timings"),
+                CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
             };
         }
 

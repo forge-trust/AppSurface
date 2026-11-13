@@ -74,16 +74,17 @@ public sealed class NativeEvidenceProgramTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task CollectCoverage_DispatchesExplicitInputsWithoutClosingAcceptance(bool history)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CollectCoverage_DispatchesExplicitInputsWithoutClosingAcceptance(bool history, bool relativeHistory)
     {
         using var fixture = new NativeCaptureFixture();
         var output = Path.Join(fixture.Root, "collection");
         var timings = Path.Join(fixture.Root, "prior-timings.json");
         var args = new List<string> { "--operation", "collect-coverage", "--repository", fixture.Repository,
             "--dotnet", ResolveDotnetHost(), "--output", output };
-        if (history) args.AddRange(["--coverage-schedule-timings", timings]);
+        if (history) args.AddRange(["--coverage-schedule-timings", relativeHistory ? Path.GetRelativePath(Directory.GetCurrentDirectory(), timings) : timings]);
         RepositoryCheckSettings? observed = null;
         using var cancellation = new CancellationTokenSource();
 

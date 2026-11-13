@@ -131,7 +131,9 @@ packed Durable consumers. Docs export starts independently. The existing `build`
 packed consumers and every selected native lane before producing and verifying the final coverage manifest.
 The stable `Coverage evidence gate` rejects failed, cancelled or skipped required collection/build/consumer
 jobs; an unselected native matrix may remain skipped. Pages deployment waits for docs export, `build` and
-that coverage gate. Existing job IDs and required check names remain available.
+that coverage gate. Existing job IDs and required check names remain available. Collection also owns the bounded slow-test
+summary and Codecov JUnit upload, so failed tests still publish diagnostics when final acceptance is skipped.
+The full report remains in `coverage-collection-diagnostics`; coverage-report upload stays behind final acceptance.
 
 The internal `--operation collect-coverage --repository <checkout> --dotnet <absolute-host>
 --output <fresh-directory>` command runs the same Release collector, complete solution inventory,
@@ -144,8 +146,11 @@ acceptance manifest or close any obligation. It requires `GITHUB_REPOSITORY`, `G
 `run --scope coverage --coverage-collection <downloaded-directory>` imports that collection into fresh
 producer output. The schema-v1 receipt binds source commit/tree, SDK, Release configuration, repository,
 run and attempt, plus SHA-256 hashes of `coverage.cobertura.xml` and `timings.json`. Import rejects linked
-paths, overlapping or occupied output, changed identities and altered report/timing bytes. The producer
-revalidates the exact solution inventory, unchanged current source and all normal aggregate, applicable
+paths, overlapping or occupied output, missing inputs, directories in place of files, malformed receipts,
+changed identities and altered report/timing bytes. Overlap checks reject case aliases conservatively on
+every host, including case-sensitive filesystems. Missing-file and JSON decoding errors raise
+`InvalidDataException` with the original I/O or JSON exception for diagnostics. The producer revalidates
+the exact solution inventory, unchanged current source and all normal aggregate, applicable
 patch and selected native fan-in gates. The workflow downloads `solution-coverage-collection-<attempt>`
 from its current run only. Rerun the whole workflow when evidence must be regenerated: earlier attempts,
 caches and timing history cannot serve as coverage proof. This receipt checks consistency between trusted
@@ -158,7 +163,9 @@ not produce a collection receipt or acceptance evidence.
 Collection uses the CLI's [longest-first schedule](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)
 for non-exclusive projects. Exclusive suites still run first in stable input order. Optional
 `--coverage-schedule-timings <timings.json>` forwards duration hints to `coverage run --schedule-timings`;
-without history, unknown projects keep input order. The
+both `run` and `collect-coverage` resolve relative hint paths against the caller's current directory before
+starting collection in the selected repository. Use an absolute path when invoking from automation.
+Without history, unknown projects keep input order. The
 [history helper](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/coverage-schedule-history.py) reads the newest available
 `coverage-schedule-timings` artifact from successful `build.yml` push runs on the default branch of this repository.
 Fork PRs, other events and mismatched head repositories are never eligible. Only main push

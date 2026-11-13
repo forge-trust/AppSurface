@@ -56,7 +56,7 @@ def _decode_json(data: bytes) -> object:
             object_pairs_hook=_reject_duplicate_keys,
             parse_constant=_reject_non_json_constant,
         )
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+    except (ValueError, RecursionError) as exc:
         raise InvalidData("invalid JSON") from exc
 
 
@@ -292,6 +292,7 @@ def _write_new_file(path: Path, content: bytes) -> None:
         try:
             path.unlink()
         except OSError:
+            # Best-effort cleanup must preserve the original write failure.
             pass
         raise
 

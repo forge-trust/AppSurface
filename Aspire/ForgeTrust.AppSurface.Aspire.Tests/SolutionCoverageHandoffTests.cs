@@ -63,13 +63,91 @@ public sealed class SolutionCoverageHandoffTests
     [InlineData("empty")]
     [InlineData("oversized")]
     [InlineData("null")]
+    [InlineData("json-syntax")]
+    [InlineData("json-type")]
     public async Task ImportRejectsInvalidReceipt(string defect)
     {
         using var fixture = new Fixture();
         await fixture.WriteAsync();
-        await File.WriteAllTextAsync(fixture.Receipt, defect switch { "empty" => "", "null" => "null", _ => new string(' ', 16385) });
+        await File.WriteAllTextAsync(fixture.Receipt, defect switch
+        {
+            "empty" => "",
+            "null" => "null",
+            "json-syntax" => "{",
+            "json-type" => "{\"SchemaVersion\":\"invalid\"}",
+            _ => new string(' ', 16385),
+        });
 
         await Assert.ThrowsAsync<InvalidDataException>(fixture.ImportAsync);
+    }
+
+    [Theory]
+    [InlineData("collection")]
+    [InlineData("coverage")]
+    [InlineData("collection-receipt.json")]
+    [InlineData("coverage.cobertura.xml")]
+    [InlineData("timings.json")]
+    public async Task ImportRejectsMissingInputsAsInvalidData(string missing)
+    {
+        using var fixture = new Fixture();
+        await fixture.WriteAsync();
+        var collection = fixture.Root;
+        if (missing == "collection") collection = Path.Join(fixture.Root, "absent", "collection");
+        else if (missing == "coverage") Directory.Delete(fixture.Coverage, recursive: true);
+        else File.Delete(Path.Join(fixture.Coverage, missing));
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => SolutionCoverageHandoff.ImportAsync(
+            collection, fixture.Destination, fixture.Identity, fixture.Run, CancellationToken.None));
+
+        Assert.IsAssignableFrom<IOException>(exception.InnerException);
+        if (missing is "collection" or "coverage" or "collection-receipt.json")
+            Assert.False(Directory.Exists(fixture.Destination));
+    }
+
+    [Theory]
+    [InlineData("collection-receipt.json")]
+    [InlineData("coverage.cobertura.xml")]
+    [InlineData("timings.json")]
+    public async Task ImportRejectsDirectoriesInPlaceOfFiles(string artifact)
+    {
+        using var fixture = new Fixture();
+        await fixture.WriteAsync();
+        var path = Path.Join(fixture.Coverage, artifact);
+        File.Delete(path);
+        Directory.CreateDirectory(path);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(fixture.ImportAsync);
+
+        Assert.Contains("must be a file", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("coverage.cobertura.xml")]
+    [InlineData("timings.json")]
+    public async Task WriteRejectsDirectoriesWithoutPublishingReceipt(string artifact)
+    {
+        using var fixture = new Fixture();
+        var path = Path.Join(fixture.Coverage, artifact);
+        File.Delete(path);
+        Directory.CreateDirectory(path);
+
+        await Assert.ThrowsAsync<InvalidDataException>(fixture.WriteAsync);
+
+        Assert.False(File.Exists(fixture.Receipt));
+    }
+
+    [Theory]
+    [InlineData("coverage.cobertura.xml")]
+    [InlineData("timings.json")]
+    public async Task WriteRejectsMissingInputsWithoutPublishingReceipt(string missing)
+    {
+        using var fixture = new Fixture();
+        File.Delete(Path.Join(fixture.Coverage, missing));
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(fixture.WriteAsync);
+
+        Assert.IsAssignableFrom<IOException>(exception.InnerException);
+        Assert.False(File.Exists(fixture.Receipt));
     }
 
     [Fact]
@@ -87,6 +165,21 @@ public sealed class SolutionCoverageHandoffTests
         await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ImportAsync(fixture.Root));
 
         Assert.Equal("preserve", await File.ReadAllTextAsync(sentinel));
+    }
+
+    [Theory]
+    [InlineData("COVERAGE")]
+    [InlineData("COVERAGE/nested")]
+    public async Task ImportRejectsCaseAliasedDestinationsBeforeCopying(string relativeDestination)
+    {
+        using var fixture = new Fixture();
+        await fixture.WriteAsync();
+        var destination = Path.Join(fixture.Root, relativeDestination.Replace('/', Path.DirectorySeparatorChar));
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ImportAsync(destination));
+
+        Assert.Contains("disjoint fresh output", exception.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Join(fixture.Coverage, "nested")));
     }
 
     [Theory]

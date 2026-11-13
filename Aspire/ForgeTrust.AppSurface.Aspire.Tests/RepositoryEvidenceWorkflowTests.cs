@@ -255,8 +255,10 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             PlanOptions(paths, narrowedPolicy, NewPath("narrowed-conservative-plan")), CancellationToken.None));
     }
 
-    [Fact]
-    public async Task NoEvidencePlanRunAndVerify_SucceedWithoutPackageOrDotnet_AndRejectDrift()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NoEvidencePlanRunAndVerify_SucceedWithoutPackageOrDotnet_AndRejectDrift(bool collectionOptions)
     {
         var paths = await WritePathsAsync([new NormalizedDiffPath("README.md")]);
         var planned = await PlanAsync(paths, CheckedInPolicyPath);
@@ -266,6 +268,11 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
         var runOptions = WorkflowOptions("run", paths, CheckedInPolicyPath,
             ("--plan", Path.Join(planned.Output, "evidence-plan.json")),
             ("--output", runOutput));
+        if (collectionOptions)
+        {
+            runOptions["--coverage-collection"] = NewPath("unused-collection");
+            runOptions["--coverage-schedule-timings"] = NewPath("unused-timings.json");
+        }
         Assert.Equal(0, await RepositoryEvidenceWorkflow.RunAsync(runOptions, CancellationToken.None));
         var manifestPath = Path.Join(runOutput, "evidence-manifest.json");
         var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));

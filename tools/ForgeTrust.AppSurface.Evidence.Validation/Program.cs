@@ -178,7 +178,7 @@ internal static class Program
         if (options.Keys.Except(allowed, StringComparer.Ordinal).Any()) throw new ArgumentException("Unsupported coverage collection option.");
         var settings = new RepositoryCheckSettings(Path.GetFullPath(Required(options, "--repository")),
             Required(options, "--dotnet"), Path.GetFullPath(Required(options, "--output")))
-        { CoverageScheduleTimingsPath = options.GetValueOrDefault("--coverage-schedule-timings") };
+        { CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null };
         if (collectCoverage is null) await new SolutionCoverageProducer(settings).CollectAsync(cancellationToken);
         else await collectCoverage(settings, cancellationToken);
         Console.WriteLine("Solution coverage collected; final gate verification is still required.");

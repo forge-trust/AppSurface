@@ -11,10 +11,10 @@ import os
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 import warnings
 import zipfile
 from pathlib import Path
-from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -155,7 +155,7 @@ class CoverageScheduleHistoryTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, code, stdout=body, stderr=b"simulated")
 
         stderr = io.StringIO()
-        with mock.patch.object(SCHEDULE.subprocess, "run", side_effect=fake_run), mock.patch.dict(
+        with unittest.mock.patch.object(SCHEDULE.subprocess, "run", side_effect=fake_run), unittest.mock.patch.dict(
             os.environ, self.env
         ), contextlib.redirect_stderr(stderr):
             result = SCHEDULE.main(["restore", "--output", str(output)])
@@ -206,6 +206,7 @@ class CoverageScheduleHistoryTests(unittest.TestCase):
         for response, expected_warning in [
             (self.list_response([]), "no successful completed build runs"),
             ((47, b"authentication failed"), "GitHub workflow history is unavailable"),
+            ((0, b'{"workflow_runs":' + b"1" * 5000 + b"}"), "GitHub workflow history is unavailable"),
         ]:
             with self.subTest(response=response[0]):
                 output = self.root / f"missing-{response[0]}" / "timings.json"
@@ -246,7 +247,7 @@ class CoverageScheduleHistoryTests(unittest.TestCase):
             run_record(88, head_repository="another-owner/AppSurface"),
             run_record(1, head_repository="FORGE-TRUST/APPSURFACE"),
         ]
-        with mock.patch.object(SCHEDULE, "_api_json", return_value={"workflow_runs": records}) as api_json:
+        with unittest.mock.patch.object(SCHEDULE, "_api_json", return_value={"workflow_runs": records}) as api_json:
             runs = SCHEDULE._workflow_runs(self.repository, self.branch, deadline=123.0)
 
         self.assertEqual(api_json.call_args.args[0], self.runs_endpoint)
@@ -267,7 +268,7 @@ class CoverageScheduleHistoryTests(unittest.TestCase):
             null_repository_name,
             eligible,
         ]
-        with mock.patch.object(SCHEDULE, "_api_json", return_value={"workflow_runs": records}):
+        with unittest.mock.patch.object(SCHEDULE, "_api_json", return_value={"workflow_runs": records}):
             runs = SCHEDULE._workflow_runs(self.repository, self.branch, deadline=123.0)
 
         self.assertEqual([run["id"] for run in runs], [1])
@@ -291,6 +292,8 @@ class CoverageScheduleHistoryTests(unittest.TestCase):
         )
         cases = [
             ("invalid-json", make_zip([("timings.json", b"not JSON")])),
+            ("oversized-integer", make_zip([("timings.json",
+                b'{"projects":[{"project":"a.csproj","seconds":' + b"1" * 5000 + b"}]}\n")])),
             ("oversize-entry", make_zip([("timings.json", b" " * (SCHEDULE.MAX_JSON_BYTES + 1))])),
             ("duplicate-zip-entry", duplicate_entries),
             ("duplicate-project", make_zip([("timings.json", json.dumps({"projects": [
@@ -426,9 +429,9 @@ class CoverageScheduleHistoryTests(unittest.TestCase):
 
         output = self.root / "deadline" / "timings.json"
         stderr = io.StringIO()
-        with mock.patch.object(SCHEDULE.subprocess, "run", side_effect=fake_run), mock.patch.object(
+        with unittest.mock.patch.object(SCHEDULE.subprocess, "run", side_effect=fake_run), unittest.mock.patch.object(
             SCHEDULE.time, "monotonic", side_effect=lambda: clock[0]
-        ), mock.patch.dict(os.environ, self.env), contextlib.redirect_stderr(stderr):
+        ), unittest.mock.patch.dict(os.environ, self.env), contextlib.redirect_stderr(stderr):
             result = SCHEDULE.main(["restore", "--output", str(output)])
         self.assertEqual(result, 0)
         self.assertIn("warning: GitHub artifact download is unavailable", stderr.getvalue())
@@ -464,7 +467,7 @@ class CoverageScheduleHistoryTests(unittest.TestCase):
         output.write_text("keep me")
         calls: list[str] = []
         stderr = io.StringIO()
-        with mock.patch.object(SCHEDULE.subprocess, "run", side_effect=lambda *args, **kwargs: calls.append("called")), mock.patch.dict(
+        with unittest.mock.patch.object(SCHEDULE.subprocess, "run", side_effect=lambda *args, **kwargs: calls.append("called")), unittest.mock.patch.dict(
             os.environ, self.env
         ), contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
             SCHEDULE.main(["restore", "--output", str(output)])
@@ -474,12 +477,12 @@ class CoverageScheduleHistoryTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_required_configuration_and_absolute_output_are_fatal(self) -> None:
-        with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": self.repository}, clear=True), contextlib.redirect_stderr(
+        with unittest.mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": self.repository}, clear=True), contextlib.redirect_stderr(
             io.StringIO()
         ), self.assertRaises(SystemExit) as missing:
             SCHEDULE.main(["restore", "--output", str(self.root / "output.json")])
         self.assertEqual(missing.exception.code, 2)
-        with mock.patch.dict(os.environ, self.env), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(
+        with unittest.mock.patch.dict(os.environ, self.env), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(
             SystemExit
         ) as relative:
             SCHEDULE.main(["restore", "--output", "relative.json"])

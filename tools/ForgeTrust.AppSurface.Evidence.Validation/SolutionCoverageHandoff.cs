@@ -36,6 +36,7 @@ internal static class SolutionCoverageHandoff
     }
 
     /// <summary>Publishes a receipt only after successful complete collection and an unchanged-source check.</summary>
+    /// <exception cref="InvalidDataException">Required collection inputs are missing, empty or linked.</exception>
     internal static async Task WriteAsync(string coverage, SolutionCoverageIdentity identity,
         IReadOnlyDictionary<string, string?> run, CancellationToken cancellationToken)
     {
@@ -52,6 +53,7 @@ internal static class SolutionCoverageHandoff
     /// Copies an unlinked collection into fresh producer output, matching source, SDK, configuration, run, attempt
     /// and the report/timings digests. The producer must independently verify inventory and all coverage gates afterward.
     /// </summary>
+    /// <exception cref="InvalidDataException">Collection inputs are missing, malformed, linked or inconsistent.</exception>
     internal static async Task ImportAsync(string collection, string coverage, SolutionCoverageIdentity identity,
         IReadOnlyDictionary<string, string?> run, CancellationToken cancellationToken)
     {
@@ -61,17 +63,29 @@ internal static class SolutionCoverageHandoff
         RejectLinks(input);
         var receiptPath = Path.Join(input, ReceiptName);
         RejectLinks(receiptPath);
+        if (Directory.Exists(receiptPath))
+            throw new InvalidDataException("Coverage collection receipt must be a file.");
         if (new FileInfo(receiptPath).Length is <= 0 or > 16384)
             throw new InvalidDataException("Coverage collection receipt is missing or oversized.");
-        var receipt = JsonSerializer.Deserialize<Receipt>(await File.ReadAllBytesAsync(receiptPath, cancellationToken).ConfigureAwait(false))
-            ?? throw new InvalidDataException("Coverage collection receipt is invalid.");
+        Receipt receipt;
+        try
+        {
+            receipt = JsonSerializer.Deserialize<Receipt>(await File.ReadAllBytesAsync(receiptPath, cancellationToken).ConfigureAwait(false))
+                ?? throw new InvalidDataException("Coverage collection receipt is invalid.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Coverage collection receipt is invalid.", exception);
+        }
         if (receipt.SchemaVersion != 1 || receipt.Identity != identity || receipt.Configuration != "Release"
             || receipt.Run is null || receipt.Run.Count != RunKeys.Length
             || RunKeys.Any(key => !receipt.Run.TryGetValue(key, out var value) || value != run[key]))
             throw new InvalidDataException("Coverage collection does not match this source, SDK or workflow attempt.");
         var destination = Path.GetFullPath(coverage);
-        if (destination == input || destination.StartsWith(input + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-            || input.StartsWith(destination + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+        // Reject case aliases conservatively even on case-sensitive hosts; artifact output never needs them.
+        if (destination.Equals(input, StringComparison.OrdinalIgnoreCase)
+            || destination.StartsWith(input + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || input.StartsWith(destination + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
             || (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any()))
             throw new InvalidDataException("Coverage collection requires disjoint fresh output.");
         CopyDirectory(input, destination, cancellationToken);
@@ -97,14 +111,23 @@ internal static class SolutionCoverageHandoff
 
     private static void RejectLinks(string path)
     {
-        for (var current = Path.GetFullPath(path); current is not null; current = Path.GetDirectoryName(current))
-            if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
-                throw new InvalidDataException("Coverage collection paths cannot contain links.");
+        try
+        {
+            for (var current = Path.GetFullPath(path); current is not null; current = Path.GetDirectoryName(current))
+                if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+                    throw new InvalidDataException("Coverage collection paths cannot contain links.");
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new InvalidDataException("Coverage collection input is missing.", exception);
+        }
     }
 
     private static async Task<string> DigestAsync(string path, CancellationToken cancellationToken)
     {
         RejectLinks(path);
+        if (Directory.Exists(path))
+            throw new InvalidDataException("Coverage collection input must be a file.");
         await using var input = File.OpenRead(path);
         if (input.Length == 0) throw new InvalidDataException("Coverage collection input is empty.");
         return Convert.ToHexStringLower(await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false));
