@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Testing;
 using YamlDotNet.RepresentationModel;
@@ -35,6 +36,41 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.False(prepare.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
         if (workflow == "package-gate.yml")
             Assert.Equal("${{ steps.plan.outputs.requires_package_checks == 'true' }}", prepare["if"].AsScalar());
+    }
+
+    [Fact]
+    public void EveryDotnetWorkerInstallsThePinnedSdkOutsideThePreinstalledToolchain()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        using var global = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(repository, "global.json")));
+        var sdk = global.RootElement.GetProperty("sdk");
+        Assert.Equal("10.0.402", sdk.GetProperty("version").GetString());
+        Assert.Equal("disable", sdk.GetProperty("rollForward").GetString());
+        Assert.False(sdk.GetProperty("allowPrerelease").GetBoolean());
+
+        var setups = 0;
+        foreach (var path in Directory.EnumerateFiles(TestPathUtils.PathUnder(repository, ".github", "workflows"), "*.yml"))
+        {
+            var workflow = LoadWorkflow(repository, Path.GetFileName(path));
+            foreach (var job in workflow["jobs"].AsMapping().Children.Values.OfType<YamlMappingNode>())
+            {
+                if (!job.Children.TryGetValue(new YamlScalarNode("steps"), out var steps))
+                    continue;
+                foreach (var step in steps.AsSequence().Children.Cast<YamlMappingNode>())
+                {
+                    if (!step.Children.TryGetValue(new YamlScalarNode("uses"), out var uses) ||
+                        !uses.AsScalar().StartsWith("actions/setup-dotnet@", StringComparison.Ordinal))
+                        continue;
+                    setups++;
+                    var inputs = step["with"].AsMapping();
+                    Assert.Equal("${{ runner.temp }}/appsurface-dotnet", step["env"].AsMapping()["DOTNET_INSTALL_DIR"].AsScalar());
+                    Assert.Contains(inputs["dotnet-version"].AsScalar().Trim(), new[] { "10.0.402", "${{ env.COVERAGE_SDK_VERSION }}" });
+                    if (inputs["dotnet-version"].AsScalar().Trim() == "${{ env.COVERAGE_SDK_VERSION }}")
+                        Assert.Equal("10.0.402", workflow["env"].AsMapping()["COVERAGE_SDK_VERSION"].AsScalar());
+                }
+            }
+        }
+        Assert.True(setups > 0);
     }
 
     [Fact]

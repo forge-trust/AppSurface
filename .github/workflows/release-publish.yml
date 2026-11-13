@@ -54,9 +54,11 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: |
-            10.0.x
+            10.0.402
 
       - name: Normalize release base ref
         id: base
@@ -126,9 +128,11 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: |
-            10.0.x
+            10.0.402
 
       - name: Build AppSurface Docs exporter
         run: dotnet build ForgeTrust.AppSurface.slnx -c Release

@@ -37,8 +37,10 @@ jobs:
           persist-credentials: false
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.402
       - name: Run source provider proof
         run: dotnet run --project examples/config-key-contract --configuration Release
       - name: Run framework-neutral conformance package tests
@@ -75,6 +77,8 @@ jobs:
           persist-credentials: false
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
       - name: Select exact coverage SDK
@@ -142,6 +146,8 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
@@ -230,8 +236,10 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.402
           cache: true
           cache-dependency-path: |
             Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/packages.lock.json
@@ -472,8 +480,10 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.402
           cache: true
           cache-dependency-path: |
             Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/packages.lock.json
@@ -503,6 +513,8 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
@@ -546,6 +558,8 @@ jobs:
       - name: Setup .NET SDK
         id: setup-dotnet
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
@@ -739,6 +753,8 @@ jobs:
       - name: Setup .NET SDK
         id: setup-dotnet
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
@@ -888,9 +904,11 @@ jobs:
       - name: Setup .NET SDK
         id: setup-dotnet
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: |
-            10.0.x
+            10.0.402
           cache: true
           cache-dependency-path: |
             **/packages.lock.json

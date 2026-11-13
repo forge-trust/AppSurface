@@ -211,7 +211,7 @@ aspire run --non-interactive --apphost examples/product-readiness-lab-apphost/Pr
 
 The lab emits a readiness report with `proven-locally`, `host-owned`, `deferred`, `unsafe-to-copy`, and `blocked` rows. Its in-process host proof shows where `IDurableTaskFlowRunner<TContext>` and `IDurableTaskFlowClient<TContext>` fit, while keeping Durable Task worker/client hosting and storage provider setup explicitly host-owned.
 
-For contributor verification, build the solution:
+For contributor verification, install the **10.0.402** SDK pinned by [`global.json`](./global.json), then build the solution. The [contributor setup guide](./CONTRIBUTING.md#local-setup) explains SDK selection and the matching isolated CI toolchain.
 
 ```bash
 dotnet build

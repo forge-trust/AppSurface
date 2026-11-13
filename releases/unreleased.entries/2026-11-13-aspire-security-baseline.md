@@ -10,3 +10,5 @@ The [Durable worker template](../../Durable/ForgeTrust.AppSurface.Durable.Templa
 The [historical compatibility consumers](../../Durable/compatibility/README.md) retain their exact published dependency graph through local central pins, so current dependency upgrades do not change the old-version proof. Their locked restore, audit and compatibility assertions remain enabled.
 
 Full-solution CI workers prepare the SDK-paired CLI bundle before parallel builds, with visible setup diagnostics and unchanged build, formatting, native-readiness and coverage requirements.
+
+The [contributor and CI toolchain](../../CONTRIBUTING.md#local-setup) now explicitly selects SDK **10.0.402** with roll-forward disabled. CI installs the pin in a job-owned SDK directory so preinstalled newer major SDKs cannot change repository builds or isolated consumer proofs. Coverage gates and required checks are unchanged.
