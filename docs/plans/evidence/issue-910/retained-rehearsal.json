@@ -1,0 +1,898 @@
+{
+  "schema": "appsurface-tailwind-acceptance-card-evidence-v1",
+  "purpose": "Sanitized planning evidence from an existing protected nonpublishing rehearsal; not a workflow-emitted v1 receipt.",
+  "maintainer": {
+    "name": "Andrew Krock",
+    "githubLogin": "akrock",
+    "assignmentSource": "User explicitly requested: Complete the protected acceptance card from the retained rehearsal and name me as the responsible maintainer. Don't start implementation yet.",
+    "assignmentDate": "2026-11-10"
+  },
+  "protectedWorkflow": {
+    "repository": "forge-trust/AppSurface",
+    "commit": "10d375c6942fc650cc64f64e0748add77540d47c",
+    "path": ".github/workflows/package-artifacts.yml",
+    "blobSha": "db8ae90fb494c5d2c7f48b04fd01b07326c47e2a",
+    "url": "https://github.com/forge-trust/AppSurface/blob/10d375c6942fc650cc64f64e0748add77540d47c/.github/workflows/package-artifacts.yml",
+    "excerpts": [
+      {
+        "sourceLine": 28,
+        "text": "    timeout-minutes: 30"
+      },
+      {
+        "sourceLine": 29,
+        "text": "    outputs:"
+      },
+      {
+        "sourceLine": 30,
+        "text": "      producer_artifact_id: ${{ steps.upload-package-artifacts.outputs.artifact-id }}"
+      },
+      {
+        "sourceLine": 31,
+        "text": "      expected_subject_sha256: ${{ steps.validate-producer-binding.outputs.expected_subject_sha256 }}"
+      },
+      {
+        "sourceLine": 32,
+        "text": "    steps:"
+      },
+      {
+        "sourceLine": 67,
+        "text": "          PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number) }}"
+      },
+      {
+        "sourceLine": 68,
+        "text": "          SOURCE_COMMIT: ${{ github.sha }}"
+      },
+      {
+        "sourceLine": 69,
+        "text": "          REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}"
+      },
+      {
+        "sourceLine": 70,
+        "text": "        run: |"
+      },
+      {
+        "sourceLine": 71,
+        "text": "          set -euo pipefail"
+      },
+      {
+        "sourceLine": 72,
+        "text": "          dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode"
+      },
+      {
+        "sourceLine": 73,
+        "text": "          dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output \"$RUNNER_TEMP/package-index\" /p:SourceRevisionId=\"$SOURCE_COMMIT\""
+      },
+      {
+        "sourceLine": 74,
+        "text": "          args=(verify-packages --package-version \"$PACKAGE_VERSION\" \\"
+      },
+      {
+        "sourceLine": 75,
+        "text": "            --artifacts-output \"$RUNNER_TEMP/package-artifacts\" \\"
+      },
+      {
+        "sourceLine": 76,
+        "text": "            --artifact-manifest \"$RUNNER_TEMP/package-artifacts/package-artifact-manifest.json\" \\"
+      },
+      {
+        "sourceLine": 77,
+        "text": "            --report \"$RUNNER_TEMP/package-artifacts/package-validation-report.md\")"
+      },
+      {
+        "sourceLine": 78,
+        "text": "          if [[ \"$REHEARSAL\" == true ]]; then"
+      },
+      {
+        "sourceLine": 79,
+        "text": "            args+=(--repository-id \"$GITHUB_REPOSITORY_ID\" --producer-run-id \"$GITHUB_RUN_ID\" \\"
+      },
+      {
+        "sourceLine": 80,
+        "text": "              --producer-attempt \"$GITHUB_RUN_ATTEMPT\" --source-commit \"$SOURCE_COMMIT\")"
+      },
+      {
+        "sourceLine": 81,
+        "text": "          fi"
+      },
+      {
+        "sourceLine": 82,
+        "text": "          dotnet \"$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll\" \"${args[@]}\""
+      },
+      {
+        "sourceLine": 83,
+        "text": "          if [[ \"$REHEARSAL\" == true ]]; then"
+      },
+      {
+        "sourceLine": 84,
+        "text": "            subject=\"$RUNNER_TEMP/package-artifacts/tailwind-proof-subject.json\""
+      },
+      {
+        "sourceLine": 85,
+        "text": "            test -f \"$subject\""
+      },
+      {
+        "sourceLine": 86,
+        "text": "            echo \"expected_subject_sha256=$(sha256sum \"$subject\" | awk '{print $1}')\" >> \"$GITHUB_OUTPUT\""
+      },
+      {
+        "sourceLine": 87,
+        "text": "          fi"
+      },
+      {
+        "sourceLine": 88,
+        "text": ""
+      },
+      {
+        "sourceLine": 89,
+        "text": "      - name: Upload package validation diagnostics"
+      },
+      {
+        "sourceLine": 90,
+        "text": "        if: ${{ always() }}"
+      },
+      {
+        "sourceLine": 91,
+        "text": "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+      },
+      {
+        "sourceLine": 92,
+        "text": "        with:"
+      },
+      {
+        "sourceLine": 112,
+        "text": "      - name: Upload package artifacts"
+      },
+      {
+        "sourceLine": 113,
+        "text": "        id: upload-package-artifacts"
+      },
+      {
+        "sourceLine": 114,
+        "text": "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+      },
+      {
+        "sourceLine": 115,
+        "text": "        with:"
+      },
+      {
+        "sourceLine": 116,
+        "text": "          name: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' && format('appsurface-package-artifacts-{0}-{1}', github.run_id, github.run_attempt) || format('appsurface-package-artifacts-{0}-{1}', github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number), github.run_attempt) }}"
+      },
+      {
+        "sourceLine": 117,
+        "text": "          path: ${{ runner.temp }}/package-artifacts"
+      },
+      {
+        "sourceLine": 118,
+        "text": "          if-no-files-found: error"
+      },
+      {
+        "sourceLine": 119,
+        "text": "          retention-days: ${{ github.retention_days }}"
+      },
+      {
+        "sourceLine": 120,
+        "text": ""
+      },
+      {
+        "sourceLine": 121,
+        "text": "      - name: Download rehearsal producer by exact artifact ID"
+      },
+      {
+        "sourceLine": 122,
+        "text": "        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}"
+      },
+      {
+        "sourceLine": 123,
+        "text": "        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"
+      },
+      {
+        "sourceLine": 124,
+        "text": "        with:"
+      },
+      {
+        "sourceLine": 125,
+        "text": "          artifact-ids: ${{ steps.upload-package-artifacts.outputs.artifact-id }}"
+      },
+      {
+        "sourceLine": 126,
+        "text": "          path: ${{ runner.temp }}/resolved-package-artifacts"
+      },
+      {
+        "sourceLine": 127,
+        "text": ""
+      },
+      {
+        "sourceLine": 128,
+        "text": "      - name: Revalidate frozen producer bundle with typed verifier"
+      },
+      {
+        "sourceLine": 129,
+        "text": "        id: validate-producer-binding"
+      },
+      {
+        "sourceLine": 130,
+        "text": "        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}"
+      },
+      {
+        "sourceLine": 131,
+        "text": "        env:"
+      },
+      {
+        "sourceLine": 132,
+        "text": "          SOURCE_COMMIT: ${{ github.sha }}"
+      },
+      {
+        "sourceLine": 133,
+        "text": "          PRODUCER_ATTEMPT: ${{ github.run_attempt }}"
+      },
+      {
+        "sourceLine": 134,
+        "text": "          PRODUCER_ID: ${{ steps.upload-package-artifacts.outputs.artifact-id }}"
+      },
+      {
+        "sourceLine": 135,
+        "text": "          EXPECTED_SUBJECT_SHA256: ${{ steps.producer-binding.outputs.expected_subject_sha256 }}"
+      },
+      {
+        "sourceLine": 136,
+        "text": "          REPOSITORY_ID: ${{ github.repository_id }}"
+      },
+      {
+        "sourceLine": 137,
+        "text": "          PRODUCER_RUN_ID: ${{ github.run_id }}"
+      },
+      {
+        "sourceLine": 138,
+        "text": "        shell: bash"
+      },
+      {
+        "sourceLine": 139,
+        "text": "        run: |"
+      },
+      {
+        "sourceLine": 140,
+        "text": "          set -euo pipefail"
+      },
+      {
+        "sourceLine": 141,
+        "text": "          binding=\"$RUNNER_TEMP/resolved-producer-binding.json\""
+      },
+      {
+        "sourceLine": 142,
+        "text": "          dotnet \"$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll\" verify-tailwind-evidence \\"
+      },
+      {
+        "sourceLine": 143,
+        "text": "            --repo-root \"$GITHUB_WORKSPACE\" --mode producer-binding \\"
+      },
+      {
+        "sourceLine": 144,
+        "text": "            --artifacts-input \"$RUNNER_TEMP/resolved-package-artifacts\" \\"
+      },
+      {
+        "sourceLine": 145,
+        "text": "            --artifact-manifest \"$RUNNER_TEMP/resolved-package-artifacts/package-artifact-manifest.json\" \\"
+      },
+      {
+        "sourceLine": 146,
+        "text": "            --producer-subject \"$RUNNER_TEMP/resolved-package-artifacts/tailwind-proof-subject.json\" \\"
+      },
+      {
+        "sourceLine": 147,
+        "text": "            --producer-artifact-id \"$PRODUCER_ID\" --expected-subject-sha256 \"$EXPECTED_SUBJECT_SHA256\" \\"
+      },
+      {
+        "sourceLine": 148,
+        "text": "            --repository-id \"$REPOSITORY_ID\" --producer-run-id \"$PRODUCER_RUN_ID\" \\"
+      },
+      {
+        "sourceLine": 149,
+        "text": "            --source-commit \"$SOURCE_COMMIT\" --report-directory \"$RUNNER_TEMP/revalidated-producer-report\" \\"
+      },
+      {
+        "sourceLine": 150,
+        "text": "            --resolved-binding-output \"$binding\""
+      },
+      {
+        "sourceLine": 151,
+        "text": "          jq -e --arg repository \"$REPOSITORY_ID\" --arg run \"$PRODUCER_RUN_ID\" \\"
+      },
+      {
+        "sourceLine": 152,
+        "text": "            --arg source \"$SOURCE_COMMIT\" --arg artifact \"$PRODUCER_ID\" --arg subject \"$EXPECTED_SUBJECT_SHA256\" \\"
+      },
+      {
+        "sourceLine": 153,
+        "text": "            '.schema == \"appsurface-tailwind-resolved-producer-binding-v1\" and"
+      },
+      {
+        "sourceLine": 154,
+        "text": "             .repositoryId == $repository and .producerRunId == $run and"
+      },
+      {
+        "sourceLine": 155,
+        "text": "             .sourceCommit == $source and .producerArtifactId == $artifact and"
+      },
+      {
+        "sourceLine": 156,
+        "text": "             .subjectSha256 == $subject and"
+      },
+      {
+        "sourceLine": 157,
+        "text": "             (.producerAttempt | type == \"string\" and test(\"^[1-9][0-9]*$\"))' \"$binding\" >/dev/null"
+      },
+      {
+        "sourceLine": 158,
+        "text": "          echo \"expected_subject_sha256=$(jq -r '.subjectSha256' \"$binding\")\" >> \"$GITHUB_OUTPUT\""
+      },
+      {
+        "sourceLine": 175,
+        "text": "  tailwind-publish-rehearsal:"
+      },
+      {
+        "sourceLine": 176,
+        "text": "    name: Nonpublishing aggregate and publisher replay rehearsal"
+      },
+      {
+        "sourceLine": 177,
+        "text": "    needs: [package-artifacts, tailwind-native-rehearsal]"
+      },
+      {
+        "sourceLine": 178,
+        "text": "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' && needs.tailwind-native-rehearsal.result == 'success' }}"
+      },
+      {
+        "sourceLine": 179,
+        "text": "    runs-on: ubuntu-latest"
+      },
+      {
+        "sourceLine": 180,
+        "text": "    timeout-minutes: 30"
+      },
+      {
+        "sourceLine": 181,
+        "text": "    permissions:"
+      },
+      {
+        "sourceLine": 182,
+        "text": "      actions: read"
+      },
+      {
+        "sourceLine": 183,
+        "text": "      contents: read"
+      },
+      {
+        "sourceLine": 184,
+        "text": "    env:"
+      },
+      {
+        "sourceLine": 185,
+        "text": "      SOURCE_COMMIT: ${{ github.sha }}"
+      },
+      {
+        "sourceLine": 186,
+        "text": "      PRODUCER_ARTIFACT_ID: ${{ needs.package-artifacts.outputs.producer_artifact_id }}"
+      },
+      {
+        "sourceLine": 187,
+        "text": "      EXPECTED_SUBJECT_SHA256: ${{ needs.package-artifacts.outputs.expected_subject_sha256 }}"
+      },
+      {
+        "sourceLine": 188,
+        "text": "      AGGREGATE_ARTIFACT_ID: ${{ needs.tailwind-native-rehearsal.outputs.aggregate_artifact_id }}"
+      },
+      {
+        "sourceLine": 189,
+        "text": "      EXPECTED_AGGREGATE_SHA256: ${{ needs.tailwind-native-rehearsal.outputs.aggregate_sha256 }}"
+      },
+      {
+        "sourceLine": 190,
+        "text": "      REPOSITORY_ID: ${{ github.repository_id }}"
+      },
+      {
+        "sourceLine": 191,
+        "text": "      PRODUCER_RUN_ID: ${{ github.run_id }}"
+      },
+      {
+        "sourceLine": 192,
+        "text": "      NATIVE_INVOCATION_ID: ${{ needs.tailwind-native-rehearsal.outputs.native_invocation_id }}"
+      },
+      {
+        "sourceLine": 193,
+        "text": "    steps:"
+      },
+      {
+        "sourceLine": 194,
+        "text": "      - name: Checkout triggering source commit"
+      },
+      {
+        "sourceLine": 195,
+        "text": "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
+      },
+      {
+        "sourceLine": 196,
+        "text": "        with:"
+      },
+      {
+        "sourceLine": 197,
+        "text": "          ref: ${{ env.SOURCE_COMMIT }}"
+      },
+      {
+        "sourceLine": 198,
+        "text": "          persist-credentials: false"
+      },
+      {
+        "sourceLine": 199,
+        "text": "      - name: Download frozen producer by exact ID"
+      },
+      {
+        "sourceLine": 200,
+        "text": "        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"
+      },
+      {
+        "sourceLine": 201,
+        "text": "        with:"
+      },
+      {
+        "sourceLine": 202,
+        "text": "          artifact-ids: ${{ env.PRODUCER_ARTIFACT_ID }}"
+      },
+      {
+        "sourceLine": 203,
+        "text": "          path: ${{ runner.temp }}/rehearsal-producer"
+      }
+    ]
+  },
+  "producer": {
+    "jobId": "109335915393",
+    "jobUrl": "https://github.com/forge-trust/AppSurface/actions/runs/36547070332/job/109335915393",
+    "logsEndpoint": "https://api.github.com/repos/forge-trust/AppSurface/actions/jobs/109335915393/logs",
+    "stepMap": [
+      {
+        "number": 7,
+        "id": "producer-binding",
+        "name": "Verify package artifacts"
+      },
+      {
+        "number": 8,
+        "name": "Upload package validation diagnostics"
+      },
+      {
+        "number": 9,
+        "id": "upload-package-artifacts",
+        "name": "Upload package artifacts"
+      },
+      {
+        "number": 10,
+        "name": "Download rehearsal producer by exact artifact ID"
+      },
+      {
+        "number": 11,
+        "id": "validate-producer-binding",
+        "name": "Revalidate frozen producer bundle with typed verifier"
+      }
+    ],
+    "logExcerpts": [
+      {
+        "sourceLine": 603,
+        "text": "2026-09-29T09:07:36.5473010Z   SOURCE_COMMIT: 10d375c6942fc650cc64f64e0748add77540d47c"
+      },
+      {
+        "sourceLine": 604,
+        "text": "2026-09-29T09:07:36.5473326Z   REHEARSAL: true"
+      },
+      {
+        "sourceLine": 655,
+        "text": "2026-09-29T09:12:48.0819385Z SHA256 digest of uploaded artifact is 0f7628804b87b38e868cd9ec4e78327738a7359db95dfb20e96bcd3ff6b22961"
+      },
+      {
+        "sourceLine": 657,
+        "text": "2026-09-29T09:12:48.5005913Z Artifact appsurface-package-validation-diagnostics-0.2.0-preview.11-1 successfully finalized. Artifact ID 11023690381"
+      },
+      {
+        "sourceLine": 658,
+        "text": "2026-09-29T09:12:48.5007248Z Artifact appsurface-package-validation-diagnostics-0.2.0-preview.11-1 has been successfully uploaded! Final size is 91675 bytes. Artifact ID is 11023690381"
+      },
+      {
+        "sourceLine": 660,
+        "text": "2026-09-29T09:12:48.5148538Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+      },
+      {
+        "sourceLine": 662,
+        "text": "2026-09-29T09:12:48.5149225Z   name: appsurface-package-artifacts-36547070332-1"
+      },
+      {
+        "sourceLine": 748,
+        "text": "2026-09-29T09:13:17.3751174Z Uploaded bytes 581350422"
+      },
+      {
+        "sourceLine": 750,
+        "text": "2026-09-29T09:13:17.4530104Z SHA256 digest of uploaded artifact is 27151d76524a22cd8126f5dc658295c16cf6d869930ccaf8a3f97d97e14be6fd"
+      },
+      {
+        "sourceLine": 752,
+        "text": "2026-09-29T09:13:17.8535149Z Artifact appsurface-package-artifacts-36547070332-1 successfully finalized. Artifact ID 11023576342"
+      },
+      {
+        "sourceLine": 753,
+        "text": "2026-09-29T09:13:17.8537327Z Artifact appsurface-package-artifacts-36547070332-1 has been successfully uploaded! Final size is 581350422 bytes. Artifact ID is 11023576342"
+      },
+      {
+        "sourceLine": 755,
+        "text": "2026-09-29T09:13:17.8785129Z ##[group]Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+      },
+      {
+        "sourceLine": 757,
+        "text": "2026-09-29T09:13:17.8785793Z   artifact-ids: 11023576342"
+      },
+      {
+        "sourceLine": 760,
+        "text": "2026-09-29T09:13:17.8786729Z   repository: forge-trust/AppSurface"
+      },
+      {
+        "sourceLine": 761,
+        "text": "2026-09-29T09:13:17.8787002Z   run-id: 36547070332"
+      },
+      {
+        "sourceLine": 763,
+        "text": "2026-09-29T09:13:17.8787491Z   digest-mismatch: error"
+      },
+      {
+        "sourceLine": 771,
+        "text": "2026-09-29T09:13:18.3042118Z - appsurface-package-artifacts-36547070332-1 (ID: 11023576342, Size: 581350422, Expected Digest: sha256:27151d76524a22cd8126f5dc658295c16cf6d869930ccaf8a3f97d97e14be6fd)"
+      },
+      {
+        "sourceLine": 776,
+        "text": "2026-09-29T09:14:08.4258739Z SHA256 digest of downloaded artifact is 27151d76524a22cd8126f5dc658295c16cf6d869930ccaf8a3f97d97e14be6fd"
+      },
+      {
+        "sourceLine": 777,
+        "text": "2026-09-29T09:14:08.4260112Z Artifact download completed successfully."
+      },
+      {
+        "sourceLine": 804,
+        "text": "2026-09-29T09:14:08.4570406Z   SOURCE_COMMIT: 10d375c6942fc650cc64f64e0748add77540d47c"
+      },
+      {
+        "sourceLine": 805,
+        "text": "2026-09-29T09:14:08.4570740Z   PRODUCER_ATTEMPT: 1"
+      },
+      {
+        "sourceLine": 806,
+        "text": "2026-09-29T09:14:08.4570978Z   PRODUCER_ID: 11023576342"
+      },
+      {
+        "sourceLine": 807,
+        "text": "2026-09-29T09:14:08.4571397Z   EXPECTED_SUBJECT_SHA256: 45a52636f54ea4e2e50713af73025bf4c38f1b4ef5c6e62d1bc312c47f954b01"
+      },
+      {
+        "sourceLine": 808,
+        "text": "2026-09-29T09:14:08.4571866Z   REPOSITORY_ID: 1035215851"
+      },
+      {
+        "sourceLine": 809,
+        "text": "2026-09-29T09:14:08.4572117Z   PRODUCER_RUN_ID: 36547070332"
+      },
+      {
+        "sourceLine": 811,
+        "text": "2026-09-29T09:14:08.6640769Z Validated frozen producer binding; report: [runner-local path omitted]"
+      }
+    ]
+  },
+  "consumer": {
+    "jobId": "109339841837",
+    "jobUrl": "https://github.com/forge-trust/AppSurface/actions/runs/36547070332/job/109339841837",
+    "logsEndpoint": "https://api.github.com/repos/forge-trust/AppSurface/actions/jobs/109339841837/logs",
+    "logExcerpts": [
+      {
+        "sourceLine": 54,
+        "text": "2026-09-29T09:18:10.8919387Z   SOURCE_COMMIT: 10d375c6942fc650cc64f64e0748add77540d47c"
+      },
+      {
+        "sourceLine": 55,
+        "text": "2026-09-29T09:18:10.8920906Z   PRODUCER_ARTIFACT_ID: 11023576342"
+      },
+      {
+        "sourceLine": 56,
+        "text": "2026-09-29T09:18:10.8922718Z   EXPECTED_SUBJECT_SHA256: 45a52636f54ea4e2e50713af73025bf4c38f1b4ef5c6e62d1bc312c47f954b01"
+      },
+      {
+        "sourceLine": 59,
+        "text": "2026-09-29T09:18:10.8928782Z   REPOSITORY_ID: 1035215851"
+      },
+      {
+        "sourceLine": 60,
+        "text": "2026-09-29T09:18:10.8929979Z   PRODUCER_RUN_ID: 36547070332"
+      },
+      {
+        "sourceLine": 196,
+        "text": "2026-09-29T09:18:14.0737119Z - appsurface-package-artifacts-36547070332-1 (ID: 11023576342, Size: 581350422, Expected Digest: sha256:27151d76524a22cd8126f5dc658295c16cf6d869930ccaf8a3f97d97e14be6fd)"
+      },
+      {
+        "sourceLine": 201,
+        "text": "2026-09-29T09:18:24.9728861Z SHA256 digest of downloaded artifact is 27151d76524a22cd8126f5dc658295c16cf6d869930ccaf8a3f97d97e14be6fd"
+      },
+      {
+        "sourceLine": 202,
+        "text": "2026-09-29T09:18:24.9729750Z Artifact download completed successfully."
+      },
+      {
+        "sourceLine": 421,
+        "text": "2026-09-29T09:19:39.9605568Z Validated uploaded Tailwind publication-start artifact 11024010360 and 49 prepared packages before credentials."
+      },
+      {
+        "sourceLine": 422,
+        "text": "2026-09-29T09:20:11.0183926Z Validated uploaded Tailwind publication-start artifact 11024010360 and 49 prepared packages before credentials."
+      }
+    ]
+  },
+  "sanitized": true,
+  "retainedFields": "Selected exact log lines and immutable workflow excerpts only. ANSI styling removed; runner-local report path omitted. Tokens, signed URLs, response headers, raw full logs, credentials and personal data beyond the requested maintainer identity are excluded.",
+  "apiSnapshots": {
+    "attempt": {
+      "fetchedAt": "2026-11-11T04:45:41.069810Z",
+      "endpoint": "https://api.github.com/repos/forge-trust/AppSurface/actions/runs/36547070332/attempts/1",
+      "data": {
+        "conclusion": "success",
+        "created_at": "2026-09-29T09:07:06Z",
+        "event": "workflow_dispatch",
+        "head_branch": "main",
+        "head_repository": {
+          "full_name": "forge-trust/AppSurface",
+          "id": 1035215851
+        },
+        "head_sha": "10d375c6942fc650cc64f64e0748add77540d47c",
+        "html_url": "https://github.com/forge-trust/AppSurface/actions/runs/36547070332",
+        "id": 36547070332,
+        "path": ".github/workflows/package-artifacts.yml",
+        "repository": {
+          "full_name": "forge-trust/AppSurface",
+          "id": 1035215851
+        },
+        "run_attempt": 1,
+        "status": "completed",
+        "updated_at": "2026-09-29T09:21:32Z"
+      }
+    },
+    "artifact": {
+      "fetchedAt": "2026-11-11T04:45:41.391120Z",
+      "endpoint": "https://api.github.com/repos/forge-trust/AppSurface/actions/artifacts/11023576342",
+      "data": {
+        "created_at": "2026-09-29T09:13:17Z",
+        "digest": "sha256:27151d76524a22cd8126f5dc658295c16cf6d869930ccaf8a3f97d97e14be6fd",
+        "expired": false,
+        "expires_at": "2026-12-28T09:07:08Z",
+        "id": 11023576342,
+        "name": "appsurface-package-artifacts-36547070332-1",
+        "size_in_bytes": 581350422,
+        "workflow_run": {
+          "head_branch": "main",
+          "head_repository_id": 1035215851,
+          "head_sha": "10d375c6942fc650cc64f64e0748add77540d47c",
+          "id": 36547070332,
+          "repository_id": 1035215851
+        }
+      }
+    },
+    "producer-job": {
+      "fetchedAt": "2026-11-11T04:45:41.817215Z",
+      "endpoint": "https://api.github.com/repos/forge-trust/AppSurface/actions/jobs/109335915393",
+      "data": {
+        "conclusion": "success",
+        "head_sha": "10d375c6942fc650cc64f64e0748add77540d47c",
+        "html_url": "https://github.com/forge-trust/AppSurface/actions/runs/36547070332/job/109335915393",
+        "id": 109335915393,
+        "name": "package-artifacts",
+        "run_attempt": 1,
+        "run_id": 36547070332,
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Checkout code",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Setup .NET SDK",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Setup pnpm",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Setup Node.js",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify web assets",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify package artifacts",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload package validation diagnostics",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload package artifacts",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Download rehearsal producer by exact artifact ID",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Revalidate frozen producer bundle with typed verifier",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Setup Node.js",
+            "number": 19,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Setup pnpm",
+            "number": 20,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Setup .NET SDK",
+            "number": 21,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Checkout code",
+            "number": 22,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 23,
+            "status": "completed"
+          }
+        ]
+      }
+    },
+    "consumer-job": {
+      "fetchedAt": "2026-11-11T04:45:42.193710Z",
+      "endpoint": "https://api.github.com/repos/forge-trust/AppSurface/actions/jobs/109339841837",
+      "data": {
+        "conclusion": "success",
+        "head_sha": "10d375c6942fc650cc64f64e0748add77540d47c",
+        "html_url": "https://github.com/forge-trust/AppSurface/actions/runs/36547070332/job/109339841837",
+        "id": 109339841837,
+        "name": "Nonpublishing aggregate and publisher replay rehearsal",
+        "run_attempt": 1,
+        "run_id": 36547070332,
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Checkout triggering source commit",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Download frozen producer by exact ID",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Download aggregate by exact ID",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Set up .NET SDK",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Restore verifier from locked dependencies",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build source-stamped verifier",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Validate frozen aggregate and prepare publication inputs without credentials",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload rehearsal publication-start receipt",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Download rehearsal publication-start by immutable ID",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Validate original receipt and credential-free replay",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Exercise recording publisher credential and push boundaries",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Set up .NET SDK",
+            "number": 23,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Checkout triggering source commit",
+            "number": 24,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 25,
+            "status": "completed"
+          }
+        ]
+      }
+    }
+  },
+  "collectedAt": "2026-11-11T04:45:42.193710Z"
+}

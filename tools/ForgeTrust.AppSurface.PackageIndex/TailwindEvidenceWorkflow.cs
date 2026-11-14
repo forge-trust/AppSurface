@@ -32,16 +32,32 @@ internal static class TailwindEvidenceWorkflow
     private const string DiagnosticSchema = "appsurface-tailwind-diagnostic-v1";
     private const string DiagnosticDocsUrl = "https://github.com/forge-trust/AppSurface/issues/798";
 
-    internal static async Task<TailwindProducerBinding> ValidateProducerBindingAsync(
+    internal static Task<TailwindProducerBinding> ValidateProducerBindingAsync(
         string repositoryRoot, string artifactsInputPath, string artifactManifestPath,
         TailwindCommandOptions options, CancellationToken cancellationToken)
+        => ValidateProducerBindingAsync(repositoryRoot, artifactsInputPath, artifactManifestPath,
+            options, cancellationToken, TailwindSourceIdentity.RequireAsync);
+
+    /// <summary>Validates the real subject, manifest and package bindings with an explicit source-identity boundary.</summary>
+    /// <param name="repositoryRoot">Exact source checkout; production uses the real source-stamp validator.</param>
+    /// <param name="artifactsInputPath">Verified, safely extracted producer bundle.</param>
+    /// <param name="artifactManifestPath">Manifest within that bundle.</param>
+    /// <param name="options">Protected expected producer identity and subject hash.</param>
+    /// <param name="cancellationToken">Cancellation covering all binding work.</param>
+    /// <param name="sourceIdentity">Source check; controlled fixtures may replace only this boundary, never content validation.</param>
+    /// <returns>The actual validated Tailwind subject and publication request.</returns>
+    internal static async Task<TailwindProducerBinding> ValidateProducerBindingAsync(
+        string repositoryRoot, string artifactsInputPath, string artifactManifestPath,
+        TailwindCommandOptions options, CancellationToken cancellationToken,
+        Func<string, string, CancellationToken, Task> sourceIdentity)
     {
+        ArgumentNullException.ThrowIfNull(sourceIdentity);
         var producerArtifactId = TailwindCommandOptions.Require(options.ProducerArtifactId, "--producer-artifact-id");
         var expectedSubjectSha256 = TailwindCommandOptions.Require(options.ExpectedSubjectSha256, "--expected-subject-sha256");
         var repositoryId = TailwindCommandOptions.Require(options.RepositoryId, "--repository-id");
         var producerRunId = TailwindCommandOptions.Require(options.ProducerRunId, "--producer-run-id");
         var sourceCommit = TailwindCommandOptions.Require(options.SourceCommit, "--source-commit");
-        await TailwindSourceIdentity.RequireAsync(repositoryRoot, sourceCommit, cancellationToken);
+        await sourceIdentity(repositoryRoot, sourceCommit, cancellationToken);
         var bundleRoot = Path.GetFullPath(artifactsInputPath);
         var subjectPath = TailwindProofSubjectService.ResolvePath(options.ProducerSubject, bundleRoot, TailwindProofSubjectService.FileName);
         var manifestPath = Path.GetFullPath(artifactManifestPath);

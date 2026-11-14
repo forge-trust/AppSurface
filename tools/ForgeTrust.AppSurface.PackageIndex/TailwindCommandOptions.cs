@@ -25,13 +25,19 @@ internal sealed record TailwindCommandOptions(
     string? ResolvedBindingOutput,
     string[] RemainingArguments)
 {
+    /// <summary>Gets the explicit owner/repository expected by artifact transport; never inferred from a receipt.</summary>
+    internal string? Repository { get; init; }
+
+    /// <summary>Gets the protected producer receipt path for artifact transport, resolved by its adapter.</summary>
+    internal string? ProducerReceipt { get; init; }
+
     private static readonly IReadOnlySet<string> Keys = new HashSet<string>(StringComparer.Ordinal)
     {
         "--mode", "--producer-subject", "--producer-artifact-id", "--expected-subject-sha256", "--repository-id",
         "--producer-run-id", "--producer-attempt", "--source-commit", "--native-invocation-id", "--expected-rid",
         "--work-directory", "--report-directory", "--evidence-input", "--host-artifacts-map", "--aggregate-input",
         "--aggregate-artifact-id", "--expected-aggregate-sha256", "--publication-directory",
-        "--publication-start-receipt", "--publication-start-artifact-id", "--resolved-binding-output"
+        "--publication-start-receipt", "--publication-start-artifact-id", "--resolved-binding-output", "--repository", "--producer-receipt"
     };
 
     internal static TailwindCommandOptions Extract(string[] args)
@@ -53,7 +59,11 @@ internal sealed record TailwindCommandOptions(
             Get("--source-commit"), Get("--native-invocation-id"), Get("--expected-rid"), Get("--work-directory"),
             Get("--report-directory"), Get("--evidence-input"), Get("--host-artifacts-map"), Get("--aggregate-input"),
             Get("--aggregate-artifact-id"), Get("--expected-aggregate-sha256"), Get("--publication-directory"),
-            Get("--publication-start-receipt"), Get("--publication-start-artifact-id"), Get("--resolved-binding-output"), remaining.ToArray());
+            Get("--publication-start-receipt"), Get("--publication-start-artifact-id"), Get("--resolved-binding-output"), remaining.ToArray())
+        {
+            Repository = Get("--repository"),
+            ProducerReceipt = Get("--producer-receipt")
+        };
     }
 
     internal TailwindPublicationRequest CreatePublicationRequest(
