@@ -326,7 +326,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             Assert.Equal("succeeded", diagnostics.RootElement.GetProperty("status").GetString());
             Assert.Equal("artifact-transport", diagnostics.RootElement.GetProperty("stage").GetString());
             Assert.Contains("Phase: `complete`", await File.ReadAllTextAsync(Path.Combine(report, "summary.md")), StringComparison.Ordinal);
-            Assert.True(File.Exists(Path.Combine(output, TailwindProofSubjectService.FileName)));
+            Assert.True(File.Exists(TestPathUtils.PathUnder(output, TailwindProofSubjectService.FileName)));
             Assert.False(Directory.Exists(work));
             Assert.Equal(2, sourceCalls); // early checkout and the validator's source boundary
             Assert.Equal(3, http.Requests.Count);
@@ -432,7 +432,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
 
         Assert.True(result.Succeeded);
         Assert.Equal(3, handler.Requests.Count);
-        Assert.True(File.Exists(Path.Combine(output, TailwindProofSubjectService.FileName)));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(output, TailwindProofSubjectService.FileName)));
         Assert.True(File.Exists(Path.Combine(report, "verified-artifact.json")));
         Assert.False(Directory.Exists(Path.Combine(_root, "work-zip64")));
     }
@@ -1138,7 +1138,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         {
             Assert.True(result.Succeeded);
             Assert.True(File.Exists(Path.Combine(report, "verified-artifact.json")));
-            Assert.True(File.Exists(Path.Combine(output, TailwindProofSubjectService.FileName)));
+            Assert.True(File.Exists(TestPathUtils.PathUnder(output, TailwindProofSubjectService.FileName)));
         }
         else
         {
@@ -1153,7 +1153,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         var producer = Path.Combine(_root, "producer-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(producer);
         var packageFile = $"{PackageId}.{Version}.nupkg";
-        var packagePath = Path.Combine(producer, packageFile);
+        var packagePath = TestPathUtils.PathUnder(producer, packageFile);
         using (var package = ZipFile.Open(packagePath, ZipArchiveMode.Create))
         {
             Add(package, $"{PackageId}.nuspec", $"<package><metadata><id>{PackageId}</id><version>{Version}</version></metadata></package>");
