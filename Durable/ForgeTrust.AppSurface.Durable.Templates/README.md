@@ -26,6 +26,8 @@ Blocking setup and cleanup adapters are invoked on dedicated threads before thei
 
 The current authored package graph and the exact v1 generated path inventory are recorded in the [versioned shape guide](../../releases/durable-worker-template-shape-v1.md). The template manifest is package metadata and is not copied into the generated application.
 
+The generated [central package pins](content/durable-worker/Directory.Packages.props) select OpenTelemetry 1.17.0 to match the packed [Observability dependencies](../../Observability/ForgeTrust.AppSurface.Observability/README.md). Keep those three telemetry pins coordinated when upgrading AppSurface; a lower central pin fails restore with `NU1109` because central transitive pinning remains enabled.
+
 The command block is pinned to the current authored coordinated baseline `0.2.0-preview.13`, including the prerelease suffix. Install only a package version present in the selected feed; release verification must use the exact candidate template and matching generated package versions.
 
 The four checkpoint lines are expected contract output, not captured output from this documentation change:

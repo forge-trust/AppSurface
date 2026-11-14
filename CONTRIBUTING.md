@@ -18,12 +18,14 @@ Avoid broad requests such as "improve the docs" without a concrete page, task, o
 
 ## Local setup
 
-Use a current .NET SDK supported by this repository, then restore and build from the repository root before opening a pull request:
+Install **.NET SDK 10.0.402**, selected by the repository's [`global.json`](https://github.com/forge-trust/AppSurface/blob/main/global.json), then restore and build from the repository root before opening a pull request. SDK roll-forward and prerelease selection are disabled: a newer installed SDK does not replace this version. See Microsoft's [SDK selection reference](https://learn.microsoft.com/dotnet/core/tools/global-json) when diagnosing a missing SDK.
 
 ```bash
 dotnet restore
 dotnet build
 ```
+
+Every [CI workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) installs that pin in a job-owned SDK directory under the runner's temporary directory. This also keeps isolated package consumers outside the checkout on the same SDK through `PATH` and `DOTNET_ROOT`, even when the hosted image contains a newer major SDK. Keep the setup inputs, coverage SDK constant and root pin coordinated when advancing the toolchain; workflow contracts check their agreement. Package caches retain their existing independent policy. The pin selects build tooling and does not change consumer target frameworks or coverage thresholds.
 
 Run the sample or package-specific command you changed, and include that command in your pull request notes. For broad changes, also run the full test suite and coverage command listed in [Local verification](#local-verification).
 

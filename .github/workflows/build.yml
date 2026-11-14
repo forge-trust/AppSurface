@@ -37,8 +37,10 @@ jobs:
           persist-credentials: false
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.402
       - name: Run source provider proof
         run: dotnet run --project examples/config-key-contract --configuration Release
       - name: Run framework-neutral conformance package tests
@@ -75,6 +77,8 @@ jobs:
           persist-credentials: false
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
       - name: Select exact coverage SDK
@@ -142,6 +146,8 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
@@ -230,8 +236,10 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.402
           cache: true
           cache-dependency-path: |
             Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/packages.lock.json
@@ -472,8 +480,10 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.402
           cache: true
           cache-dependency-path: |
             Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/packages.lock.json
@@ -503,6 +513,8 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
@@ -523,9 +535,207 @@ jobs:
       - name: Verify packed Durable consumers
         run: ./Durable/verify-packed-consumers.sh
 
+  coverage-collection:
+    needs: [coverage-evidence-plan]
+    if: ${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        id: setup-dotnet
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
+        with:
+          dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
+            **/packages.*.lock.json
+
+      - name: Select exact coverage SDK
+        shell: pwsh
+        run: |
+          $selection = @{ sdk = @{ version = "${{ env.COVERAGE_SDK_VERSION }}"; rollForward = "disable" } }
+          $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) "global.json")
+          if ((dotnet --version) -ne "${{ env.COVERAGE_SDK_VERSION }}") { throw "Coverage SDK selection failed" }
+
+      - name: Restore .NET packages (locked, cache-aware)
+        run: |
+          start_seconds="$(date +%s)"
+          dotnet nuget locals global-packages --list
+          dotnet restore ForgeTrust.AppSurface.slnx --locked-mode
+          restore_seconds="$(( $(date +%s) - start_seconds ))"
+          package_size="$(du -sh "$NUGET_PACKAGES" 2>/dev/null | cut -f1 || true)"
+
+          {
+            echo "### NuGet cache summary"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Workflow job | build.yml / coverage-collection |"
+            echo "| Cache hit | ${{ steps.setup-dotnet.outputs.cache-hit }} |"
+            echo "| Cache dependency path | \`**/packages.lock.json\`, \`**/packages.*.lock.json\` |"
+            echo "| NUGET_PACKAGES | \`$NUGET_PACKAGES\` |"
+            echo "| Package folder size | ${package_size:-unknown} |"
+            echo "| Locked restore duration | ${restore_seconds}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.1.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: Web/pnpm-lock.yaml
+
+      - name: Prepare pinned Aspire CLI bundle
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
+
+      - name: Verify Tailwind release artifact transport
+        run: python3 .github/tests/tailwind_workflow_transport_tests.py
+
+      - name: Verify Durable template release artifact transport
+        run: >-
+          dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj
+          --configuration Release --no-restore
+          --filter FullyQualifiedName~DurableTemplateWorkflowTransportTests
+
+      - name: Verify generated Markdown snippets
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable/README.md
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/migrations/typed-work-definitions-v1.md
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Web/ForgeTrust.AppSurface.Web/README.md
+
+      - name: Verify web assets
+        run: |
+          pnpm --dir Web install --frozen-lockfile
+          pnpm --dir Web run assets:typecheck
+          pnpm --dir Web run assets:test
+          pnpm --dir Web run assets:build
+          pnpm --dir Web run assets:verify
+
+      - name: Verify the Durable doctor report consumer
+        run: python3 -m unittest discover -s examples/durable-external-activation -p 'test_*.py'
+
+      - name: Verify Cloud Run execution fixture comparisons
+        run: python3 -m unittest discover -s Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1 -p 'test_*.py'
+
+      - name: Test coverage scheduling history helper
+        run: python3 -m unittest discover -s .github/tests -p 'coverage_schedule_history_tests.py'
+
+      - name: Restore advisory coverage scheduling history
+        if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 .github/scripts/coverage-schedule-history.py restore --output "$RUNNER_TEMP/coverage-schedule/timings.json"
+
+      - name: Collect solution coverage
+        if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
+        env:
+          APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
+        run: |
+          set -euo pipefail
+          validation="tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
+          dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
+          dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
+          args=(--operation collect-coverage --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --output "$RUNNER_TEMP/solution-coverage-collection")
+          if [[ -f "$RUNNER_TEMP/coverage-schedule/timings.json" ]]; then args+=(--coverage-schedule-timings "$RUNNER_TEMP/coverage-schedule/timings.json"); fi
+          dotnet "$validation" "${args[@]}"
+
+      - name: Preserve same-attempt coverage collection
+        if: ${{ success() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: solution-coverage-collection-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solution-coverage-collection
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish advisory coverage scheduling timings
+        if: ${{ success() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-schedule-timings
+          path: ${{ runner.temp }}/solution-coverage-collection/coverage/timings.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload docs outline layout evidence
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-outline-layout-evidence
+          path: ${{ runner.temp }}/docs-outline-layout-evidence
+          if-no-files-found: warn
+
+      - name: Upload test-result diagnostics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
+        with:
+          name: coverage-collection-diagnostics
+          path: |
+            ${{ runner.temp }}/solution-coverage-collection/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish bounded test-result and slow-test diagnostics summary
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
+        run: |
+          diagnostics_markdown="$RUNNER_TEMP/solution-coverage-collection/coverage/slow-test-diagnostics.md"
+          summary_preview_maximum_bytes=65536
+          if [[ -f "$diagnostics_markdown" ]]; then
+            diagnostics_bytes="$(wc -c < "$diagnostics_markdown")"
+            if (( diagnostics_bytes <= summary_preview_maximum_bytes )); then
+              cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+            else
+              head -c "$summary_preview_maximum_bytes" "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+              {
+                echo
+                echo
+                echo "> Test-result and slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`coverage-collection-diagnostics\` artifact for the complete report."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            {
+              echo "## Slow-test diagnostics"
+              echo
+              echo "No slow-test diagnostics Markdown artifact was generated."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload test results to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && env.CODECOV_TOKEN_PRESENT == 'true' }}
+        with:
+          files: '${{ runner.temp }}/solution-coverage-collection/coverage/junit-*.xml'
+          report_type: test_results
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   build:
-    needs: [coverage-evidence-plan, coverage-security-platform, packed-durable-consumers]
-    if: ${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && needs.packed-durable-consumers.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result == 'skipped')) }}
+    needs: [coverage-evidence-plan, coverage-security-platform, packed-durable-consumers, coverage-collection]
+    if: ${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && needs.packed-durable-consumers.result == 'success' && needs.coverage-collection.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -543,6 +753,8 @@ jobs:
       - name: Setup .NET SDK
         id: setup-dotnet
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
@@ -578,48 +790,15 @@ jobs:
             echo "| Locked restore duration | ${restore_seconds}s |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Build coverage gate CLI
+        run: dotnet build Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --configuration Release --no-restore
+
+      - name: Download same-attempt coverage collection
+        if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          version: 11.1.3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: Web/pnpm-lock.yaml
-
-      - name: Verify Tailwind release artifact transport
-        run: python3 .github/tests/tailwind_workflow_transport_tests.py
-
-      - name: Verify Durable template release artifact transport
-        run: >-
-          dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj
-          --configuration Release --no-restore
-          --filter FullyQualifiedName~DurableTemplateWorkflowTransportTests
-
-      - name: Verify generated Markdown snippets
-        run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify
-          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable/README.md
-          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/migrations/typed-work-definitions-v1.md
-          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
-          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Web/ForgeTrust.AppSurface.Web/README.md
-
-      - name: Verify web assets
-        run: |
-          pnpm --dir Web install --frozen-lockfile
-          pnpm --dir Web run assets:typecheck
-          pnpm --dir Web run assets:test
-          pnpm --dir Web run assets:build
-          pnpm --dir Web run assets:verify
-
-      - name: Verify the Durable doctor report consumer
-        run: python3 -m unittest discover -s examples/durable-external-activation -p 'test_*.py'
-
-      - name: Verify Cloud Run execution fixture comparisons
-        run: python3 -m unittest discover -s Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1 -p 'test_*.py'
+          name: solution-coverage-collection-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solution-coverage-collection
 
       - name: Download same-run native coverage evidence
         if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
@@ -646,16 +825,9 @@ jobs:
           args=(--operation run --scope coverage --policy .github/evidence.policy.json --changed-paths "$changes/changed-paths.json" --plan "$plan/evidence-plan.json" --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --output "$evidence_root")
           if [[ -n "$COVERAGE_DIFF_BASE" && "$(jq -r '.requiresCoverage' "$plan/selection.json")" == "true" ]]; then args+=(--diff-base "$COVERAGE_DIFF_BASE"); fi
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$(jq -r '.requiresNativeCoverage' "$plan/selection.json")" == "true" ]]; then args+=(--native-coverage-directory "$RUNNER_TEMP/coverage-native-inputs"); fi
+          if [[ "$(jq -r '.requiresCoverage' "$plan/selection.json")" == "true" ]]; then args+=(--coverage-collection "$RUNNER_TEMP/solution-coverage-collection"); fi
           dotnet "$validation" "${args[@]}"
           dotnet "$validation" --operation verify --scope coverage --policy .github/evidence.policy.json --changed-paths "$changes/changed-paths.json" --plan "$plan/evidence-plan.json" --manifest "$evidence_root/evidence-manifest.json" --artifact-root "$evidence_root/artifacts"
-
-      - name: Upload docs outline layout evidence
-        if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: docs-outline-layout-evidence
-          path: ${{ runner.temp }}/docs-outline-layout-evidence
-          if-no-files-found: warn
 
       - name: Upload test-result diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -693,31 +865,6 @@ jobs:
             TestResults/coverage-evidence/evidence-summary.md
           if-no-files-found: warn
 
-      - name: Publish bounded test-result and slow-test diagnostics summary
-        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
-        run: |
-          diagnostics_markdown="TestResults/coverage-evidence/coverage/slow-test-diagnostics.md"
-          summary_preview_maximum_bytes=65536
-          if [[ -f "$diagnostics_markdown" ]]; then
-            diagnostics_bytes="$(wc -c < "$diagnostics_markdown")"
-            if (( diagnostics_bytes <= summary_preview_maximum_bytes )); then
-              cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
-            else
-              head -c "$summary_preview_maximum_bytes" "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
-              {
-                echo
-                echo
-                echo "> Test-result and slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`test-result-diagnostics\` artifact for the complete report."
-              } >> "$GITHUB_STEP_SUMMARY"
-            fi
-          else
-            {
-              echo "## Slow-test diagnostics"
-              echo
-              echo "No slow-test diagnostics Markdown artifact was generated."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: ${{ success() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}
@@ -726,29 +873,20 @@ jobs:
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Upload test results to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && env.CODECOV_TOKEN_PRESENT == 'true' }}
-        with:
-          files: 'TestResults/coverage-evidence/coverage/junit-*.xml'
-          report_type: test_results
-          token: ${{ secrets.CODECOV_TOKEN }}
-
   coverage-manifest-gate:
     name: Coverage evidence gate
     if: ${{ always() }}
-    needs: [coverage-evidence-plan, coverage-security-platform, build]
+    needs: [coverage-evidence-plan, coverage-security-platform, packed-durable-consumers, coverage-collection, build]
     runs-on: ubuntu-latest
     steps:
       - name: Fail unless planning, selected native evidence, and the build passed
-        if: ${{ needs.coverage-evidence-plan.result != 'success' || needs.build.result != 'success' || (needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result != 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result != 'skipped' && needs.coverage-security-platform.result != 'success') }}
+        if: ${{ needs.coverage-evidence-plan.result != 'success' || needs.build.result != 'success' || needs.packed-durable-consumers.result != 'success' || needs.coverage-collection.result != 'success' || (needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && needs.coverage-security-platform.result != 'success') || (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' && needs.coverage-security-platform.result != 'skipped' && needs.coverage-security-platform.result != 'success') }}
         run: exit 1
       - name: Confirm the selected coverage evidence gate passed
-        if: ${{ needs.coverage-evidence-plan.result == 'success' && needs.build.result == 'success' && (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' || needs.coverage-security-platform.result == 'success') }}
+        if: ${{ needs.coverage-evidence-plan.result == 'success' && needs.build.result == 'success' && needs.packed-durable-consumers.result == 'success' && needs.coverage-collection.result == 'success' && (needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true' || needs.coverage-security-platform.result == 'success') }}
         run: echo 'The selected coverage evidence gate passed.'
 
   export-appsurface-docs:
-    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -766,9 +904,11 @@ jobs:
       - name: Setup .NET SDK
         id: setup-dotnet
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: |
-            10.0.x
+            10.0.402
           cache: true
           cache-dependency-path: |
             **/packages.lock.json
@@ -911,7 +1051,7 @@ jobs:
 
   deploy-appsurface-docs:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: export-appsurface-docs
+    needs: [export-appsurface-docs, build, coverage-manifest-gate]
     runs-on: ubuntu-latest
     permissions:
       pages: write

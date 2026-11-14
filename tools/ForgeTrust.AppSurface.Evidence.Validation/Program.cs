@@ -19,7 +19,9 @@ internal static class Program
         finally { Console.CancelKeyPress -= cancel; }
     }
 
-    internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken = default)
+    /// <summary>Dispatches validated operations; tests may replace only the collection command boundary.</summary>
+    internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken = default,
+        Func<RepositoryCheckSettings, CancellationToken, Task>? collectCoverage = null)
     {
         if (args.Length == 0 || args.Contains("--help", StringComparer.Ordinal))
         {
@@ -47,6 +49,11 @@ internal static class Program
                 run: [--repository <checkout>] [--dotnet <absolute-host>]
                 run coverage: [--diff-base <commit>] [--diff-file <snapshot.patch>]
                 [--native-coverage-directory <same-run-native-captures>]
+                [--coverage-collection <same-run-collection>] [--coverage-schedule-timings <prior-timings.json>]
+
+                CI coverage collection: --operation collect-coverage --repository <checkout>
+                --output <fresh-directory> --dotnet <absolute-host> [--coverage-schedule-timings <prior-timings.json>]
+                Collection alone never closes coverage obligations.
                 verify: --manifest <proof/evidence-manifest.json> --artifact-root <proof/artifacts>
 
                 Native coverage capture: --operation capture-native --repository <checkout>
@@ -67,6 +74,7 @@ internal static class Program
             if (options.TryGetValue("--operation", out var operation))
             {
                 if (operation is "local" or "local-plan") return await new LocalEvidenceWorkflow().RunAsync(options, cancellationToken);
+                if (operation == "collect-coverage") return await CollectCoverageAsync(options, cancellationToken, collectCoverage);
                 if (operation == "collect") return await CollectChangesAsync(options, cancellationToken);
                 if (operation == "capture-native") return await CaptureNativeAsync(options, cancellationToken);
             }
@@ -152,7 +160,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--report", "--raw-report"];
+        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)
@@ -162,6 +170,20 @@ internal static class Program
 
     private static string Required(IReadOnlyDictionary<string, string> options, string key) =>
         options.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException("Missing required validation option: " + key);
+
+    private static async Task<int> CollectCoverageAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
+        Func<RepositoryCheckSettings, CancellationToken, Task>? collectCoverage)
+    {
+        string[] allowed = ["--operation", "--repository", "--output", "--dotnet", "--coverage-schedule-timings"];
+        if (options.Keys.Except(allowed, StringComparer.Ordinal).Any()) throw new ArgumentException("Unsupported coverage collection option.");
+        var settings = new RepositoryCheckSettings(Path.GetFullPath(Required(options, "--repository")),
+            Required(options, "--dotnet"), Path.GetFullPath(Required(options, "--output")))
+        { CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null };
+        if (collectCoverage is null) await new SolutionCoverageProducer(settings).CollectAsync(cancellationToken);
+        else await collectCoverage(settings, cancellationToken);
+        Console.WriteLine("Solution coverage collected; final gate verification is still required.");
+        return 0;
+    }
 
     private static async Task<int> CollectChangesAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken)
     {

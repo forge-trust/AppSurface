@@ -8,8 +8,8 @@ using ForgeTrust.AppSurface.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
-#pragma warning disable ASPIREPIPELINES001 // Tests pin the adapter to the repository-supported Aspire 13.4.4 API.
-#pragma warning disable ASPIREPIPELINES004 // Tests pin the adapter output service to Aspire 13.4.4.
+#pragma warning disable ASPIREPIPELINES001 // Tests pin the adapter to the repository-supported Aspire 13.6.5 API.
+#pragma warning disable ASPIREPIPELINES004 // Tests pin the adapter output service to Aspire 13.6.5.
 
 [Collection(AspireDeploymentBuilderCollection.Name)]
 public sealed class AppSurfaceDeploymentBuilderExtensionsTests

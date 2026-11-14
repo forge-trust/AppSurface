@@ -352,7 +352,7 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
     /// <summary>Internal operation seam for deterministic start, health, endpoint, probe, and cleanup tests.</summary>
     internal sealed record FixtureOperations
     {
-        /// <summary>Gets the production operations backed by the typed builder and Aspire 13.4.4 helpers.</summary>
+        /// <summary>Gets the production operations backed by the typed builder and Aspire 13.6.5 helpers.</summary>
         internal static FixtureOperations Native { get; } = new();
 
         /// <summary>Builds the application through the builder's sole lifecycle owner.</summary>

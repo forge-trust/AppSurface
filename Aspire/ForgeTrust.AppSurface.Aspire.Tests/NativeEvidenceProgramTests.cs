@@ -74,6 +74,61 @@ public sealed class NativeEvidenceProgramTests
     }
 
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CollectCoverage_DispatchesExplicitInputsWithoutClosingAcceptance(bool history, bool relativeHistory)
+    {
+        using var fixture = new NativeCaptureFixture();
+        var output = Path.Join(fixture.Root, "collection");
+        var timings = Path.Join(fixture.Root, "prior-timings.json");
+        var args = new List<string> { "--operation", "collect-coverage", "--repository", fixture.Repository,
+            "--dotnet", ResolveDotnetHost(), "--output", output };
+        if (history) args.AddRange(["--coverage-schedule-timings", relativeHistory ? Path.GetRelativePath(Directory.GetCurrentDirectory(), timings) : timings]);
+        RepositoryCheckSettings? observed = null;
+        using var cancellation = new CancellationTokenSource();
+
+        var result = await Program.RunAsync(args.ToArray(), cancellation.Token, (settings, token) =>
+        {
+            observed = settings;
+            Assert.Equal(cancellation.Token, token);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(0, result);
+        Assert.NotNull(observed);
+        Assert.Equal(fixture.Repository, observed.RepositoryRoot);
+        Assert.Equal(ResolveDotnetHost(), observed.DotnetPath);
+        Assert.Equal(output, observed.OutputDirectory);
+        Assert.Equal(history ? timings : null, observed.CoverageScheduleTimingsPath);
+        Assert.Null(observed.NativeCoverageDirectory);
+        Assert.Null(observed.DiffFile);
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Theory]
+    [InlineData("unsupported-option")]
+    [InlineData("missing-repository")]
+    [InlineData("missing-host")]
+    [InlineData("missing-output")]
+    public async Task CollectCoverage_RejectsInvalidOptionsBeforeDispatch(string failure)
+    {
+        using var fixture = new NativeCaptureFixture();
+        var output = Path.Join(fixture.Root, "collection");
+        var args = new List<string> { "--operation", "collect-coverage" };
+        if (failure != "missing-repository") args.AddRange(["--repository", fixture.Repository]);
+        if (failure != "missing-host") args.AddRange(["--dotnet", ResolveDotnetHost()]);
+        if (failure != "missing-output") args.AddRange(["--output", output]);
+        if (failure == "unsupported-option") args.AddRange(["--diff-file", "local.patch"]);
+
+        var result = await Program.RunAsync(args.ToArray(), collectCoverage: (_, _) =>
+            throw new Xunit.Sdk.XunitException("Invalid input must not start collection."));
+
+        Assert.Equal(1, result);
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Theory]
     [InlineData("directory")]
     [InlineData("file")]
     [InlineData("unsupported-option")]

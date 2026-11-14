@@ -882,7 +882,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                     target[cloudTasksKey] = new { type = "package", dependencies = directPackageDependencies };
                     libraries[cloudTasksKey] = new { type = "package", sha512 = Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(candidatePackages["ForgeTrust.AppSurface.Durable.CloudTasks"]))) };
                 }
-                var consumerDiKey = "Microsoft.Extensions.DependencyInjection/10.0.8";
+                var consumerDiKey = "Microsoft.Extensions.DependencyInjection/10.0.14";
                 target[consumerDiKey] = new { type = "package", dependencies = new Dictionary<string, string>() };
                 libraries[consumerDiKey] = new { type = "package", sha512 = "consumer-di-hash" };
                 if (invalidCloudTasksGraph == "extra")
@@ -894,7 +894,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 var directDependencies = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["ForgeTrust.AppSurface.Durable.CloudTasks"] = new { version = $"[{candidateVersion}, )" },
-                    ["Microsoft.Extensions.DependencyInjection"] = new { version = "[10.0.8, )" },
+                    ["Microsoft.Extensions.DependencyInjection"] = new { version = "[10.0.14, )" },
                 };
                 return new
                 {

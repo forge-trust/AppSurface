@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Xml.Linq;
 using ForgeTrust.AppSurface.Testing;
 using YamlDotNet.RepresentationModel;
 
@@ -15,6 +17,67 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         _workflow = LoadWorkflow(repository, "native-evidence-validation.yml");
         _buildWorkflow = LoadWorkflow(repository, "build.yml");
         _packageWorkflow = LoadWorkflow(repository, "package-gate.yml");
+    }
+
+    [Theory]
+    [InlineData("code-quality.yml", "dotnet-format", "Build project")]
+    [InlineData("package-gate.yml", "package-gate", "Run and verify scoped package evidence")]
+    [InlineData("build.yml", "coverage-collection", "Verify Durable template release artifact transport")]
+    [InlineData("package-artifacts.yml", "package-artifacts", "Verify package artifacts")]
+    [InlineData("nuget-prerelease-publish.yml", "pack-and-verify", "Verify package artifacts")]
+    [InlineData("nuget-stable-publish.yml", "pack-and-verify", "Verify package artifacts")]
+    [InlineData("release-publish.yml", "publish-docs-archive", "Build AppSurface Docs exporter")]
+    [InlineData("coverage-efficiency.yml", "capture-evidence", "Capture coverage efficiency evidence")]
+    public void FullSolutionWorkersPrepareTheSdkPairedAspireBundleBeforeBuilding(string workflow, string job, string firstBuild)
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var document = LoadWorkflow(repository, workflow);
+        var steps = document["jobs"].AsMapping()[job].AsMapping()["steps"].AsSequence();
+        var prepare = FindStep(steps, "Prepare pinned Aspire CLI bundle");
+        Assert.True(IndexOf(steps, prepare) < IndexOf(steps, FindStep(steps, firstBuild)));
+        var appHost = XDocument.Load(TestPathUtils.PathUnder(repository, "examples", "aspire-apphost", "AspireAppHostExample.csproj"));
+        var version = (string)appHost.Descendants("Sdk").Single(sdk => (string?)sdk.Attribute("Name") == "Aspire.AppHost.Sdk").Attribute("Version")!;
+        Assert.Equal($"dnx --yes aspire.cli@{version} -- setup --install-path \"$HOME/.aspire\" --non-interactive", prepare["run"].AsScalar());
+        Assert.False(prepare.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        if (workflow == "package-gate.yml")
+            Assert.Equal("${{ steps.plan.outputs.requires_package_checks == 'true' }}", prepare["if"].AsScalar());
+        if (workflow is "nuget-prerelease-publish.yml" or "nuget-stable-publish.yml")
+            Assert.Equal(FindStep(steps, firstBuild)["if"].AsScalar(), prepare["if"].AsScalar());
+    }
+
+    [Fact]
+    public void EveryDotnetWorkerInstallsThePinnedSdkOutsideThePreinstalledToolchain()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        using var global = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(repository, "global.json")));
+        var sdk = global.RootElement.GetProperty("sdk");
+        Assert.Equal("10.0.402", sdk.GetProperty("version").GetString());
+        Assert.Equal("disable", sdk.GetProperty("rollForward").GetString());
+        Assert.False(sdk.GetProperty("allowPrerelease").GetBoolean());
+
+        var setups = 0;
+        foreach (var path in Directory.EnumerateFiles(TestPathUtils.PathUnder(repository, ".github", "workflows"), "*.yml"))
+        {
+            var workflow = LoadWorkflow(repository, Path.GetFileName(path));
+            foreach (var job in workflow["jobs"].AsMapping().Children.Values.OfType<YamlMappingNode>())
+            {
+                if (!job.Children.TryGetValue(new YamlScalarNode("steps"), out var steps))
+                    continue;
+                foreach (var step in steps.AsSequence().Children.Cast<YamlMappingNode>())
+                {
+                    if (!step.Children.TryGetValue(new YamlScalarNode("uses"), out var uses) ||
+                        !uses.AsScalar().StartsWith("actions/setup-dotnet@", StringComparison.Ordinal))
+                        continue;
+                    setups++;
+                    var inputs = step["with"].AsMapping();
+                    Assert.Equal("${{ runner.temp }}/appsurface-dotnet", step["env"].AsMapping()["DOTNET_INSTALL_DIR"].AsScalar());
+                    Assert.Contains(inputs["dotnet-version"].AsScalar().Trim(), new[] { "10.0.402", "${{ env.COVERAGE_SDK_VERSION }}" });
+                    if (inputs["dotnet-version"].AsScalar().Trim() == "${{ env.COVERAGE_SDK_VERSION }}")
+                        Assert.Equal("10.0.402", workflow["env"].AsMapping()["COVERAGE_SDK_VERSION"].AsScalar());
+                }
+            }
+        }
+        Assert.True(setups > 0);
     }
 
     [Fact]
@@ -70,6 +133,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
         Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
         Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
+        Assert.Contains("SolutionCoverageHandoffTests", testCommand);
 
         var producer = FindStep(steps, "Run selected evidence producers");
         Assert.Contains("steps.plan.outcome == 'success'", producer["if"].AsScalar());
@@ -182,7 +246,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
 
         var manifestGate = jobs["coverage-manifest-gate"].AsMapping();
         Assert.Equal("${{ always() }}", manifestGate["if"].AsScalar());
-        Assert.Equal(["coverage-evidence-plan", "coverage-security-platform", "build"],
+        Assert.Equal(["coverage-evidence-plan", "coverage-security-platform", "packed-durable-consumers", "coverage-collection", "build"],
             manifestGate["needs"].AsSequence().Select(node => node.AsScalar()));
         var gateSteps = manifestGate["steps"].AsSequence();
         var failGate = FindStep(gateSteps, "Fail unless planning, selected native evidence, and the build passed");
@@ -191,6 +255,53 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("needs.coverage-security-platform.result != 'success'", failGate["if"].AsScalar());
         Assert.Contains("needs.coverage-security-platform.result != 'skipped'", failGate["if"].AsScalar());
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_native_coverage != 'true'", FindStep(gateSteps, "Confirm the selected coverage evidence gate passed")["if"].AsScalar());
+    }
+
+    [Fact]
+    public void CollectionOverlapsNativeAndPackedChecksWhileFinalAcceptanceStillRequiresBoth()
+    {
+        var jobs = _buildWorkflow["jobs"].AsMapping();
+        var collection = jobs["coverage-collection"].AsMapping();
+        Assert.Equal(["coverage-evidence-plan"], collection["needs"].AsSequence().Select(node => node.AsScalar()));
+        var steps = collection["steps"].AsSequence();
+        var collect = FindStep(steps, "Collect solution coverage");
+        Assert.Contains("requires_coverage == 'true'", collect["if"].AsScalar());
+        Assert.Contains("--operation collect-coverage", collect["run"].AsScalar());
+        Assert.Contains("--coverage-schedule-timings", collect["run"].AsScalar());
+        Assert.DoesNotContain("--native-coverage-directory", collect["run"].AsScalar());
+        var history = FindStep(steps, "Restore advisory coverage scheduling history");
+        Assert.True(IndexOf(steps, history) < IndexOf(steps, collect));
+        Assert.Equal("${{ github.event.repository.default_branch }}", history["env"].AsMapping()["GITHUB_DEFAULT_BRANCH"].AsScalar());
+        var upload = FindStep(steps, "Preserve same-attempt coverage collection");
+        Assert.Contains("success()", upload["if"].AsScalar());
+        Assert.Equal("solution-coverage-collection-${{ github.run_attempt }}", upload["with"].AsMapping()["name"].AsScalar());
+        var build = jobs["build"].AsMapping();
+        Assert.Contains("coverage-collection", build["needs"].AsSequence().Select(node => node.AsScalar()));
+        Assert.Contains("needs.coverage-collection.result == 'success'", build["if"].AsScalar());
+        Assert.Contains("needs.packed-durable-consumers.result == 'success'", build["if"].AsScalar());
+        var gateSteps = build["steps"].AsSequence();
+        var download = FindStep(gateSteps, "Download same-attempt coverage collection");
+        Assert.Equal(upload["with"].AsMapping()["name"].AsScalar(), download["with"].AsMapping()["name"].AsScalar());
+        Assert.DoesNotContain(new YamlScalarNode("run-id"), download["with"].AsMapping().Children.Keys);
+        Assert.Contains("--coverage-collection", FindStep(gateSteps, "Run solution coverage and gate")["run"].AsScalar());
+        var finalSteps = jobs["coverage-manifest-gate"].AsMapping()["steps"].AsSequence();
+        var failure = FindStep(finalSteps, "Fail unless planning, selected native evidence, and the build passed")["if"].AsScalar();
+        Assert.Contains("needs.coverage-collection.result != 'success'", failure);
+        Assert.Contains("needs.packed-durable-consumers.result != 'success'", failure);
+        var timings = FindStep(steps, "Publish advisory coverage scheduling timings");
+        Assert.Contains("github.event_name == 'push'", timings["if"].AsScalar());
+        Assert.Contains("github.ref == 'refs/heads/main'", timings["if"].AsScalar());
+    }
+
+    [Fact]
+    public void DocsExportOverlapsBuildButDeploymentWaitsForAllPreviouslyRequiredAcceptance()
+    {
+        var jobs = _buildWorkflow["jobs"].AsMapping();
+        Assert.DoesNotContain(new YamlScalarNode("needs"), jobs["export-appsurface-docs"].AsMapping().Children.Keys);
+        var deploy = jobs["deploy-appsurface-docs"].AsMapping();
+        Assert.Equal(["export-appsurface-docs", "build", "coverage-manifest-gate"],
+            deploy["needs"].AsSequence().Select(node => node.AsScalar()));
+        Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", deploy["if"].AsScalar());
     }
 
     [Fact]

@@ -31,9 +31,11 @@ jobs:
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: |
-            10.0.x
+            10.0.402
 
       - name: Build repository validation tool
         run: |
@@ -77,6 +79,10 @@ jobs:
           pnpm --dir Web run assets:typecheck
           pnpm --dir Web run assets:test
           pnpm --dir Web run assets:verify
+
+      - name: Prepare pinned Aspire CLI bundle
+        if: ${{ steps.plan.outputs.requires_package_checks == 'true' }}
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
 
       - name: Run and verify scoped package evidence
         id: package-evidence

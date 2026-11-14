@@ -7,7 +7,7 @@ namespace ForgeTrust.AppSurface.Aspire.Testing;
 /// Captures the root service provider created while Aspire resolves its host so a failed build can release it.
 /// </summary>
 /// <remarks>
-/// Aspire 13.4.4 registers <see cref="IHost"/> as a singleton factory. The factory receives the root provider before
+/// Aspire 13.6.5 registers <see cref="IHost"/> as a singleton factory. The factory receives the root provider before
 /// host construction can fail, while <c>DistributedApplicationBuilder.Build()</c> does not otherwise expose that
 /// partial provider. This lease decorates the verified unkeyed registration shape when it is present and ignores
 /// unrelated keyed <see cref="IHost"/> registrations. If a consumer-selected Aspire version changes that shape,
@@ -48,7 +48,7 @@ internal sealed class AspireBuildServiceProviderLease : IAsyncDisposable
             AspireTestingDiagnostics.TryWrite(
                 warningSink,
                 "The Aspire IHost service registration does not have the singleton factory shape verified with " +
-                "Aspire 13.4.4. Build will continue without AppSurface's partial-provider cleanup; verify failed-build " +
+                "Aspire 13.6.5. Build will continue without AppSurface's partial-provider cleanup; verify failed-build " +
                 "cleanup before relying on this consumer-selected Aspire version.");
             return null;
         }

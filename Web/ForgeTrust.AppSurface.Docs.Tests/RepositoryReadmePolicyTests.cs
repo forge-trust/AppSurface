@@ -13,6 +13,26 @@ public sealed partial class RepositoryReadmePolicyTests
     private const string CanonicalReleaseHubUrl = "https://github.com/forge-trust/AppSurface/blob/main/releases/README.md";
 
     [Theory]
+    [InlineData("Durable/verify-postgresql.sh")]
+    [InlineData("Durable/verify-packed-consumers.sh")]
+    [InlineData("Durable/compatibility/Directory.Packages.props")]
+    public void HistoricalCompatibilitySourceReferences_ShouldRemainExternalInStaticDocs(string targetPath)
+    {
+        const string sourcePath = "Durable/compatibility/README.md";
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var markdown = File.ReadAllText(TestPathUtils.PathUnder(repoRoot, sourcePath));
+        var html = Markdig.Markdown.ToHtml(markdown);
+        var rewritten = DocContentLinkRewriter.RewriteInternalDocLinks(sourcePath, html, "/docs",
+            DocLinkTargetManifest.FromPaths([sourcePath]));
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(rewritten);
+        var reference = Assert.Single(document.QuerySelectorAll("a[href]")
+, anchor => anchor.GetAttribute("href")!.EndsWith(Path.GetFileName(targetPath), StringComparison.Ordinal));
+        Assert.Equal("https://github.com/forge-trust/AppSurface/blob/main/" + targetPath, reference.GetAttribute("href"));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(repoRoot, targetPath)));
+        Assert.Null(reference.GetAttribute("data-turbo-frame"));
+    }
+
+    [Theory]
     [InlineData("README.md")]
     [InlineData("CONTRIBUTING.md")]
     [InlineData("eng/ci-critical-path.md")]

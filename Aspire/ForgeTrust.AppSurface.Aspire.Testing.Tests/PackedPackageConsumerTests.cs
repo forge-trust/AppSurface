@@ -8,10 +8,11 @@ using Xunit.Abstractions;
 
 public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageConsumerTests.PackedProducerFixture>
 {
-    private const string AspireOverrideVersion = "13.4.6";
-    private const string AspireBaselineVersion = "13.4.4";
-    private const string HostingBaselineVersion = "10.0.8";
-    private const string MessagePackVersion = "2.5.303";
+    // The security floor is also the latest stable release; this verifies explicit selection, not a later runtime.
+    private const string AspireOverrideVersion = "13.6.5";
+    private const string AspireBaselineVersion = "13.6.5";
+    private const string HostingBaselineVersion = "10.0.14";
+    private const string MessagePackVersion = "2.5.307";
     private const string AppSurfaceTestingPackageId = "ForgeTrust.AppSurface.Aspire.Testing";
     private const string SkoolitSourceCommit = "a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e";
     private static readonly string[] PackedPackageIds =
@@ -230,7 +231,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             await RunDotNetAsync(
                 consumerDirectory,
                 ["restore", "Consumer.csproj", "--configfile", nugetConfigPath, "--force", "--no-cache", "--nologo"],
-                "Aspire 13.4.6 override consumer restore",
+                "Aspire 13.6.5 override consumer restore",
                 isolatedDotNetEnvironment,
                 RemainingBudget(packageRun.Budget, "consumer proof"));
             await AssertConsumerAssetsAsync(
@@ -241,7 +242,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             await RunDotNetAsync(
                 consumerDirectory,
                 ["build", "Consumer.csproj", "--configuration", configuration, "--no-restore", "--nologo"],
-                "Aspire 13.4.6 override consumer build",
+                "Aspire 13.6.5 override consumer build",
                 isolatedDotNetEnvironment,
                 RemainingBudget(packageRun.Budget, "consumer proof"));
             var originalWorkingDirectory = Environment.CurrentDirectory;
@@ -252,7 +253,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                     var output = await RunDotNetAsync(
                         workingDirectory,
                         [Path.Join(consumerDirectory, "bin", configuration, "net10.0", "Consumer.dll"), workingDirectory],
-                        "Aspire 13.4.6 repository assets and override cleanup proof",
+                        "Aspire 13.6.5 repository assets and override cleanup proof",
                         consumerDotNetEnvironment,
                         RemainingBudget(packageRun.Budget, "repository assets and override cleanup proof"));
                     _output.WriteLine(output);
@@ -329,7 +330,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             await RunDotNetAsync(
                 consumerDirectory,
                 ["restore", "Consumer.csproj", "--configfile", nugetConfigPath, "--force", "--no-cache", "--nologo"],
-                "Aspire 13.4.4 configured portable consumer restore",
+                "Aspire 13.6.5 configured portable consumer restore",
                 isolatedDotNetEnvironment,
                 RemainingBudget(packageRun.Budget, "consumer proof"));
             await AssertConsumerAssetsAsync(
@@ -340,14 +341,14 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             await RunDotNetAsync(
                 consumerDirectory,
                 ["build", "Consumer.csproj", "--no-restore", "--nologo"],
-                "Aspire 13.4.4 configured portable consumer build",
+                "Aspire 13.6.5 configured portable consumer build",
                 isolatedDotNetEnvironment,
                 RemainingBudget(packageRun.Budget, "consumer proof"));
 
             var output = await RunDotNetAsync(
                 consumerDirectory,
                 ["run", "--project", "Consumer.csproj", "--no-build", "--no-restore", "--no-launch-profile"],
-                "Aspire 13.4.4 configured graph execution",
+                "Aspire 13.6.5 configured graph execution",
                 new Dictionary<string, string>(isolatedDotNetEnvironment)
                 {
                     ["ASPIRE_DCP_PATH"] = "dummy",
@@ -700,12 +701,13 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 element => element.Attribute("version")?.Value ?? string.Empty,
                 StringComparer.OrdinalIgnoreCase);
 
-        Assert.Equal("13.4.4", dependencies["Aspire.Hosting"]);
-        Assert.Equal("13.4.4", dependencies["Aspire.Hosting.AppHost"]);
-        Assert.Equal("13.4.4", dependencies["Aspire.Hosting.Testing"]);
+        // Bare nuspec versions are inclusive minimums; exact-version ranges would fail these assertions.
+        Assert.Equal("13.6.5", dependencies["Aspire.Hosting"]);
+        Assert.Equal("13.6.5", dependencies["Aspire.Hosting.AppHost"]);
+        Assert.Equal("13.6.5", dependencies["Aspire.Hosting.Testing"]);
         Assert.Equal(expectedPackageVersion, dependencies["ForgeTrust.AppSurface.Aspire"]);
-        // Both NuGet spellings require inclusive 2.5.303 and allow later consumer-selected versions.
-        Assert.Contains(dependencies["MessagePack"], new[] { "2.5.303", "[2.5.303, )" });
+        // Both NuGet spellings require inclusive 2.5.307 and allow later consumer-selected versions.
+        Assert.Contains(dependencies["MessagePack"], new[] { "2.5.307", "[2.5.307, )" });
     }
 
     /// <summary>Runs a shell-free, bounded dotnet command shared by packed proofs and version regressions.</summary>
