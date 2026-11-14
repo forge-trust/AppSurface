@@ -360,6 +360,81 @@ public sealed class ReleaseWorkflowPolicyTests
             prepare.Children.TryGetValue(new YamlScalarNode("cache-mode"), out var cacheMode),
             "Release preparation must deny cache access before executing base-ref-controlled tooling.");
         Assert.Equal("none", Assert.IsType<YamlScalarNode>(cacheMode).Value);
+
+        var steps = Assert.IsType<YamlSequenceNode>(prepare.Children[new YamlScalarNode("steps")]);
+        var firstStep = Assert.IsType<YamlMappingNode>(steps.Children[0]);
+        Assert.Equal(
+            "Verify cache access is disabled",
+            Assert.IsType<YamlScalarNode>(firstStep.Children[new YamlScalarNode("name")]).Value);
+        Assert.False(firstStep.Children.ContainsKey(new YamlScalarNode("if")));
+        Assert.False(firstStep.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        foreach (var scope in new[] { root, prepare, firstStep })
+        {
+            if (scope.Children.TryGetValue(new YamlScalarNode("env"), out var environment))
+            {
+                Assert.False(
+                    Assert.IsType<YamlMappingNode>(environment).Children.ContainsKey(new YamlScalarNode("ACTIONS_CACHE_MODE")),
+                    "The cache-mode assertion must read the runner's effective mode without an environment override.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Verifies the workflow's cache-mode assertion accepts only the runner-provided disabled mode.
+    /// </summary>
+    [Theory]
+    [InlineData("none", true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("read", false)]
+    [InlineData("write", false)]
+    [InlineData("write-only", false)]
+    [InlineData("unknown", false)]
+    [InlineData("NONE", false)]
+    public async Task ReleasePreparationRequiresDisabledRunnerCacheMode(string? cacheMode, bool expectedSuccess)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
+        var prepare = GetWorkflowJob(workflow, "prepare", "publish-release-preparation");
+        var script = GetWorkflowStepRun(prepare, "Verify cache access is disabled");
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "bash",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            }
+        };
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add(script);
+        process.StartInfo.Environment.Remove("ACTIONS_CACHE_MODE");
+        if (cacheMode is not null)
+        {
+            process.StartInfo.Environment["ACTIONS_CACHE_MODE"] = cacheMode;
+        }
+
+        Assert.True(process.Start());
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync());
+
+        Assert.Equal(expectedSuccess ? 0 : 1, process.ExitCode);
+        var expectedMode = string.IsNullOrEmpty(cacheMode) ? "<unset>" : cacheMode;
+        Assert.Equal($"ACTIONS_CACHE_MODE={expectedMode}\n", await outputTask);
+        if (expectedSuccess)
+        {
+            Assert.Equal(string.Empty, await errorTask);
+        }
+        else
+        {
+            Assert.Contains("Release Prep requires ACTIONS_CACHE_MODE=none", await errorTask, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

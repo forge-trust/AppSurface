@@ -70,6 +70,15 @@ variable does not remove the default cache-write capability of a
 Release preparation does not use a dependency cache; it passes the bundle and
 report to the publishing job through the artifact upload and download steps.
 
+The first `prepare` step, **Verify cache access is disabled**, prints the
+runner-provided `ACTIONS_CACHE_MODE` and requires its value to be exactly `none`.
+A missing, empty, or different value fails the job before checkout or release
+tooling runs, so the publishing job cannot proceed. Inspect this step in the
+next manually dispatched Release Prep run for runtime confirmation. Do not set
+`ACTIONS_CACHE_MODE` in workflow or job environment variables to satisfy the
+assertion: it verifies the runner's effective mode; `cache-mode: none` remains
+the control that restricts the token.
+
 After that job succeeds, a separate fresh runner downloads only the bundle and
 report. It does not check out or execute files from `base-ref`; before it reads
 the App credentials, it fetches the selected protected base itself using its
