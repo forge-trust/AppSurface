@@ -47,16 +47,6 @@
         "resolved": "3.1.5",
         "contentHash": "tKi7dSTwP4m5m9eXPM2Ime4Kn7xNf4x4zT9sdLO/G4hZVnQCRiMTWoSZqI/pYTVeI27oPPqHBKYI/DjJ9GsYgA=="
       },
-      "Aspire.Dashboard.Sdk.osx-arm64": {
-        "type": "Transitive",
-        "resolved": "13.6.5",
-        "contentHash": "BgU8bn8D/Sac+UalJXshFuhR4BiLZTe1Av1izghRCEWdL9QnsjO8zI/jM0mymg7Nt2FY2Y7nzoE/mLSJXzt6+A=="
-      },
-      "Aspire.Hosting.Orchestration.osx-arm64": {
-        "type": "Transitive",
-        "resolved": "13.6.5",
-        "contentHash": "k4M0Nz2lsqOft36GtjtEEZ5k7Itwd0pX5HTaFVEa9ig7K5WEH+Yzzjz4GCwBZNgwzSgemLTdP47GvQEh2nZtgw=="
-      },
       "AspNetCore.HealthChecks.Uris": {
         "type": "Transitive",
         "resolved": "9.0.0",
@@ -653,9 +643,7 @@
       "authaspirekeycloakapphost": {
         "type": "Project",
         "dependencies": {
-          "Aspire.Dashboard.Sdk.osx-arm64": "[13.6.5, )",
           "Aspire.Hosting.AppHost": "[13.6.5, )",
-          "Aspire.Hosting.Orchestration.osx-arm64": "[13.6.5, )",
           "ForgeTrust.AppSurface.Aspire": "[0.1.0, )",
           "ForgeTrust.AppSurface.Auth.Aspire.Keycloak": "[0.1.0, )",
           "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker": "[0.1.0, )"

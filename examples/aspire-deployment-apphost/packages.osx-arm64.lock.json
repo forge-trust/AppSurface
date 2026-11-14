@@ -2,12 +2,6 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
-      "Aspire.Dashboard.Sdk.osx-arm64": {
-        "type": "Direct",
-        "requested": "[13.6.5, )",
-        "resolved": "13.6.5",
-        "contentHash": "BgU8bn8D/Sac+UalJXshFuhR4BiLZTe1Av1izghRCEWdL9QnsjO8zI/jM0mymg7Nt2FY2Y7nzoE/mLSJXzt6+A=="
-      },
       "Aspire.Hosting.AppHost": {
         "type": "Direct",
         "requested": "[13.6.5, )",
@@ -46,12 +40,6 @@
           "System.IO.Hashing": "10.0.14",
           "YamlDotNet": "18.1.0"
         }
-      },
-      "Aspire.Hosting.Orchestration.osx-arm64": {
-        "type": "Direct",
-        "requested": "[13.6.5, )",
-        "resolved": "13.6.5",
-        "contentHash": "k4M0Nz2lsqOft36GtjtEEZ5k7Itwd0pX5HTaFVEa9ig7K5WEH+Yzzjz4GCwBZNgwzSgemLTdP47GvQEh2nZtgw=="
       },
       "AspNetCore.HealthChecks.Uris": {
         "type": "Transitive",

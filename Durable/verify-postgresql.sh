@@ -224,6 +224,7 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
     ! -path '*/obj/*' \
     -print >> "$source_file_list"
   printf '%s\n' \
+    "$repo_root/Durable/compatibility/Directory.Packages.props" \
     "$repo_root/Durable/verify-postgresql.sh" \
     "$repo_root/Durable/verify-packed-consumers.sh" \
     "$repo_root/Durable/configure-postgresql-roles.sql" \

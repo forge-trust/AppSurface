@@ -73,18 +73,14 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             Directory.CreateDirectory(coverage);
 
             stage = "collection";
-            List<string> runArgs = _settings.CoverageCliPath is null
-            ? [
-                "run", "--project", Path.Join(root, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"),
-                "--configuration", "Release", "--", "coverage", "run", "--solution", Path.Join(root, "ForgeTrust.AppSurface.slnx"),
-                "--output", coverage, "--configuration", "Release", "--parallelism", "2",
-            ]
-            : ["coverage", "run", "--solution", Path.Join(root, "ForgeTrust.AppSurface.slnx"),
-                "--output", coverage, "--configuration", "Release", "--parallelism", "2"];
-            foreach (var project in ExclusiveProjects) { runArgs.Add("--exclusive-test-project"); runArgs.Add(project); }
-            runArgs.AddRange(["--logger", "console;verbosity=normal", "--test-results", "junit", "--slow-test-diagnostics", "--require-non-sandbox"]);
-            await ExecuteAsync("coverage-run", runArgs, root, proof, cancellationToken,
-                _settings.CoverageCliPath ?? _settings.DotnetPath).ConfigureAwait(false);
+            if (_settings.CoverageCollectionDirectory is { } collection)
+            {
+                if (!string.IsNullOrWhiteSpace(_settings.DiffFile))
+                    throw new InvalidDataException("Collected CI coverage cannot be used for a local patch.");
+                await SolutionCoverageHandoff.ImportAsync(collection, coverage, new(commit, tree, sdk), WorkflowRun(), cancellationToken).ConfigureAwait(false);
+            }
+            else
+                await CollectCoverageAsync(root, coverage, proof, cancellationToken).ConfigureAwait(false);
             var report = Path.Join(coverage, "coverage.cobertura.xml");
             var timings = Path.Join(coverage, "timings.json");
             ValidateTimings(timings, expected);
@@ -181,7 +177,67 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         }
     }
 
-    private async Task ExecuteAsync(string name, IReadOnlyList<string> args, string root, List<CommandProof> proof, CancellationToken ct, string? executable = null)
+    /// <summary>
+    /// Collects the complete solution without closing coverage obligations. The same-run handoff must later pass
+    /// the normal producer's aggregate, applicable patch and native fan-in gates before any acceptance claim.
+    /// Collection uses the explicitly selected installed CLI when supplied, otherwise the source CLI.
+    /// It does not require native inputs and cannot satisfy final acceptance.
+    /// </summary>
+    internal async Task CollectAsync(CancellationToken cancellationToken)
+    {
+        if (_settings.DiffFile is not null || _settings.NativeCoverageDirectory is not null || _settings.CoverageCollectionDirectory is not null)
+            throw new ArgumentException("Collection accepts no patch override, native captures or previous collection.");
+        if (_settings.CoverageCliPath is { } coverageCli
+            && (!Path.IsPathFullyQualified(coverageCli) || !File.Exists(coverageCli)))
+            throw new ArgumentException("The installed coverage CLI must be an existing absolute executable.");
+        var root = Path.GetFullPath(_settings.RepositoryRoot);
+        var coverage = Path.Join(Path.GetFullPath(_settings.OutputDirectory), "coverage");
+        if (!File.Exists(Path.Join(root, "ForgeTrust.AppSurface.slnx")) || ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx")).Count == 0
+            || !Path.IsPathFullyQualified(_settings.DotnetPath) || !File.Exists(_settings.DotnetPath)
+            || Directory.Exists(_settings.OutputDirectory) || File.Exists(_settings.OutputDirectory))
+            throw new ArgumentException("Collection requires a solution, an absolute SDK host and fresh output.");
+        var run = WorkflowRun();
+        SolutionCoverageHandoff.RequireRun(run);
+        var proof = new List<CommandProof>();
+        var commit = (await ExecuteTextAsync("git", ["rev-parse", "--verify", "HEAD^{commit}"], root, proof, cancellationToken)).Trim();
+        var tree = (await ExecuteTextAsync("git", ["rev-parse", "--verify", "HEAD^{tree}"], root, proof, cancellationToken)).Trim();
+        var sdk = (await ExecuteTextAsync(_settings.DotnetPath, ["--version"], root, proof, cancellationToken)).Trim();
+        var identity = new SolutionCoverageIdentity(commit, tree, sdk);
+        identity.Validate();
+        await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(coverage);
+        await CollectCoverageAsync(root, coverage, proof, cancellationToken).ConfigureAwait(false);
+        await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
+        await SolutionCoverageHandoff.WriteAsync(coverage, identity, run, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task CollectCoverageAsync(string root, string coverage, List<CommandProof> proof,
+        CancellationToken cancellationToken)
+    {
+        var installedCli = _settings.CoverageCliPath;
+        List<string> runArgs = installedCli is null
+            ? [
+                "run", "--project", Path.Join(root, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"),
+                "--configuration", "Release", "--", "coverage", "run", "--solution", Path.Join(root, "ForgeTrust.AppSurface.slnx"),
+                "--output", coverage, "--configuration", "Release", "--parallelism", "2",
+            ]
+            : ["coverage", "run", "--solution", Path.Join(root, "ForgeTrust.AppSurface.slnx"),
+                "--output", coverage, "--configuration", "Release", "--parallelism", "2"];
+        runArgs.AddRange(["--schedule", "longest-first"]);
+        if (_settings.CoverageScheduleTimingsPath is { } timings)
+            runArgs.AddRange(["--schedule-timings", timings]);
+        foreach (var project in ExclusiveProjects) { runArgs.Add("--exclusive-test-project"); runArgs.Add(project); }
+        runArgs.AddRange(["--logger", "console;verbosity=normal", "--test-results", "junit", "--slow-test-diagnostics", "--require-non-sandbox"]);
+        await ExecuteAsync("coverage-run", runArgs, root, proof, cancellationToken,
+            installedCli ?? _settings.DotnetPath).ConfigureAwait(false);
+        ValidateTimings(Path.Join(coverage, "timings.json"), ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx")));
+        var report = Path.Join(coverage, "coverage.cobertura.xml");
+        if (!File.Exists(report) || new FileInfo(report).Length == 0)
+            throw new InvalidDataException("The merged solution coverage report is missing.");
+    }
+
+    private async Task ExecuteAsync(string name, IReadOnlyList<string> args, string root, List<CommandProof> proof,
+        CancellationToken ct, string? executable = null)
     {
         var result = await _command(new EvidenceCommandRequest(executable ?? _settings.DotnetPath, args, root, TimeSpan.FromMinutes(90))
         { MaximumOutputBytes = 16 * 1024 * 1024, Environment = _settings.CommandEnvironment }, ct).ConfigureAwait(false);

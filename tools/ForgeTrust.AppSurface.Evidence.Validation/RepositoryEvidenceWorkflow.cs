@@ -85,7 +85,11 @@ internal static class RepositoryEvidenceWorkflow
                     Path.GetFullPath(options.GetValueOrDefault("--scratch-parent", Path.GetTempPath())), output);
             checks = new RepositoryCheckSettings(repository, dotnet, output,
                 options.GetValueOrDefault("--diff-base"), nativeCoverageDirectory, options.GetValueOrDefault("--diff-file"), coverageCli)
-            { VerifyLocalSourceAsync = verifyLocalSourceAsync };
+            {
+                VerifyLocalSourceAsync = verifyLocalSourceAsync,
+                CoverageCollectionDirectory = options.GetValueOrDefault("--coverage-collection"),
+                CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
+            };
         }
 
         Directory.CreateDirectory(output);
@@ -269,7 +273,7 @@ internal static class RepositoryEvidenceWorkflow
         string[] selected = operation switch
         {
             "plan" => ["--output"],
-            "run" => ["--plan", "--output", "--package", "--version", "--source-commit", "--dotnet", "--scratch-parent", "--repository", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli"],
+            "run" => ["--plan", "--output", "--package", "--version", "--source-commit", "--dotnet", "--scratch-parent", "--repository", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli", "--coverage-collection", "--coverage-schedule-timings"],
             _ => ["--plan", "--manifest", "--artifact-root"],
         };
         if (options.Keys.Except(common.Concat(selected), StringComparer.Ordinal).Any())

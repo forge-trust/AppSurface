@@ -293,13 +293,8 @@ public static class Program
             throw new InvalidOperationException("The prepared AppHost assembly has no usable native DCP CLI metadata.");
         }
 
-        var expectedArchitecture = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.Arm64 => "arm64",
-            Architecture.X64 => "x64",
-            _ => null,
-        };
-        if (expectedArchitecture is null || !dcpPath.Contains(expectedArchitecture, StringComparison.OrdinalIgnoreCase))
+        using var executable = File.OpenRead(dcpPath);
+        if (NativeDcpArchitecture.Read(executable) != RuntimeInformation.ProcessArchitecture)
         {
             throw new InvalidOperationException("The prepared AppHost DCP metadata does not match the current process architecture.");
         }

@@ -8,6 +8,7 @@ using Xunit.Abstractions;
 
 public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageConsumerTests.PackedProducerFixture>
 {
+    // The explicit-selection proof pins the patched minimum; it does not establish later-runtime compatibility.
     private const string AspireOverrideVersion = "13.6.5";
     private const string AspireBaselineVersion = "13.6.5";
     private const string HostingBaselineVersion = "10.0.14";
@@ -701,6 +702,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 element => element.Attribute("version")?.Value ?? string.Empty,
                 StringComparer.OrdinalIgnoreCase);
 
+        // Bare nuspec versions are inclusive minimums; exact-version ranges would fail these assertions.
         Assert.Equal("13.6.5", dependencies["Aspire.Hosting"]);
         Assert.Equal("13.6.5", dependencies["Aspire.Hosting.AppHost"]);
         Assert.Equal("13.6.5", dependencies["Aspire.Hosting.Testing"]);
