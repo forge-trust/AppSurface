@@ -500,8 +500,14 @@ public static class EvidenceUnifiedDiffReader
     /// <summary>
     /// Parses changed paths from unified diff text.
     /// </summary>
+    /// <remarks>
+    /// Git path decoding preserves literal filename characters, including leading and trailing whitespace.
+    /// Decoded paths have not yet passed the normalized-path policy enforced by <see cref="EvidencePlanner"/>;
+    /// the planner rejects nonnormalized whitespace with ASEVD118 rather than selecting a trimmed sibling.
+    /// Empty or whitespace-only unquoted path fields are malformed headers and fail with ASEVD135.
+    /// </remarks>
     /// <param name="diff">Unified diff text.</param>
-    /// <returns>Normalized added, modified, deleted, and renamed paths.</returns>
+    /// <returns>Decoded added, modified, deleted, and renamed path records for subsequent policy validation.</returns>
     public static IReadOnlyList<NormalizedDiffPath> Read(string diff)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(diff);
