@@ -110,7 +110,13 @@ uses `queue: max` so a new build does not replace a pending release deployment. 
 publish later if its export takes longer.
 
 The Pages artifact is retained for seven days so a failed deployment can be retried without
-rebuilding the docs. If `deploy-appsurface-docs` times out in `syncing_files` after a successful
+rebuilding the docs. Each artifact also contains the [release archives and version catalog](./guides/version-switching.md)
+hydrated during export; queuing and retries do not refresh that snapshot. Before rerunning only
+the deployment, confirm that both the selected commit and release catalog are still intended.
+If a release was published or its docs assets or catalog changed after export, rerun the export
+from current `main` before deploying, even when the selected commit has not changed.
+
+If `deploy-appsurface-docs` times out in `syncing_files` after a successful
 export, inspect its logs and [GitHub Status](https://www.githubstatus.com/) before rerunning the
 deployment job. The pinned [deploy-pages action](https://github.com/actions/deploy-pages) caps its
 timeout at ten minutes; a larger timeout input cannot extend that limit.
@@ -118,8 +124,7 @@ timeout at ten minutes; a larger timeout input cannot extend that limit.
 If the artifact has expired, rerun `export-appsurface-docs` and its dependent deployment from the
 current `main` run, or start a fresh manual run with `gh workflow run build.yml --ref main`.
 See [rerunning jobs](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/re-running-workflows-and-jobs)
-for the Actions UI and CLI options. Check that the selected commit is still the intended published
-version before retrying an older run. Repeated synchronization timeouts with a valid artifact need
+for the Actions UI and CLI options. Repeated synchronization timeouts with a valid artifact need
 Pages service investigation; deployment serialization does not resolve a backend outage.
 
 ### CI test-result diagnostics

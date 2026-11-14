@@ -301,7 +301,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var deploy = jobs["deploy-appsurface-docs"].AsMapping();
         Assert.Equal(["export-appsurface-docs", "build", "coverage-manifest-gate"],
             deploy["needs"].AsSequence().Select(node => node.AsScalar()));
-        Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", deploy["if"].AsScalar());
+        Assert.Equal("${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}", deploy["if"].AsScalar());
     }
 
     [Fact]
