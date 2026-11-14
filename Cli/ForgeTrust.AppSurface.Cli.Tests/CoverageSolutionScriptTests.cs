@@ -50,7 +50,23 @@ public sealed class CoverageSolutionScriptTests
         var workflow = ReadWorkflow();
         Assert.DoesNotContain("coverage_fanin.py", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("test_coverage_fanin.py", workflow, StringComparison.Ordinal);
-        Assert.Contains("name: coverage-cli-candidate", workflow, StringComparison.Ordinal);
+        var yaml = new YamlStream();
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
+        var jobs = (YamlMappingNode)((YamlMappingNode)yaml.Documents.Single().RootNode)["jobs"];
+        var candidateSteps = ((YamlSequenceNode)((YamlMappingNode)jobs["coverage-cli-candidate"])["steps"])
+            .OfType<YamlMappingNode>();
+        var upload = Assert.Single(candidateSteps, step => step.Children.TryGetValue("uses", out var action)
+            && action.ToString().StartsWith("actions/upload-artifact@", StringComparison.Ordinal));
+        Assert.Equal("coverage-cli-candidate-${{ github.run_attempt }}", ((YamlMappingNode)upload["with"])["name"].ToString());
+        foreach (var name in new[] { "build", "coverage-security-platform", "coverage-collection" })
+        {
+            var steps = ((YamlSequenceNode)((YamlMappingNode)jobs[name])["steps"]).OfType<YamlMappingNode>();
+            var download = Assert.Single(steps, step => step.Children.TryGetValue("with", out var inputs)
+                && inputs is YamlMappingNode values && values.Children.TryGetValue("name", out var artifact)
+                && artifact.ToString().StartsWith("coverage-cli-candidate", StringComparison.Ordinal));
+            Assert.Equal("coverage-cli-candidate-${{ github.run_attempt }}", ((YamlMappingNode)download["with"])["name"].ToString());
+        }
         Assert.Contains("Candidate CLI package source, SDK, or pinned version does not match this lane.", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_SCOPE: ${{ github.repository }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ID: ${{ github.run_id }}", workflow, StringComparison.Ordinal);
@@ -68,7 +84,7 @@ public sealed class CoverageSolutionScriptTests
         using var reader = new StringReader(ReadWorkflow());
         yaml.Load(reader);
         var jobs = (YamlMappingNode)((YamlMappingNode)yaml.Documents.Single().RootNode)["jobs"];
-        foreach (var name in new[] { "build", "coverage-security-platform" })
+        foreach (var name in new[] { "build", "coverage-security-platform", "coverage-collection" })
         {
             var job = (YamlMappingNode)jobs[name];
             var steps = ((YamlSequenceNode)job["steps"]).OfType<YamlMappingNode>();
