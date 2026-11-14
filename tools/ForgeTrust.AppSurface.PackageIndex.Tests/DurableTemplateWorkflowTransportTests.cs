@@ -164,7 +164,7 @@ public sealed class DurableTemplateWorkflowTransportTests
         }
 
         var buildWorkflow = ReadWorkflow(WorkflowPath("build.yml"));
-        var buildStep = FindStep(buildWorkflow, "build", "Verify Durable template release artifact transport");
+        var buildStep = FindStep(buildWorkflow, "coverage-collection", "Verify Durable template release artifact transport");
         var buildCommand = ReadScalar(buildStep, "run");
         Assert.Contains("dotnet test", buildCommand, StringComparison.Ordinal);
         Assert.Contains("FullyQualifiedName~DurableTemplateWorkflowTransportTests", buildCommand, StringComparison.Ordinal);

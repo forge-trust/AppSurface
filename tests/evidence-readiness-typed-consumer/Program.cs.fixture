@@ -55,7 +55,7 @@ public static class Program
             $"packageId=ForgeTrust.AppSurface.Aspire.Testing packageVersion={packageVersion} " +
             $"sourceCommit={sourceCommit} skoolitSourceCommit={SkoolitSourceCommit} " +
             $"sourceTree={sourceTreeStatus} " +
-            "resource=skoolit-web endpoint=http path=/healthz aspire=13.4.4 " +
+            "resource=skoolit-web endpoint=http path=/healthz aspire=13.6.5 " +
             "startupTimeout=3m maxAttempts=30 requestTimeout=3s retryDelay=250ms useProxy=false connectTimeout=2s " +
             "nativeDcpMetadata=present timing=unmeasured");
         return 0;
@@ -145,9 +145,9 @@ public static class Program
 
         RequirePackage(libraries, "ForgeTrust.AppSurface.Aspire.Testing", packageVersion);
         RequirePackage(libraries, "ForgeTrust.AppSurface.Evidence.Readiness", packageVersion);
-        RequirePackage(libraries, "Aspire.Hosting", "13.4.4");
-        RequirePackage(libraries, "Aspire.Hosting.AppHost", "13.4.4");
-        RequirePackage(libraries, "Aspire.Hosting.Testing", "13.4.4");
+        RequirePackage(libraries, "Aspire.Hosting", "13.6.5");
+        RequirePackage(libraries, "Aspire.Hosting.AppHost", "13.6.5");
+        RequirePackage(libraries, "Aspire.Hosting.Testing", "13.6.5");
 
         var restoredFirstPartyPackages = new[]
         {
@@ -257,7 +257,7 @@ public static class Program
                 "ForgeTrust.AppSurface.Evidence.Contracts",
                 "ForgeTrust.AppSurface.Evidence.Readiness",
             }, StringComparer.OrdinalIgnoreCase) ||
-            hostingDependency?.Attribute("version")?.Value.Replace(" ", string.Empty) != "[13.4.4,14.0.0)" ||
+            hostingDependency?.Attribute("version")?.Value.Replace(" ", string.Empty) != "[13.6.5,14.0.0)" ||
             dependencies.Any(dependency => string.Equals(dependency.Attribute("id")?.Value,
                 "Aspire.Hosting.Testing", StringComparison.OrdinalIgnoreCase)))
         {
@@ -292,13 +292,8 @@ public static class Program
             throw new InvalidOperationException("The prepared AppHost assembly has no usable native DCP CLI metadata.");
         }
 
-        var expectedArchitecture = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.Arm64 => "arm64",
-            Architecture.X64 => "x64",
-            _ => null,
-        };
-        if (expectedArchitecture is null || !dcpPath.Contains(expectedArchitecture, StringComparison.OrdinalIgnoreCase))
+        using var executable = File.OpenRead(dcpPath);
+        if (NativeDcpArchitecture.Read(executable) != RuntimeInformation.ProcessArchitecture)
         {
             throw new InvalidOperationException("The prepared AppHost DCP metadata does not match the current process architecture.");
         }

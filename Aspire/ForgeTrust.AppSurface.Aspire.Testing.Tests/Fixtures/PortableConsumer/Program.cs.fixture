@@ -40,7 +40,7 @@ public static class Program
             "PORTABLE_GRAPH_PROOF " +
             $"SkoolitSourceCommit={SkoolitSourceCommit} " +
             "ProviderAssembly=Microsoft.Extensions.DependencyInjection " +
-            "Aspire=13.4.4 Hosting=10.0.8 " +
+            "Aspire=13.6.5 Hosting=10.0.14 " +
             "receiptsOn=true/SeededInternal/household_dev_billing " +
             "receiptsOff=false/Disabled/");
         return 0;

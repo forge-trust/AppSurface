@@ -123,6 +123,58 @@ around execution instead of requiring a clean checkout. The local workflow suppl
 to each coverage checkpoint through an in-process callback. Direct `run --diff-file` calls fail closed;
 use `--operation local` to collect and verify a dirty working tree.
 
+### CI collection overlap and scheduling
+
+The [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml)
+starts full-solution collection after changed-path planning, alongside the native security matrix and
+packed Durable consumers. Docs export starts independently. The existing `build` job waits for collection,
+packed consumers and every selected native lane before producing and verifying the final coverage manifest.
+The stable `Coverage evidence gate` rejects failed, cancelled or skipped required collection/build/consumer
+jobs; an unselected native matrix may remain skipped. Pages deployment waits for docs export, `build` and
+that coverage gate. Existing job IDs and required check names remain available. Collection also owns the bounded slow-test
+summary and Codecov JUnit upload, so failed tests still publish diagnostics when final acceptance is skipped.
+The full report remains in `coverage-collection-diagnostics`; coverage-report upload stays behind final acceptance.
+
+The internal `--operation collect-coverage --repository <checkout> --dotnet <absolute-host>
+--output <fresh-directory>` command runs the same Release collector, complete solution inventory,
+parallelism `2`, explicit exclusive list and automatic exclusivity rules as normal producer execution.
+It checks unchanged source before and after collection and writes `coverage/collection-receipt.json` only
+after every test project and coverage artifact passes validation. It does **not** evaluate gates, write an
+acceptance manifest or close any obligation. It requires `GITHUB_REPOSITORY`, `GITHUB_RUN_ID` and
+`GITHUB_RUN_ATTEMPT`; local patches continue through the normal local workflow.
+
+`run --scope coverage --coverage-collection <downloaded-directory>` imports that collection into fresh
+producer output. The schema-v1 receipt binds source commit/tree, SDK, Release configuration, repository,
+run and attempt, plus SHA-256 hashes of `coverage.cobertura.xml` and `timings.json`. Import rejects linked
+paths, overlapping or occupied output, missing inputs, directories in place of files, malformed receipts,
+changed identities and altered report/timing bytes. Overlap checks reject case aliases conservatively on
+every host, including case-sensitive filesystems. Missing-file and JSON decoding errors raise
+`InvalidDataException` with the original I/O or JSON exception for diagnostics. The producer revalidates
+the exact solution inventory, unchanged current source and all normal aggregate, applicable
+patch and selected native fan-in gates. The workflow downloads `solution-coverage-collection-<attempt>`
+from its current run only. Rerun the whole workflow when evidence must be regenerated: earlier attempts,
+caches and timing history cannot serve as coverage proof. This receipt checks consistency between trusted
+workflow jobs; it does not authenticate arbitrary artifact producers.
+
+The internal `Program.RunAsync` collection callback is a test seam for option dispatch only; production
+entrypoints always use `SolutionCoverageProducer.CollectAsync`. Replacing that callback in tests does
+not produce a collection receipt or acceptance evidence.
+
+Collection uses the CLI's [longest-first schedule](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)
+for non-exclusive projects. Exclusive suites still run first in stable input order. Optional
+`--coverage-schedule-timings <timings.json>` forwards duration hints to `coverage run --schedule-timings`;
+both `run` and `collect-coverage` resolve relative hint paths against the caller's current directory before
+starting collection in the selected repository. Use an absolute path when invoking from automation.
+Without history, unknown projects keep input order. The
+[history helper](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/coverage-schedule-history.py) reads the newest available
+`coverage-schedule-timings` artifact from successful `build.yml` push runs on the default branch of this repository.
+Fork PRs, other events and mismatched head repositories are never eligible. Only main push
+collections publish this advisory artifact; it becomes eligible for reuse only after the full workflow succeeds. The history lookup has a 45-second total API budget. API failures, expired/missing artifacts or invalid bounded
+history fall back to a fresh run without hints. It never restores coverage results or changes project
+selection, exclusions, parallelism, gates or thresholds. The first run after introducing this artifact
+has no history; the next successful main workflow supplies it. Do not confuse faster scheduling with
+reusable acceptance evidence.
+
 `package-checks` runs the existing [PackageIndex](../ForgeTrust.AppSurface.PackageIndex/README.md)
 `gate`, `verify` and `verify-packages` commands, using a fresh exact version and an isolated NuGet cache.
 The last command already restores, builds, packs and exercises installed consumers; the adapter avoids

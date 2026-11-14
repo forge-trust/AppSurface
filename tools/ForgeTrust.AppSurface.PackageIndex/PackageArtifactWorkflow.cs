@@ -147,7 +147,8 @@ internal sealed class PackageArtifactWorkflow
             "restore",
             "restoring",
             RestoreTimeoutMilliseconds,
-            cancellationToken);
+            cancellationToken,
+            includeStandardOutputOnFailure: true);
 
         await RunRepositoryCommandAsync(
             request,

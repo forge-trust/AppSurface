@@ -10,6 +10,12 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed record RepositoryCheckSettings(string RepositoryRoot, string DotnetPath, string OutputDirectory,
     string? DiffBase = null, string? NativeCoverageDirectory = null, string? DiffFile = null)
 {
+    /// <summary>Optional same-run CI collection to verify and gate instead of collecting again. Never used for local patches.</summary>
+    internal string? CoverageCollectionDirectory { get; init; }
+
+    /// <summary>Optional prior timings used only to order non-exclusive projects in the longest-first schedule.</summary>
+    internal string? CoverageScheduleTimingsPath { get; init; }
+
     /// <summary>
     /// Verifies the local source and policy digest captured by <see cref="LocalEvidenceWorkflow"/>.
     /// Required for a dirty local patch; direct command-line runs cannot supply this in-process callback.

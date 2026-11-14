@@ -1,13 +1,15 @@
 # Packed typed readiness consumer
 
-This prepared .NET 10 Aspire AppHost project restores the locally packed `ForgeTrust.AppSurface.Aspire.Testing` package with Aspire 13.4.4, builds a public AppHost marker/module/profile, and runs the complete `AppSurfaceAspireTestFixture.StartAsync` call from that package. The profile adds a local executable resource that serves `/healthz`; Aspire's native DCP starts and health-checks that process before the fixture returns the named HTTP endpoint.
+This prepared .NET 10 Aspire AppHost project restores the locally packed `ForgeTrust.AppSurface.Aspire.Testing` package with Aspire 13.6.5, builds a public AppHost marker/module/profile, and runs the complete `AppSurfaceAspireTestFixture.StartAsync` call from that package. The profile adds a local executable resource that serves `/healthz`; Aspire's native DCP starts and health-checks that process before the fixture returns the named HTTP endpoint.
+
+Aspire versions before 13.6.5 are affected by [GHSA-f7vh-h5g3-7jrh](https://github.com/advisories/GHSA-f7vh-h5g3-7jrh), so this consumer uses the coordinated patched minimum. No later safe stable version is available for a separate runtime proof. The fixture remains bound to the Skoolit source snapshot `a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e`; this README describes the prepared consumer contract, while an actual run is evidenced by the script's transactional completion sentinel below.
 
 The program contains two executable, version-bound startup-call equivalences for the pinned Skoolit source commit `a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e`:
 
 - [`MonitoringReceiptBrowserGateTests.cs`](https://github.com/forge-trust/skoolit/blob/a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e/tests/Skoolit.Playwright.Tests/MonitoringReceiptBrowserGateTests.cs) creates `skoolit-web`, selects endpoint `http`, and calls the shared QA probe at `/healthz`.
 - [`BillingTierBrowserGateTests.cs`](https://github.com/forge-trust/skoolit/blob/a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e/tests/Skoolit.Playwright.Tests/BillingTierBrowserGateTests.cs) uses the same resource, endpoint, and probe sequence from its browser fixture.
 
-Both runs retain the source's three-minute caller/startup budget, exact-200 behavior, 30-attempt cap, three-second request timeout, 250 ms retry delay, `UseProxy = false`, and two-second `ConnectTimeout`. The test project is a `.csproj.template`, not a repository project, so package-index and solution discovery do not enroll it. The compiled AppHost assembly must carry a usable `dcpclipath` metadata value from Aspire's AppHost SDK.
+Both runs retain the source's three-minute caller/startup budget, exact-200 behavior, 30-attempt cap, three-second request timeout, 250 ms retry delay, `UseProxy = false`, and two-second `ConnectTimeout`. The test project is a `.csproj.template`, not a repository project, so package-index and solution discovery do not enroll it. The compiled AppHost assembly must carry a usable `dcpclipath` metadata value from Aspire's AppHost SDK. The [native architecture reader](NativeDcpArchitecture.cs) checks that executable's Mach-O, ELF or PE header against the current process architecture; it rejects unsupported or truncated headers. Bundle paths need not contain a runtime identifier, so path text cannot establish this property.
 
 The pinned browser gates used this startup sequence before their browser and business assertions:
 
@@ -33,7 +35,7 @@ The equivalence is native Aspire startup/readiness only. Browser execution, auth
 
 Aspire allocates the executable's HTTP target port and injects it through `PORT`. The health server binds only to `127.0.0.1` at that port; it does not require port 8080 to be available or listen on external network interfaces.
 
-Prerequisites are a clean committed repository checkout, the .NET 10 SDK, network access to NuGet.org for Aspire dependencies, and an OS-supported Aspire 13.4.4 AppHost/DCP runtime. This fixture graph contains an executable resource and does not require a container image. The repository script retains the generated feed and restore/build/run logs under `.gstack/tmp/issue-867-readiness-consumers`; use its `packageVersion`, `sourceCommit`, `sourceTree`, and `feed` values for the exact local install:
+Prerequisites are a clean committed repository checkout, the .NET 10 SDK, network access to NuGet.org for Aspire dependencies, and an OS-supported Aspire 13.6.5 AppHost/DCP runtime. This fixture graph contains an executable resource and does not require a container image. The repository script retains the generated feed and restore/build/run logs under `.gstack/tmp/issue-867-readiness-consumers`; use its `packageVersion`, `sourceCommit`, `sourceTree`, and `feed` values for the exact local install:
 
 ```sh
 dotnet add package ForgeTrust.AppSurface.Aspire.Testing \
@@ -41,7 +43,7 @@ dotnet add package ForgeTrust.AppSurface.Aspire.Testing \
   --source "$PACKAGE_FEED"
 ```
 
-For the standalone prepared project, copy this directory's `Consumer.csproj.template` to `Consumer.csproj`, replace `{{PACKAGE_VERSION}}` with the reported exact version, copy `Program.cs.fixture` to `Program.cs`, and use a NuGet config with the reported local feed plus NuGet.org. Run the full proof with:
+For the standalone prepared project, copy this directory's `Consumer.csproj.template` to `Consumer.csproj`, replace `{{PACKAGE_VERSION}}` with the reported exact version, copy `Program.cs.fixture` to `Program.cs` and retain `NativeDcpArchitecture.cs`, and use a NuGet config with the reported local feed plus NuGet.org. Run the full proof with:
 
 ```sh
 scripts/verify-evidence-readiness-consumers.sh

@@ -328,6 +328,21 @@ public sealed class TemplateRepositoryContractTests
             solutionProjects);
     }
 
+    [Fact]
+    public async Task AuthoredTelemetryPins_MatchThePackedObservabilityDependencyFloor()
+    {
+        var templatePackages = GetPackageVersions(await LoadProjectAsync(
+            TestPathUtils.PathUnder(TemplateRoot, "Directory.Packages.props")));
+        var repositoryPackages = await LoadProjectAsync(
+            TestPathUtils.PathUnder(RepositoryRoot, "Directory.Packages.props"));
+        foreach (var packageId in new[] { "OpenTelemetry", "OpenTelemetry.Exporter.OpenTelemetryProtocol", "OpenTelemetry.Extensions.Hosting" })
+        {
+            var repositoryPin = Assert.Single(GetItems(repositoryPackages, "PackageVersion"),
+                item => GetItemInclude(item) == packageId);
+            Assert.Equal((string?)repositoryPin.Attribute("Version"), templatePackages[packageId]);
+        }
+    }
+
     private static async Task<XDocument> LoadProjectAsync(string path)
     {
         Assert.True(File.Exists(path), $"Expected project file was not found at '{path}'.");

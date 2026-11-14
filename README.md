@@ -211,7 +211,7 @@ aspire run --non-interactive --apphost examples/product-readiness-lab-apphost/Pr
 
 The lab emits a readiness report with `proven-locally`, `host-owned`, `deferred`, `unsafe-to-copy`, and `blocked` rows. Its in-process host proof shows where `IDurableTaskFlowRunner<TContext>` and `IDurableTaskFlowClient<TContext>` fit, while keeping Durable Task worker/client hosting and storage provider setup explicitly host-owned.
 
-For contributor verification, build the solution:
+For contributor verification, install the **10.0.402** SDK pinned by [`global.json`](https://github.com/forge-trust/AppSurface/blob/main/global.json), then build the solution. The [contributor setup guide](./CONTRIBUTING.md#local-setup) explains SDK selection and the matching isolated CI toolchain.
 
 ```bash
 dotnet build
@@ -253,7 +253,12 @@ The repository lane requires a non-sandboxed host by default. Set
 deliberately leaves ordinary CI and container hosts valid; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
 
 The policy-selected coverage producer writes to the printed run's `proof/coverage` directory
-(CI uses `TestResults/coverage-evidence/coverage`). The compatibility wrapper has the same collection
+(CI uses `TestResults/coverage-evidence/coverage`). CI overlaps collection with native and packed-consumer
+checks, then verifies same-attempt collection and all existing gates in the final `build` job. Non-exclusive
+projects use longest-first scheduling with optional advisory main-branch timing history; exclusive suites
+retain their ordering. Docs export runs alongside validation, and Pages deployment waits for acceptance.
+See the [CI collection and scheduling contract](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#ci-collection-overlap-and-scheduling)
+for handoff provenance, fallback behavior and full-workflow reruns. The compatibility wrapper has the same collection
 and threshold behavior and uses the fixed `TestResults/coverage-merged` paths listed below:
 
 - Runs each solution test project.
