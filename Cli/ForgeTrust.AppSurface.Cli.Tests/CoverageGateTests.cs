@@ -1275,6 +1275,43 @@ public sealed class CoverageGateTests
     }
 
     [Theory]
+    [InlineData("src/Foo.cs ", false)]
+    [InlineData("src/Foo.cs ", true)]
+    [InlineData(" src/Foo.cs", false)]
+    [InlineData(" src/Foo.cs", true)]
+    [InlineData(" src/Foo.cs ", false)]
+    [InlineData(" src/Foo.cs ", true)]
+    public async Task EvaluateAsync_PreservesFilenameWhitespaceInsteadOfMatchingTrimmedSibling(
+        string filename, bool changedFileCovered)
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage($"""
+            <coverage lines-covered="1" lines-valid="2" branches-covered="1" branches-valid="1">
+              <packages><package name="Example"><classes>
+                <class name="TrimmedSibling" filename="{filename.Trim()}">
+                  <lines><line number="1" hits="{(changedFileCovered ? 0 : 1)}" /></lines>
+                </class>
+                <class name="ChangedFile" filename="{filename}">
+                  <lines><line number="1" hits="{(changedFileCovered ? 1 : 0)}" /></lines>
+                </class>
+              </classes></package></packages>
+            </coverage>
+            """);
+        var diff = $"diff --git a/{filename} b/{filename}\n--- a/{filename}\t\n+++ b/{filename}\t\n@@ -1 +1 @@\n-old\n+new\n";
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null,
+            new CoveragePatchRequest(temp.Path, "origin/main", 95, _ => Task.FromResult(diff),
+                LineMode: PatchLineMode.Codecov));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.Equal(changedFileCovered, result.Passed);
+        Assert.Equal(1, result.PatchLineCoverage?.ChangedLines);
+        Assert.Equal(1, result.PatchLineCoverage?.MeasurableLines);
+        Assert.Equal(changedFileCovered ? 1 : 0, result.PatchLineCoverage?.CoveredLines);
+        Assert.Equal(changedFileCovered ? 100 : 0, result.PatchLineCoverage?.Percent);
+    }
+
+    [Theory]
     [InlineData("measurable")]
     [InlineData("codecov")]
     public async Task EvaluateAsync_ExcludesChangedLinesMissingFromCobertura_InEveryMode(string modeName)

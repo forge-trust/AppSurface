@@ -1924,6 +1924,7 @@ internal static class PatchCoverageEvaluator
         return normalizedPath is not null;
     }
 
+    /// <summary>Resolves a reported filename without discarding significant filename whitespace.</summary>
     private static string? NormalizeCoveragePath(string? value, string repositoryRoot)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1931,7 +1932,7 @@ internal static class PatchCoverageEvaluator
             return null;
         }
 
-        var path = value.Trim();
+        var path = value;
         if (Path.IsPathFullyQualified(path))
         {
             var relative = Path.GetRelativePath(repositoryRoot, path);

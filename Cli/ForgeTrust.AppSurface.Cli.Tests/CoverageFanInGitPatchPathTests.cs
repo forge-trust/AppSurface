@@ -63,6 +63,18 @@ public sealed class CoverageFanInGitPatchPathTests
     }
 
     [Theory]
+    [InlineData("src/File.cs ", "src/File.cs ")]
+    [InlineData(" src/File.cs", " src/File.cs")]
+    [InlineData("src/File.cs \t2026-11-07 12:00:00", "src/File.cs ")]
+    [InlineData("\"src/File.cs \"", "src/File.cs ")]
+    public void TryDecode_PreservesLiteralLeadingAndTrailingWhitespace(string field, string expectedPath)
+    {
+        Assert.True(GitPatchPathHeader.TryDecode(field, out var path));
+        Assert.Equal(expectedPath, path);
+        AssertPlannerPath(field, expectedPath);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("\"\"")]
     [InlineData("   ")]
@@ -75,6 +87,15 @@ public sealed class CoverageFanInGitPatchPathTests
     [InlineData("\"src/invalid\\200.cs\"")]
     [InlineData("\"src/incomplete\\303.cs\"")]
     public void TryDecode_RejectsMalformedOrInvalidUtf8Fields(string field)
+    {
+        Assert.False(GitPatchPathHeader.TryDecode(field, out _));
+        AssertPlannerRejects(field);
+    }
+
+    [Theory]
+    [InlineData("   ")]
+    [InlineData(" \t2026-11-07 12:00:00")]
+    public void TryDecode_RejectsWhitespaceOnlyUnquotedFields(string field)
     {
         Assert.False(GitPatchPathHeader.TryDecode(field, out _));
         AssertPlannerRejects(field);
@@ -149,6 +170,38 @@ public sealed class CoverageFanInGitPatchPathTests
         Assert.Equal("all", plan.Profile.Id);
         Assert.Equal(path, Assert.Single(plan.ChangedPaths).Path);
         Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(patch)), plan.PatchSha256);
+    }
+
+    [Theory]
+    [InlineData("src/File.cs ")]
+    [InlineData(" src/File.cs")]
+    public void ResolvePatch_RejectsWhitespacePathsWithoutSelectingTrimmedSibling(string path)
+    {
+        var patch = Encoding.UTF8.GetBytes(
+            $"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n");
+
+        var decoded = Assert.Single(EvidenceUnifiedDiffReader.Read(Encoding.UTF8.GetString(patch)));
+        Assert.Equal(path, decoded.Path);
+        var error = Assert.Throws<EvidencePlanningException>(() =>
+            new EvidencePlanner().ResolvePatch(CreatePathPolicy(), patch));
+        Assert.Equal("ASEVD118", error.Code);
+    }
+
+    [Fact]
+    public void ResolvePatch_RejectsWhitespaceRenameWithoutSelectingTrimmedSibling()
+    {
+        const string path = "src/File.cs ";
+        var patch = Encoding.UTF8.GetBytes(
+            "diff --git a/src/File.cs b/src/File.cs \n" +
+            "similarity index 100%\nrename from src/File.cs\nrename to src/File.cs \n" +
+            "--- a/src/File.cs\n+++ b/src/File.cs \n");
+
+        var changed = Assert.Single(EvidenceUnifiedDiffReader.Read(Encoding.UTF8.GetString(patch)));
+        Assert.Equal(path, changed.Path);
+        Assert.Equal("src/File.cs", changed.PreviousPath);
+        var error = Assert.Throws<EvidencePlanningException>(() =>
+            new EvidencePlanner().ResolvePatch(CreatePathPolicy(), patch));
+        Assert.Equal("ASEVD118", error.Code);
     }
 
     [Fact]

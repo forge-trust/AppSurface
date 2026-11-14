@@ -19,6 +19,7 @@ public sealed class EvidencePlanner
         => ResolveCore(policy, changedPaths, null);
 
     /// <summary>Resolves a plan that also binds the exact, strictly decoded UTF-8 patch captured by the caller.</summary>
+    /// <remarks>Decoded patch paths must satisfy the normalized-path policy; filename characters are never discarded to select a different path.</remarks>
     /// <param name="policy">Versioned consumer policy.</param>
     /// <param name="patch">Exact UTF-8 unified patch bytes; copied before strict decoding, parsing, and hashing. Invalid UTF-8 fails with ASEVD136. At most 20 MiB.</param>
     /// <param name="additionalPaths">Optional normalized paths considered alongside paths read from the patch.</param>
@@ -396,6 +397,7 @@ public sealed class EvidencePlanner
         }
     }
 
+    /// <summary>Produces the canonical value used to reject nonnormalized paths before policy selection.</summary>
     private static string NormalizePathValue(string path)
     {
         if (string.IsNullOrWhiteSpace(path))

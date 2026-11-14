@@ -9,14 +9,15 @@ internal static class GitPatchPathHeader
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     /// <summary>Reads a literal or Git C-quoted path, discarding only an optional tab-delimited suffix.</summary>
+    /// <remarks>Leading and trailing filename whitespace is significant; an all-whitespace unquoted field is invalid.</remarks>
     internal static bool TryDecode(string value, out string path)
     {
         path = string.Empty;
         if (!value.StartsWith('"'))
         {
             var tab = value.IndexOf('\t');
-            path = tab < 0 ? value.Trim() : value[..tab];
-            return path.Length > 0 && !path.Contains('\0');
+            path = tab < 0 ? value : value[..tab];
+            return !string.IsNullOrWhiteSpace(path) && !path.Contains('\0');
         }
 
         using var bytes = new MemoryStream();
