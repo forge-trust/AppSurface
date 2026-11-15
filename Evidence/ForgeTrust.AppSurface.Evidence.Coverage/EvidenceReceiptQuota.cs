@@ -331,14 +331,20 @@ internal static class EvidenceReceiptQuota
         WriteIndex(root, rootPath, index);
     }
 
-    /// <summary>Reconciles bound orphan payload reservations while the supplied live key lease remains held.</summary>
+    /// <summary>Reconciles speculative essential holds and bound orphan payload reservations under a live key lease.</summary>
     /// <param name="keyLease">The non-disposed exclusive key lease acquired by the current caller.</param>
     /// <param name="waitTimeout">Remaining caller-owned acquisition budget, capped at 30 seconds for the root-index wait.</param>
     /// <param name="cancellationToken">Cancels the root-index wait before reconciliation changes authority.</param>
-    /// <returns>The number of speculative reserved bytes released because their bound directories are absent or smaller than reserved.</returns>
+    /// <returns>
+    /// The number of speculative payload bytes released because their bound directories are absent or smaller than
+    /// reserved. Zero does not mean the index was unchanged: essential reservation IDs may still have been pruned.
+    /// </returns>
     /// <remarks>
-    /// Call immediately after acquiring the key lease and before creating a new payload reservation or stage. The
-    /// method checks only the exact persisted stage/final names, securely measures a single recognized directory,
+    /// Call immediately after acquiring the key lease and confirming its essential reservation, before creating a
+    /// new payload reservation or stage. Reconciliation retains this actual owner's essential hold and drops other
+    /// preparers' speculative IDs. Each waiter must re-confirm its own essential reservation and capacity after
+    /// acquiring the key, before reconciliation or execution; a prior preparation reservation alone is insufficient.
+    /// The method checks only the exact persisted stage/final names, securely measures a single recognized directory,
     /// and retains its actual bytes. Ambiguous, foreign, linked, malformed, over-bound, or legacy unbound state is
     /// left unchanged; reservation age and process liveness are never used to reclaim it. It never deletes payloads or
     /// changes authoritative execution/audit/quarantine state; in particular, an unresolved InFlight record continues

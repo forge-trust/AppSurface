@@ -40,13 +40,23 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     { MaximumFiles = MaximumFiles };
 
     /// <summary>Captures required run/gate reports and every retained publication in the managed session.</summary>
+    /// <param name="outputRoot">Current execution root containing the original coverage directory.</param>
+    /// <param name="result">A successful collection and passing gate; other results are ineligible.</param>
+    /// <param name="publications">Complete writer-owned publications, limited to 1–128 entries before optional receipt work.</param>
+    /// <param name="token">Producer cancellation/deadline, propagated rather than treated as optional ineligibility.</param>
+    /// <returns>A complete validated receipt inventory, including an eligible current-run sidecar when present.</returns>
     /// <remarks>Includes the current-run history sidecar when the managed session published one. That sidecar is
-    /// optional in the existing retention workflow; receipt eligibility does not enable or require history storage.</remarks>
+    /// optional in the existing retention workflow; receipt eligibility does not enable or require history storage.
+    /// Rejects oversized publication counts before enumerating publications or reading optional metadata. Ordinary
+    /// report delivery remains independent of this receipt-only limit.</remarks>
     internal static CoverageEvidenceInventory Capture(string outputRoot, CoverageEvidenceExecutionResult result,
         IReadOnlyList<CoverageArtifactInventoryEntry> publications, CancellationToken token)
     {
         if (!result.Run.Success || result.Gate is null || !result.Gate.Passed)
             throw new CoverageEvidenceInventoryException("inventory-result-not-passed");
+        token.ThrowIfCancellationRequested();
+        if (publications.Count is 0 or > MaximumFiles)
+            throw new CoverageEvidenceInventoryException("inventory-file-limit");
         var root = Path.GetFullPath(outputRoot);
         var paths = publications.Select(entry => new CoverageEvidenceInventoryFile("coverage/" + entry.Path, entry.Length, entry.Sha256)).ToList();
         var manifestPath = "coverage/" + CoverageArtifactSession.SidecarName;

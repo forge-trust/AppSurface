@@ -12,6 +12,23 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageEvidenceReceiptInventoryTests
 {
     [Theory]
+    [InlineData(0)]
+    [InlineData(129)]
+    public void ReceiptCaptureRejectsIneligibleCountsBeforeInspectingPublications(int count)
+    {
+        using var directory = TestDirectory.Create();
+        var result = new CoverageEvidenceExecutionResult(new(true, directory.Path, "coverage.xml"),
+            new("coverage.xml", new(1, 1, 100), new(1, 1, 100), 95, 85, true, "gate.json", "gate.md"));
+        var publications = new CountOnlyPublications(count);
+
+        var exception = Assert.Throws<CoverageEvidenceInventoryException>(() =>
+            CoverageEvidenceInventory.Capture(directory.Path, result, publications, CancellationToken.None));
+
+        Assert.Equal("inventory-file-limit", exception.Reason);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
+    }
+
+    [Theory]
     [InlineData("/coverage/file")]
     [InlineData("coverage/../escape")]
     [InlineData("coverage/./file")]
@@ -530,6 +547,14 @@ public sealed class CoverageEvidenceReceiptInventoryTests
             current = current.Parent;
         }
         throw new InvalidOperationException("The CLI test process is not running inside a Git worktree.");
+    }
+
+    private sealed class CountOnlyPublications(int count) : IReadOnlyList<CoverageArtifactInventoryEntry>
+    {
+        public int Count => count;
+        public CoverageArtifactInventoryEntry this[int index] => throw new InvalidOperationException("An ineligible set must not be inspected.");
+        public IEnumerator<CoverageArtifactInventoryEntry> GetEnumerator() => throw new InvalidOperationException("An ineligible set must not be enumerated.");
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private sealed class Runner(string? failure = null, string? solutionProjectPath = null, int attachmentCount = 1) : ICoverageRunProcessRunner

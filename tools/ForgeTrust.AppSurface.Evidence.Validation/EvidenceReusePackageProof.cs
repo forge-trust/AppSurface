@@ -426,6 +426,7 @@ internal static class EvidenceReusePackageProof
                     && manifest.Eligibility == EvidenceClaimEligibility.Informational, "cli-reuse-informational");
                 Require(producer.Diagnostic is { } diagnostic
                     && diagnostic.Contains("coverage/coverage-gate.md", StringComparison.Ordinal)
+                    && diagnostic.Contains("relative to the producer artifact root", StringComparison.Ordinal)
                     && !diagnostic.Contains(Path.Join(output, "cli-fresh"), StringComparison.Ordinal),
                     "cli-reuse-diagnostic-current-artifacts");
             }

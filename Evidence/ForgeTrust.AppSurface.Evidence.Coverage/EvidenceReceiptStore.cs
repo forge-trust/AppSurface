@@ -624,7 +624,7 @@ internal sealed class EvidenceReceiptStore
                         OriginManifestDigest = originManifest.ManifestDigest,
                         OriginCompletedAt = state.OriginCompletedAt,
                         Diagnostic = producer.Kind.Equals("coverage", StringComparison.OrdinalIgnoreCase)
-                            ? "Coverage report: coverage/coverage-gate.md"
+                            ? "Coverage report: coverage/coverage-gate.md (relative to the producer artifact root)."
                             : originResult.Diagnostic
                     };
                     return EvidenceReceiptReadResult.Restored(reused, originPlan, originManifest,

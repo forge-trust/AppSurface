@@ -336,21 +336,29 @@ internal sealed partial class CoverageRunOutputLease
 
     /// <summary>Enumerates at most a caller-supplied number of immediate entries without following links.</summary>
     /// <param name="maximumEntries">Strict positive allocation and traversal bound.</param>
-    /// <returns>Validated regular-file and directory names.</returns>
-    internal IReadOnlyList<CoverageArtifactDirectoryEntry> EnumerateArtifactEntries(int maximumEntries)
+    /// <param name="cancellationToken">Optional cancellation observed before name enumeration and during entry inspection.</param>
+    /// <returns>Validated regular-file and directory names, in the underlying filesystem's enumeration order.</returns>
+    /// <remarks>
+    /// The token is checked before enumeration, while collecting names, and before inspecting each name. Cancellation
+    /// stops the operation and disposes any enumeration resources it owns; the retained directory remains caller-owned.
+    /// </remarks>
+    internal IReadOnlyList<CoverageArtifactDirectoryEntry> EnumerateArtifactEntries(int maximumEntries, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumEntries);
         VerifyBinding();
         var names = OperatingSystem.IsWindows()
-            ? ReadArtifactWindowsNames(_outputHandle!, maximumEntries)
-            : ReadArtifactUnixNames(_outputHandle!, maximumEntries);
+            ? ReadArtifactWindowsNames(_outputHandle!, maximumEntries, cancellationToken: cancellationToken)
+            : ReadArtifactUnixNames(_outputHandle!, maximumEntries, cancellationToken: cancellationToken);
         var entries = new List<CoverageArtifactDirectoryEntry>(names.Count);
         foreach (var name in names)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ValidateArtifactComponent(name);
             var inspected = InspectEntry(_outputHandle!, name);
             entries.Add(new(name, inspected.IsDirectory, inspected.Identity.ToString()));
         }
+        cancellationToken.ThrowIfCancellationRequested();
         VerifyBinding();
         return entries;
     }
@@ -722,16 +730,24 @@ internal sealed partial class CoverageRunOutputLease
     /// <param name="directory">Retained directory handle.</param>
     /// <param name="maximumEntries">Strict bound, checked before retaining another name.</param>
     /// <param name="enumerate">Optional per-call name observation for iterator failure tests; defaults to the native bound path.</param>
-    /// <remarks>Injected names verify the count and iterator decisions; they do not prove Windows enumeration.</remarks>
+    /// <param name="cancellationToken">Optional cancellation observed before starting and after each yielded path.</param>
+    /// <returns>Collected immediate child names, without their parent directory path.</returns>
+    /// <remarks>
+    /// Cancellation disposes the managed enumerator and does not dispose the retained directory. Injected names verify
+    /// cancellation, count and iterator decisions; they do not prove Windows enumeration.
+    /// </remarks>
     internal static IReadOnlyList<string> ReadArtifactWindowsNames(SafeFileHandle directory, int maximumEntries,
-        Func<SafeFileHandle, IEnumerable<string>>? enumerate = null)
+        Func<SafeFileHandle, IEnumerable<string>>? enumerate = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var result = new List<string>();
         foreach (var path in enumerate is null ? Directory.EnumerateFileSystemEntries(GetStableDirectoryPath(directory)) : enumerate(directory))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (result.Count >= maximumEntries) throw new IOException("Artifact entry inspection limit reached.");
             result.Add(Path.GetFileName(path));
         }
+        cancellationToken.ThrowIfCancellationRequested();
         return result;
     }
 
@@ -739,10 +755,17 @@ internal sealed partial class CoverageRunOutputLease
     /// <param name="directory">Retained source directory handle, never disposed by this method.</param>
     /// <param name="maximumEntries">Strict entry count bound, excluding dot entries.</param>
     /// <param name="nativeCalls">Optional per-call native enumeration operations for failure/cleanup tests.</param>
-    /// <remarks>Omission uses the host APIs; fake results exercise orchestration, not the kernel ABI.</remarks>
+    /// <param name="cancellationToken">Optional cancellation observed before setup, before each native read, and after it returns.</param>
+    /// <returns>Collected immediate child names, excluding the Unix dot entries.</returns>
+    /// <remarks>
+    /// Once the native directory stream owns the duplicated descriptor, cancellation closes that stream in the same
+    /// cleanup path as other failures. The caller's retained directory is never disposed. Omission uses the host APIs;
+    /// fake results exercise orchestration, not the kernel ABI.
+    /// </remarks>
     internal static IReadOnlyList<string> ReadArtifactUnixNames(SafeFileHandle directory, int maximumEntries,
-        CoverageArtifactEnumerationCalls? nativeCalls = null)
+        CoverageArtifactEnumerationCalls? nativeCalls = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var calls = nativeCalls ?? CoverageArtifactEnumerationCalls.Default;
         var fd = calls.Duplicate(directory.DangerousGetHandle().ToInt32());
         if (fd < 0) throw NativeIOException("Unable to duplicate artifact directory descriptor.");
@@ -754,8 +777,10 @@ internal sealed partial class CoverageRunOutputLease
             var names = new List<string>();
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 Marshal.SetLastPInvokeError(0);
                 var entry = calls.ReadDirectory(stream);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (entry == 0)
                 {
                     if (Marshal.GetLastPInvokeError() != 0) throw NativeIOException("Artifact enumeration failed.");

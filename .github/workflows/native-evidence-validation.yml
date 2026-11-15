@@ -207,7 +207,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~Evidence'
+          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~Evidence|FullyQualifiedName~CoverageArtifactMetadataDurabilityTests|FullyQualifiedName~CoverageArtifactEnumerationDecisionTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve evidence inputs, plan, proof, and artifacts
         id: upload

@@ -182,7 +182,8 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
                 Check();
                 using var directory = CoverageRunOutputLease.AcquireArtifactDirectory(pending.Pop(), false, false);
                 if (directory is null) continue;
-                foreach (var entry in directory.EnumerateArtifactEntries(ordinary ? int.MaxValue : CoverageArtifactLimits.MaximumFiles))
+                foreach (var entry in directory.EnumerateArtifactEntries(
+                    ordinary ? int.MaxValue : CoverageArtifactLimits.MaximumFiles, token))
                 {
                     Check();
                     if (!ordinary && files.Count >= CoverageArtifactLimits.MaximumFiles) throw new InvalidDataException("Writer inventory exceeded its file limit.");
