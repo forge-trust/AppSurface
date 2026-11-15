@@ -146,7 +146,7 @@ internal static class Program
             Console.WriteLine($"Recipe: {receipt.RunOutcome}; cleanup: {receipt.CleanupCompleted}; receipt: {receiptPath}");
             foreach (var journey in receipt.Journeys)
                 Console.WriteLine($"{journey.ProducerId}: {journey.Outcome} {journey.Diagnostic}");
-            return cancellationToken.IsCancellationRequested ? 130 : receipt.RunOutcome == "passed" ? 0 : 1;
+            return receipt.RunOutcome switch { "passed" => 0, "cancelled" => 130, _ => 1 };
         }
         catch (OperationCanceledException) { Console.Error.WriteLine("Validation cancelled; no package recipe was marked passed."); return 130; }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException
