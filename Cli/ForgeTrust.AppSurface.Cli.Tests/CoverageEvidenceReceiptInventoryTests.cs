@@ -453,13 +453,18 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         File.WriteAllText(solution, "{}");
         var output = Path.Join(directory.Path, "run");
         var runner = new Runner(failure);
+        var runManifestPath = TestPathUtils.PathUnder(output, "coverage", CoverageArtifactSession.SidecarName);
+        // Managed storage republishes this optional sidecar after collection and again after gate reports.
+        // Corrupt every completed publication, so the fixture does not depend on storage being unavailable.
+        using TextWriter outputWriter = failure == "corrupt-run-manifest"
+            ? new SidecarCorruptingWriter(runManifestPath) : TextWriter.Null;
         void MutateManifest()
         {
             // The test owns one declared project's fixed destination; production never discovers outputs this way.
             var manifest = Directory.GetFiles(Path.Join(output, "coverage", "projects"), "coverage-project.json", SearchOption.AllDirectories).Single();
             if (failure == "missing-project-manifest") File.Delete(manifest);
             if (failure == "corrupt-project-manifest") File.WriteAllText(manifest, "broken json");
-            if (failure == "corrupt-run-manifest") File.WriteAllText(Path.Join(output, "coverage", CoverageArtifactSession.SidecarName), "broken json");
+            if (failure == "corrupt-run-manifest") File.WriteAllText(runManifestPath, "broken json");
             if (failure == "unsafe-attachment") File.WriteAllText(Path.Join(runner.RawDirectory!, "CON.txt"), "unsafe retained name");
             if (failure == "file-count")
                 for (var index = 0; index < 129; index++) File.WriteAllText(Path.Join(runner.RawDirectory!, $"report-{index}.txt"), "retained");
@@ -472,8 +477,9 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         var writer = new EvidenceArtifactWriter(declaration, target);
         await using var childLifetime = EvidenceChildLifetimeSession.Start(Guid.NewGuid().ToString("N"));
         var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer, childLifetime);
+            CoverageTextWriters.Create(outputWriter, TextWriter.Null), CancellationToken.None, writer, childLifetime);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
+        if (failure == "corrupt-run-manifest") Assert.Equal("broken json", await File.ReadAllTextAsync(runManifestPath));
         Assert.Null(execution.Inventory);
         Assert.NotNull(execution.InventoryIneligibilityReason);
         Assert.Null(execution.Result.Artifacts);
@@ -563,6 +569,16 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         public CoverageArtifactInventoryEntry this[int index] => throw new InvalidOperationException("An ineligible set must not be inspected.");
         public IEnumerator<CoverageArtifactInventoryEntry> GetEnumerator() => throw new InvalidOperationException("An ineligible set must not be enumerated.");
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class SidecarCorruptingWriter(string path) : StringWriter
+    {
+        public override Task WriteLineAsync(string? value)
+        {
+            if (value?.StartsWith("Coverage storage: current=", StringComparison.Ordinal) == true)
+                File.WriteAllText(path, "broken json");
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class Runner(string? failure = null, string? solutionProjectPath = null, int attachmentCount = 1) : ICoverageRunProcessRunner
