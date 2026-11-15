@@ -2,9 +2,12 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.Evidence.Validation;
 
-namespace ForgeTrust.AppSurface.Aspire.Tests;
+namespace ForgeTrust.AppSurface.Cli.Tests;
 
-public sealed class NativeValidationExecutionTests
+// Keep these lifecycle tests in native fan-in because raw MoveNext branches require
+// real execution; see CoverageFanInComposedPatchTests.RetainedNativeMethodBranchesRequireRealFullObservationBeforePatchAcceptance.
+[Collection("CoverageGate process state")]
+public sealed class CoverageArtifactNativeValidationExecutionTests
 {
     private const string ProducerId = "ordinary-recipe";
     private const string AssertionId = "ordinary/assertion@1";
