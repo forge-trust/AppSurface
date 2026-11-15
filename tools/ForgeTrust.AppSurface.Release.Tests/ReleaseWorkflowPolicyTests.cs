@@ -853,6 +853,27 @@ public sealed class ReleaseWorkflowPolicyTests
     }
 
     [Fact]
+    public async Task ReleasePrepPushScriptReportsEarlyRejectionBeforeALargeUnreadTail()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
+        var publishPreparation = GetWorkflowJob(workflow, "publish-release-preparation", "release-prep-review");
+        // Exceed a pipe buffer so an early shell exit cannot race a successful stdin write.
+        var script = GetWorkflowStepRun(publishPreparation, "Validate prepared release artifact")
+            + "\n#" + new string('x', 1024 * 1024) + "\n";
+
+        var result = await RunReleasePrepPushScriptAsync(script, "artifact-rejected", string.Empty, "missing-bundle");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(string.Empty, result.Calls);
+        Assert.Contains("expected regular bundle and report artifact files", result.StandardError, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StableNuGetPublishWorkflowUsesStablePolicy()
     {
         var workflow = await ReadRepositoryFileAsync(".github/workflows/nuget-stable-publish.yml");
@@ -994,6 +1015,7 @@ public sealed class ReleaseWorkflowPolicyTests
     {
         var temporaryDirectory = Path.Join(Path.GetTempPath(), $"appsurface-release-prep-push-{Guid.NewGuid():N}");
         Directory.CreateDirectory(temporaryDirectory);
+        var scriptPath = Path.Join(temporaryDirectory, "release-prep-test.sh");
         var callLogPath = Path.Join(temporaryDirectory, "calls.log");
         var artifactDirectory = Path.Join(temporaryDirectory, "release-prep");
         Directory.CreateDirectory(artifactDirectory);
@@ -1030,13 +1052,12 @@ public sealed class ReleaseWorkflowPolicyTests
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = "bash",
-                    RedirectStandardInput = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false
                 }
             };
-            process.StartInfo.ArgumentList.Add("-s");
+            process.StartInfo.ArgumentList.Add(scriptPath);
             process.StartInfo.Environment["BASE_REF"] = "main";
             process.StartInfo.Environment["GH_TOKEN"] = "test-release-bot-token";
             process.StartInfo.Environment["GITHUB_TOKEN"] = "test-github-token";
@@ -1046,9 +1067,8 @@ public sealed class ReleaseWorkflowPolicyTests
             process.StartInfo.Environment["RELEASE_BRANCH"] = "release-bot/v0.2.0";
             process.StartInfo.Environment["RUNNER_TEMP"] = temporaryDirectory;
             process.StartInfo.Environment["VERSION"] = "0.2.0";
-            Assert.True(process.Start());
-
-            await process.StandardInput.WriteAsync(
+            // Materialize the script before launch; early rejection may close stdin before a writer finishes.
+            await File.WriteAllTextAsync(scriptPath,
                 """
                 git() {
                   command_name=""
@@ -1108,9 +1128,8 @@ public sealed class ReleaseWorkflowPolicyTests
                   fi
                 }
 
-                """);
-            await process.StandardInput.WriteAsync(script);
-            process.StandardInput.Close();
+                """ + "\n" + script);
+            Assert.True(process.Start());
 
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
