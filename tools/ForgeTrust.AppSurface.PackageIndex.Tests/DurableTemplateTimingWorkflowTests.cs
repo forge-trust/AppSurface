@@ -1103,7 +1103,11 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
             => request.Arguments.Count >= 2 && request.Arguments[0] == first && request.Arguments[1] == second;
 
         private static int ParseSampleOrdinal(string root)
-            => int.TryParse(Path.GetFileName(root).AsSpan("sample-".Length), out var ordinal) ? ordinal : 0;
+        {
+            var name = Path.GetFileName(root);
+            return name.StartsWith("sample-", StringComparison.Ordinal)
+                && int.TryParse(name.AsSpan("sample-".Length), out var ordinal) ? ordinal : 0;
+        }
 
         private static string OperationKey(ExternalCommandRequest request)
         {
