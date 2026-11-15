@@ -337,19 +337,21 @@ internal sealed partial class CoverageRunOutputLease
     /// <summary>Enumerates at most a caller-supplied number of immediate entries without following links.</summary>
     /// <param name="maximumEntries">Strict positive allocation and traversal bound.</param>
     /// <param name="cancellationToken">Optional cancellation observed before name enumeration and during entry inspection.</param>
+    /// <param name="enumerationCalls">Optional per-call name enumeration operations; null uses the native host paths.</param>
     /// <returns>Validated regular-file and directory names, in the underlying filesystem's enumeration order.</returns>
     /// <remarks>
     /// The token is checked before enumeration, while collecting names, and before inspecting each name. Cancellation
     /// stops the operation and disposes any enumeration resources it owns; the retained directory remains caller-owned.
     /// </remarks>
-    internal IReadOnlyList<CoverageArtifactDirectoryEntry> EnumerateArtifactEntries(int maximumEntries, CancellationToken cancellationToken = default)
+    internal IReadOnlyList<CoverageArtifactDirectoryEntry> EnumerateArtifactEntries(int maximumEntries,
+        CancellationToken cancellationToken = default, CoverageArtifactEnumerationCalls? enumerationCalls = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumEntries);
         VerifyBinding();
         var names = OperatingSystem.IsWindows()
-            ? ReadArtifactWindowsNames(_outputHandle!, maximumEntries, cancellationToken: cancellationToken)
-            : ReadArtifactUnixNames(_outputHandle!, maximumEntries, cancellationToken: cancellationToken);
+            ? ReadArtifactWindowsNames(_outputHandle!, maximumEntries, enumerationCalls?.EnumerateWindowsNames, cancellationToken)
+            : ReadArtifactUnixNames(_outputHandle!, maximumEntries, enumerationCalls, cancellationToken);
         var entries = new List<CoverageArtifactDirectoryEntry>(names.Count);
         foreach (var name in names)
         {
@@ -796,12 +798,14 @@ internal sealed partial class CoverageRunOutputLease
         finally { _ = calls.CloseDirectory(stream); }
     }
 
-    /// <summary>Per-call native Unix enumeration results with production descriptor ownership defaults.</summary>
+    /// <summary>Per-call native enumeration operations with production ownership defaults.</summary>
     /// <remarks>Fake results must describe their own descriptors and pointers; they do not establish filesystem support.</remarks>
     internal sealed class CoverageArtifactEnumerationCalls
     {
         /// <summary>Gets the immutable default call set.</summary>
         internal static CoverageArtifactEnumerationCalls Default { get; } = new();
+        /// <summary>Gets an optional Windows name source; null uses the retained directory's native path.</summary>
+        internal Func<SafeFileHandle, IEnumerable<string>>? EnumerateWindowsNames { get; init; }
         /// <summary>Gets a fresh close-on-exec descriptor for the same directory.</summary>
         internal Func<int, int> Duplicate { get; init; } = DuplicateCloseOnExec;
         /// <summary>Gets the rewind operation on the fresh descriptor.</summary>

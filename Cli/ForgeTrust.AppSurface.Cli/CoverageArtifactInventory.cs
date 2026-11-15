@@ -6,11 +6,15 @@ using System.Text.Json;
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
 /// <summary>Collects explicitly writer-owned paths without adopting pre-existing output contents.</summary>
+/// <param name="outputDirectory">The invocation-owned output root.</param>
+/// <param name="clock">Clock used for bounded optional history capture.</param>
+/// <param name="enumerationCalls">Optional invocation-local native enumeration seam; null uses the host APIs.</param>
 /// <remarks>
 /// Writers register each attempted file publication and only invocation-unique subtrees. Hashing occurs after
 /// producers drain, under the caller's output lease. An incomplete inventory cannot publish complete history.
 /// </remarks>
-internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProvider clock)
+internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProvider clock,
+    CoverageRunOutputLease.CoverageArtifactEnumerationCalls? enumerationCalls = null)
 {
     private readonly object _sync = new();
     private readonly HashSet<string> _files = new(StringComparer.Ordinal);
@@ -183,7 +187,7 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
                 using var directory = CoverageRunOutputLease.AcquireArtifactDirectory(pending.Pop(), false, false);
                 if (directory is null) continue;
                 foreach (var entry in directory.EnumerateArtifactEntries(
-                    ordinary ? int.MaxValue : CoverageArtifactLimits.MaximumFiles, token))
+                    ordinary ? int.MaxValue : CoverageArtifactLimits.MaximumFiles, token, enumerationCalls))
                 {
                     Check();
                     if (!ordinary && files.Count >= CoverageArtifactLimits.MaximumFiles) throw new InvalidDataException("Writer inventory exceeded its file limit.");

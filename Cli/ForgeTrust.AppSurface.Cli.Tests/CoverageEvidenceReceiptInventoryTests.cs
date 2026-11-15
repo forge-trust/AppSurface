@@ -12,11 +12,18 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageEvidenceReceiptInventoryTests
 {
     [Theory]
-    [InlineData(0)]
-    [InlineData(129)]
-    public void ReceiptCaptureRejectsIneligibleCountsBeforeInspectingPublications(int count)
+    [InlineData(0, false)]
+    [InlineData(129, false)]
+    [InlineData(128, true)]
+    public void ReceiptCaptureRejectsIneligibleCountsBeforeInspectingPublications(int count, bool sidecar)
     {
         using var directory = TestDirectory.Create();
+        var sidecarPath = Path.Join(directory.Path, "coverage", CoverageArtifactSession.SidecarName);
+        if (sidecar)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
+            File.WriteAllText(sidecarPath, "not JSON; an oversized receipt must never read this metadata");
+        }
         var result = new CoverageEvidenceExecutionResult(new(true, directory.Path, "coverage.xml"),
             new("coverage.xml", new(1, 1, 100), new(1, 1, 100), 95, 85, true, "gate.json", "gate.md"));
         var publications = new CountOnlyPublications(count);
@@ -25,7 +32,8 @@ public sealed class CoverageEvidenceReceiptInventoryTests
             CoverageEvidenceInventory.Capture(directory.Path, result, publications, CancellationToken.None));
 
         Assert.Equal("inventory-file-limit", exception.Reason);
-        Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
+        if (sidecar) Assert.Equal("not JSON; an oversized receipt must never read this metadata", File.ReadAllText(sidecarPath));
+        else Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
     }
 
     [Theory]
