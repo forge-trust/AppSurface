@@ -148,7 +148,7 @@ public sealed class DockerInspectionTests
             {
                 "io" => new IOException("private cleanup"),
                 "denied" => new UnauthorizedAccessException("private cleanup"),
-                "cancelled" => new OperationCanceledException(token),
+                "cancelled" => new OperationCanceledException("private cancellation", token),
                 _ => new BoundedProcessException(ProcessStopReason.Deadline)
             };
         }
@@ -161,7 +161,13 @@ public sealed class DockerInspectionTests
         Assert.Equal(KeycloakEffectState.Unknown, failure.Effect);
         Assert.Equal(KeycloakRecoveryClass.InspectBeforeRetry, failure.Recovery);
         Assert.True(failure.RetryMetadata.RequiresInspectionFirst);
-        Assert.DoesNotContain("private", failure.ToString(), StringComparison.Ordinal);
+        Assert.Null(failure.InnerException);
+        Assert.DoesNotContain("private", failure.Message, StringComparison.Ordinal);
+        // Stack traces may name a /private/tmp checkout; reject the supplied command data, not that path.
+        Assert.DoesNotContain("private cleanup", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("private output", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("private error", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("private cancellation", failure.ToString(), StringComparison.Ordinal);
     }
 
     // protects: an uncertain create plus failed removal retains the original failure and safe recovery state.
