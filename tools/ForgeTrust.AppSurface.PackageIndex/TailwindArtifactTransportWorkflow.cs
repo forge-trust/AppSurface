@@ -523,6 +523,7 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
         try
         {
             using var archive = ZipFile.OpenRead(archivePath);
+            var stagingPrefix = Path.GetFullPath(staging + Path.DirectorySeparatorChar);
             if (archive.Entries.Count > maximumEntries) throw Failure("artifact-budget-exceeded", "extraction", field: "entry-count");
             var paths = new Dictionary<string, (bool Directory, string Spelling)>(StringComparer.OrdinalIgnoreCase);
             var explicitPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -537,7 +538,7 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
                 var key = relative.Replace('/', Path.DirectorySeparatorChar);
                 RegisterPath(paths, explicitPaths, relative, isDirectory, token);
                 var destination = Path.GetFullPath(Path.Combine(staging, key));
-                if (!IsWithin(staging, destination) || Path.GetRelativePath(staging, destination).Replace(Path.DirectorySeparatorChar, '/') != relative)
+                if (!destination.StartsWith(stagingPrefix, StringComparison.Ordinal) || Path.GetRelativePath(staging, destination).Replace(Path.DirectorySeparatorChar, '/') != relative)
                     throw Failure("artifact-archive-unsafe", "extraction", field: "entry-name");
                 if (IsUnixLink(entry)) throw Failure("artifact-archive-unsafe", "extraction", field: "entry-type");
                 if (isDirectory)
