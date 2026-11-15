@@ -17,7 +17,7 @@ The new v1 receipt did not exist in this historical run. The normalized record b
 
 ## Exact values and protected sources
 
-Selected log lines, timestamps, original line numbers, immutable workflow excerpts, and fresh API metadata are preserved in the [sanitized evidence snapshot](evidence/issue-910/retained-rehearsal.json). References to source lines below mean the original decoded job log recorded there; signed URLs and full logs are excluded.
+Selected log lines, timestamps, original line numbers, immutable workflow excerpts, and fresh API metadata are preserved in the [sanitized evidence snapshot](https://github.com/forge-trust/AppSurface/blob/3d1a69e1db4dfea8eacf4927e34e6440f9dde6f1/docs/plans/evidence/issue-910/retained-rehearsal.json). References to source lines below mean the original decoded job log recorded there; signed URLs and full logs are excluded.
 
 | Field | Exact value | Protected source | Corroboration |
 |---|---|---|---|

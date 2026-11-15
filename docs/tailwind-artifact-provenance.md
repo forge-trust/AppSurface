@@ -4,7 +4,7 @@ This is the operator and private-tool reference for the approved [#798 design](d
 
 ## Exact GitHub Actions artifact transport (#910)
 
-The internal `artifact-transport` mode is a maintainer-only, nonpublishing transport gate in the protected manual Tailwind rehearsal. It verifies one artifact by exact ID and current run attempt before passing the extracted bundle to the existing producer-binding validator. It adds no public package API or dependency. This feature and its internal contract are documented in the [PackageIndex maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#exact-artifact-transport-910) and wired only by the protected [Package Artifacts workflow](../.github/workflows/package-artifacts.yml).
+The internal `artifact-transport` mode is a maintainer-only, nonpublishing transport gate in the protected manual Tailwind rehearsal. It verifies one artifact by exact ID and current run attempt before passing the extracted bundle to the existing producer-binding validator. It adds no public package API or dependency. This feature and its internal contract are documented in the [PackageIndex maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#exact-artifact-transport-910) and wired only by the protected [Package Artifacts workflow](https://github.com/forge-trust/AppSurface/blob/3d1a69e1db4dfea8eacf4927e34e6440f9dde6f1/.github/workflows/package-artifacts.yml).
 
 ### Receipt and authority
 
