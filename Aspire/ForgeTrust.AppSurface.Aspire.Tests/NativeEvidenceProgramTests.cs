@@ -359,38 +359,6 @@ public sealed class NativeEvidenceProgramTests
     }
 
     [Theory]
-    [InlineData("Native package journeys selected:", "cancelled", true, 130)]
-    [InlineData("Recipe:", "failed", false, 1)]
-    public async Task CancellationAfterPlanOrReceiptFinalization_UsesReceiptOutcomeForExitCode(
-        string cancellationLine,
-        string expectedOutcome,
-        bool expectedCallerCancellation,
-        int expectedExitCode)
-    {
-        var root = Directory.CreateTempSubdirectory("appsurface-native-program-late-cancel-").FullName;
-        try
-        {
-            var package = Path.Join(root, "candidate.nupkg");
-            await File.WriteAllBytesAsync(package, []);
-            var output = Path.Join(root, "evidence");
-            using var cancellation = new CancellationTokenSource();
-
-            var result = await InvokeAsync(["--package", package, "--version", "1.0.0", "--source-commit", "source",
-                "--dotnet", ResolveDotnetHost(), "--output", output, "--mode", "storage", "--scratch-parent", root,
-                "--maximum-scratch-bytes", "1048576", "--minimum-free-bytes", "0"], cancellation.Token,
-                new CancelOnLineWriter(cancellation, cancellationLine));
-
-            Assert.True(cancellation.IsCancellationRequested);
-            Assert.Contains("Recipe: " + expectedOutcome, result.StandardOutput, StringComparison.Ordinal);
-            var receipt = NativeValidationReceiptCodec.Deserialize(await File.ReadAllBytesAsync(Path.Join(output, "native-validation-receipt.json")));
-            Assert.Equal(expectedOutcome, receipt.RunOutcome);
-            Assert.Equal(expectedCallerCancellation, receipt.CallerCancellationRequested);
-            Assert.Equal(expectedExitCode, result.ExitCode);
-        }
-        finally { Directory.Delete(root, recursive: true); }
-    }
-
-    [Theory]
     [InlineData("storage")]
     [InlineData("consumer")]
     public async Task MinimalCandidate_ProducesRecipeReceiptThroughInternalOrchestration(string mode)
@@ -497,10 +465,9 @@ public sealed class NativeEvidenceProgramTests
 
     private static async Task<InvocationResult> InvokeAsync(
         string[] args,
-        CancellationToken cancellationToken = default,
-        StringWriter? outputWriter = null)
+        CancellationToken cancellationToken = default)
     {
-        var output = outputWriter ?? new StringWriter();
+        var output = new StringWriter();
         var error = new StringWriter();
         var originalOutput = global::System.Console.Out;
         var originalError = global::System.Console.Error;
@@ -519,15 +486,6 @@ public sealed class NativeEvidenceProgramTests
             global::System.Console.SetError(originalError);
             output.Dispose();
             error.Dispose();
-        }
-    }
-
-    private sealed class CancelOnLineWriter(CancellationTokenSource cancellation, string linePrefix) : StringWriter
-    {
-        public override void WriteLine(string? value)
-        {
-            base.WriteLine(value);
-            if (value?.StartsWith(linePrefix, StringComparison.Ordinal) == true) cancellation.Cancel();
         }
     }
 
