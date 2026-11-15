@@ -631,6 +631,50 @@ public sealed class NativeValidationExecutionTests
         Assert.Empty(receipt.Journeys.Single().SatisfiedAssertionIds);
     }
 
+    [Theory]
+    [InlineData("null-assertions")]
+    [InlineData("unreported-artifact")]
+    public async Task ExecuteAsync_ResultCannotOmitOrInventItsProducerEvidence(string defect)
+    {
+        using var directory = new TemporaryDirectory();
+        var plan = ResolvePlan();
+        var producer = new FixedRecipeProducer(ProducerId, async (context, token) =>
+        {
+            if (defect == "unreported-artifact")
+            {
+                await WriteArtifactAsync(context, token);
+            }
+
+            return new EvidenceProducerResult(
+                ProducerId,
+                EvidenceProducerOutcome.Passed,
+                defect == "null-assertions" ? null! : [AssertionId],
+                Artifacts: defect == "unreported-artifact" ? [] : null);
+        });
+
+        var receipt = await ExecuteAsync(plan, producer, directory.Root);
+
+        Assert.True(NativeValidationReceiptCodec.Verify(plan, receipt));
+        Assert.Equal("failed", receipt.RunOutcome);
+        Assert.Equal("invalid", receipt.Journeys.Single().Outcome);
+        Assert.Empty(receipt.Journeys.Single().SatisfiedAssertionIds);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_BoundsLongProducerDiagnosticBeforePublishingReceipt()
+    {
+        using var directory = new TemporaryDirectory();
+        var plan = ResolvePlan();
+        var producer = new FixedRecipeProducer(ProducerId, (_, _) => ValueTask.FromResult(
+            new EvidenceProducerResult(ProducerId, EvidenceProducerOutcome.Failed, [], new string('x', 3000))));
+
+        var receipt = await ExecuteAsync(plan, producer, directory.Root);
+
+        Assert.True(NativeValidationReceiptCodec.Verify(plan, receipt));
+        Assert.Equal("failed", receipt.RunOutcome);
+        Assert.Equal(NativeValidationReceiptCodec.MaximumDiagnosticCharacters, receipt.Journeys.Single().Diagnostic!.Length);
+    }
+
     private static Task<NativeValidationReceipt> ExecuteAsync(
         EvidencePlan plan,
         FixedRecipeProducer producer,
@@ -762,7 +806,10 @@ public sealed class NativeValidationExecutionTests
 
     private sealed class TemporaryDirectory : IDisposable
     {
-        public TemporaryDirectory() => Root = Directory.CreateTempSubdirectory("native-validation-execution-").FullName;
+        public TemporaryDirectory()
+        {
+            Root = Directory.CreateTempSubdirectory("native-validation-execution-").FullName;
+        }
 
         public string Root { get; }
 

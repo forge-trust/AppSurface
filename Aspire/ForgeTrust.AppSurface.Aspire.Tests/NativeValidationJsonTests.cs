@@ -43,6 +43,56 @@ public sealed class NativeValidationJsonTests
         Assert.Throws<JsonException>(() => NativeValidationReceiptCodec.Deserialize("null"u8));
     }
 
+    [Fact]
+    public void Receipt_CreateMarksAnIncompleteJourneyCollectionFailed()
+    {
+        var (plan, _) = CreateRecipeReceipt();
+
+        var receipt = NativeValidationReceiptCodec.Create(plan, new string('b', 64), [], true, null, false);
+
+        Assert.Equal("failed", receipt.RunOutcome);
+        Assert.Empty(receipt.Journeys);
+    }
+
+    [Fact]
+    public void Receipt_CreateKeepsACompleteFailedJourneyCollectionFailed()
+    {
+        var (plan, receipt) = CreateRecipeReceipt();
+        var journey = receipt.Journeys.Single() with { Outcome = "failed", SatisfiedAssertionIds = [] };
+
+        var failed = NativeValidationReceiptCodec.Create(plan, receipt.InputDigest, [journey], true, null, false);
+
+        Assert.Equal("failed", failed.RunOutcome);
+        Assert.True(NativeValidationReceiptCodec.Verify(plan, failed));
+    }
+
+    [Theory]
+    [InlineData('A')]
+    [InlineData('g')]
+    public void Receipt_RejectsNonLowercaseHexSha256EvenWhenItsLengthIsValid(char invalidCharacter)
+    {
+        var (_, receipt) = CreateRecipeReceipt();
+
+        Assert.Throws<InvalidDataException>(() => NativeValidationReceiptCodec.Serialize(
+            receipt with { InputDigest = new string(invalidCharacter, 64) }));
+    }
+
+    [Theory]
+    [InlineData("schema-version")]
+    [InlineData("receipt-type")]
+    public void Receipt_SerializationRejectsUnsupportedIdentity(string defect)
+    {
+        var (_, receipt) = CreateRecipeReceipt();
+        var changed = defect switch
+        {
+            "schema-version" => receipt with { SchemaVersion = NativeValidationReceiptCodec.CurrentSchemaVersion + 1 },
+            "receipt-type" => receipt with { ReceiptType = "other-receipt" },
+            _ => throw new InvalidOperationException("Unknown receipt identity defect."),
+        };
+
+        Assert.Throws<InvalidDataException>(() => NativeValidationReceiptCodec.Serialize(changed));
+    }
+
     [Theory]
     [InlineData("digest")]
     [InlineData("input-digest")]
@@ -129,6 +179,117 @@ public sealed class NativeValidationJsonTests
             var resealed = NativeValidationReceiptCodec.Deserialize(NativeValidationReceiptCodec.Serialize(changed));
             Assert.False(NativeValidationReceiptCodec.Verify(plan, resealed));
         }
+    }
+
+    [Fact]
+    public void Receipt_VerificationRejectsNullSatisfiedAssertionAfterDigestResealing()
+    {
+        var (plan, receipt) = CreateRecipeReceipt();
+        var journey = receipt.Journeys.Single();
+        var changed = receipt with
+        {
+            Journeys = [journey with { SatisfiedAssertionIds = [null!] }],
+        };
+
+        var resealed = NativeValidationReceiptCodec.Deserialize(NativeValidationReceiptCodec.Serialize(changed));
+
+        Assert.False(NativeValidationReceiptCodec.Verify(plan, resealed));
+    }
+
+    [Fact]
+    public void Receipt_VerificationRejectsAResealedFailedOutcomeWhenAllJourneysPassed()
+    {
+        var (plan, receipt) = CreateRecipeReceipt();
+
+        var resealed = NativeValidationReceiptCodec.Deserialize(NativeValidationReceiptCodec.Serialize(
+            receipt with { RunOutcome = "failed" }));
+
+        Assert.False(NativeValidationReceiptCodec.Verify(plan, resealed));
+    }
+
+    [Fact]
+    public void Receipt_VerificationRejectsPassedOutcomeWhenAResealedJourneyDidNotPass()
+    {
+        var (plan, receipt) = CreateRecipeReceipt();
+        var journey = receipt.Journeys.Single();
+        var resealed = NativeValidationReceiptCodec.Deserialize(NativeValidationReceiptCodec.Serialize(
+            receipt with { Journeys = [journey with { Outcome = "failed", SatisfiedAssertionIds = [] }] }));
+
+        Assert.False(NativeValidationReceiptCodec.Verify(plan, resealed));
+    }
+
+    [Fact]
+    public void Receipt_VerificationRejectsFailedOutcomeThatClaimsCallerCancellation()
+    {
+        var (plan, receipt) = CreateRecipeReceipt();
+        var resealed = NativeValidationReceiptCodec.Deserialize(NativeValidationReceiptCodec.Serialize(
+            receipt with { RunOutcome = "failed", CallerCancellationRequested = true }));
+
+        Assert.False(NativeValidationReceiptCodec.Verify(plan, resealed));
+    }
+
+    [Theory]
+    [InlineData("flaky")]
+    [InlineData("unavailable")]
+    [InlineData("skippednotrequired")]
+    public void Receipt_VerificationAcceptsKnownNonPassingJourneyOutcomes(string outcome)
+    {
+        var (plan, receipt) = CreateRecipeReceipt();
+        var journey = receipt.Journeys.Single();
+        var resealed = NativeValidationReceiptCodec.Deserialize(NativeValidationReceiptCodec.Serialize(
+            receipt with { RunOutcome = "failed", Journeys = [journey with { Outcome = outcome, SatisfiedAssertionIds = [] }] }));
+
+        Assert.True(NativeValidationReceiptCodec.Verify(plan, resealed));
+    }
+
+    [Fact]
+    public void Receipt_VerificationRejectsJourneyCountThatDoesNotMatchTheSelectedPlan()
+    {
+        var (originalPlan, receipt) = CreateRecipeReceipt();
+        var firstDeclaration = originalPlan.Profile.Producers.Single();
+        var secondDeclaration = new EvidenceProducerDeclaration(
+            "second-recipe", "native-validation", "1", [], ["second/assertion@1"], [], 5);
+        var secondObligation = new EvidenceObligation(
+            "second-obligation", "recipe", "Verify the second recipe.", [secondDeclaration.Id], "second/assertion@1");
+        var profile = originalPlan.Profile with
+        {
+            Producers = [firstDeclaration, secondDeclaration],
+            Obligations = [.. originalPlan.Profile.Obligations, secondObligation],
+        };
+        var policy = new EvidencePolicy("recipe-policy", "1", profile.Id, [profile], []);
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("Recipe.cs")]);
+        var shortReceipt = NativeValidationReceiptCodec.Create(
+            plan, receipt.InputDigest, receipt.Journeys, true, null, false);
+        var resealed = NativeValidationReceiptCodec.Deserialize(NativeValidationReceiptCodec.Serialize(shortReceipt));
+
+        Assert.Equal("failed", resealed.RunOutcome);
+        Assert.False(NativeValidationReceiptCodec.Verify(plan, resealed));
+    }
+
+    [Fact]
+    public void Receipt_VerificationRejectsAPlanWithNoSelectedProducers()
+    {
+        var (plan, receipt) = CreateRecipeReceipt();
+        var empty = new EvidenceProfile("empty", EvidenceProfileScope.Targeted, [], [], []);
+        var policy = new EvidencePolicy(
+            "recipe-policy", "1", plan.Profile.Id, [plan.Profile, empty],
+            [new EvidencePolicyRule("empty-path", "Recipe.cs", empty.Id)]);
+        var emptyPlan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("Recipe.cs")]);
+
+        Assert.False(NativeValidationReceiptCodec.Verify(emptyPlan, receipt));
+    }
+
+    [Fact]
+    public void Receipt_VerificationRejectsDuplicateProducerIdsInAPlan()
+    {
+        var (plan, receipt) = CreateRecipeReceipt();
+        var declaration = plan.Profile.Producers.Single();
+        var duplicatePlan = plan with
+        {
+            Profile = plan.Profile with { Producers = [declaration, declaration] },
+        };
+
+        Assert.False(NativeValidationReceiptCodec.Verify(duplicatePlan, receipt));
     }
 
     [Theory]
