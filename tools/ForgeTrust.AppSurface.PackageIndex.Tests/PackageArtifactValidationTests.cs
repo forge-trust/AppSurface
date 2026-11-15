@@ -720,6 +720,42 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         Assert.Equal("ForgeTrust.AppSurface.Web", entry.PackageId);
     }
 
+    [Theory]
+    [InlineData("0.0.0-ci.42", false)]
+    [InlineData("[0.0.0-ci.42, )", false)]
+    [InlineData("[0.0.0-ci.41]", false)]
+    [InlineData("[0.0.0-ci.42, 0.0.0-ci.43)", false)]
+    [InlineData("[0.0.0-ci.42]", true)]
+    public void PackageArtifactValidator_RequiresExactCoordinatedCoverageEngineDependency(string dependencyRange, bool expectedToPass)
+    {
+        const string facadeId = "ForgeTrust.AppSurface.Coverage";
+        const string engineId = "ForgeTrust.AppSurface.Evidence.Coverage";
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(artifactDirectory, facadeId, PackageVersion,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [engineId] = dependencyRange });
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj",
+                facadeId,
+                PackagePublishDecision.Publish,
+                [engineId],
+                IsTool: false)
+        ]);
+
+        if (expectedToPass)
+        {
+            var report = new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion);
+            Assert.Equal(facadeId, Assert.Single(report.Entries).PackageId);
+            return;
+        }
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion));
+        Assert.Contains("exact coordinated dependency", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void PackageArtifactValidator_RequiresCanonicalReleaseGuidanceInPackedReadme()
     {

@@ -47,12 +47,15 @@ internal static class Program
                 [--scope all|native|coverage|packages]
                 plan/run: --output <fresh-directory>
                 run: [--repository <checkout>] [--dotnet <absolute-host>]
+                [--coverage-cli <absolute-installed-appsurface>]
                 run coverage: [--diff-base <commit>] [--diff-file <snapshot.patch>]
                 [--native-coverage-directory <same-run-native-captures>]
+                Native fan-in requires --coverage-cli; without it, coverage uses the source CLI through --dotnet.
                 [--coverage-collection <same-run-collection>] [--coverage-schedule-timings <prior-timings.json>]
 
                 CI coverage collection: --operation collect-coverage --repository <checkout>
-                --output <fresh-directory> --dotnet <absolute-host> [--coverage-schedule-timings <prior-timings.json>]
+                --output <fresh-directory> --dotnet <absolute-host> [--coverage-cli <absolute-installed-appsurface>]
+                [--coverage-schedule-timings <prior-timings.json>]
                 Collection alone never closes coverage obligations.
                 verify: --manifest <proof/evidence-manifest.json> --artifact-root <proof/artifacts>
 
@@ -161,7 +164,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
+        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)
@@ -175,11 +178,21 @@ internal static class Program
     private static async Task<int> CollectCoverageAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
         Func<RepositoryCheckSettings, CancellationToken, Task>? collectCoverage)
     {
-        string[] allowed = ["--operation", "--repository", "--output", "--dotnet", "--coverage-schedule-timings"];
+        string[] allowed = ["--operation", "--repository", "--output", "--dotnet", "--coverage-cli", "--coverage-schedule-timings"];
         if (options.Keys.Except(allowed, StringComparer.Ordinal).Any()) throw new ArgumentException("Unsupported coverage collection option.");
+        string? coverageCli = null;
+        if (options.TryGetValue("--coverage-cli", out var selectedCoverageCli))
+        {
+            if (!Path.IsPathFullyQualified(selectedCoverageCli) || !File.Exists(selectedCoverageCli))
+                throw new ArgumentException("The selected coverage CLI must be an existing absolute executable.");
+            coverageCli = Path.GetFullPath(selectedCoverageCli);
+        }
         var settings = new RepositoryCheckSettings(Path.GetFullPath(Required(options, "--repository")),
             Required(options, "--dotnet"), Path.GetFullPath(Required(options, "--output")))
-        { CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null };
+        {
+            CoverageCliPath = coverageCli,
+            CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
+        };
         if (collectCoverage is null) await new SolutionCoverageProducer(settings).CollectAsync(cancellationToken);
         else await collectCoverage(settings, cancellationToken);
         Console.WriteLine("Solution coverage collected; final gate verification is still required.");

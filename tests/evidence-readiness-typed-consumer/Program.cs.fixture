@@ -254,6 +254,7 @@ public static class Program
             string.Equals(dependency.Attribute("id")?.Value, "Aspire.Hosting", StringComparison.OrdinalIgnoreCase));
         if (!firstPartyIds.SequenceEqual(new[]
             {
+                "ForgeTrust.AppSurface.Coverage",
                 "ForgeTrust.AppSurface.Evidence.Contracts",
                 "ForgeTrust.AppSurface.Evidence.Readiness",
             }, StringComparer.OrdinalIgnoreCase) ||
@@ -261,7 +262,7 @@ public static class Program
             dependencies.Any(dependency => string.Equals(dependency.Attribute("id")?.Value,
                 "Aspire.Hosting.Testing", StringComparison.OrdinalIgnoreCase)))
         {
-            throw new InvalidOperationException("Evidence.Aspire must reference only Contracts and Readiness first-party packages, require the supported Aspire.Hosting range, and have no Aspire.Hosting.Testing dependency.");
+            throw new InvalidOperationException("Evidence.Aspire must reference exactly Coverage, Contracts and Readiness first-party packages, require the supported Aspire.Hosting range, and have no Aspire.Hosting.Testing dependency.");
         }
     }
 
