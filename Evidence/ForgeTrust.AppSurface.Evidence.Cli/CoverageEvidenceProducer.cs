@@ -16,9 +16,9 @@ internal sealed class CoverageEvidenceProducer
     private readonly CoverageEvidenceExecutionWorkflow _executionWorkflow;
     private readonly TimeProvider _clock;
 
-    /// <summary>Creates an Evidence adapter with the same monotonic clock as the coverage workflow.</summary>
+    /// <summary>Creates an Evidence adapter with a clock for the producer deadline.</summary>
     /// <param name="executionWorkflow">Shared private coverage run and gate engine.</param>
-    /// <param name="clock">Optional monotonic clock used to measure the producer's remaining test budget.</param>
+    /// <param name="clock">Clock that schedules deadline cancellation and measures the remaining test budget. Defaults to the system clock.</param>
     public CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow executionWorkflow, TimeProvider? clock = null)
     {
         _executionWorkflow = executionWorkflow ?? throw new ArgumentNullException(nameof(executionWorkflow));
@@ -104,19 +104,22 @@ internal sealed class CoverageEvidenceProducer
             return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Unavailable, [], "The declared patch coverage gate requires --diff-file so the plan and coverage gate use the same explicit CI diff.");
         }
 
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var deadlineToken = CancellationToken.None;
         try
         {
+            var timeout = TimeSpan.FromSeconds(producer.TimeoutSeconds);
             var producerDeadline = new CoverageProducerDeadline(
                 _clock,
                 _clock.GetTimestamp(),
-                TimeSpan.FromSeconds(producer.TimeoutSeconds));
-            deadline.CancelAfter(TimeSpan.FromSeconds(producer.TimeoutSeconds));
+                timeout);
+            using var deadline = new CancellationTokenSource(timeout, _clock);
+            deadlineToken = deadline.Token;
+            using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadlineToken);
             var result = await _executionWorkflow.RunAndGateAsync(
                 CreateRunRequest(solutionPath, outputDirectory, producer.CoverageExecution) with { ProducerDeadline = producerDeadline, ArtifactRetention = producer.CoverageArtifactRetention },
                 CreateGateRequest(outputDirectory, diffSnapshot, producer.CoverageGate),
                 writers,
-                deadline.Token).ConfigureAwait(false);
+                executionCancellation.Token).ConfigureAwait(false);
             if (!result.Run.Success)
             {
                 return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], "The existing AppSurface coverage workflow reported a failed test, merge, or artifact step.");
@@ -131,7 +134,7 @@ internal sealed class CoverageEvidenceProducer
         {
             throw;
         }
-        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        catch (OperationCanceledException) when (deadlineToken.IsCancellationRequested)
         {
             var timingsPath = Path.Join(outputDirectory, "coverage", "timings.json");
             var hint = string.Empty;

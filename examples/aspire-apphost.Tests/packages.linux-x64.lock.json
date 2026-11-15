@@ -744,6 +744,12 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.14, )"
         }
       },
+      "forgetrust.appsurface.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.deployment": {
         "type": "Project"
       },
@@ -751,12 +757,19 @@
         "type": "Project",
         "dependencies": {
           "Aspire.Hosting": "[13.6.5, 14.0.0)",
+          "ForgeTrust.AppSurface.Coverage": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.contracts": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )"
+        }
       },
       "forgetrust.appsurface.evidence.readiness": {
         "type": "Project"

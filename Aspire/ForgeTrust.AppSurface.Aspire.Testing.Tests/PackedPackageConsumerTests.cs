@@ -8,7 +8,7 @@ using Xunit.Abstractions;
 
 public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageConsumerTests.PackedProducerFixture>
 {
-    // The security floor is also the latest stable release; this verifies explicit selection, not a later runtime.
+    // The explicit-selection proof pins the patched minimum; it does not establish later-runtime compatibility.
     private const string AspireOverrideVersion = "13.6.5";
     private const string AspireBaselineVersion = "13.6.5";
     private const string HostingBaselineVersion = "10.0.14";
@@ -274,7 +274,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 $"SkoolitSourceCommit={SkoolitSourceCommit}; elapsed={proofStopwatch.Elapsed}.");
 
             _output.WriteLine(
-                $"Legacy override proof passed: AppSurfaceSourceCommit={packageRun.SourceCommit}; " +
+                $"Explicit patched Aspire selection proof passed: AppSurfaceSourceCommit={packageRun.SourceCommit}; " +
                 $"PackageVersion={packageRun.PackageVersion}; ConsumerAspireVersion={AspireOverrideVersion}; " +
                 $"Feed={packageRun.FeedDirectory}; PartialProviderDisposed=true.");
             proofSucceeded = true;
@@ -356,6 +356,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 },
                 RemainingBudget(packageRun.Budget, "configured graph execution"));
             Assert.Contains("PORTABLE_GRAPH_PROOF", output, StringComparison.Ordinal);
+            Assert.Contains($"Aspire={AspireBaselineVersion} Hosting={HostingBaselineVersion}", output, StringComparison.Ordinal);
             Assert.Contains(SkoolitSourceCommit, output, StringComparison.Ordinal);
             Assert.Contains("receiptsOn=true/SeededInternal/household_dev_billing", output, StringComparison.Ordinal);
             Assert.Contains("receiptsOff=false/Disabled/", output, StringComparison.Ordinal);

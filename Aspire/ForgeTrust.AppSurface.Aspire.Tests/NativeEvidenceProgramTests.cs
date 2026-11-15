@@ -106,6 +106,27 @@ public sealed class NativeEvidenceProgramTests
         Assert.False(Directory.Exists(output));
     }
 
+    [Fact]
+    public async Task CollectCoverage_ForwardsTheInstalledCliWithoutClosingAcceptance()
+    {
+        using var fixture = new NativeCaptureFixture();
+        var output = Path.Join(fixture.Root, "collection");
+        var host = ResolveDotnetHost();
+        RepositoryCheckSettings? observed = null;
+
+        var result = await Program.RunAsync(["--operation", "collect-coverage", "--repository", fixture.Repository,
+            "--dotnet", host, "--coverage-cli", host, "--output", output], collectCoverage: (settings, _) =>
+        {
+            observed = settings;
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(0, result);
+        Assert.NotNull(observed);
+        Assert.Equal(host, observed.CoverageCliPath);
+        Assert.False(Directory.Exists(output));
+    }
+
     [Theory]
     [InlineData("unsupported-option")]
     [InlineData("missing-repository")]

@@ -22,7 +22,7 @@ An `EvidencePolicy` resolves into an immutable `EvidencePlan`. A run records dec
 | --- | --- |
 | `EvidencePolicy`, `EvidenceProfile`, `EvidencePolicyRule` | Checked-in change-risk policy and explicitly selected profile. |
 | `EvidenceResourceDeclaration`, `EvidenceProducerDeclaration`, `EvidenceObligation` | Closed declaration of resource readiness, producer assertions/artifacts, and the risk obligation each assertion may close. |
-| `EvidencePlan`, `NormalizedDiffPath` | Deterministic resolved input. The plan binds policy identity, diff, selected profile, and matched rules. |
+| `EvidencePlan`, `NormalizedDiffPath` | Deterministic resolved input. `DiffDigest` binds normalized paths; optional `PatchSha256` binds the exact unified patch bytes. The plan digest also covers policy identity, the selected profile, and matched rules. |
 | `EvidenceProducerResult`, `EvidenceManifest` | Terminal producer outcomes and the resulting gate claim. |
 | `EvidenceCanonicalJson`, `EvidenceDigest`, `EvidenceManifestBuilder` | Canonical serialization, digesting, claim calculation, and manifest verification. |
 
