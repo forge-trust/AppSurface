@@ -87,11 +87,11 @@ public sealed class CoverageEvidenceReceiptInventoryTests
             case "version": version++; break;
             case "digest": files = [first with { Sha256 = "bad" }]; break;
             case "size": files = [first with { LengthBytes = -1 }]; break;
-            case "missing": File.Delete(Path.Join(source, second.RelativePath)); break;
-            case "corrupt": File.WriteAllText(Path.Join(source, second.RelativePath), "SECOND"); break;
+            case "missing": File.Delete(TestPathUtils.PathUnder(source, second.RelativePath)); break;
+            case "corrupt": File.WriteAllText(TestPathUtils.PathUnder(source, second.RelativePath), "SECOND"); break;
             case "linked-file":
-                File.Delete(Path.Join(source, second.RelativePath));
-                File.CreateSymbolicLink(Path.Join(source, second.RelativePath), Path.Join(source, first.RelativePath));
+                File.Delete(TestPathUtils.PathUnder(source, second.RelativePath));
+                File.CreateSymbolicLink(TestPathUtils.PathUnder(source, second.RelativePath), TestPathUtils.PathUnder(source, first.RelativePath));
                 break;
             case "linked-parent":
                 var moved = Path.Join(directory.Path, "moved");
@@ -348,7 +348,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         Assert.Equal(files.Select(file => file.RelativePath), results.Select(file => file.RelativePath));
         foreach (var file in files)
         {
-            Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Join(target, file.RelativePath)));
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(target, file.RelativePath)));
             Assert.Equal(file.Sha256, results.Single(result => result.RelativePath == file.RelativePath).Sha256);
         }
     }
@@ -378,7 +378,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
             .WriteAsync(writer, slot, source, CancellationToken.None));
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(target));
-        Assert.Equal(new byte[] { 1 }, File.ReadAllBytes(Path.Join(source, first.RelativePath)));
+        Assert.Equal(new byte[] { 1 }, File.ReadAllBytes(TestPathUtils.PathUnder(source, first.RelativePath)));
     }
 
     [Theory]
@@ -411,7 +411,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
             CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer, childLifetime);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         foreach (var file in new[] { "coverage.cobertura.xml", "coverage-gate.json", "coverage-gate.md", "timings.json", "summary.txt" })
-            Assert.True(File.Exists(Path.Join(output, "coverage", file)), file);
+            Assert.True(File.Exists(TestPathUtils.PathUnder(output, "coverage", file)), file);
         if (!custody || oversized)
         {
             Assert.Null(execution.Inventory);
@@ -432,7 +432,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         Assert.Equal(execution.Inventory.Files.Count, execution.Result.Artifacts!.Count);
         Assert.True(await writer!.VerifyWrittenArtifactsAsync());
         foreach (var file in execution.Inventory.Files)
-            Assert.Equal(await File.ReadAllBytesAsync(Path.Join(output, file.RelativePath)), await File.ReadAllBytesAsync(Path.Join(staged, file.RelativePath)));
+            Assert.Equal(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, file.RelativePath)), await File.ReadAllBytesAsync(TestPathUtils.PathUnder(staged, file.RelativePath)));
     }
 
     [Theory]
@@ -504,8 +504,8 @@ public sealed class CoverageEvidenceReceiptInventoryTests
 
     private static CoverageEvidenceInventoryFile Put(string root, string path, byte[] bytes)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.Join(root, path))!);
-        File.WriteAllBytes(Path.Join(root, path), bytes);
+        Directory.CreateDirectory(Path.GetDirectoryName(TestPathUtils.PathUnder(root, path))!);
+        File.WriteAllBytes(TestPathUtils.PathUnder(root, path), bytes);
         return new(path, bytes.Length, Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
     }
 
@@ -528,7 +528,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
             var slug = project.GetProperty("slug").GetString()!;
             var required = new[]
             {
-                Path.Join(coverageRoot, "projects", slug, CoverageProjectManifest.FileName),
+                TestPathUtils.PathUnder(coverageRoot, "projects", slug, CoverageProjectManifest.FileName),
                 Path.Join(coverageRoot, "projects", slug, "coverage.cobertura.xml"),
             }.Concat(project.GetProperty("testResults").EnumerateArray().Select(report =>
                 Path.Join(coverageRoot, report.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar))));

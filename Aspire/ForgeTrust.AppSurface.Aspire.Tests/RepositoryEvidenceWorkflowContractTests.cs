@@ -152,7 +152,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
         Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
         Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", testCommand);
-        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~Evidence'", testCommand);
+        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~Evidence|FullyQualifiedName~CoverageArtifactMetadataDurabilityTests|FullyQualifiedName~CoverageArtifactEnumerationDecisionTests'", testCommand);
         Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
         Assert.Contains("SolutionCoverageHandoffTests", testCommand);
 

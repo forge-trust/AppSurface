@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -427,7 +428,7 @@ public sealed class EvidenceProducerIdentityTests
         }
         internal async Task WriteAsync(string relative, string contents)
         {
-            var path = Path.Combine(Root, relative.Replace('/', Path.DirectorySeparatorChar));
+            var path = TestPathUtils.PathUnder(Root, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             await File.WriteAllTextAsync(path, contents);
         }
