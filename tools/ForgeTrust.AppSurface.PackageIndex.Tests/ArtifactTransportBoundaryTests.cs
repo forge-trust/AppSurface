@@ -63,6 +63,9 @@ public sealed class ArtifactTransportBoundaryTests : IDisposable
     [InlineData("artifactId", "leading-zero", "artifact-receipt-invalid")]
     [InlineData("sourceCommit", "uppercase", "artifact-receipt-invalid")]
     [InlineData("archiveSha256", "uppercase", "artifact-receipt-invalid")]
+    [InlineData("repository", "repo-parent", "artifact-receipt-invalid")]
+    [InlineData("repository", "repo-extra", "artifact-receipt-invalid")]
+    [InlineData("repository", "repo-space", "artifact-receipt-invalid")]
     [InlineData("runAttempt", "wrong-type", "artifact-receipt-invalid")]
     [InlineData("sourceCommit", "wrong-type", "artifact-receipt-invalid")]
     [InlineData("schema", "wrong-type", "artifact-receipt-invalid")]
@@ -145,6 +148,7 @@ public sealed class ArtifactTransportBoundaryTests : IDisposable
     [InlineData("digest", "missing", "artifact-api-response-invalid")]
     [InlineData("id", "missing", "artifact-api-response-invalid")]
     [InlineData("expired", "missing", "artifact-api-response-invalid")]
+    [InlineData("workflow_run", "wrong-type", "artifact-api-response-invalid")]
     [InlineData("workflow_run", "missing", "artifact-api-response-invalid")]
     [InlineData("workflow_run.id", "missing", "artifact-api-response-invalid")]
     [InlineData("workflow_run.repository_id", "missing", "artifact-api-response-invalid")]
@@ -197,6 +201,74 @@ public sealed class ArtifactTransportBoundaryTests : IDisposable
         Assert.Single(duplicateHandler.Requests);
         AssertNoOwnedZip(duplicateError);
         AssertSafe(duplicateError);
+    }
+
+    [Theory]
+    [InlineData("artifact", "null", 1)]
+    [InlineData("artifact", "[]", 1)]
+    [InlineData("attempt", "null", 2)]
+    [InlineData("attempt", "[]", 2)]
+    public async Task MetadataJsonRequiresObjectRoots(string stage, string body, int expectedRequests)
+    {
+        // protects: parsed JSON scalars and arrays cannot be treated as metadata objects.
+        // fails_when: a non-object response is accepted or advances to a later transport stage.
+        // no_claim: object shape alone does not establish response authenticity.
+        using var handler = new RecordingHandler((_, index) => index == 0 || stage == "attempt" && index == 1
+            ? index == 0 && stage == "attempt" ? JsonResponse(ArtifactJson(Expected)) : JsonResponse(body)
+            : throw new InvalidOperationException("unexpected request"));
+        using var verifier = CreateVerifier(handler);
+        var receipt = await WriteReceiptAsync();
+
+        var error = await Assert.ThrowsAsync<ArtifactTransportException>(() => VerifyAsync(verifier, receipt));
+
+        Assert.Equal("artifact-api-response-invalid", error.Code);
+        Assert.Equal(expectedRequests, handler.Requests.Count);
+        AssertNoOwnedZip(error);
+        AssertSafe(error);
+    }
+
+    [Theory]
+    [InlineData("workflow_run.head_sha", "invalid-hex")]
+    [InlineData("digest", "invalid-hex")]
+    [InlineData("workflow_run.head_sha", "short")]
+    [InlineData("digest", "short")]
+    public async Task ArtifactMetadataRejectsMalformedCanonicalHex(string path, string mutation)
+    {
+        // protects: source commits and SHA-256 text accept only canonical lowercase hexadecimal characters.
+        // fails_when: correctly typed but malformed digest text passes its syntax boundary.
+        // no_claim: syntax checks do not authenticate the API response.
+        var handler = new RecordingHandler((_, _) => JsonResponse(MutateArtifact(path, mutation)));
+        using var verifier = CreateVerifier(handler);
+        var receipt = await WriteReceiptAsync();
+
+        var error = await Assert.ThrowsAsync<ArtifactTransportException>(() => VerifyAsync(verifier, receipt));
+
+        Assert.Equal("artifact-api-response-invalid", error.Code);
+        Assert.Single(handler.Requests);
+        AssertNoOwnedZip(error);
+        AssertSafe(error);
+    }
+
+    [Theory]
+    [InlineData("invalid-hex")]
+    [InlineData("short")]
+    public async Task AttemptMetadataRejectsMalformedSourceHex(string mutation)
+    {
+        // protects: a forty-character source field still must be lowercase hexadecimal.
+        // fails_when: malformed source text reaches archive download or is reported as an identity mismatch.
+        // no_claim: local syntax validation does not authenticate the attempt endpoint.
+        var handler = new RecordingHandler((_, index) => index == 0
+            ? JsonResponse(ArtifactJson(Expected))
+            : JsonResponse(MutateAttempt(AttemptJson(Expected), "head_sha", mutation)));
+        using var verifier = CreateVerifier(handler);
+        var receipt = await WriteReceiptAsync();
+
+        var error = await Assert.ThrowsAsync<ArtifactTransportException>(() => VerifyAsync(verifier, receipt));
+
+        Assert.Equal("artifact-api-response-invalid", error.Code);
+        Assert.Equal(2, handler.Requests.Count);
+        AssertNoOwnedZip(error);
+        AssertSafe(error);
     }
 
     [Theory]
@@ -421,6 +493,9 @@ public sealed class ArtifactTransportBoundaryTests : IDisposable
             case "leading-zero": node[property] = property == "repositoryId" ? "01035215851" : property == "runId" ? "036547070332" : property == "runAttempt" ? "01" : "011023576342"; break;
             case "uppercase": node[property] = property == "sourceCommit" ? Source.ToUpperInvariant() : "SHA256:" + new string('A', 64); break;
             case "wrong-type": node[property] = JsonValue.Create(17); break;
+            case "repo-parent": node[property] = "../AppSurface"; break;
+            case "repo-extra": node[property] = "forge-trust/AppSurface/extra"; break;
+            case "repo-space": node[property] = "forge trust/AppSurface"; break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation));
         }
         return node.ToJsonString();
@@ -474,6 +549,11 @@ public sealed class ArtifactTransportBoundaryTests : IDisposable
                 else parent[key] = JsonValue.Create(17);
                 break;
             case "uppercase": parent[key] = path.EndsWith("head_sha", StringComparison.Ordinal) ? Source.ToUpperInvariant() : "SHA256:" + new string('A', 64); break;
+            case "invalid-hex":
+                parent[key] = path.EndsWith("head_sha", StringComparison.Ordinal)
+                ? Source[..^1] + "g"
+                : "sha256:" + new string('g', 64); break;
+            case "short": parent[key] = key == "head_sha" ? Source[..^1] : "sha256:a"; break;
             case "true": parent[key] = true; break;
             case "expired": parent[key] = "2000-01-01T00:00:00Z"; break;
             case "other-valid": parent[key] = "sha256:" + new string('0', 64); break;
@@ -507,6 +587,8 @@ public sealed class ArtifactTransportBoundaryTests : IDisposable
         if (mutation == "missing") { parent.Remove(key); return node.ToJsonString(); }
         switch (mutation)
         {
+            case "invalid-hex": parent[key] = Source[..^1] + "g"; break;
+            case "short": parent[key] = Source[..^1]; break;
             case "wrong-type":
                 if (key is "head_sha" or "path" or "event") parent[key] = 17;
                 else parent[key] = key switch
@@ -585,4 +667,24 @@ public sealed class ArtifactTransportBoundaryTests : IDisposable
 
     private sealed record RequestRecord(Uri Uri, AuthenticationHeaderValue? Authorization,
         KeyValuePair<string, string>[] Headers);
+
+    [Fact]
+    public async Task ReceiptAcceptsCanonicalRepositoryComponentsWithDotsAndUnderscores()
+    {
+        var expected = Expected with { Repository = "forge-trust/App.Surface_tests" };
+        var handler = new RecordingHandler((_, index) => index switch
+        {
+            0 => JsonResponse(ArtifactJson(expected)),
+            1 => JsonResponse(AttemptJson(expected)),
+            _ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        });
+        using var verifier = CreateVerifier(handler);
+        var receipt = await WriteReceiptAsync(ReceiptJson(expected));
+
+        var error = await Assert.ThrowsAsync<ArtifactTransportException>(() => VerifyAsync(verifier, receipt, expected));
+        Assert.Equal("artifact-api-unavailable", error.Code);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Contains("/repos/forge-trust/App.Surface_tests/", handler.Requests[0].Uri.AbsolutePath, StringComparison.Ordinal);
+        AssertSafe(error);
+    }
 }

@@ -253,6 +253,51 @@ public sealed class TailwindCliDispatchTests : IDisposable
         Assert.DoesNotContain("secret-sentinel", stderr.ToString());
     }
 
+    // protects=the real default workflow keeps path ownership checks at the CLI boundary;
+    // fails_when=production dispatch bypasses receipt-container separation or emits a success marker;
+    // no_claim=this local pre-HTTP refusal does not establish GitHub token access or hosted acceptance.
+    [Fact]
+    public async Task ArtifactTransport_DefaultWorkflowRefusesReceiptContainerOverlapWithoutEligibleOutputs()
+    {
+        Directory.CreateDirectory(_root);
+        var receipt = TestPathUtils.PathUnder(_root, "receipt.json");
+        await File.WriteAllTextAsync(receipt, "secret-sentinel");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exit = await Program.RunAsync(TransportArguments().ToArray(), stdout, stderr, _root,
+            artifactTransportToken: () => "fixture-token");
+
+        Assert.Equal(1, exit);
+        Assert.Empty(stdout.ToString());
+        Assert.Equal("artifact-transport failed: artifact-input-invalid", stderr.ToString().Trim());
+        Assert.DoesNotContain("secret-sentinel", stderr.ToString());
+        Assert.DoesNotContain("fixture-token", stderr.ToString());
+        Assert.Equal("secret-sentinel", await File.ReadAllTextAsync(receipt));
+        foreach (var directory in new[] { "work", "bundle", "report" })
+            Assert.False(Directory.Exists(TestPathUtils.PathUnder(_root, directory)));
+    }
+
+    // protects=fatal allocation failures are propagated instead of presented as handled transport refusals;
+    // fails_when=the catch-all masks a fatal runtime exception or emits ordinary recovery output;
+    // no_claim=the injected exception does not allocate excessive memory or exercise OS memory exhaustion.
+    [Fact]
+    public async Task ArtifactTransport_FatalAllocationFailureIsNotReportedAsHandledRefusal()
+    {
+        var failure = new OutOfMemoryException("fatal-allocation-sentinel");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var observed = await Assert.ThrowsAsync<OutOfMemoryException>(() => Program.RunAsync(
+            TransportArguments().ToArray(), stdout, stderr, _root,
+            artifactTransportAsync: (_, _) => throw failure, artifactTransportToken: () => "fixture-token"));
+
+        Assert.Same(failure, observed);
+        Assert.Empty(stdout.ToString());
+        Assert.Empty(stderr.ToString());
+        Assert.False(Directory.Exists(_root));
+    }
+
     private List<string> TransportArguments() =>
     [
         "verify-tailwind-evidence", "--mode", "artifact-transport", "--repo-root", _root,

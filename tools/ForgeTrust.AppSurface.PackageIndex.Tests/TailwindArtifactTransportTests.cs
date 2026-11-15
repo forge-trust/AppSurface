@@ -38,6 +38,8 @@ public sealed class TailwindArtifactTransportTests : IDisposable
     [InlineData("artifacts-output-blank")]
     [InlineData("report-directory-blank")]
     [InlineData("token-blank")]
+    [InlineData("token-whitespace")]
+    [InlineData("token-control")]
     [InlineData("expected-null")]
     public async Task RequestValidation_RefusesNullAndBlankRequiredFieldsWithoutTouchingInputs(string scenario)
     {
@@ -67,6 +69,8 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             "artifacts-output-blank" => request with { ArtifactsOutput = "" },
             "report-directory-blank" => request with { ReportDirectory = " " },
             "token-blank" => request with { Token = " \t" },
+            "token-whitespace" => request with { Token = "token value" },
+            "token-control" => request with { Token = "token\u0001value" },
             "expected-null" => request with { Expected = null! },
             _ => throw new ArgumentOutOfRangeException(nameof(scenario))
         };
@@ -85,6 +89,25 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         Assert.False(Directory.Exists(output));
         Assert.False(Directory.Exists(report));
         Assert.False(File.Exists(Path.Combine(report, "verified-artifact.json")));
+    }
+
+    [Fact]
+    public async Task NullRequestIsRefusedWithoutCreatingAnOwnedReport()
+    {
+        // protects: a null public request is a typed refusal before any path or transport work.
+        // fails_when: null request throws to the caller or creates report/output state.
+        // no_claim: a null request has no caller-owned paths to preserve.
+        var handler = new FakeHandler([], "");
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier);
+
+        var result = await workflow.RunAsync(null!);
+
+        Assert.Equal("artifact-input-invalid", result.Code);
+        Assert.Equal("failed", result.Status);
+        Assert.False(result.ReportWritten);
+        Assert.Empty(handler.Requests);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(_root));
     }
 
     [Theory]
@@ -360,6 +383,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
     [InlineData("/rooted.txt", "artifact-archive-unsafe")]
     [InlineData("a\\backslash.txt", "artifact-archive-unsafe")]
     [InlineData("a:b.txt", "artifact-archive-unsafe")]
+    [InlineData("a\0b.txt", "artifact-archive-unsafe")]
     [InlineData("a/./b.txt", "artifact-archive-unsafe")]
     [InlineData("trailing. ", "artifact-archive-unsafe")]
     [InlineData("NUL", "artifact-archive-unsafe")]
@@ -395,13 +419,24 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         Assert.Empty(Directory.Exists(Path.Combine(_root, "outside")) ? Directory.EnumerateFileSystemEntries(Path.Combine(_root, "outside")) : []);
     }
 
-    [Fact]
-    public async Task Extractor_AllowsInferredParentFollowedByExplicitDirectory()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Extractor_AllowsInferredParentFollowedByExplicitDirectory(bool unixDirectoryMode)
     {
         // protects: ZIPs may list files before a corresponding explicit parent directory.
         // fails_when: a valid explicit directory marker is mistaken for a duplicate inferred node.
         // no_claim: only the documented normalized directory-entry case is asserted.
         var fixture = await CreateFixtureAsync(Attempt, extraEntries: [("z-parent/child.txt", "ok"), ("z-parent/", "")]);
+        if (unixDirectoryMode)
+        {
+            using var bytes = new MemoryStream();
+            bytes.Write(fixture.ZipBytes);
+            bytes.Position = 0;
+            using (var archive = new ZipArchive(bytes, ZipArchiveMode.Update, leaveOpen: true))
+                archive.GetEntry("z-parent/")!.ExternalAttributes = 0x40000010;
+            fixture = WithArchive(fixture, bytes.ToArray());
+        }
         var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
         var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
         using var verifier = new GitHubActionsArtifactVerifier(handler);
@@ -443,6 +478,9 @@ public sealed class TailwindArtifactTransportTests : IDisposable
     [InlineData("corrupt-offset")]
     [InlineData("false-count")]
     [InlineData("central-signature")]
+    [InlineData("truncated-directory")]
+    [InlineData("short-central-header")]
+    [InlineData("comment-length-mismatch")]
     public async Task ArchivePreflight_RejectsSplitTruncatedAndCorruptEnvelopes(string scenario)
     {
         // protects: split, truncated and out-of-archive central-directory envelopes fail before ZIP entry extraction.
@@ -476,6 +514,14 @@ public sealed class TailwindArtifactTransportTests : IDisposable
     [InlineData("record")]
     [InlineData("count")]
     [InlineData("offset")]
+    [InlineData("locator-disk")]
+    [InlineData("locator-count")]
+    [InlineData("offset-too-large")]
+    [InlineData("offset-distance")]
+    [InlineData("record-disk")]
+    [InlineData("record-disk-number")]
+    [InlineData("record-size-minimum")]
+    [InlineData("record-size-too-large")]
     public async Task ArchivePreflight_RejectsMalformedZip64AuthorityFields(string scenario)
     {
         // protects: ZIP64 locator, end-record, count, and directory-offset fields are checked before extraction.
@@ -498,6 +544,34 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         Assert.Equal(3, handler.Requests.Count);
         Assert.False(Directory.Exists(output));
         AssertFailureReport(result, report, "archive-preflight");
+    }
+
+    [Fact]
+    public async Task ArchivePreflightWalksActualCentralHeadersBeforeBclEvenWhenDeclaredCountIsSmall()
+    {
+        // protects: false EOCD counts cannot hide actual central-directory entries from the injected entry bound.
+        // fails_when: declared count one reaches ZipArchive despite multiple actual headers and a one-entry limit.
+        // no_claim: controlled archive bytes verify preflight allocation bounds, not general ZIP interoperability.
+        var baseline = await CreateFixtureAsync(Attempt);
+        var fixture = WithArchive(baseline, MutateZipEnvelope(baseline.ZipBytes, "false-small-count"));
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier,
+            sourceIdentity: (_, _, _) => Task.CompletedTask,
+            limits: new TailwindArtifactTransportLimits(1, long.MaxValue, TimeSpan.FromMinutes(1)));
+        var report = TestPathUtils.PathUnder(_root, "report-actual-central-count");
+        var output = TestPathUtils.PathUnder(_root, "output-actual-central-count");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash,
+            TestPathUtils.PathUnder(_root, "work-actual-central-count"), output, report));
+
+        Assert.Equal("artifact-budget-exceeded", result.Code);
+        AssertFailureReport(result, report, "archive-preflight");
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(report, "diagnostics.json")));
+        Assert.Contains("field=entry-count", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.False(Directory.Exists(output));
     }
 
     [Theory]
@@ -655,8 +729,11 @@ public sealed class TailwindArtifactTransportTests : IDisposable
 
     [Theory]
     [InlineData("preexisting")]
+    [InlineData("existing-file-target")]
     [InlineData("overlap")]
+    [InlineData("duplicate-target")]
     [InlineData("watched-source")]
+    [InlineData("exact-watched-source")]
     public async Task PathOwnershipRefusesUnsafeTargetsBeforeHttp(string scenario)
     {
         // protects: fresh disjoint outputs avoid overwriting evidence or making the stamped source dirty.
@@ -675,19 +752,225 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             Directory.CreateDirectory(output);
             await File.WriteAllTextAsync(Path.Combine(output, "keep.txt"), "preserve");
         }
+        else if (scenario == "existing-file-target")
+        {
+            await File.WriteAllTextAsync(work, "preserve-file-target");
+        }
         else if (scenario == "overlap") output = Path.Combine(work, "nested-output");
+        else if (scenario == "duplicate-target") output = work;
+        else if (scenario == "exact-watched-source") work = TestPathUtils.PathUnder(_root, "tools/ForgeTrust.AppSurface.PackageIndex");
         else work = Path.Combine(_root, "tools", "ForgeTrust.AppSurface.PackageIndex", "work");
         var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash, work, output, report));
         Assert.Equal("artifact-input-invalid", result.Code);
         Assert.Empty(handler.Requests);
         if (scenario == "preexisting") Assert.Equal("preserve", await File.ReadAllTextAsync(Path.Combine(output, "keep.txt")));
+        if (scenario == "existing-file-target") Assert.Equal("preserve-file-target", await File.ReadAllTextAsync(work));
         if (scenario == "watched-source") Assert.False(Directory.Exists(Path.Combine(_root, "tools")));
+        if (scenario == "exact-watched-source") Assert.False(Directory.Exists(work));
+        if (scenario == "duplicate-target") Assert.False(Directory.Exists(work));
+    }
+
+    [Theory]
+    [InlineData("access", "access-denied")]
+    [InlineData("directory-missing", "directory-missing")]
+    [InlineData("file-missing", "file-missing")]
+    [InlineData("io", "io-failure")]
+    [InlineData("invalid-data", "invalid-data")]
+    [InlineData("invalid-argument", "invalid-argument")]
+    public async Task TypedSourceFailuresExposeOnlyAllowlistedCauseAndSafeReport(string scenario, string expectedCause)
+    {
+        // protects: typed local source failures map to stable safe cause names without serializing exception details.
+        // fails_when: paths, messages, or exception types escape into diagnostics or transport reaches HTTP.
+        // no_claim: injected exceptions verify adapter classification, not the operating system's source-check behavior.
+        var fixture = await CreateFixtureAsync(Attempt);
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        var sourceCalls = 0;
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier,
+            sourceIdentity: (_, _, _) =>
+            {
+                if (++sourceCalls == 2) throw SourceFailure(scenario);
+                return Task.CompletedTask;
+            });
+        var report = TestPathUtils.PathUnder(_root, "report-typed-source-" + scenario);
+        var work = TestPathUtils.PathUnder(_root, "work-typed-source-" + scenario);
+        var output = TestPathUtils.PathUnder(_root, "output-typed-source-" + scenario);
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash, work, output, report));
+
+        Assert.Equal("artifact-source-mismatch", result.Code);
+        Assert.Equal(2, sourceCalls);
+        AssertFailureReport(result, report, "producer-binding");
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.False(Directory.Exists(work));
+        Assert.False(Directory.Exists(output));
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(report, "diagnostics.json")));
+        var message = diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString()!;
+        Assert.Contains("cause=" + expectedCause, message, StringComparison.Ordinal);
+        await AssertReportsRedactedAsync(report, ["typed-source-sentinel", "/private/source-path", Token]);
+    }
+
+    [Fact]
+    public async Task TypedVerifierStatusIsPreservedWithoutLeakingResponseBody()
+    {
+        // protects: a typed verifier refusal retains its safe HTTP status while API response text stays private.
+        // fails_when: the status is lost, response/token data enters reports, or refused work leaves eligible output.
+        // no_claim: a controlled 403 validates adapter reporting, not GitHub permissions or token capability.
+        var receipt = await WriteReceiptAsync("sha256:" + new string('a', 64), Attempt);
+        var handler = new RefusalHandler(HttpStatusCode.Forbidden, "response-body-sentinel token-sentinel-910");
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier,
+            sourceIdentity: (_, _, _) => Task.CompletedTask);
+        var report = TestPathUtils.PathUnder(_root, "report-verifier-status");
+        var work = TestPathUtils.PathUnder(_root, "work-verifier-status");
+        var output = TestPathUtils.PathUnder(_root, "output-verifier-status");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, new string('0', 64), work, output, report));
+
+        Assert.Equal("artifact-permission-denied", result.Code);
+        AssertFailureReport(result, report, "artifact-verification");
+        Assert.Equal(1, handler.RequestCount);
+        Assert.False(Directory.Exists(work));
+        Assert.False(Directory.Exists(output));
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(report, "diagnostics.json")));
+        var message = diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString()!;
+        Assert.Contains("httpStatus=403", message, StringComparison.Ordinal);
+        await AssertReportsRedactedAsync(report, ["response-body-sentinel", Token]);
+    }
+
+    [Fact]
+    public async Task UnexpectedWorkflowPathReportsFixedPolicyWithoutEchoingApiText()
+    {
+        // protects: a foreign workflow refuses with fixed policy context instead of raw API path text.
+        // fails_when: a changed attempt workflow reaches archive download or contaminates the report.
+        // no_claim: fixture responses do not establish hosted authority.
+        var fixture = await CreateFixtureAsync(Attempt);
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        using var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest, workflowPath: "api-workflow-secret-sentinel");
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier, sourceIdentity: (_, _, _) => Task.CompletedTask);
+        var report = TestPathUtils.PathUnder(_root, "report-workflow-policy");
+        var output = TestPathUtils.PathUnder(_root, "output-workflow-policy");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash,
+            TestPathUtils.PathUnder(_root, "work-workflow-policy"), output, report));
+
+        Assert.Equal("artifact-workflow-mismatch", result.Code);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.False(Directory.Exists(output));
+        AssertFailureReport(result, report, "artifact-verification");
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
+        var error = diagnostics.RootElement.GetProperty("errors")[0];
+        Assert.Equal(".github/workflows/package-artifacts.yml", error.GetProperty("expected").GetString());
+        Assert.Equal("unexpected", error.GetProperty("observed").GetString());
+        await AssertReportsRedactedAsync(report, ["api-workflow-secret-sentinel", Token]);
+    }
+
+    [Theory]
+    [InlineData("COM!.txt")]
+    [InlineData("LPTX.txt")]
+    public async Task DeviceLikeOrdinaryNamesRemainValid(string name)
+    {
+        // protects: ordinary prefix matches remain valid under the portable reserved-device rule.
+        // fails_when: lexical device-prefix matching blocks a valid producer bundle.
+        // no_claim: these legal names do not cover every platform filesystem convention.
+        var fixture = await CreateFixtureAsync(Attempt, extraEntries: [(name, "ordinary")]);
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        using var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier, sourceIdentity: (_, _, _) => Task.CompletedTask);
+        var output = TestPathUtils.PathUnder(_root, "output-device-prefix");
+        var report = TestPathUtils.PathUnder(_root, "report-device-prefix");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash,
+            TestPathUtils.PathUnder(_root, "work-device-prefix"), output, report));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("ordinary", await File.ReadAllTextAsync(TestPathUtils.PathUnder(output, name)));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(report, "verified-artifact.json")));
+    }
+
+    [Fact]
+    public async Task MalformedReceiptIdentityIsRejectedWithoutEchoingValue()
+    {
+        // protects: malformed receipt identity is refused before binding or HTTP without copying the value into reports.
+        // fails_when: invalid authority reaches the API or report JSON echoes the noncanonical input.
+        // no_claim: this local schema refusal does not establish protected receipt or remote artifact authority.
+        var fixture = await CreateFixtureAsync(Attempt);
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        var receiptNode = JsonNode.Parse(await File.ReadAllTextAsync(receipt))!.AsObject();
+        receiptNode["runId"] = JsonValue.Create("response-secret-sentinel");
+        await File.WriteAllTextAsync(receipt, receiptNode.ToJsonString());
+        var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier,
+            sourceIdentity: (_, _, _) => Task.CompletedTask);
+        var report = TestPathUtils.PathUnder(_root, "report-typed-identity-redaction");
+        var output = TestPathUtils.PathUnder(_root, "output-typed-identity-redaction");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash,
+            TestPathUtils.PathUnder(_root, "work-typed-identity-redaction"), output, report));
+
+        Assert.Equal("artifact-receipt-invalid", result.Code);
+        Assert.Empty(handler.Requests);
+        Assert.False(Directory.Exists(output));
+        AssertFailureReport(result, report, "artifact-verification");
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(report, "diagnostics.json")));
+        var error = diagnostics.RootElement.GetProperty("errors")[0];
+        Assert.Equal(JsonValueKind.Null, error.GetProperty("expected").ValueKind);
+        Assert.Equal(JsonValueKind.Null, error.GetProperty("observed").ValueKind);
+        await AssertReportsRedactedAsync(report, ["response-secret-sentinel", Token]);
+    }
+
+    [Fact]
+    public async Task OuterDeadlineAfterInitialSourceCallbackIsReportedAtThatBoundary()
+    {
+        // protects: expiry immediately after successful initial source validation uses the shared deadline classification.
+        // fails_when: expired work reaches verifier HTTP or is confused with caller cancellation.
+        // no_claim: ManualClock deterministically exercises the adapter boundary, not scheduler timing.
+        var fixture = await CreateFixtureAsync(Attempt);
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        var clock = new ManualClock();
+        var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        using var verifier = new GitHubActionsArtifactVerifier(handler, clock);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier, clock,
+            sourceIdentity: (_, _, _) =>
+            {
+                clock.Advance(TimeSpan.FromMinutes(2));
+                return Task.CompletedTask;
+            }, limits: new TailwindArtifactTransportLimits(100, long.MaxValue, TimeSpan.FromMinutes(1)));
+        var report = TestPathUtils.PathUnder(_root, "report-source-deadline");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash,
+            TestPathUtils.PathUnder(_root, "work-source-deadline"),
+            TestPathUtils.PathUnder(_root, "output-source-deadline"), report));
+
+        Assert.Equal("artifact-budget-exceeded", result.Code);
+        Assert.Empty(handler.Requests);
+        AssertFailureReport(result, report, "source-validation");
+    }
+
+    private static Exception SourceFailure(string scenario)
+    {
+        const string message = "typed-source-sentinel /private/source-path";
+        return scenario switch
+        {
+            "access" => new UnauthorizedAccessException(message),
+            "directory-missing" => new DirectoryNotFoundException(message),
+            "file-missing" => new FileNotFoundException(message),
+            "io" => new IOException(message),
+            "invalid-data" => new InvalidDataException(message),
+            "invalid-argument" => new ArgumentException(message),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario))
+        };
     }
 
     [Theory]
     [InlineData("invalid-subject-hash")]
     [InlineData("receipt-file-overlap")]
     [InlineData("receipt-directory-overlap")]
+    [InlineData("receipt-directory-child-overlap")]
     [InlineData("preexisting-work")]
     [InlineData("preexisting-report")]
     public async Task RequestAndReceiptOwnershipRefusalsPreserveExistingState(string scenario)
@@ -707,6 +990,8 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         if (scenario == "invalid-subject-hash") expectedHash = "not-a-sha256";
         else if (scenario == "receipt-file-overlap") report = receipt;
         else if (scenario == "receipt-directory-overlap") report = Path.GetDirectoryName(receipt)!;
+        else if (scenario == "receipt-directory-child-overlap")
+            report = TestPathUtils.PathUnder(Path.GetDirectoryName(receipt)!, "transport-report");
         else
         {
             var existing = scenario == "preexisting-work" ? work : report;
@@ -724,6 +1009,42 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             Assert.Equal("preserve", await File.ReadAllTextAsync(Path.Combine(work, "keep.txt")));
         if (scenario == "preexisting-report")
             Assert.Equal("preserve", await File.ReadAllTextAsync(Path.Combine(report, "keep.txt")));
+        if (scenario == "receipt-directory-child-overlap")
+        {
+            Assert.False(result.ReportWritten);
+            Assert.False(Directory.Exists(report));
+        }
+    }
+
+    [Fact]
+    public async Task OutputParentThatIsAFileRefusesAtInstallationAndCleansOwnedWork()
+    {
+        // protects: a regular file at the output parent boundary blocks installation without disturbing it.
+        // fails_when: install overwrites the parent file, leaves work behind, or publishes a success marker.
+        // no_claim: the fixture tests a stable file-vs-directory conflict, not a concurrent replacement race.
+        var fixture = await CreateFixtureAsync(Attempt);
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier,
+            sourceIdentity: (_, _, _) => Task.CompletedTask);
+        var parentFile = TestPathUtils.PathUnder(_root, "output-parent-file");
+        await File.WriteAllTextAsync(parentFile, "keep-parent-file");
+        var output = TestPathUtils.PathUnder(parentFile, "bundle");
+        var report = TestPathUtils.PathUnder(_root, "report-parent-file");
+        var work = TestPathUtils.PathUnder(_root, "work-parent-file");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash, work, output, report));
+
+        Assert.Equal("artifact-input-invalid", result.Code);
+        Assert.Equal(3, handler.Requests.Count);
+        AssertFailureReport(result, report, "bundle-installation");
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(report, "diagnostics.json")));
+        Assert.Contains("field=output-parent-is-file",
+            diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Equal("keep-parent-file", await File.ReadAllTextAsync(parentFile));
+        Assert.False(Directory.Exists(work));
+        Assert.False(Directory.Exists(output));
     }
 
     [Theory]
@@ -1090,6 +1411,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
     [InlineData("depth129")]
     [InlineData("workflow-layout")]
     [InlineData("symlink")]
+    [InlineData("dos-reparse")]
     [InlineData("compression")]
     public async Task ExtractionPolicyAndActualWorkflowLayoutHaveObservableEffects(string scenario)
     {
@@ -1105,11 +1427,12 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             _ => Array.Empty<(string, string)>()
         };
         var fixture = await CreateFixtureAsync(Attempt, extra);
-        if (scenario is "symlink" or "compression")
+        if (scenario is "symlink" or "dos-reparse" or "compression")
         {
             var bytes = (byte[])fixture.ZipBytes.Clone();
             var directory = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(bytes.Length - 6, 4));
             if (scenario == "symlink") BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(directory + 38), 0xA1FF0000);
+            else if (scenario == "dos-reparse") BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(directory + 38), (uint)FileAttributes.ReparsePoint);
             else
             {
                 BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(directory + 10), 99);
@@ -1236,6 +1559,24 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(end + 16));
             result[offset] ^= 1;
         }
+        else if (scenario == "truncated-directory")
+        {
+            var size = BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(end + 12));
+            BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(end + 12), size - 1);
+        }
+        else if (scenario == "short-central-header")
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(end + 12), 45);
+        }
+        else if (scenario == "comment-length-mismatch")
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(end + 20), 1);
+        }
+        else if (scenario == "false-small-count")
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(end + 8), 1);
+            BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(end + 10), 1);
+        }
         else BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(end + 16), (uint)bytes.Length);
         return result;
     }
@@ -1260,6 +1601,30 @@ public sealed class TailwindArtifactTransportTests : IDisposable
                 break;
             case "offset":
                 BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(recordOffset + 48, 8), ulong.MaxValue);
+                break;
+            case "locator-disk":
+                BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(locator + 4, 4), 1);
+                break;
+            case "locator-count":
+                BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(locator + 16, 4), 2);
+                break;
+            case "offset-too-large":
+                BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(locator + 8, 8), ulong.MaxValue);
+                break;
+            case "offset-distance":
+                BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(locator + 8, 8), (ulong)(end + 1));
+                break;
+            case "record-disk":
+                BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(recordOffset + 16, 4), 1);
+                break;
+            case "record-disk-number":
+                BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(recordOffset + 20, 4), 1);
+                break;
+            case "record-size-minimum":
+                BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(recordOffset + 4, 8), 43);
+                break;
+            case "record-size-too-large":
+                BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(recordOffset + 4, 8), ulong.MaxValue);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(scenario));
@@ -1369,7 +1734,8 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         }
     }
 
-    private sealed class FakeHandler(byte[] archive, string digest, string attempt = Attempt) : HttpMessageHandler
+    private sealed class FakeHandler(byte[] archive, string digest, string attempt = Attempt,
+        string workflowPath = ".github/workflows/package-artifacts.yml") : HttpMessageHandler
     {
         public List<Uri> Requests { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -1378,13 +1744,27 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             var response = Requests.Count switch
             {
                 1 => Json($"{{\"id\":{ArtifactId},\"expired\":false,\"expires_at\":\"2099-01-01T00:00:00Z\",\"digest\":\"{digest}\",\"workflow_run\":{{\"id\":{RunId},\"repository_id\":{RepositoryId},\"head_repository_id\":{RepositoryId},\"head_sha\":\"{Source}\"}}}}"),
-                2 => Json($"{{\"id\":{RunId},\"run_attempt\":{attempt},\"repository\":{{\"id\":{RepositoryId}}},\"head_repository\":{{\"id\":{RepositoryId}}},\"head_sha\":\"{Source}\",\"path\":\".github/workflows/package-artifacts.yml\",\"event\":\"workflow_dispatch\"}}"),
+                2 => Json($"{{\"id\":{RunId},\"run_attempt\":{attempt},\"repository\":{{\"id\":{RepositoryId}}},\"head_repository\":{{\"id\":{RepositoryId}}},\"head_sha\":\"{Source}\",\"path\":\"{workflowPath}\",\"event\":\"workflow_dispatch\"}}"),
                 _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(archive) }
             };
             response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
             return Task.FromResult(response);
         }
         private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+    }
+
+    private sealed class RefusalHandler(HttpStatusCode statusCode, string responseBody) : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            return Task.FromResult(new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
+            });
+        }
     }
 
     private sealed class BlockingHandler : HttpMessageHandler

@@ -577,6 +577,7 @@ public sealed class GitHubActionsArtifactVerifierTests : IDisposable
     [Theory]
     [InlineData("metadata-open", "artifact-api-unavailable")]
     [InlineData("metadata-read", "artifact-api-unavailable")]
+    [InlineData("metadata-read-http", "artifact-api-unavailable")]
     [InlineData("archive-open", "artifact-download-failed")]
     [InlineData("archive-send", "artifact-api-unavailable")]
     [InlineData("storage-send", "artifact-download-failed")]
@@ -589,6 +590,7 @@ public sealed class GitHubActionsArtifactVerifierTests : IDisposable
         {
             if (stage == "metadata-open") return new HttpResponseMessage(HttpStatusCode.OK) { Content = new OpenFailureContent() };
             if (stage == "metadata-read") return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new IoFailureStream()) };
+            if (stage == "metadata-read-http") return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new FaultReadStream()) };
             if (index == 0) return JsonResponse(ArtifactJson(Expected, Sha));
             if (index == 1) return JsonResponse(AttemptJson(Expected));
             if (stage == "storage-send" && index == 2) return new HttpResponseMessage(HttpStatusCode.Found) { Headers = { Location = new Uri("https://storage.test/secret?query=sentinel") } };
@@ -941,5 +943,120 @@ public sealed class GitHubActionsArtifactVerifierTests : IDisposable
                 callback(state); _due = _period == Timeout.InfiniteTimeSpan ? null : now + _period; return true;
             }
         }
+    }
+
+    [Fact]
+    public async Task VerifyAsync_CallerCancellationDuringArtifactMetadataBodyRemainsDistinct()
+    {
+        var body = new HangingReadStream();
+        using var handler = new QueueHandler((_, _) => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var caller = new CancellationTokenSource();
+        var receipt = await WriteReceiptAsync();
+        var scratch = TestPathUtils.PathUnder(_root, "metadata-body-cancelled");
+        var verify = verifier.VerifyAsync(Expected, receipt, "token", scratch, caller.Token);
+        await body.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        caller.Cancel();
+
+        var error = await Assert.ThrowsAsync<ArtifactTransportException>(() => verify);
+        Assert.Equal("artifact-cancelled", error.Code);
+        Assert.Equal("caller-cancelled", error.CauseKind);
+        Assert.Single(handler.Requests);
+        Assert.True(File.Exists(receipt));
+        Assert.Empty(Directory.GetFiles(scratch));
+        AssertNoSentinel(error);
+    }
+
+    private sealed class FaultingArchiveOutputStream(string path, string stage, string failureKind)
+        : FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true)
+    {
+        public bool FaultWasReached { get; private set; }
+        public bool Disposed { get; private set; }
+        public int BytesWritten { get; private set; }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (stage == "write")
+            {
+                await base.WriteAsync(buffer[..Math.Min(buffer.Length, 3)], cancellationToken);
+                BytesWritten += Math.Min(buffer.Length, 3);
+                FaultWasReached = true;
+                ThrowOutputFailure();
+            }
+            await base.WriteAsync(buffer, cancellationToken);
+            BytesWritten += buffer.Length;
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            if (stage == "flush")
+            {
+                FaultWasReached = true;
+                ThrowOutputFailure();
+            }
+            return base.FlushAsync(cancellationToken);
+        }
+
+        public override ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return base.DisposeAsync();
+        }
+
+        private void ThrowOutputFailure()
+        {
+            if (failureKind == "access") throw new UnauthorizedAccessException("output-secret-sentinel");
+            throw new IOException("output-secret-sentinel");
+        }
+    }
+
+    [Theory]
+    [InlineData("write", "io", "io")]
+    [InlineData("write", "access", "access")]
+    [InlineData("flush", "io", "io")]
+    [InlineData("flush", "access", "access")]
+    public async Task ArchiveOutputWriteAndFlushFailuresAreTypedAndCleanPartialArchive(string stage, string failureKind, string expectedCause)
+    {
+        using var handler = HandlerForSuccess(Encoding.UTF8.GetBytes(ZipText));
+        FaultingArchiveOutputStream? output = null;
+        using var verifier = new GitHubActionsArtifactVerifier(handler, null, 4096, 4096,
+            TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(30),
+            archiveOutputFactory: path => output = new FaultingArchiveOutputStream(path, stage, failureKind));
+        var receipt = await WriteReceiptAsync();
+        var scratch = TestPathUtils.PathUnder(_root, "output-fault-" + stage + "-" + failureKind);
+
+        var error = await Assert.ThrowsAsync<ArtifactTransportException>(() =>
+            verifier.VerifyAsync(Expected, receipt, "token", scratch));
+
+        Assert.Equal("artifact-output-failed", error.Code);
+        Assert.Equal("archive-download", error.Operation);
+        Assert.Equal(expectedCause, error.CauseKind);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.NotNull(output);
+        Assert.True(output!.FaultWasReached);
+        Assert.True(output.BytesWritten > 0);
+        Assert.Equal(stage == "write" ? Math.Min(ZipText.Length, 3) : ZipText.Length, output.BytesWritten);
+        Assert.True(output.Disposed);
+        Assert.DoesNotContain("output-secret-sentinel", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFiles(scratch));
+        AssertNoSentinel(error);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_UseAfterDisposePreservesUnexpectedFailureAndCleansOwnedOutput()
+    {
+        using var handler = new QueueHandler((_, _) => throw new InvalidOperationException("unexpected handler call"));
+        var verifier = new GitHubActionsArtifactVerifier(handler);
+        var receipt = await WriteReceiptAsync();
+        var before = await File.ReadAllBytesAsync(receipt);
+        var scratch = TestPathUtils.PathUnder(_root, "disposed-verifier");
+        verifier.Dispose();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            verifier.VerifyAsync(Expected, receipt, "token", scratch));
+
+        Assert.Empty(handler.Requests);
+        Assert.Equal(before, await File.ReadAllBytesAsync(receipt));
+        Assert.Empty(Directory.GetFiles(scratch));
     }
 }

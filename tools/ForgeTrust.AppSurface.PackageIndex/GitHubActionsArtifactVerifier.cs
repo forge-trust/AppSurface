@@ -81,6 +81,7 @@ internal sealed class GitHubActionsArtifactVerifier : IDisposable
     private readonly int _maxJsonBytes;
     private readonly TimeSpan _overallLimit;
     private readonly TimeSpan _ioLimit;
+    private readonly Func<string, Stream> _archiveOutputFactory;
 
     /// <summary>Creates a verifier over a caller-owned handler and controllable clock.</summary>
     /// <param name="handler">Handler used for requests; it remains owned and disposed by the caller.</param>
@@ -88,17 +89,31 @@ internal sealed class GitHubActionsArtifactVerifier : IDisposable
     public GitHubActionsArtifactVerifier(HttpMessageHandler handler, TimeProvider? timeProvider = null)
         : this(handler, timeProvider, MaxJsonBytes, MaxArchiveBytes, OverallLimit, IoLimit) { }
 
+    /// <summary>Creates a verifier with bounded test settings and an optional archive writer for deterministic I/O fault tests.</summary>
+    /// <param name="handler">Caller-owned HTTP handler; the verifier does not dispose it.</param>
+    /// <param name="timeProvider">Optional deadline clock; defaults to <see cref="TimeProvider.System"/>.</param>
+    /// <param name="maxJsonBytes">Positive JSON response limit used by the test.</param>
+    /// <param name="maxArchiveBytes">Positive streamed archive-byte limit used by the test.</param>
+    /// <param name="overallLimit">Positive overall transport deadline used by the test.</param>
+    /// <param name="ioLimit">Positive header and stream-inactivity deadline used by the test.</param>
+    /// <param name="archiveOutputFactory">Optional internal fault-test factory. It receives the generated owned ZIP path,
+    /// must create that exact fresh file, write supplied bytes verbatim, and return a writable non-null stream. The verifier owns stream disposal.
+    /// The default remains an asynchronous, exclusive <see cref="FileStream"/> opened with <see cref="FileMode.CreateNew"/>.
+    /// It must not redirect or reuse the owned path. Successful <see cref="VerifyAsync"/> transfers the completed file to its caller.</param>
     internal GitHubActionsArtifactVerifier(HttpMessageHandler handler, TimeProvider? timeProvider,
-        int maxJsonBytes, long maxArchiveBytes, TimeSpan overallLimit, TimeSpan ioLimit)
-        : this(handler, timeProvider, maxJsonBytes, maxArchiveBytes, overallLimit, ioLimit, disposeHandler: false) { }
+        int maxJsonBytes, long maxArchiveBytes, TimeSpan overallLimit, TimeSpan ioLimit,
+        Func<string, Stream>? archiveOutputFactory = null)
+        : this(handler, timeProvider, maxJsonBytes, maxArchiveBytes, overallLimit, ioLimit, disposeHandler: false, archiveOutputFactory: archiveOutputFactory) { }
 
     private GitHubActionsArtifactVerifier(HttpMessageHandler handler, TimeProvider? timeProvider,
-        int maxJsonBytes, long maxArchiveBytes, TimeSpan overallLimit, TimeSpan ioLimit, bool disposeHandler)
+        int maxJsonBytes, long maxArchiveBytes, TimeSpan overallLimit, TimeSpan ioLimit, bool disposeHandler,
+        Func<string, Stream>? archiveOutputFactory = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         _time = timeProvider ?? TimeProvider.System;
         _maxJsonBytes = maxJsonBytes; _maxArchiveBytes = maxArchiveBytes;
         _overallLimit = overallLimit; _ioLimit = ioLimit;
+        _archiveOutputFactory = archiveOutputFactory ?? OpenArchiveOutput;
         _client = new HttpClient(handler, disposeHandler) { Timeout = Timeout.InfiniteTimeSpan };
     }
 
@@ -322,8 +337,8 @@ internal sealed class GitHubActionsArtifactVerifier : IDisposable
                 { throw Failure("artifact-download-failed", "archive-download", status: (int)response.StatusCode, cause: SafeCause(ex)); }
                 await using (input.ConfigureAwait(false))
                 {
-                    FileStream output;
-                    try { output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true); }
+                    Stream output;
+                    try { output = _archiveOutputFactory(archivePath); }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     { throw Failure("artifact-output-failed", "archive-download", cause: SafeCause(ex)); }
                     await using (output.ConfigureAwait(false))
@@ -361,6 +376,9 @@ internal sealed class GitHubActionsArtifactVerifier : IDisposable
             }
         }
     }
+
+    private static Stream OpenArchiveOutput(string path)
+        => new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true);
 
     private string ValidateArtifactMetadata(JsonElement root, ArtifactExpectedContext expected, ProducerArtifactReceipt receipt)
     {
