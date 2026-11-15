@@ -1,5 +1,7 @@
 # EvidenceHost: risk-mediated CI without coverage theater
 
+For local producer reuse, complete public API reference, prepared-host recipe, recovery decisions, and pitfalls, continue to the [Evidence producer reuse guide](../guides/evidence-reuse.md). Reuse is opt-in and never upgrades local restored results into gate-eligible claims.
+
 EvidenceHost is AppSurface's contract-first approach to CI evidence. Its purpose is simple: make a meaningful change visibly prove the risk it introduces, while allowing an explicitly low-risk change to pass without someone inventing tests for incidental lines.
 
 It is not a replacement for a test framework, coverage collector, GitHub Actions, Aspire AppHost, Docker, or a hosted coverage dashboard. It starts no infrastructure by default and has no outbound telemetry.

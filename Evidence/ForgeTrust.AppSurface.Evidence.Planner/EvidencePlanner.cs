@@ -101,8 +101,11 @@ public sealed class EvidencePlanner
             matchedRuleIds = matchedRuleIds.Append($"conservative:{policy.ConservativeProfileId}");
         }
 
+        var hasReuseContract = policy.Profiles.Any(static candidate => candidate.Producers.Any(static producer => producer.Inputs is not null
+            || producer.CoverageExecution is { CooperativeChildLifetime: true }
+            || producer.ArtifactSlots.Any(static slot => slot.MaximumFiles is not null)));
         var draft = new EvidencePlan(
-            ContractVersion: "1.0",
+            ContractVersion: hasReuseContract ? "1.1" : "1.0",
             PolicyId: policy.Id,
             PolicyDigest: policyDigest,
             DiffDigest: diffDigest,
@@ -271,6 +274,19 @@ public sealed class EvidencePlanner
                 throw new EvidencePlanningException("ASEVD110", $"Producer '{producer.Id}' has a non-positive timeout.", "Set timeoutSeconds to a positive value.");
             }
 
+            if (producer.Inputs is { } inputs)
+            {
+                if (inputs.Include is null || inputs.Include.Count == 0 || inputs.Exclude is null)
+                {
+                    throw new EvidencePlanningException("ASEVD137", $"Producer '{producer.Id}' has an invalid inputs declaration.", "Provide at least one include pattern and a non-null exclude list.");
+                }
+
+                foreach (var pattern in inputs.Include.Concat(inputs.Exclude))
+                {
+                    ValidateInputPattern(producer.Id, pattern);
+                }
+            }
+
             if (producer.ArtifactSlots.Count > 128
                 || producer.ArtifactSlots.GroupBy(static slot => slot.LogicalName, StringComparer.Ordinal).Any(static group => group.Count() > 1))
             {
@@ -280,14 +296,19 @@ public sealed class EvidencePlanner
             foreach (var slot in producer.ArtifactSlots)
             {
                 RequireIdentifier(slot.LogicalName, "artifact logical name");
-                if (slot.MaximumBytes < 0 || string.IsNullOrWhiteSpace(slot.MediaType))
+                if (slot.MaximumBytes < 0 || string.IsNullOrWhiteSpace(slot.MediaType)
+                    || slot.MaximumFiles is <= 0 or > 128)
                 {
-                    throw new EvidencePlanningException("ASEVD126", $"Producer '{producer.Id}' has an invalid artifact slot '{slot.LogicalName}'.", "Use a media type and a non-negative maximum byte count.");
+                    throw new EvidencePlanningException("ASEVD126", $"Producer '{producer.Id}' has an invalid artifact slot '{slot.LogicalName}'.", "Use a media type, a non-negative aggregate maximum byte count, and omit maximumFiles or set it from 1 through 128.");
                 }
 
                 try
                 {
-                    EvidenceArtifactValidation.NormalizeRelativePath(slot.RelativeRoot);
+                    var normalizedRoot = EvidenceArtifactValidation.NormalizeRelativePath(slot.RelativeRoot);
+                    if (slot.MaximumFiles is not null && !string.Equals(normalizedRoot, slot.RelativeRoot, StringComparison.Ordinal))
+                    {
+                        throw new ArgumentException("Multi-file roots must already be canonical.");
+                    }
                 }
                 catch (ArgumentException)
                 {
@@ -344,6 +365,19 @@ public sealed class EvidencePlanner
         if (IsEmptyProfile(profile) && profile.Scope != EvidenceProfileScope.Targeted)
         {
             throw new EvidencePlanningException("ASEVD116", $"Release profile '{profile.Id}' cannot be empty.", "Use a targeted no-evidence profile only for explicit low-risk rules.");
+        }
+    }
+
+    private static void ValidateInputPattern(string producerId, string? pattern)
+    {
+        var segments = pattern?.Split('/', StringSplitOptions.None);
+        if (string.IsNullOrWhiteSpace(pattern) || pattern.Contains('\\') || Path.IsPathRooted(pattern)
+            || pattern.IndexOfAny([':', '?', '[', ']', '{', '}']) >= 0 || pattern.Any(char.IsControl)
+            || segments is null || segments.Length == 0
+            || segments.Any(static segment => segment.Length == 0 || segment is "." or ".."
+                || segment.Contains("**", StringComparison.Ordinal) && segment != "**"))
+        {
+            throw new EvidencePlanningException("ASEVD137", $"Producer '{producerId}' has invalid input pattern '{pattern}'.", "Use repository-relative forward-slash paths with * within a segment and ** as a complete segment.");
         }
     }
 

@@ -4,6 +4,8 @@
 
 Start with the [EvidenceHost guide](../../start-here/evidencehost.md). The workflow reads only explicit policy and diff inputs; it does not scan consumer assemblies, discover tests, provision third-party services, or report outbound usage telemetry.
 
+See the canonical [producer reuse guide](../../guides/evidence-reuse.md) for complete input declarations, optional multi-file report custody, cooperative child lifetime, reuse/audit CLI behavior, and candidate 1.1 constraints.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 

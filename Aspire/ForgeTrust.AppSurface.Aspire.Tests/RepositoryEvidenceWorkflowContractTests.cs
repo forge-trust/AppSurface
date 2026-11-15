@@ -152,7 +152,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
         Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
         Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", testCommand);
-        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests'", testCommand);
+        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~Evidence'", testCommand);
         Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
         Assert.Contains("SolutionCoverageHandoffTests", testCommand);
 
@@ -332,6 +332,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("--package-proof", proof["run"].AsScalar());
         Assert.Contains("/p:RepositoryCommit=$env:SOURCE_COMMIT", proof["run"].AsScalar());
         Assert.Contains("$LASTEXITCODE -eq 0 -or (Test-Path $output)", rejection["run"].AsScalar());
+        Assert.Contains("<repository type='git' commit='$candidateCommit'/>", rejection["run"].AsScalar());
+        Assert.Contains("coverage.private-dependency-invalid", rejection["run"].AsScalar());
+        var lifecycle = FindStep(steps, "Test native lifecycle contracts for selected producers")["run"].AsScalar();
+        Assert.Contains("FullyQualifiedName~EvidenceReusePackageProofTests", lifecycle);
         var upload = FindStep(steps, "Preserve evidence inputs, plan, proof, and artifacts")["with"].AsMapping()["path"].AsScalar();
         Assert.Contains("native-coverage-library-proof/proof.json", upload);
         Assert.Contains("native-coverage-library-proof/published-proof/runs/**", upload);

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
 
 /// <summary>
@@ -26,4 +28,16 @@ public enum EvidenceCoverageTestResultFormat
 public sealed record EvidenceCoverageExecutionOptions(
     string Configuration = "Debug",
     EvidenceCoverageTestResultFormat TestResults = EvidenceCoverageTestResultFormat.None,
-    int Parallelism = 1);
+    int Parallelism = 1)
+{
+    /// <summary>Gets whether this coverage workload follows cooperative-v1 child enrollment and actual joining.</summary>
+    /// <remarks>
+    /// False by default, preserving ordinary fresh execution. Reuse requires explicit opt-in: every test-created
+    /// process or asynchronous child must enroll before work through EvidenceOwnedChild and be joined before
+    /// completion. Unregistered work violates this supported-workload promise; the protocol is not OS containment.
+    /// Missing or unknown settlement suppresses receipt publication and preserves execution authority.
+    /// This optional addition requires contract1.1 and is omitted from legacy canonical bytes when false.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool CooperativeChildLifetime { get; init; }
+}

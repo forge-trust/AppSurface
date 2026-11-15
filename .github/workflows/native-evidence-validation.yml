@@ -141,11 +141,31 @@ jobs:
           $proof = Join-Path $env:RUNNER_TEMP 'native-coverage-library-proof'
           New-Item -ItemType Directory -Path $feed -Force | Out-Null
           Copy-Item (Join-Path $env:EVIDENCE_ROOT "feed/ForgeTrust.AppSurface.Cli.$version.nupkg") $feed
+          dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet pack Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release -- --package-proof --feed $feed --version $version --output $proof --dotnet (Get-Command dotnet).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove installed reuse tool and package-only prepared host
+        id: reuse-package-proof
+        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ steps.diff.outputs.source_commit }}
+        run: |
+          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
+          $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-library-feed'
+          $proof = Join-Path $env:RUNNER_TEMP 'native-evidence-reuse-package-proof'
+          foreach ($name in @('Contracts', 'Planner', 'Readiness', 'Cli', 'Aspire')) {
+            $project = "Evidence/ForgeTrust.AppSurface.Evidence.$name/ForgeTrust.AppSurface.Evidence.$name.csproj"
+            dotnet pack $project --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
+          dotnet $validation --operation reuse-package-proof --feed $feed --version $version --source-commit $env:SOURCE_COMMIT --dotnet (Get-Command dotnet).Source --output $proof
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Reject case-varied engine version skew before proof output
         if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
@@ -155,14 +175,18 @@ jobs:
           $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-invalid-metadata'
           $output = Join-Path $env:RUNNER_TEMP 'native-coverage-invalid-proof'
           New-Item -ItemType Directory -Path $feed | Out-Null
+          $candidateCommit = '${{ steps.diff.outputs.source_commit }}'
           # These are metadata-only admission fixtures. The canonical exact edge must
           # not hide a case-varied, open engine edge in another framework group.
-          foreach ($id in @('ForgeTrust.AppSurface.Coverage', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Cli')) {
+          foreach ($id in @('ForgeTrust.AppSurface.Coverage', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Cli')) {
             $dependencies = ''
             if ($id -eq 'ForgeTrust.AppSurface.Coverage') {
               $dependencies = "<dependencies><group targetFramework='net10.0'><dependency id='ForgeTrust.AppSurface.Evidence.Coverage' version='[$version]' /></group><group targetFramework='net9.0'><dependency id='forgetrust.appsurface.evidence.coverage' version='$version' /></group></dependencies>"
             }
-            $metadata = "<package xmlns='http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd'><metadata><id>$id</id><version>$version</version>$dependencies</metadata></package>"
+            if ($id -eq 'ForgeTrust.AppSurface.Evidence.Coverage') {
+              $dependencies = "<dependencies><group targetFramework='net10.0'><dependency id='ForgeTrust.AppSurface.Evidence.Contracts' version='[$version]' /></group></dependencies>"
+            }
+            $metadata = "<package xmlns='http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd'><metadata><id>$id</id><version>$version</version><repository type='git' commit='$candidateCommit'/>$dependencies</metadata></package>"
             $archive = [System.IO.Compression.ZipFile]::Open((Join-Path $feed "$id.$version.nupkg"), [System.IO.Compression.ZipArchiveMode]::Create)
             try {
               $writer = [System.IO.StreamWriter]::new($archive.CreateEntry("$id.nuspec").Open())
@@ -170,7 +194,7 @@ jobs:
             } finally { $archive.Dispose() }
           }
           $diagnostic = & dotnet tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/Release/net10.0/ForgeTrust.AppSurface.Coverage.Dogfood.dll --package-proof --feed $feed --version $version --output $output --dotnet (Get-Command dotnet).Source 2>&1
-          if ($LASTEXITCODE -eq 0 -or (Test-Path $output) -or !($diagnostic -match 'ASCOV312 Packed coverage proof failed')) { throw 'Invalid engine metadata passed admission or created proof output, or the proof runner failed to execute.' }
+          if ($LASTEXITCODE -eq 0 -or (Test-Path $output) -or !($diagnostic -match 'coverage.private-dependency-invalid')) { throw 'Invalid engine metadata passed admission or created proof output, or the proof runner failed to execute.' }
           exit 0
       - name: Test native lifecycle contracts for selected producers
         id: lifecycle
@@ -179,11 +203,11 @@ jobs:
         run: |
           dotnet restore Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~EvidenceCoverageFanInProducerTests|FullyQualifiedName~EvidenceCoverageFanInCollectionTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests|FullyQualifiedName~RepositoryEvidenceWorkflowTests|FullyQualifiedName~RepositoryGitChangesTests|FullyQualifiedName~RepositoryEvidenceWorkflowContractTests|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~NativeEvidenceProgramTests|FullyQualifiedName~PackageChecksProducerTests|FullyQualifiedName~SolutionCoverageProducerTests|FullyQualifiedName~SolutionCoverageHandoffTests'
+          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceHostBootstrap|FullyQualifiedName~EvidencePreparedRun|FullyQualifiedName~EvidenceHostPreparationOwnership|FullyQualifiedName~EvidenceProducerKeyMaterialExecution|FullyQualifiedName~EvidenceReusePackageProofTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~EvidenceCoverageFanInProducerTests|FullyQualifiedName~EvidenceCoverageFanInCollectionTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests|FullyQualifiedName~RepositoryEvidenceWorkflowTests|FullyQualifiedName~RepositoryGitChangesTests|FullyQualifiedName~RepositoryEvidenceWorkflowContractTests|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~NativeEvidenceProgramTests|FullyQualifiedName~PackageChecksProducerTests|FullyQualifiedName~SolutionCoverageProducerTests|FullyQualifiedName~SolutionCoverageHandoffTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests'
+          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~Evidence'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve evidence inputs, plan, proof, and artifacts
         id: upload
@@ -196,6 +220,17 @@ jobs:
             ${{ runner.temp }}/native-coverage-library-proof/proof.json
             ${{ runner.temp }}/native-coverage-library-proof/*.log
             ${{ runner.temp }}/native-coverage-library-proof/direct/runs/**
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/proof.json
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/*.log
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/cli-fresh/**
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/cli-warm/**
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/cli-audit/**
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/host-built-proof/**
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/host-published-proof/**
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/restored-reader-reports/**
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/host-app/obj/project.assets.json
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/host-app/packages.lock.json
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/host-published/PackedHost.deps.json
             ${{ runner.temp }}/native-coverage-library-proof/published-proof/runs/**
           if-no-files-found: warn
           retention-days: 7

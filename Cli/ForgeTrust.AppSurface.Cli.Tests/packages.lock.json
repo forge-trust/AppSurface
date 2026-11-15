@@ -970,6 +970,8 @@
           "Aspire.Hosting": "[13.6.5, 14.0.0)",
           "ForgeTrust.AppSurface.Coverage": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }
       },
@@ -987,7 +989,8 @@
       "forgetrust.appsurface.evidence.coverage": {
         "type": "Project",
         "dependencies": {
-          "CliWrap": "[3.10.1, )"
+          "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.planner": {

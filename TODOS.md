@@ -182,6 +182,17 @@ Skoolit consumer implementation/adoption is separate future work in the [open ca
 
 **Depends on / blocked by:** #867 adoption evidence and a concrete multi-resource requirement, with separately reviewed ownership/cancellation semantics.
 
+## Local Evidence merge-base convenience (#917 follow-up)
+
+**What:** Consider automatic local merge-base selection and diff capture for Evidence commands after the explicit-input reuse capability ships.
+**Why:** The [#917 approved design](docs/designs/issue-917-producer-reuse.md) deliberately preserves current `--path` and `--diff-file` input behavior; adding Git-history resolution is a separate command contract.
+**Pros:** Could remove caller-side local diff preparation while preserving one stable base for a run.
+**Cons:** Adds ref/worktree/shallow-checkout errors, resolution ordering, provenance and compatibility cases; it must not make producer reuse depend on history.
+**Context:** User approved this deferral at office-hours D7 on 2026-11-14. Start from the shared existing planning snapshot, resolve a base once, and preserve exact captured diff bytes through patch evaluation. Keep commit/index/plan digests outside producer keys. This item adds no #917 implementation or acceptance gate.
+**Effort:** M human team / S agent assistance, estimated.
+**Priority:** P3.
+**Depends on / blocked by:** Shipped explicit-input reuse, a concrete local caller requirement and a separately reviewed Git-resolution contract.
+
 ## Handoff consumer feasibility (#869 follow-up)
 
 - **What:** After a supported coordinated package is available, inventory the actual downstream authority/ledger writers and prove their lock order with a pinned public-package executor flow. **Why:** The [#869 framework plan](docs/plans/issue-869-transaction-bound-handoff-fence.md) proves the generic boundary; it cannot certify an application's competing writers or provider policy. **Pros:** Exposes implicit foreign-key/enqueue locks and confirms that the supported API replaces private SQL in a real integration. **Cons:** Depends on another repository's schema, release availability and consumer-owned provider/reconciliation choices. **Context:** Keep [Skoolit #735](https://github.com/forge-trust/skoolit/issues/735) blocked until its separately owned package upgrade and feasibility proof pass; no consumer business logic or activation is included in #869. **Effort:** M human (1–2 days) / M agent (3–6 hours), estimated after schema access. **Priority:** P3. **Depends on / blocked by:** Published supported package, identified adopter/owner and actual writer audit. User approved autoplan d1a on 2026-10-14: preserve the framework-first milestone and this separately owned downstream proof.

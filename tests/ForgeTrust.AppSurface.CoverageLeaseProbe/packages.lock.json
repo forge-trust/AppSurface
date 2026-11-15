@@ -2,10 +2,14 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "forgetrust.appsurface.evidence.contracts": {
+        "type": "Project"
+      },
       "forgetrust.appsurface.evidence.coverage": {
         "type": "Project",
         "dependencies": {
-          "CliWrap": "[3.10.1, )"
+          "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
         }
       },
       "CliWrap": {

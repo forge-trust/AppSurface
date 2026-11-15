@@ -4,6 +4,8 @@
 
 Read the [EvidenceHost guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/evidencehost.md) first. `EvidenceAspireApplication.StartAsync(...)` can build and start an explicitly consumer-composed `DistributedApplication` and bind a named Aspire health condition to a declared evidence resource. The package never discovers an application, provisions cloud resources, creates a Docker sandbox, attests an artifact, or operates a dashboard.
 
+For opt-in local receipt reuse, use the canonical [reuse guide](../../guides/evidence-reuse.md), including the exact prepared-run factory contract and the cooperative child-lifetime requirement. A prepared host must build only its `RequiredResourceIds`, use the returned `ArtifactDirectories` map for producer roots, and retain its resource scope until settlement.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 

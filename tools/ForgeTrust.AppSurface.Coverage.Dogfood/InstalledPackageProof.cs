@@ -4,9 +4,11 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
 
-/// <summary>Dogfood release proof for the exact packed neutral facade and private dependency.</summary>
+/// <summary>Dogfood release proof for the exact packed neutral facade and its private dependency closure.</summary>
 internal static class InstalledPackageProof
 {
+    private const string PrivateDependencyFailure = "coverage.private-dependency-invalid";
+
     internal static async Task<int> RunAsync(string[] args)
     {
         try
@@ -20,7 +22,8 @@ internal static class InstalledPackageProof
             if (Directory.Exists(output) || File.Exists(output) || !Directory.Exists(feed) || !File.Exists(dotnet)
                 || version.Length > 100 || version.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '-'))) throw new ArgumentException();
             var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var id in new[] { "ForgeTrust.AppSurface.Coverage", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Cli" })
+            string? sourceCommit = null;
+            foreach (var id in new[] { "ForgeTrust.AppSurface.Coverage", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Evidence.Contracts", "ForgeTrust.AppSurface.Cli" })
             {
                 var package = Path.Join(feed, $"{id}.{version}.nupkg");
                 using var archive = ZipFile.OpenRead(package);
@@ -29,20 +32,38 @@ internal static class InstalledPackageProof
                 var metadata = document.Descendants().Single(x => x.Name.LocalName == "metadata");
                 if (metadata.Elements().Single(x => x.Name.LocalName == "id").Value != id || metadata.Elements().Single(x => x.Name.LocalName == "version").Value != version)
                     throw new InvalidDataException();
+                var commit = (string?)metadata.Elements().Single(x => x.Name.LocalName == "repository").Attribute("commit");
+                if (string.IsNullOrWhiteSpace(commit) || (sourceCommit is not null && commit != sourceCommit))
+                    throw new InvalidDataException();
+                sourceCommit = commit;
                 var firstPartyDependencies = document.Descendants().Where(x => x.Name.LocalName == "dependency"
                     && ((string?)x.Attribute("id"))?.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase) == true).ToArray();
-                if (id == "ForgeTrust.AppSurface.Coverage")
+                var privateDependencyId = id switch
                 {
-                    var engineDependencies = firstPartyDependencies.Where(x =>
-                        string.Equals((string?)x.Attribute("id"), "ForgeTrust.AppSurface.Evidence.Coverage", StringComparison.OrdinalIgnoreCase)).ToArray();
-                    if (engineDependencies.Length == 0 || engineDependencies.Any(x =>
-                        !string.Equals((string?)x.Attribute("version"), $"[{version}]", StringComparison.Ordinal)))
-                        throw new InvalidDataException();
+                    "ForgeTrust.AppSurface.Coverage" => "ForgeTrust.AppSurface.Evidence.Coverage",
+                    "ForgeTrust.AppSurface.Evidence.Coverage" => "ForgeTrust.AppSurface.Evidence.Contracts",
+                    _ => null
+                };
+                if (privateDependencyId is not null)
+                {
+                    // A private edge is mandatory in every framework group, or in the ungrouped container.
+                    var dependencyContainers = metadata.Elements().Where(x => x.Name.LocalName == "dependencies")
+                        .SelectMany(x => x.Elements().Any(e => e.Name.LocalName == "group")
+                            ? x.Elements().Where(e => e.Name.LocalName == "group") : new[] { x }).ToArray();
+                    if (dependencyContainers.Length == 0 || dependencyContainers.Any(container => !container.Elements().Any(x =>
+                        x.Name.LocalName == "dependency"
+                        && string.Equals((string?)x.Attribute("id"), privateDependencyId, StringComparison.Ordinal)
+                        && string.Equals((string?)x.Attribute("version"), $"[{version}]", StringComparison.Ordinal))))
+                        throw new InvalidDataException(PrivateDependencyFailure);
                 }
+                // Detect case-varied private IDs as well as canonical ones, but admit only exact spelling and pins.
+                // Inspect every occurrence so an invalid duplicate or another framework group cannot evade admission.
                 if (firstPartyDependencies.Any(x =>
-                    !(id == "ForgeTrust.AppSurface.Coverage"
-                        && string.Equals((string?)x.Attribute("id"), "ForgeTrust.AppSurface.Evidence.Coverage", StringComparison.OrdinalIgnoreCase))
-                    && !string.Equals((string?)x.Attribute("version"), version, StringComparison.Ordinal))) throw new InvalidDataException();
+                    privateDependencyId is not null
+                        && string.Equals((string?)x.Attribute("id"), privateDependencyId, StringComparison.OrdinalIgnoreCase)
+                        ? !string.Equals((string?)x.Attribute("id"), privateDependencyId, StringComparison.Ordinal)
+                            || !string.Equals((string?)x.Attribute("version"), $"[{version}]", StringComparison.Ordinal)
+                        : !string.Equals((string?)x.Attribute("version"), version, StringComparison.Ordinal))) throw new InvalidDataException(PrivateDependencyFailure);
                 hashes[id] = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(package)));
             }
             Directory.CreateDirectory(output); var app = Path.Join(output, "app"); Directory.CreateDirectory(app);
@@ -88,7 +109,7 @@ internal static class InstalledPackageProof
             if (!cliStorePackages.Any(path => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))
                 == hashes["ForgeTrust.AppSurface.Cli"])) throw new InvalidDataException();
             await Run("restore", "restore", Path.Join(app, "Fixture.csproj"), "--configfile", Path.Join(output, "nuget.config"));
-            foreach (var id in new[] { "ForgeTrust.AppSurface.Coverage", "ForgeTrust.AppSurface.Evidence.Coverage" })
+            foreach (var id in new[] { "ForgeTrust.AppSurface.Coverage", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Evidence.Contracts" })
             {
                 var hash = hashes[id];
                 var restored = Path.Join(output, "packages", id.ToLowerInvariant(), version.ToLowerInvariant(),
@@ -100,7 +121,8 @@ internal static class InstalledPackageProof
             {
                 var libraries = assets.RootElement.GetProperty("libraries").EnumerateObject().Select(x => x.Name).ToArray();
                 if (libraries.Any(x => x.Contains("Aspire", StringComparison.OrdinalIgnoreCase) || x.Contains("CliFx", StringComparison.OrdinalIgnoreCase) || x.Contains("Evidence.Planner", StringComparison.Ordinal) || x.StartsWith("ForgeTrust.AppSurface.Cli/", StringComparison.Ordinal))
-                    || !libraries.Contains("ForgeTrust.AppSurface.Coverage/" + version) || !libraries.Contains("ForgeTrust.AppSurface.Evidence.Coverage/" + version)) throw new InvalidDataException();
+                    || !libraries.Contains("ForgeTrust.AppSurface.Coverage/" + version) || !libraries.Contains("ForgeTrust.AppSurface.Evidence.Coverage/" + version)
+                    || !libraries.Contains("ForgeTrust.AppSurface.Evidence.Contracts/" + version)) throw new InvalidDataException();
             }
             await Run("build", "build", Path.Join(app, "Fixture.csproj"), "--no-restore", "--configuration", "Release", "-warnaserror");
             RequireReportGeneratorPayload(Path.Join(app, "bin", "Release", fixtureTargetFramework));
@@ -108,11 +130,16 @@ internal static class InstalledPackageProof
             await Run("publish", "publish", Path.Join(app, "Fixture.csproj"), "--no-restore", "--configuration", "Release", "--output", Path.Join(output, "published"), "-warnaserror");
             RequireReportGeneratorPayload(Path.Join(output, "published"));
             await Run("published-run", Path.Join(output, "published", "Fixture.dll"), Path.Join(output, "published-proof"), installedCommand);
-            await File.WriteAllBytesAsync(Path.Join(output, "proof.json"), JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1, version, packages = hashes, stages, passed = true }));
+            await File.WriteAllBytesAsync(Path.Join(output, "proof.json"), JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1, version, sourceCommit, packages = hashes, stages, passed = true }));
             Console.WriteLine("Packed coverage baseline and tamper proof passed."); return 0;
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or InvalidOperationException or JsonException or OperationCanceledException)
-        { Console.Error.WriteLine("ASCOV312 Packed coverage proof failed; inspect retained stage logs and exact candidate package closure."); return 1; }
+        {
+            var admission = exception is InvalidDataException && exception.Message == PrivateDependencyFailure
+                ? " Code: " + PrivateDependencyFailure + "." : string.Empty;
+            Console.Error.WriteLine("ASCOV312 Packed coverage proof failed; inspect retained stage logs and exact candidate package closure." + admission);
+            return 1;
+        }
     }
     private static async Task<string> ReadBounded(StreamReader reader, CancellationToken token)
     {
