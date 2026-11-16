@@ -340,6 +340,43 @@ public sealed class EvidenceContractEdgeCoverageTests
         Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, manifest));
     }
 
+    [Theory]
+    [InlineData(EvidenceClaimEligibility.None)]
+    [InlineData(EvidenceClaimEligibility.Informational)]
+    [InlineData(EvidenceClaimEligibility.ReleaseGate)]
+    public void TargetedGateRejectsARehashedEligibilityOverride(EvidenceClaimEligibility eligibility)
+    {
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [],
+            [new EvidenceProducerDeclaration("p", "kind", "1", [], [], [], 30)], []);
+        var plan = CreatePlan(profile, "1.1");
+        var valid = EvidenceManifestBuilder.Build(plan, [new("p", EvidenceProducerOutcome.Passed, [])]);
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, valid.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.PullRequestGate, valid.Eligibility);
+        Assert.True(EvidenceManifestBuilder.VerifyForGate(plan, valid));
+        var altered = valid with { Eligibility = eligibility, ManifestDigest = string.Empty };
+        altered = altered with { ManifestDigest = EvidenceDigest.CanonicalSha256(altered) };
+
+        Assert.False(EvidenceManifestBuilder.Verify(plan, altered));
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, altered));
+    }
+
+    [Fact]
+    public void FreshReleaseClaimWithItsValidatedEnvelopeRemainsGateEligible()
+    {
+        var profile = new EvidenceProfile("release", EvidenceProfileScope.Release, [],
+            [new EvidenceProducerDeclaration("p", "kind", "1", [], [], [], 30)], []);
+        var plan = CreatePlan(profile, "1.1");
+
+        var manifest = EvidenceManifestBuilder.Build(plan, [new("p", EvidenceProducerOutcome.Passed, [])],
+            envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested);
+
+        Assert.Equal(EvidenceExecutionVerdict.Passed, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.ReleaseComplete, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.ReleaseGate, manifest.Eligibility);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+        Assert.True(EvidenceManifestBuilder.VerifyForGate(plan, manifest));
+    }
+
     private static EvidenceProducerDeclaration ProducerWithRequiredArtifact() =>
         new("p", "kind", "1", [], [], [new EvidenceArtifactSlot("report", "reports", "text/plain", true, 16)], 30);
 

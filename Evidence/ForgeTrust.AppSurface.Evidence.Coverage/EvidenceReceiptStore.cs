@@ -1353,7 +1353,8 @@ internal sealed class EvidenceReceiptStore
         /// <param name="executionId">Execution that owns the current durable authority.</param>
         /// <param name="originManifestDigest">Canonical origin-manifest SHA-256.</param>
         /// <param name="originCompletedAt">Caller-supplied origin completion time.</param>
-        /// <param name="payloadDirectoryName">Validated immutable staged payload directory name.</param>
+        /// <param name="payloadDirectoryName">Validated immutable final component beginning with <c>payload-</c>;
+        /// <c>payload-stage-</c> names, including case variants, are excluded.</param>
         /// <param name="passedProducerRecord">Bounded canonical producer record bytes.</param>
         internal void CommitPassed(string executionId, string originManifestDigest, DateTimeOffset originCompletedAt,
             string payloadDirectoryName, byte[] passedProducerRecord)
