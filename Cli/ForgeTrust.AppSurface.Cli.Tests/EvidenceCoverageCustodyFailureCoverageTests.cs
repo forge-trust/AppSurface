@@ -27,7 +27,7 @@ public sealed class EvidenceCoverageCustodyFailureCoverageTests
             var coverage = TestPathUtils.PathUnder(output, "coverage");
             var metadata = JsonNode.Parse(File.ReadAllText(Directory.GetFiles(coverage, ".timings.*.tmp").Single()))!;
             var relative = metadata["projects"]!.AsArray().Single()!["testResults"]!.AsArray().Single()!["path"]!.GetValue<string>();
-            linkedPath = Path.Combine(coverage, relative.Replace('/', Path.DirectorySeparatorChar));
+            linkedPath = TestPathUtils.PathUnder(coverage, relative.Replace('/', Path.DirectorySeparatorChar));
             backup = TestPathUtils.PathUnder(directory.Path, "original-test-results.xml");
             File.Move(linkedPath, backup);
             File.CreateSymbolicLink(linkedPath, sentinel);

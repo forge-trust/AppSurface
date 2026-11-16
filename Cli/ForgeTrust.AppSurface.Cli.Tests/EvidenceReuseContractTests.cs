@@ -133,6 +133,14 @@ public sealed class EvidenceReuseContractTests
         Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
         Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, manifest));
         Assert.False(EvidenceManifestBuilder.Verify(plan, manifest with { ContractVersion = "9.0" }));
+        var forgedGateClaim = manifest with
+        {
+            ClaimKind = EvidenceClaimKind.TargetedComplete,
+            Eligibility = EvidenceClaimEligibility.PullRequestGate,
+            ManifestDigest = string.Empty,
+        };
+        forgedGateClaim = forgedGateClaim with { ManifestDigest = EvidenceDigest.CanonicalSha256(forgedGateClaim) };
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, forgedGateClaim));
     }
 
     [Fact]

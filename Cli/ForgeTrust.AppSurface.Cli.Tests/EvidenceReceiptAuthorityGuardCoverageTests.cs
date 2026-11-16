@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
@@ -151,6 +153,51 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         Assert.True(fixture.Lease.ReadState()!.AuditMismatch);
     }
 
+    [Theory]
+    [InlineData("payload-dir/child")]
+    [InlineData("")]
+    [InlineData("payload-stage-owned")]
+    [InlineData("payload-STAGE-owned")]
+    public async Task InvalidationRefusesMalformedActivePayloadComponentWithoutChangingCustody(string malformedPayloadName)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var completedAt = fixture.Clock.GetUtcNow();
+        var outsideSentinel = TestPathUtils.PathUnder(fixture.DirectoryPath, "operator-sentinel.txt");
+        var sentinelBytes = Encoding.UTF8.GetBytes("outside receipt custody");
+        await File.WriteAllBytesAsync(outsideSentinel, sentinelBytes);
+        var settled = new EvidenceReceiptState(1, fixture.Lease.Key, null, null, new string('b', 64), completedAt,
+            malformedPayloadName, null, completedAt, false, null);
+        var original = fixture.IndexBytes();
+        Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.RecordState(
+            fixture.Root, fixture.Repository, fixture.Lease.Key,
+            JsonSerializer.SerializeToUtf8Bytes(settled).Length, settled));
+        Assert.Equal(original, fixture.IndexBytes());
+        Assert.Null(EvidenceReceiptQuota.ReadAuthority(fixture.Root, fixture.Repository, fixture.Lease.Key, readOnly: true));
+        var corrupt = JsonNode.Parse(original)!;
+        var entry = corrupt["Entries"]!.AsArray().Single()!;
+        entry["PayloadDirectoryName"] = malformedPayloadName;
+        entry["AuthorityState"] = JsonSerializer.SerializeToNode(settled);
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(fixture.Root, "quota-index.json"),
+            Encoding.UTF8.GetBytes(corrupt.ToJsonString()));
+        var before = fixture.IndexBytes();
+        var invalidated = new EvidenceReceiptState(1, fixture.Lease.Key, null, null, null, null, null);
+
+        try
+        {
+            var failure = Assert.Throws<InvalidDataException>(() =>
+                EvidenceReceiptQuota.InvalidatePayload(fixture.Lease, settled, invalidated));
+            Assert.Equal("Receipt quota index contains unsupported or invalid authority.", failure.Message);
+            Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.ReadAuthority(
+                fixture.Root, fixture.Repository, fixture.Lease.Key, readOnly: true));
+            Assert.Equal(before, fixture.IndexBytes());
+            Assert.Equal(sentinelBytes, await File.ReadAllBytesAsync(outsideSentinel));
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(fixture.Root, "quota-index.json"), original);
+        }
+    }
+
     [Fact]
     public async Task DisposedKeyLeaseCannotReadOrRewriteRetainedExecutionAuthority()
     {
@@ -170,6 +217,67 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         Assert.Equal("execution", state!.InFlightExecutionId);
     }
 
+    [Fact]
+    public async Task RetiredPayloadChargeRequiresConfirmedDeletionAndExactName()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var repository = fixture.Repository;
+        var key = fixture.Lease.Key;
+        var payloadName = "payload-authority-guard-retired";
+        var completedAt = fixture.Clock.GetUtcNow();
+        var sentinelPath = TestPathUtils.PathUnder(fixture.DirectoryPath, "operator-sentinel.txt");
+        await File.WriteAllTextAsync(sentinelPath, "preserve outside receipt custody");
+        Assert.True(EvidenceReceiptQuota.TryReservePayload(fixture.Root, repository, key, 3, completedAt));
+        using (var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(fixture.Lease.DirectoryPath,
+            createMissing: false, requirePrivate: true)!)
+        using (var payload = keyRoot.CreateArtifactDirectory(payloadName))
+        using (var file = payload.OpenArtifactFile("owned.bin", createNew: true))
+        {
+            file.Write(new byte[] { 2, 4, 6 });
+            file.Flush(flushToDisk: true);
+        }
+        EvidenceReceiptQuota.CommitPayload(fixture.Root, repository, key, 3, payloadName, completedAt,
+            JsonSerializer.SerializeToUtf8Bytes(new EvidenceReceiptState(1, key, null, null,
+                new string('b', 64), completedAt, payloadName)).Length);
+        var settled = new EvidenceReceiptState(1, key, null, null, new string('b', 64), completedAt,
+            payloadName, null, completedAt, false, null);
+        EvidenceReceiptQuota.RecordState(fixture.Root, repository, key,
+            JsonSerializer.SerializeToUtf8Bytes(settled).Length, settled);
+        var invalidated = new EvidenceReceiptState(1, key, null, null, null, null, null);
+        EvidenceReceiptQuota.InvalidatePayload(fixture.Lease, settled, invalidated);
+
+        Assert.Equal(new[] { payloadName }, EvidenceReceiptQuota.ReadRetiredPayloadNames(fixture.Root, repository, key));
+        AssertRetiredPayloadCharge(fixture.IndexBytes(), payloadName, 3);
+        var beforeUnconfirmedRelease = fixture.IndexBytes();
+        EvidenceReceiptQuota.ReleaseRetiredPayload(fixture.Root, repository, key, payloadName, deletionConfirmed: false);
+        Assert.Equal(beforeUnconfirmedRelease, fixture.IndexBytes());
+        EvidenceReceiptQuota.ReleaseRetiredPayload(fixture.Root, repository, key, "payload-unrelated",
+            deletionConfirmed: true);
+        Assert.Equal(beforeUnconfirmedRelease, fixture.IndexBytes());
+
+        using (var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(fixture.Lease.DirectoryPath,
+            createMissing: false, requirePrivate: true)!)
+            keyRoot.DeleteArtifactEntry(payloadName, 16);
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(fixture.Lease.DirectoryPath, payloadName)));
+        AssertRetiredPayloadCharge(fixture.IndexBytes(), payloadName, 3);
+        EvidenceReceiptQuota.ReleaseRetiredPayload(fixture.Root, repository, key, payloadName, deletionConfirmed: true);
+
+        Assert.Empty(EvidenceReceiptQuota.ReadRetiredPayloadNames(fixture.Root, repository, key));
+        using var index = JsonDocument.Parse(fixture.IndexBytes());
+        var entry = Assert.Single(index.RootElement.GetProperty("Entries").EnumerateArray());
+        Assert.Empty(entry.GetProperty("RetiredPayloads").EnumerateArray());
+        Assert.Equal("preserve outside receipt custody", await File.ReadAllTextAsync(sentinelPath));
+    }
+
+    private static void AssertRetiredPayloadCharge(byte[] indexBytes, string payloadName, long expectedBytes)
+    {
+        using var index = JsonDocument.Parse(indexBytes);
+        var entry = Assert.Single(index.RootElement.GetProperty("Entries").EnumerateArray());
+        var retired = Assert.Single(entry.GetProperty("RetiredPayloads").EnumerateArray());
+        Assert.Equal(payloadName, retired.GetProperty("DirectoryName").GetString());
+        Assert.Equal(expectedBytes, retired.GetProperty("Bytes").GetInt64());
+    }
+
     private sealed class FixedClock : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -179,6 +287,8 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         EvidenceReceiptStore.EvidenceReceiptKeyLease lease) : IDisposable
     {
         internal string Root => root;
+        internal string Repository => new string('a', 64);
+        internal string DirectoryPath => directory.Path;
         internal TimeProvider Clock => clock;
         internal EvidenceReceiptStore.EvidenceReceiptKeyLease Lease => lease;
         internal byte[] IndexBytes() => File.ReadAllBytes(TestPathUtils.PathUnder(root, "quota-index.json"));

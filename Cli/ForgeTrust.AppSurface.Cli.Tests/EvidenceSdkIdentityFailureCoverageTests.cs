@@ -27,6 +27,7 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
     [InlineData("long")]
     [InlineData("unlaunchable")]
     [InlineData("deadline")]
+    [InlineData("fail-after-first")]
     public async Task UnavailableSdkIdentityKeepsFreshCoveragePassingWithoutPublishingAReceipt(string mode)
     {
         using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
@@ -44,13 +45,38 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
         Assert.Equal(EvidenceProducerOutcome.Passed, Assert.Single(result.Manifest.ProducerResults).Outcome);
         var decision = Assert.Single(result.Decisions);
         Assert.Equal("Ineligible", decision.Status);
-        Assert.Equal("reuse.sdk_unavailable", decision.Reason);
+        // A later failure inside the key callback retains its generic, exception-redacted reason.
+        Assert.Equal(mode == "fail-after-first" ? "reuse.material_failed" : "reuse.sdk_unavailable", decision.Reason);
+        if (mode == "fail-after-first")
+            Assert.True(File.Exists(TestPathUtils.PathUnder(repository.Root, "sdk-probe.first-query")));
         Assert.Equal("suppressed", decision.Publication);
         Assert.DoesNotContain("private-sdk-probe-error-marker", decision.Diagnostic ?? string.Empty, StringComparison.Ordinal);
         if (mode != "unlaunchable")
             Assert.Equal(mode, await File.ReadAllTextAsync(TestPathUtils.PathUnder(repository.Root, "sdk-probe.observed")));
         Assert.True(runner.TestInvocationCount > 0);
         Assert.True(File.Exists(TestPathUtils.PathUnder(output, "coverage", "coverage.cobertura.xml")));
+    }
+
+    [Fact]
+    public async Task ExplainMapsFailedSdkQueryToSafeUnavailableSummary()
+    {
+        using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        var (plan, solution) = await CreatePlanAsync(repository);
+        using var fixture = new SdkProcessFixture(repository.Root, "nonzero");
+        var resolver = Resolver(out var runner, fixture.ExecutablePath);
+        var store = TestPathUtils.PathUnder(repository.Root, "receipts");
+
+        var decision = Assert.Single(await resolver.ExplainAsync(plan, null, solution, store,
+            TimeSpan.FromSeconds(3), CancellationToken.None));
+
+        Assert.Equal("Ineligible", decision.Status);
+        Assert.Equal("reuse.sdk_unavailable", decision.Reason);
+        Assert.Equal("The actual dotnet SDK version could not be resolved; execute fresh or repair the local SDK installation.",
+            decision.Diagnostic);
+        Assert.Equal("suppressed", decision.Publication);
+        Assert.DoesNotContain("private-sdk-probe-error-marker", decision.Diagnostic ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal("nonzero", await File.ReadAllTextAsync(TestPathUtils.PathUnder(repository.Root, "sdk-probe.observed")));
+        Assert.Equal(0, runner.TestInvocationCount);
     }
 
     [Fact]
@@ -124,6 +150,68 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
             Assert.Equal(EvidenceClaimKind.LocalReusedComplete, waitingResult.Manifest.ClaimKind);
             Assert.Equal(1, diagnosticWriter.WriteAttempts);
             Assert.Equal(1, runner.TestInvocationCount);
+        }
+        finally
+        {
+            releaseProducer.TrySetResult();
+            await JoinIfStarted(first);
+            await JoinIfStarted(waiting);
+        }
+
+        Task<EvidenceReuseRunResult> RunAsync(string name, TextWriter error) => resolver.RunAsync(plan, null, solution,
+            TestPathUtils.PathUnder(repository.Root, name), false, false, store, TimeSpan.FromSeconds(12),
+            TextWriter.Null, error, CancellationToken.None);
+
+        static async Task JoinIfStarted(Task<EvidenceReuseRunResult>? task)
+        {
+            if (task is null) return;
+            try { await task.WaitAsync(TimeSpan.FromSeconds(20)); }
+            catch (Exception) when (task.IsCompleted) { }
+        }
+    }
+
+    [Fact]
+    public async Task SuccessfulStringWriterReportsContentionBeforeReceiptIsReused()
+    {
+        using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        var (plan, solution) = await CreatePlanAsync(repository);
+        await repository.CommitAsync();
+        using var fixture = new SdkProcessFixture(repository.Root, "stable");
+        var producerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseProducer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var testCalls = 0;
+        var resolver = Resolver(out var runner, fixture.ExecutablePath, () =>
+        {
+            if (Interlocked.Increment(ref testCalls) == 1)
+            {
+                producerEntered.TrySetResult();
+                releaseProducer.Task.GetAwaiter().GetResult();
+            }
+        });
+        Task<EvidenceReuseRunResult>? first = null;
+        Task<EvidenceReuseRunResult>? waiting = null;
+        using var diagnosticWriter = new SuccessfulProgressWriter();
+        var store = TestPathUtils.PathUnder(repository.Root, "receipts");
+
+        try
+        {
+            first = RunAsync("first", TextWriter.Null);
+            await producerEntered.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            waiting = RunAsync("waiting", diagnosticWriter);
+
+            var progress = await diagnosticWriter.Written.Task.WaitAsync(TimeSpan.FromSeconds(9));
+            Assert.StartsWith("reuse.waiting key=", progress, StringComparison.Ordinal);
+            Assert.False(releaseProducer.Task.IsCompleted);
+            releaseProducer.TrySetResult();
+
+            var firstResult = await first.WaitAsync(TimeSpan.FromSeconds(20));
+            var waitingResult = await waiting.WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.Equal(EvidenceExecutionVerdict.Passed, firstResult.Manifest.ExecutionVerdict);
+            Assert.Equal(EvidenceExecutionVerdict.Passed, waitingResult.Manifest.ExecutionVerdict);
+            Assert.Equal(EvidenceProducerOutcome.Reused, Assert.Single(waitingResult.Manifest.ProducerResults).Outcome);
+            Assert.Equal(EvidenceClaimKind.LocalReusedComplete, waitingResult.Manifest.ClaimKind);
+            Assert.Equal(1, runner.TestInvocationCount);
+            Assert.Contains("reuse.waiting key=", diagnosticWriter.ToString(), StringComparison.Ordinal);
         }
         finally
         {
@@ -296,6 +384,17 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
             WriteAttempts++;
             Attempted.TrySetResult(value ?? string.Empty);
             throw new IOException("The diagnostic sink is closed.");
+        }
+    }
+
+    private sealed class SuccessfulProgressWriter : StringWriter
+    {
+        internal TaskCompletionSource<string> Written { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void WriteLine(string? value)
+        {
+            base.WriteLine(value);
+            Written.TrySetResult(value ?? string.Empty);
         }
     }
 }

@@ -12,6 +12,22 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidenceReuseCommandTests
 {
     [Fact]
+    public void FilesystemRootCannotBeClaimedAsANewRunAndLeavesCallerFilesUntouched()
+    {
+        using var temporary = TestDirectory.Create();
+        var sentinel = TestPathUtils.PathUnder(temporary.Path, "sentinel.txt");
+        File.WriteAllText(sentinel, "caller-owned sentinel");
+        var root = Path.GetPathRoot(temporary.Path)!;
+
+        var failure = Assert.Throws<InvalidOperationException>(() =>
+            EvidenceReuseOutput.CreateFreshRoot(root, temporary.Path));
+
+        Assert.Contains("reuse.output_invalid", failure.Message, StringComparison.Ordinal);
+        Assert.Equal("caller-owned sentinel", File.ReadAllText(sentinel));
+        Assert.Equal([sentinel], Directory.GetFileSystemEntries(temporary.Path));
+    }
+
+    [Fact]
     public void FreshRootCreatesExclusivePrivateChildAndNeverReusesIt()
     {
         var parent = Path.Combine(Path.GetTempPath(), $"evidence-output-{Guid.NewGuid():N}");

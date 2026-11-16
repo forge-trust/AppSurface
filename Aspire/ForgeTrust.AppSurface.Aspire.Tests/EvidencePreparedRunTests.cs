@@ -16,19 +16,25 @@ public sealed class EvidencePreparedRunTests
         var plan = fixture.Plan(fixture.Declaration("a", "a.txt", "db-a"));
         var firstProducer = new Producer("a");
         var firstOwner = new Owner();
+        long originElapsed;
         await using (var first = await fixture.PrepareAsync(plan, firstProducer))
         {
             Assert.Equal(["base", "db-a"], first.RequiredResourceIds);
             var fresh = await first.RunAsync((ids, _) => ValueTask.FromResult(fixture.Scope(ids, firstOwner)));
             Assert.Equal(EvidenceExecutionVerdict.Passed, fresh.ExecutionVerdict);
-            Assert.Equal(EvidenceProducerOutcome.Passed, Assert.Single(fresh.ProducerResults).Outcome);
+            var freshResult = Assert.Single(fresh.ProducerResults);
+            Assert.Equal(EvidenceProducerOutcome.Passed, freshResult.Outcome);
+            originElapsed = freshResult.ElapsedMilliseconds;
             Assert.Equal(1, firstOwner.Disposals);
             Assert.Equal(1, firstProducer.Disposals);
         }
         var secondProducer = new Producer("a");
         await using var second = await fixture.PrepareAsync(plan, secondProducer);
         Assert.Empty(second.RequiredResourceIds);
-        Assert.Equal(EvidenceReuseStatus.Hit, Assert.Single(second.Decisions).Status);
+        var decision = Assert.Single(second.Decisions);
+        Assert.Equal(EvidenceReuseStatus.Hit, decision.Status);
+        Assert.NotNull(decision.OriginCompletedAt);
+        Assert.Equal(originElapsed, decision.OriginElapsedMilliseconds);
         var factoryCalls = 0;
 
         var reused = await second.RunAsync((_, _) =>
@@ -48,6 +54,7 @@ public sealed class EvidencePreparedRunTests
         Assert.Equal(EvidenceProducerOutcome.Reused, result.Outcome);
         Assert.Equal(0, result.ElapsedMilliseconds);
         Assert.NotNull(result.OriginManifestDigest);
+        Assert.Equal(decision.OriginCompletedAt, result.OriginCompletedAt);
         Assert.All(reused.ResourceResults, resource => Assert.Equal(EvidenceResourceOutcome.NotRequiredForExecution, resource.Outcome));
         Assert.True(File.Exists(Path.Join(second.ArtifactDirectories["a"], "reports", "result.txt")));
     }

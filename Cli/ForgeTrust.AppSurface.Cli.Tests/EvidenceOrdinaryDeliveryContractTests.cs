@@ -63,11 +63,11 @@ public sealed class EvidenceOrdinaryDeliveryContractTests
         using var fixture = await Fixture.CreateAsync();
         var first = fixture.Publications[0];
         var changed = sameLength ? Enumerable.Repeat((byte)'x', checked((int)first.Length)).ToArray() : "longer changed bytes"u8.ToArray();
-        await File.WriteAllBytesAsync(Path.Combine(fixture.Source, "coverage", first.Path), changed);
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(fixture.Source, "coverage", first.Path), changed);
 
         await Assert.ThrowsAsync<IOException>(() => fixture.DeliverAsync());
 
-        Assert.Equal(changed, await File.ReadAllBytesAsync(Path.Combine(fixture.Source, "coverage", first.Path)));
+        Assert.Equal(changed, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(fixture.Source, "coverage", first.Path)));
         Assert.Equal("caller-owned sentinel", await File.ReadAllTextAsync(fixture.Sentinel));
     }
 
@@ -77,20 +77,20 @@ public sealed class EvidenceOrdinaryDeliveryContractTests
         using var fixture = await Fixture.CreateAsync();
         await fixture.DeliverAsync();
         foreach (var file in fixture.Publications)
-            File.SetLastWriteTimeUtc(Path.Combine(fixture.Destination, "coverage", file.Path),
+            File.SetLastWriteTimeUtc(TestPathUtils.PathUnder(fixture.Destination, "coverage", file.Path),
                 new DateTime(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc));
         var originalTimes = fixture.Publications.ToDictionary(file => file.Path,
-            file => File.GetLastWriteTimeUtc(Path.Combine(fixture.Destination, "coverage", file.Path)));
+            file => File.GetLastWriteTimeUtc(TestPathUtils.PathUnder(fixture.Destination, "coverage", file.Path)));
 
         await fixture.DeliverAsync();
 
         foreach (var file in fixture.Publications)
         {
-            var destination = Path.Combine(fixture.Destination, "coverage", file.Path);
+            var destination = TestPathUtils.PathUnder(fixture.Destination, "coverage", file.Path);
             Assert.Equal(originalTimes[file.Path], File.GetLastWriteTimeUtc(destination));
             Assert.Equal(fixture.Bytes[file.Path], await File.ReadAllBytesAsync(destination));
         }
-        var occupied = Path.Combine(fixture.Destination, "coverage", fixture.Publications[0].Path);
+        var occupied = TestPathUtils.PathUnder(fixture.Destination, "coverage", fixture.Publications[0].Path);
         var foreign = Enumerable.Repeat((byte)'z', checked((int)fixture.Publications[0].Length)).ToArray();
         await File.WriteAllBytesAsync(occupied, foreign);
 
@@ -143,7 +143,7 @@ public sealed class EvidenceOrdinaryDeliveryContractTests
                 };
                 foreach (var (path, content) in bytes)
                 {
-                    var destination = Path.Combine(source, "coverage", path);
+                    var destination = TestPathUtils.PathUnder(source, "coverage", path);
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                     await File.WriteAllBytesAsync(destination, content);
                 }
@@ -167,7 +167,7 @@ public sealed class EvidenceOrdinaryDeliveryContractTests
         internal async Task AssertSourcesUnchangedAsync()
         {
             foreach (var (path, content) in Bytes)
-                Assert.Equal(content, await File.ReadAllBytesAsync(Path.Combine(Source, "coverage", path)));
+                Assert.Equal(content, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(Source, "coverage", path)));
             Assert.Equal("caller-owned sentinel", await File.ReadAllTextAsync(Sentinel));
         }
 

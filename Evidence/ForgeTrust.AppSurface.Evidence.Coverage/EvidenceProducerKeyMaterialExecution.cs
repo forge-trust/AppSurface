@@ -90,11 +90,8 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
             if (_cancellation.IsCancellationRequested)
                 return new EvidenceProducerKeyMaterialPreparation(null, true, _callerCancellation.IsCancellationRequested,
                     _callerCancellation.IsCancellationRequested ? "reuse.material_cancelled" : "reuse.material_timed_out");
-            return new EvidenceProducerKeyMaterialPreparation(material, true, false,
-                material is null ? "reuse.material_invalid" : "reuse.material_ready")
-            {
-                Diagnostic = material is null ? "The key-material callback returned no material map. Return a non-null map within the declared limits." : null,
-            };
+            // CaptureMaterial rejects null and returns an owned, non-null snapshot before the task completes.
+            return new EvidenceProducerKeyMaterialPreparation(material, true, false, "reuse.material_ready");
         }
         catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
         {

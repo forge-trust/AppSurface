@@ -8,6 +8,21 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class EvidenceCoverageChildLifetimeRunnerTests
 {
+    [Fact]
+    public void MissingRunnerOrChannelCannotConstructAnExecutionWrapperOrStartWork()
+    {
+        var runner = new CaptureRunner();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new EvidenceCoverageProcessRunner(runner, (EvidenceChildLifetimeSession)null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new EvidenceCoverageProcessRunner(null!, new Dictionary<string, string>()));
+        Assert.Throws<ArgumentNullException>(() =>
+            new EvidenceCoverageProcessRunner(runner, (IReadOnlyDictionary<string, string>)null!));
+
+        Assert.Empty(runner.Requests);
+    }
+
     [Theory]
     [InlineData("msbuild", false)]
     [InlineData("build", true)]

@@ -1243,8 +1243,20 @@ internal sealed class EvidenceReceiptStore
             VerifyExactTree(artifactRoot, expected);
         }
 
-        private static void VerifyExactTree(CoverageRunOutputLease root, HashSet<string> expectedFiles, bool requirePrivate = true)
+        /// <summary>Verifies an exact, bounded artifact-path inventory without taking ownership of the root.</summary>
+        /// <param name="root">Caller-owned native directory lease, held exclusively through verification.</param>
+        /// <param name="expectedFiles">Immutable canonical portable root-relative file paths expected in the tree.</param>
+        /// <param name="requirePrivate">Whether every opened child must retain current-user-only access.</param>
+        /// <param name="maximumTreeEntries">A stricter entry budget from one through 1,024; defaults to the production limit of 1,024.</param>
+        /// <remarks>Callers separately verify artifact hashes and lengths. Verification owns and disposes only its child leases.
+        /// A smaller per-call budget supports bounded native traversal tests without changing process file-descriptor limits.</remarks>
+        internal static void VerifyExactTree(CoverageRunOutputLease root, HashSet<string> expectedFiles, bool requirePrivate = true,
+            int maximumTreeEntries = MaximumPayloadFiles * 4)
         {
+            ArgumentNullException.ThrowIfNull(root);
+            ArgumentNullException.ThrowIfNull(expectedFiles);
+            if (maximumTreeEntries is < 1 or > MaximumPayloadFiles * 4)
+                throw new ArgumentOutOfRangeException(nameof(maximumTreeEntries));
             var actualFiles = new HashSet<string>(StringComparer.Ordinal);
             var pending = new Stack<(CoverageRunOutputLease Root, string Prefix, bool Owned)>();
             pending.Push((root, string.Empty, false));
@@ -1258,7 +1270,7 @@ internal sealed class EvidenceReceiptStore
                         throw new InvalidDataException("Receipt payload nesting exceeds its bound.");
                     foreach (var entry in item.Root.EnumerateArtifactEntries(MaximumPayloadFiles + 8))
                     {
-                        if (++entryCount > MaximumPayloadFiles * 4) throw new InvalidDataException("Receipt payload tree exceeds its bound.");
+                        if (++entryCount > maximumTreeEntries) throw new InvalidDataException("Receipt payload tree exceeds its bound.");
                         var path = item.Prefix.Length == 0 ? entry.Name : item.Prefix + "/" + entry.Name;
                         if (entry.IsDirectory)
                         {

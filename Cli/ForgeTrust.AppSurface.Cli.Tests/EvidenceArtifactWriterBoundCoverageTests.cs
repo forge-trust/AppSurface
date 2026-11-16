@@ -7,6 +7,50 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidenceArtifactWriterBoundCoverageTests
 {
     [Fact]
+    public async Task CallerMemoryFailureRemovesOnlyItsPartialNewFileAndAllowsTheSameDestinationToBeRetried()
+    {
+        using var directory = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(directory.Path, "artifacts");
+        var path = TestPathUtils.PathUnder(root, "reports/result.bin");
+        var declaration = new EvidenceProducerDeclaration("producer", "custom", "1", [], [],
+            [new("report", "reports", "application/octet-stream", false, 16) { MaximumFiles = 2 }], 10);
+        var writer = new EvidenceArtifactWriter(declaration, root);
+        var expected = new IOException("controlled caller memory failure");
+        using var memory = new FailingMemory(expected);
+
+        var observed = await Record.ExceptionAsync(() => writer.WriteAsync("report", "reports/result.bin", memory.Memory).AsTask());
+
+        Assert.Same(expected, observed);
+        Assert.True(Directory.Exists(root));
+        Assert.False(File.Exists(path));
+        Assert.Empty(writer.WrittenArtifacts);
+
+        await writer.WriteAsync("report", "reports/result.bin", new byte[] { 42 });
+
+        Assert.Equal(new byte[] { 42 }, await File.ReadAllBytesAsync(path));
+        Assert.Single(writer.WrittenArtifacts);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(129)]
+    public async Task InvalidMultiFileCountIsRejectedBeforeCreatingAnyArtifact(int count)
+    {
+        using var directory = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(directory.Path, "artifacts");
+        var declaration = new EvidenceProducerDeclaration("producer", "custom", "1", [], [],
+            [new("report", "reports", "application/octet-stream", false, 16) { MaximumFiles = count }], 10);
+        var writer = new EvidenceArtifactWriter(declaration, root);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            writer.WriteAsync("report", "reports/result.bin", new byte[] { 42 }).AsTask());
+
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
     public async Task ProducerWideByteLimitRejectsOversizedMemoryBeforeReadingItAndReleasesTheReservation()
     {
         using var directory = TestDirectory.Create();
@@ -43,6 +87,15 @@ public sealed class EvidenceArtifactWriterBoundCoverageTests
             throw new InvalidOperationException("Oversized memory must not be read.");
         }
         public override MemoryHandle Pin(int elementIndex = 0) => throw new NotSupportedException();
+        public override void Unpin() { }
+        protected override void Dispose(bool disposing) { }
+    }
+
+    private sealed class FailingMemory(Exception failure) : MemoryManager<byte>
+    {
+        public override Memory<byte> Memory => CreateMemory(1);
+        public override Span<byte> GetSpan() => throw failure;
+        public override MemoryHandle Pin(int elementIndex = 0) => throw failure;
         public override void Unpin() { }
         protected override void Dispose(bool disposing) { }
     }

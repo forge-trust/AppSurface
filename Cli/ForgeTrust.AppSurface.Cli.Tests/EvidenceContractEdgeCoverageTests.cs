@@ -200,6 +200,146 @@ public sealed class EvidenceContractEdgeCoverageTests
         Assert.Equal("1.1", planner.Resolve(validPolicy, [new NormalizedDiffPath("src/file.cs")]).ContractVersion);
     }
 
+    [Theory]
+    [InlineData("PRN.txt")]
+    [InlineData("AUX.txt")]
+    [InlineData("NUL.txt")]
+    [InlineData("LPT1.txt")]
+    [InlineData("LPT².txt")]
+    [InlineData("COM³.txt")]
+    [InlineData("name .txt ")]
+    [InlineData("folder /result.txt")]
+    [InlineData("line\nbreak.txt")]
+    public void PortableSlotsRejectReservedDeviceNamesWhileAllowingSimilarOrdinaryNames(string name)
+    {
+        var slot = new EvidenceArtifactSlot("report", "reports", "text/plain", false, 16)
+        {
+            MaximumFiles = 2,
+        };
+
+        Assert.Throws<ArgumentException>(() =>
+            EvidenceArtifactValidation.ValidatePathForSlot(slot, "reports/" + name));
+        EvidenceArtifactValidation.ValidatePathForSlot(slot, "reports/COM0.txt");
+        EvidenceArtifactValidation.ValidatePathForSlot(slot, "reports/LPTx.txt");
+        EvidenceArtifactValidation.ValidatePathForSlot(slot, "reports/PRNx.txt");
+    }
+
+    [Theory]
+    [InlineData("key")]
+    [InlineData("digest")]
+    [InlineData("time")]
+    public void LegacyVerifierRejectsFreshResultsWithInjectedReuseProvenanceEvenWhenRehashed(string field)
+    {
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [],
+            [new EvidenceProducerDeclaration("p", "kind", "1", [], [], [], 30)], []);
+        var plan = CreatePlan(profile, "1.0");
+        var result = new EvidenceProducerResult("p", EvidenceProducerOutcome.Passed, []);
+        var valid = EvidenceManifestBuilder.Build(plan, [result]);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, valid));
+        Assert.True(EvidenceManifestBuilder.VerifyForGate(plan, valid));
+        result = field switch
+        {
+            "key" => result with { ProducerKey = new string('a', 64) },
+            "digest" => result with { OriginManifestDigest = new string('b', 64) },
+            _ => result with { OriginCompletedAt = DateTimeOffset.UnixEpoch },
+        };
+        var injected = valid with { ProducerResults = [result], ManifestDigest = string.Empty };
+        injected = injected with { ManifestDigest = EvidenceDigest.CanonicalSha256(injected) };
+
+        Assert.False(EvidenceManifestBuilder.Verify(plan, injected));
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, injected));
+    }
+
+    [Theory]
+    [InlineData("short")]
+    [InlineData("uppercase")]
+    [InlineData("nonhex")]
+    public void PlanVerifierRequiresACanonicalCapturedPatchDigestEvenWhenAllDigestsAreRecomputed(string defect)
+    {
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [],
+            [new EvidenceProducerDeclaration("p", "kind", "1", [], [], [], 30)], []);
+        var plan = BindPatch(CreatePlan(profile, "1.1"), new string('a', 64));
+        EvidenceProducerResult[] results = [new("p", EvidenceProducerOutcome.Passed, [])];
+        Assert.True(EvidenceManifestBuilder.VerifyForGate(plan, EvidenceManifestBuilder.Build(plan, results)));
+        var invalid = defect switch
+        {
+            "short" => new string('a', 63),
+            "uppercase" => new string('A', 64),
+            _ => new string('g', 64),
+        };
+        plan = BindPatch(plan, invalid);
+        var manifest = EvidenceManifestBuilder.Build(plan, results);
+
+        Assert.False(EvidenceManifestBuilder.Verify(plan, manifest));
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, manifest));
+
+        static EvidencePlan BindPatch(EvidencePlan source, string patch)
+        {
+            var draft = source with { PatchSha256 = patch, PlanDigest = string.Empty };
+            return draft with { PlanDigest = EvidenceDigest.CanonicalSha256(draft) };
+        }
+    }
+
+    [Fact]
+    public void MultiFileDeclarationRequiresVersion11EvenWithoutInputOrChildLifetimeAdditions()
+    {
+        var producer = new EvidenceProducerDeclaration("p", "kind", "1", [], [],
+            [new("report", "reports", "text/plain", false, 16) { MaximumFiles = 2 }], 30);
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [producer], []);
+        EvidenceProducerResult[] results = [new("p", EvidenceProducerOutcome.Passed, [])];
+        var current = CreatePlan(profile, "1.1");
+        Assert.True(EvidenceManifestBuilder.VerifyForGate(current, EvidenceManifestBuilder.Build(current, results)));
+
+        var legacy = CreatePlan(profile, "1.0");
+        var refused = EvidenceManifestBuilder.Build(legacy, results);
+
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, refused.ExecutionVerdict);
+        Assert.False(EvidenceManifestBuilder.Verify(legacy, refused));
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(legacy, refused));
+    }
+
+    [Theory]
+    [InlineData("skipped-resource")]
+    [InlineData("local-reuse-claim")]
+    public void LegacyVerifierRejectsNewResourceOrClaimSemanticsEvenWithARehashedManifest(string defect)
+    {
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted,
+            [new("resource", "completion", 10, [])],
+            [new EvidenceProducerDeclaration("p", "kind", "1", [], [], [], 30)], []);
+        var plan = CreatePlan(profile, "1.0");
+        var valid = EvidenceManifestBuilder.Build(plan, [new("p", EvidenceProducerOutcome.Passed, [])],
+            resourceResults: [new("resource", EvidenceResourceOutcome.Ready, 1)]);
+        Assert.True(EvidenceManifestBuilder.VerifyForGate(plan, valid));
+        var injected = defect == "skipped-resource"
+            ? valid with { ResourceResults = [new("resource", EvidenceResourceOutcome.NotRequiredForExecution, 0)] }
+            : valid with { ClaimKind = EvidenceClaimKind.LocalReusedComplete };
+        injected = injected with { ManifestDigest = string.Empty };
+        injected = injected with { ManifestDigest = EvidenceDigest.CanonicalSha256(injected) };
+
+        Assert.False(EvidenceManifestBuilder.Verify(plan, injected));
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, injected));
+    }
+
+    [Theory]
+    [InlineData("plan-version")]
+    [InlineData("manifest-version")]
+    [InlineData("missing-policy")]
+    public void GateRejectsUnsupportedOrUnboundContractInputs(string defect)
+    {
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [],
+            [new EvidenceProducerDeclaration("p", "kind", "1", [], [], [], 30)], []);
+        var plan = CreatePlan(profile, "1.1");
+        var manifest = EvidenceManifestBuilder.Build(plan, [new("p", EvidenceProducerOutcome.Passed, [])]);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+        Assert.True(EvidenceManifestBuilder.VerifyForGate(plan, manifest));
+        if (defect == "plan-version") plan = plan with { ContractVersion = "9.0" };
+        else if (defect == "manifest-version") manifest = manifest with { ContractVersion = "1.0" };
+        else plan = plan with { PolicySnapshot = null };
+
+        Assert.False(EvidenceManifestBuilder.Verify(plan, manifest));
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, manifest));
+    }
+
     private static EvidenceProducerDeclaration ProducerWithRequiredArtifact() =>
         new("p", "kind", "1", [], [], [new EvidenceArtifactSlot("report", "reports", "text/plain", true, 16)], 30);
 

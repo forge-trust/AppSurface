@@ -576,6 +576,69 @@ public sealed class EvidenceChildProtocolCoverageTests
         }
     }
 
+    [Theory]
+    [InlineData("empty-eof")]
+    [InlineData("truncated")]
+    public async Task ProtocolReaderDistinguishesCleanEofFromInvalidFrames(string frameKind)
+    {
+        var bytes = frameKind switch
+        {
+            "empty-eof" => [],
+            _ => "BEGIN|partial"u8.ToArray()
+        };
+        using var stream = new MemoryStream(bytes, writable: false);
+
+        if (frameKind == "empty-eof")
+        {
+            Assert.Null(await EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
+            return;
+        }
+
+        var failure = await Assert.ThrowsAsync<IOException>(() =>
+            EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
+        Assert.Contains("Truncated", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OversizedProtocolWriteFailsBeforeEmittingAnyFrameBytes()
+    {
+        using var stream = new MemoryStream();
+
+        var failure = await Assert.ThrowsAsync<IOException>(() => EvidenceOwnedChildProtocol.WriteFrameAsync(
+            stream, new string('x', EvidenceOwnedChild.MaximumFrameBytes), CancellationToken.None));
+
+        Assert.Contains("exceeds its limit", failure.Message, StringComparison.Ordinal);
+        Assert.Empty(stream.ToArray());
+    }
+
+    [Theory]
+    [InlineData("io", false)]
+    [InlineData("disposed", false)]
+    [InlineData("cancelled", false)]
+    [InlineData("unexpected", true)]
+    public async Task BestEffortRejectionWriteSuppressesOnlyTransportFailures(string failureKind, bool propagates)
+    {
+        Exception expected = failureKind switch
+        {
+            "io" => new IOException("controlled write failure"),
+            "disposed" => new ObjectDisposedException("controlled pipe"),
+            "cancelled" => new OperationCanceledException("controlled write cancellation"),
+            _ => new InvalidOperationException("unexpected stream failure")
+        };
+        using var stream = new ThrowingWriteStream(expected);
+
+        if (propagates)
+        {
+            var actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                EvidenceOwnedChildProtocol.TryWriteFrameAsync(stream, "REJECT|invalid", CancellationToken.None));
+            Assert.Same(expected, actual);
+        }
+        else
+        {
+            await EvidenceOwnedChildProtocol.TryWriteFrameAsync(stream, "REJECT|invalid", CancellationToken.None);
+        }
+    }
+
     private static async Task JoinActualChildAndDisposeSessionAsync(Task? childTask,
         CancellationTokenSource childTimeout, EvidenceChildLifetimeSession session)
     {
@@ -599,4 +662,20 @@ public sealed class EvidenceChildProtocolCoverageTests
     };
 
     private sealed class ChildListenerProbeException : Exception { }
+
+    private sealed class ThrowingWriteStream(Exception failure) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw failure;
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => Task.FromException(failure);
+    }
 }

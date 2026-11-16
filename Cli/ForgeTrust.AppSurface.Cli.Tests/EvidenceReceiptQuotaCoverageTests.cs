@@ -900,6 +900,7 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         var invalidated = new EvidenceReceiptState(1, key, null, null, null, null, null);
         var indexPath = TestPathUtils.PathUnder(root, "quota-index.json");
 
+        var originalIndex = await File.ReadAllBytesAsync(indexPath);
         {
             var index = JsonNode.Parse(await File.ReadAllBytesAsync(indexPath))!;
             var entry = index["Entries"]!.AsArray().Single()!;
@@ -914,16 +915,30 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         }
 
         var unchangedIndex = await File.ReadAllBytesAsync(indexPath);
-        EvidenceReceiptQuota.InvalidatePayload(lease, settled, invalidated);
-
-        Assert.Equal(unchangedIndex, await File.ReadAllBytesAsync(indexPath));
-        Assert.Equal(settled, lease.ReadState());
-        var unchanged = Entry(root, key);
-        var expectedPayloadBinding = defect == "index-payload-binding" ? "payload-other-binding" : payloadName;
-        Assert.Equal(expectedPayloadBinding, unchanged.GetProperty("PayloadDirectoryName").GetString());
-        Assert.Equal(3, unchanged.GetProperty("PayloadBytes").GetInt64());
-        Assert.Equal(new byte[] { 7, 8, 9 }, await File.ReadAllBytesAsync(
-            TestPathUtils.PathUnder(lease.DirectoryPath, payloadName, "owned.bin")));
+        try
+        {
+            if (defect == "active-payload-already-retired")
+            {
+                Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.InvalidatePayload(lease, settled, invalidated));
+                Assert.Throws<InvalidDataException>(() => lease.ReadState());
+            }
+            else
+            {
+                EvidenceReceiptQuota.InvalidatePayload(lease, settled, invalidated);
+                Assert.Equal(settled, lease.ReadState());
+            }
+            Assert.Equal(unchangedIndex, await File.ReadAllBytesAsync(indexPath));
+            var unchanged = Entry(root, key);
+            var expectedPayloadBinding = defect == "index-payload-binding" ? "payload-other-binding" : payloadName;
+            Assert.Equal(expectedPayloadBinding, unchanged.GetProperty("PayloadDirectoryName").GetString());
+            Assert.Equal(3, unchanged.GetProperty("PayloadBytes").GetInt64());
+            Assert.Equal(new byte[] { 7, 8, 9 }, await File.ReadAllBytesAsync(
+                TestPathUtils.PathUnder(lease.DirectoryPath, payloadName, "owned.bin")));
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(indexPath, originalIndex);
+        }
     }
 
     [Fact]
@@ -1406,18 +1421,24 @@ public sealed class EvidenceReceiptQuotaCoverageTests
 
     public static IEnumerable<object[]> IndexCorruptions => new[]
     {
-        "duplicate-entry", "invalid-repository", "invalid-key", "invalid-input-hash",
+        "duplicate-entry", "null-entries", "null-entry", "invalid-repository", "invalid-key", "invalid-input-hash",
         "producer-empty", "producer-long", "producer-control",
         "negative-metadata", "negative-payload", "negative-reserved",
         "retired-null", "retired-over-capacity", "retired-negative", "retired-bad-name",
-        "essential-null", "essential-over-capacity", "essential-bad-length", "essential-nonhex", "essential-duplicate",
+        "retired-null-entry", "retired-null-name", "retired-invalid-component",
+        "active-empty-name", "active-invalid-component", "active-stage-name", "retired-stage-name",
+        "active-stage-case-name", "retired-stage-case-name",
+        "retired-active-alias", "retired-active-case-alias", "retired-reservation-alias", "retired-reservation-case-alias",
+        "active-reservation-alias", "active-reservation-case-alias",
+        "essential-null", "essential-null-id", "essential-over-capacity", "essential-bad-length", "essential-nonhex", "essential-duplicate",
         "payload-over-capacity", "payload-bad-id", "payload-bad-stage", "payload-bad-name",
         "payload-negative", "payload-sum-exceeds-charge", "payload-duplicate-id",
         "tombstone-authority", "tombstone-metadata", "tombstone-reserved", "tombstone-essential-bytes",
         "tombstone-essential-flag", "tombstone-flight-flag", "tombstone-audit-flag", "tombstone-quarantine-flag",
         "tombstone-origin-time", "tombstone-use-time", "tombstone-producer", "tombstone-input-hash",
         "tombstone-essential-id", "tombstone-payload-binding",
-        "state-schema", "state-key", "state-audit-utf8-limit", "unsupported-index-schema", "oversized-index"
+        "state-schema", "state-key", "state-audit-utf8-limit", "unsupported-index-schema", "oversized-index",
+        "state-payload-empty", "state-payload-component", "state-payload-stage", "state-payload-stage-case"
     }.Select(corruption => new object[] { corruption });
 
     [Theory]
@@ -1510,6 +1531,14 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             var state = JsonNode.Parse(entry["AuthorityState"]!.ToJsonString())!;
             if (corruption == "state-schema") state["SchemaVersion"] = 2;
             else if (corruption == "state-key") state["Key"] = Hash("different-state-key");
+            else if (corruption.StartsWith("state-payload-", StringComparison.Ordinal))
+                state["PayloadDirectoryName"] = corruption switch
+                {
+                    "state-payload-empty" => "",
+                    "state-payload-component" => "payload-x/../../outside",
+                    "state-payload-stage" => validStage,
+                    _ => validStage.Replace("stage", "STAGE", StringComparison.Ordinal),
+                };
             else state["AuditExpectedAssertions"] = new string('x', 4097);
             entry["AuthorityState"] = state;
         }
@@ -1517,6 +1546,8 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         switch (corruption)
         {
             case "duplicate-entry": entries.Add(entry.DeepClone()); break;
+            case "null-entries": index["Entries"] = null; break;
+            case "null-entry": entries[0] = null; break;
             case "invalid-repository": entry["RepositoryNamespace"] = new string('g', 64); break;
             case "invalid-key": entry["Key"] = "short"; break;
             case "invalid-input-hash": entry["InputIdentityDigest"] = "not-a-hash"; break;
@@ -1530,7 +1561,37 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             case "retired-over-capacity": entry["RetiredPayloads"] = RetiredPayloads(65); break;
             case "retired-negative": entry["RetiredPayloads"] = new JsonArray(JsonSerializer.SerializeToNode(new { DirectoryName = "payload-old", Bytes = -1L })); break;
             case "retired-bad-name": entry["RetiredPayloads"] = new JsonArray(JsonSerializer.SerializeToNode(new { DirectoryName = "foreign-old", Bytes = 1L })); break;
+            case "retired-null-entry": entry["RetiredPayloads"] = new JsonArray((JsonNode?)null); break;
+            case "retired-null-name": entry["RetiredPayloads"] = new JsonArray(JsonSerializer.SerializeToNode(new { DirectoryName = (string?)null, Bytes = 1L })); break;
+            case "retired-invalid-component": entry["RetiredPayloads"] = new JsonArray(JsonSerializer.SerializeToNode(new { DirectoryName = "payload-x/../../outside", Bytes = 1L })); break;
+            case "active-empty-name": entry["PayloadDirectoryName"] = ""; break;
+            case "active-invalid-component": entry["PayloadDirectoryName"] = "payload-x/../../outside"; break;
+            case "active-stage-name": entry["PayloadDirectoryName"] = validStage; break;
+            case "active-stage-case-name": entry["PayloadDirectoryName"] = validStage.Replace("stage", "STAGE", StringComparison.Ordinal); break;
+            case "retired-stage-name": entry["RetiredPayloads"] = new JsonArray(JsonSerializer.SerializeToNode(new { DirectoryName = validStage, Bytes = 1L })); break;
+            case "retired-stage-case-name": entry["RetiredPayloads"] = new JsonArray(JsonSerializer.SerializeToNode(new { DirectoryName = validStage.Replace("stage", "STAGE", StringComparison.Ordinal), Bytes = 1L })); break;
+            case "retired-active-alias":
+            case "retired-active-case-alias":
+                entry["PayloadDirectoryName"] = "payload-live";
+                entry["RetiredPayloads"] = new JsonArray(JsonSerializer.SerializeToNode(new
+                { DirectoryName = corruption.EndsWith("case-alias", StringComparison.Ordinal) ? "payload-LIVE" : "payload-live", Bytes = 1L }));
+                break;
+            case "active-reservation-alias":
+            case "active-reservation-case-alias":
+                SetPayloadReservations(entry, validId, validStage, validPayload, 1);
+                entry["ReservedPayloadBytes"] = 1;
+                entry["PayloadDirectoryName"] = corruption.EndsWith("case-alias", StringComparison.Ordinal)
+                    ? validPayload.ToUpperInvariant().Replace("PAYLOAD-", "payload-", StringComparison.Ordinal) : validPayload;
+                break;
+            case "retired-reservation-alias":
+            case "retired-reservation-case-alias":
+                SetPayloadReservations(entry, validId, validStage, validPayload, 1);
+                entry["ReservedPayloadBytes"] = 1;
+                entry["RetiredPayloads"] = new JsonArray(JsonSerializer.SerializeToNode(new
+                { DirectoryName = corruption.EndsWith("case-alias", StringComparison.Ordinal) ? validPayload.ToUpperInvariant().Replace("PAYLOAD-", "payload-", StringComparison.Ordinal) : validPayload, Bytes = 1L }));
+                break;
             case "essential-null": entry["EssentialReservationIds"] = null; break;
+            case "essential-null-id": entry["EssentialReservationIds"] = new JsonArray((JsonNode?)null); break;
             case "essential-over-capacity": entry["EssentialReservationIds"] = new JsonArray(Enumerable.Range(0, 65).Select(i => JsonValue.Create(i.ToString("x32", System.Globalization.CultureInfo.InvariantCulture))).ToArray()); break;
             case "essential-bad-length": entry["EssentialReservationIds"] = new JsonArray(JsonValue.Create("short")); break;
             case "essential-nonhex": entry["EssentialReservationIds"] = new JsonArray(JsonValue.Create(new string('z', 32))); break;
@@ -1830,6 +1891,281 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         finally
         {
             foreach (var lease in leases.Reverse()) lease.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ExplicitEmptyLegacyPayloadBindingsCommitTheAggregateReservation()
+    {
+        using var temporary = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(temporary.Path, "receipts");
+        var repository = Hash("empty-legacy-bindings-repository");
+        var key = Hash("empty-legacy-bindings-key");
+        var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+        { RootDirectory = root, RepositoryNamespace = repository });
+        using var lease = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
+        var completedAt = DateTimeOffset.UtcNow;
+        Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 93, completedAt));
+
+        var indexPath = TestPathUtils.PathUnder(root, "quota-index.json");
+        var index = JsonNode.Parse(await File.ReadAllBytesAsync(indexPath))!;
+        var entry = index["Entries"]!.AsArray().Single()!;
+        entry["PayloadReservations"] = new JsonArray();
+        await File.WriteAllBytesAsync(indexPath, Encoding.UTF8.GetBytes(index.ToJsonString()));
+
+        EvidenceReceiptQuota.CommitPayload(root, repository, key, 71, "payload-empty-legacy-commit", completedAt,
+            stateBytes: 22);
+
+        var committed = Entry(root, key);
+        Assert.Equal(0, committed.GetProperty("ReservedPayloadBytes").GetInt64());
+        Assert.Equal(71, committed.GetProperty("PayloadBytes").GetInt64());
+        Assert.Equal(22, committed.GetProperty("MetadataBytes").GetInt64());
+        Assert.Equal("payload-empty-legacy-commit", committed.GetProperty("PayloadDirectoryName").GetString());
+        Assert.Equal(completedAt, committed.GetProperty("OriginCompletedAt").GetDateTimeOffset());
+        Assert.Empty(committed.GetProperty("PayloadReservations").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task LegacyBatchCommitConsumesOnlyItsDeclaredAggregateReservation()
+    {
+        using var temporary = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(temporary.Path, "receipts");
+        var repository = Hash("legacy-batch-commit-repository");
+        var key = Hash("legacy-batch-commit-key");
+        var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+        { RootDirectory = root, RepositoryNamespace = repository });
+        using var lease = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
+        const string executionId = "legacy-batch-commit-owner";
+        lease.EstablishAuthority(executionId);
+        var completedAt = DateTimeOffset.UtcNow;
+        const string payloadName = "payload-legacy-batch-commit";
+        Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 100, completedAt));
+        using (var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(lease.DirectoryPath, false, true)!)
+        using (var payload = keyRoot.CreateArtifactDirectory(payloadName))
+        using (var file = payload.OpenArtifactFile("owned.bin", createNew: true))
+        {
+            file.Write(new byte[37]);
+            file.Flush(flushToDisk: true);
+        }
+
+        var prior = lease.ReadState()!;
+        var committedState = prior with
+        {
+            InFlightExecutionId = null,
+            OriginCompletedAt = completedAt,
+            PayloadDirectoryName = payloadName
+        };
+        EvidenceReceiptQuota.CommitInvocation(root,
+        [
+            new EvidenceReceiptBatchCommit(repository, key, "legacy-batch-producer", executionId,
+                committedState, JsonSerializer.SerializeToUtf8Bytes(committedState).Length,
+                payloadName, completedAt, PayloadBytes: 37, ReservationBytes: 80,
+                EssentialReservationId: lease.EssentialReservationId)
+        ]);
+
+        var committed = Entry(root, key);
+        Assert.Equal(37, committed.GetProperty("PayloadBytes").GetInt64());
+        Assert.Equal(20, committed.GetProperty("ReservedPayloadBytes").GetInt64());
+        Assert.Equal(payloadName, committed.GetProperty("PayloadDirectoryName").GetString());
+        Assert.Equal(committedState, lease.ReadState());
+        Assert.False(committed.GetProperty("HasInFlight").GetBoolean());
+        Assert.False(committed.GetProperty("EssentialReserved").GetBoolean());
+        Assert.Empty(committed.GetProperty("EssentialReservationIds").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, committed.GetProperty("PayloadReservations").ValueKind);
+        Assert.Equal(new byte[37], await File.ReadAllBytesAsync(
+            TestPathUtils.PathUnder(lease.DirectoryPath, payloadName, "owned.bin")));
+    }
+
+    [Fact]
+    public async Task ByteReleaseConsumesOneBoundReservationBeforeLegacyUnboundBytes()
+    {
+        using var temporary = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(temporary.Path, "receipts");
+        var repository = Hash("mixed-legacy-bound-release-repository");
+        var key = Hash("mixed-legacy-bound-release-key");
+        var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+        { RootDirectory = root, RepositoryNamespace = repository });
+        using var lease = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
+        var reservationId = Guid.NewGuid().ToString("N");
+        var stageName = "payload-stage-" + reservationId;
+        var payloadName = "payload-" + reservationId;
+        Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 50, DateTimeOffset.UtcNow));
+        Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 60, DateTimeOffset.UtcNow,
+            reservationId, stageName, payloadName));
+
+        EvidenceReceiptQuota.ReleasePayloadReservation(root, repository, key, 60);
+
+        var afterBoundRelease = Entry(root, key);
+        Assert.Equal(50, afterBoundRelease.GetProperty("ReservedPayloadBytes").GetInt64());
+        Assert.Empty(afterBoundRelease.GetProperty("PayloadReservations").EnumerateArray());
+        EvidenceReceiptQuota.ReleasePayloadReservation(root, repository, key, 50);
+        Assert.Equal(0, Entry(root, key).GetProperty("ReservedPayloadBytes").GetInt64());
+    }
+
+    [Theory]
+    [InlineData("indexed")]
+    [InlineData("previous-index")]
+    [InlineData("replacement-index")]
+    [InlineData("abandoned-staging")]
+    public void IndexPublicationCapacityRejectsEachNegativeByteComponent(string component)
+    {
+        var indexedBytes = component == "indexed" ? -1 : 1;
+        var previousIndexBytes = component == "previous-index" ? -1 : 1;
+        var replacementIndexBytes = component == "replacement-index" ? -1 : 1;
+        var abandonedStagingBytes = component == "abandoned-staging" ? -1 : 1;
+
+        Assert.False(EvidenceReceiptQuota.IndexPublicationFits(indexedBytes, previousIndexBytes,
+            replacementIndexBytes, abandonedStagingBytes));
+    }
+
+    [Fact]
+    public void IndexPublicationCapacityUsesLargerAbandonedStagingCopyAtItsExactBoundary()
+    {
+        var indexedBytes = EvidenceReceiptQuota.MaximumBytes - 256;
+
+        Assert.True(EvidenceReceiptQuota.IndexPublicationFits(indexedBytes, 128, 64, abandonedStagingBytes: 128));
+        Assert.False(EvidenceReceiptQuota.IndexPublicationFits(indexedBytes, 128, 64, abandonedStagingBytes: 129));
+    }
+
+    [Fact]
+    public async Task QuotaPublicationIncludesOwnedAbandonedMetadataStageAndPreservesItOnCapacityRefusal()
+    {
+        using var temporary = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(temporary.Path, "receipts");
+        var repository = Hash("abandoned-quota-stage-repository");
+        var key = Hash("abandoned-quota-stage-key");
+        var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+        { RootDirectory = root, RepositoryNamespace = repository });
+        using var lease = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
+        var indexPath = TestPathUtils.PathUnder(root, "quota-index.json");
+        var originalIndex = await File.ReadAllBytesAsync(indexPath);
+        var index = JsonNode.Parse(originalIndex)!;
+        var entry = index["Entries"]!.AsArray().Single()!;
+        var stagingBytes = Encoding.UTF8.GetBytes(new string('s', 4096));
+        var indexedBytes = EvidenceReceiptQuota.MaximumBytes - stagingBytes.LongLength - originalIndex.LongLength;
+        byte[] configuredIndex;
+        for (var attempt = 0; ; attempt++)
+        {
+            entry["MetadataBytes"] = indexedBytes;
+            configuredIndex = Encoding.UTF8.GetBytes(index.ToJsonString());
+            var adjusted = EvidenceReceiptQuota.MaximumBytes - stagingBytes.LongLength - configuredIndex.LongLength;
+            if (adjusted == indexedBytes) break;
+            Assert.True(attempt < 3, "The bounded index-charge fixture did not reach a stable encoded length.");
+            indexedBytes = adjusted;
+        }
+        Assert.Equal(indexedBytes, entry["MetadataBytes"]!.GetValue<long>());
+        Assert.True(stagingBytes.LongLength > configuredIndex.LongLength);
+        await File.WriteAllBytesAsync(indexPath, configuredIndex);
+
+        var stagingPath = TestPathUtils.PathUnder(root, CoverageArtifactMetadataPublication.StagingName);
+        string? stagingIdentity = null;
+        try
+        {
+            using (var rootLease = CoverageRunOutputLease.AcquireArtifactDirectory(root, false, true)!)
+            using (var staging = rootLease.OpenArtifactFile(CoverageArtifactMetadataPublication.StagingName, true))
+            {
+                stagingIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(staging.SafeFileHandle);
+                staging.Write(stagingBytes);
+                staging.Flush(flushToDisk: true);
+            }
+
+            var indexedBefore = await File.ReadAllBytesAsync(indexPath);
+            var stageBefore = await File.ReadAllBytesAsync(stagingPath);
+            Assert.Equal(stagingBytes, stageBefore);
+            Assert.Equal(EvidenceReceiptQuota.MaximumBytes,
+                indexedBytes + indexedBefore.LongLength + stageBefore.LongLength);
+            var failure = Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() =>
+                EvidenceReceiptQuota.TryReservePayload(root, repository, key, 1, DateTimeOffset.UtcNow));
+
+            Assert.Equal("receipt-quota-index-capacity-unavailable", failure.Message);
+            Assert.Equal(indexedBefore, await File.ReadAllBytesAsync(indexPath));
+            Assert.Equal(stageBefore, await File.ReadAllBytesAsync(stagingPath));
+            Assert.Equal(indexedBytes, Entry(root, key).GetProperty("MetadataBytes").GetInt64());
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(indexPath, originalIndex);
+            if (stagingIdentity is not null)
+            {
+                using var rootLease = CoverageRunOutputLease.AcquireArtifactDirectory(root, false, true)!;
+                rootLease.DeleteArtifactEntry(CoverageArtifactMetadataPublication.StagingName, 1, stagingIdentity);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task MissingQuotaEntryOperationsRefuseMutationAndConfirmCanRecreateOnlyItsOwnRow()
+    {
+        using var temporary = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(temporary.Path, "receipts");
+        var repository = Hash("missing-quota-entry-repository");
+        var missingKey = Hash("missing-quota-entry-key");
+        var controlKey = Hash("missing-quota-entry-control-key");
+        var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+        { RootDirectory = root, RepositoryNamespace = repository });
+        IReadOnlyList<EvidenceReceiptStore.EvidenceReceiptKeyLease>? leases = null;
+        var indexPath = TestPathUtils.PathUnder(root, "quota-index.json");
+        byte[]? originalIndex = null;
+        try
+        {
+            leases = await store.AcquireAsync([missingKey, controlKey], CancellationToken.None);
+            var missingLease = Assert.Single(leases, lease => lease.Key == missingKey);
+            var controlLease = Assert.Single(leases, lease => lease.Key == controlKey);
+            controlLease.EstablishAuthority("control-execution");
+            var controlState = controlLease.ReadState();
+            var originalIndexBytes = await File.ReadAllBytesAsync(indexPath);
+            originalIndex = originalIndexBytes;
+            var sentinelPath = TestPathUtils.PathUnder(temporary.Path, "outside-sentinel.txt");
+            var sentinelBytes = Encoding.UTF8.GetBytes("unchanged outside receipt custody");
+            await File.WriteAllBytesAsync(sentinelPath, sentinelBytes);
+
+            var index = JsonNode.Parse(originalIndexBytes)!;
+            var entries = index["Entries"]!.AsArray();
+            var missingEntry = entries.Single(entry => entry!["Key"]!.GetValue<string>() == missingKey);
+            Assert.True(entries.Remove(missingEntry));
+            await File.WriteAllTextAsync(indexPath, index.ToJsonString());
+            var missingIndex = await File.ReadAllBytesAsync(indexPath);
+            var state = new EvidenceReceiptState(1, missingKey, null, null, null, null, null);
+
+            Assert.Throws<InvalidOperationException>(() => EvidenceReceiptQuota.TryReservePayload(
+                root, repository, missingKey, 1, DateTimeOffset.UtcNow));
+            Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
+            Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() => EvidenceReceiptQuota.RecordState(
+                root, repository, missingKey, 0, state));
+            Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
+            Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() => EvidenceReceiptQuota.CommitPayload(
+                root, repository, missingKey, 0, "payload-missing-row", DateTimeOffset.UtcNow, stateBytes: 0));
+            Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
+            Assert.Empty(EvidenceReceiptQuota.ReadRetiredPayloadNames(root, repository, missingKey));
+            Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
+
+            EvidenceReceiptQuota.ReleaseEssentialReservation(root, repository, missingKey,
+                missingLease.EssentialReservationId);
+            EvidenceReceiptQuota.ReleasePayloadReservation(root, repository, missingKey, 1L);
+            EvidenceReceiptQuota.ReleasePayloadReservation(root, repository, missingKey, "missing-reservation");
+            Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
+            Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() => EvidenceReceiptQuota.RecordSuccessfulUse(
+                root, repository, missingKey, DateTimeOffset.UtcNow, 0, state));
+            Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
+
+            EvidenceReceiptQuota.ConfirmEssentialReservation(root, repository, missingKey,
+                missingLease.EssentialReservationId, DateTimeOffset.UtcNow);
+            var recreated = Entry(root, missingKey);
+            Assert.Equal(EvidenceReceiptQuota.EssentialReservationBytes,
+                recreated.GetProperty("EssentialReservationBytes").GetInt64());
+            Assert.Equal(missingLease.EssentialReservationId,
+                Assert.Single(recreated.GetProperty("EssentialReservationIds").EnumerateArray()).GetString());
+            Assert.Equal(controlState, controlLease.ReadState());
+            Assert.Equal(sentinelBytes, await File.ReadAllBytesAsync(sentinelPath));
+        }
+        finally
+        {
+            if (leases is not null)
+            {
+                // Restore the test-owned valid index before lease disposal can reconcile its reservations.
+                if (originalIndex is not null) await File.WriteAllBytesAsync(indexPath, originalIndex);
+                foreach (var lease in leases) lease.Dispose();
+            }
         }
     }
 

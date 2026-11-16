@@ -111,7 +111,6 @@ internal static class EvidenceProducerIdentityBuilder
             var commonInfo = new DirectoryInfo(commonPath);
             if (!commonInfo.Exists || (commonInfo.Attributes & FileAttributes.ReparsePoint) != 0)
                 return Ineligible("reuse.identity.repository_unverified", "The Git common directory could not be verified safely.");
-            commonPath = commonInfo.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? commonPath;
             using var commonDirectory = CoverageRunOutputLease.AcquireArtifactDirectory(commonPath, false, false)
                 ?? throw new InvalidOperationException("Git common directory is unavailable.");
             var namespaceId = Hash(Encoding.UTF8.GetBytes(commonDirectory.ArtifactDirectoryIdentity));

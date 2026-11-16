@@ -1,5 +1,5 @@
-using System.IO.Compression;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -481,6 +481,40 @@ public sealed class EvidenceReusePackageProofTests
         finally { Directory.Delete(scratch, recursive: true); }
     }
 
+    [Fact]
+    public async Task FailedSdkProcessRedactsInheritedSecretFromActualLogsAndRetainsFailureProof()
+    {
+        using var fixture = new FeedFixture();
+        var scratch = Directory.CreateTempSubdirectory("packed-sdk-redaction-");
+        var output = TestPathUtils.PathUnder(scratch.FullName, "output");
+        const string secret = "private-sdk-probe-error-marker";
+        using var probe = new SdkCancellationProbeFixture(fixture.Root, "nonzero", secret);
+        try
+        {
+            Assert.Equal(7, (await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit)).Count);
+
+            var result = await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
+                probe.ExecutablePath, Commit, CancellationToken.None);
+
+            Assert.Equal(1, result);
+            using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(output, "proof.json")));
+            Assert.False(proof.RootElement.GetProperty("passed").GetBoolean());
+            Assert.Equal("admission", proof.RootElement.GetProperty("stage").GetString());
+            Assert.Equal("InvalidOperationException", proof.RootElement.GetProperty("failureType").GetString());
+
+            var sdkLog = await File.ReadAllTextAsync(TestPathUtils.PathUnder(output, "sdk.log"));
+            Assert.Contains("[redacted]", sdkLog, StringComparison.Ordinal);
+            Assert.DoesNotContain(secret, sdkLog, StringComparison.Ordinal);
+            var sdkStage = Assert.Single(proof.RootElement.GetProperty("stages").EnumerateArray());
+            Assert.Equal("sdk", sdkStage.GetProperty("Stage").GetString());
+            Assert.Equal(17, sdkStage.GetProperty("ExitCode").GetInt32());
+            Assert.False(Directory.Exists(TestPathUtils.PathUnder(output, "installed-tool")));
+            Assert.False(Directory.Exists(TestPathUtils.PathUnder(output, "host-app")));
+            Assert.False(Directory.Exists(TestPathUtils.PathUnder(output, "cli-inputs")));
+        }
+        finally { Directory.Delete(scratch.FullName, recursive: true); }
+    }
+
     private sealed class FeedFixture : IDisposable
     {
         internal string Root { get; } = Directory.CreateTempSubdirectory("evidence-packed-admission-").FullName;
@@ -543,7 +577,7 @@ public sealed class EvidenceReusePackageProofTests
         internal string StopPath { get; }
         internal string ExecutablePath { get; }
 
-        internal SdkCancellationProbeFixture(string root)
+        internal SdkCancellationProbeFixture(string root, string mode = "cancel", string? secretEnvironmentValue = null)
         {
             var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
             var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent!.Name;
@@ -566,8 +600,9 @@ public sealed class EvidenceReusePackageProofTests
             var values = new Dictionary<string, string?>
             {
                 ["APPSURFACE_IDENTITY_SDK_PROBE_ROOT"] = ProbeRoot,
-                ["APPSURFACE_IDENTITY_SDK_PROBE_MODE"] = "cancel"
+                ["APPSURFACE_IDENTITY_SDK_PROBE_MODE"] = mode
             };
+            if (secretEnvironmentValue is not null) values["APPSURFACE_917_SECRET"] = secretEnvironmentValue;
             _originalEnvironment = values.Keys.ToDictionary(name => name, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
             try
             {

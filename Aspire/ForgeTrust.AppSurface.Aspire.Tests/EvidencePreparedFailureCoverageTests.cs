@@ -72,6 +72,20 @@ public sealed class EvidencePreparedFailureCoverageTests
     }
 
     [Fact]
+    public async Task MissingResourceIdentityRejectsAdmissionAndPreservesTheFailureWhileDisposingProducer()
+    {
+        var producer = new SynchronousProducer(new IOException("controlled untransferred disposal"));
+
+        var observed = await Record.ExceptionAsync(() => EvidenceHostBootstrap.PrepareAsync(PlanWithResource(), registration =>
+            registration.AddProducer(producer, "fixture-v1"), new EvidenceHostOptions { EnvironmentReader = _ => null }));
+
+        var failure = Assert.IsType<EvidenceHostException>(observed);
+        Assert.Equal("ASEVD302", failure.Code);
+        Assert.Equal(1, producer.Disposals);
+        Assert.Equal(0, producer.Runs);
+    }
+
+    [Fact]
     public async Task ReuseWithATrustedEnvelopeIsRejectedBeforeRegistration()
     {
         var calls = 0;

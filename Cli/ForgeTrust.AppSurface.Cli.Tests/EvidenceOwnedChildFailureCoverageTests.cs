@@ -158,6 +158,68 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
         Assert.False(invoked);
     }
 
+    [Fact]
+    public async Task WorkFailureIsRethrownOnlyAfterCompletionIsAcknowledged()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var pipeName = "work-failure-" + Guid.NewGuid().ToString("N")[..12];
+        var childId = Guid.NewGuid().ToString("N");
+        var server = Server(pipeName);
+        var completionReceived = false;
+        var serverTask = Task.Run(async () =>
+        {
+            await using (server)
+            {
+                await server.WaitForConnectionAsync(deadline.Token);
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
+                Assert.Equal("COMPLETE|" + childId,
+                    await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                completionReceived = true;
+                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "DONE|" + childId, deadline.Token);
+            }
+        }, deadline.Token);
+        var workFailure = new ListenerFailure();
+        var workInvoked = false;
+        Task? childTask = null;
+        try
+        {
+            childTask = EvidenceOwnedChild.RunAsync(_ =>
+            {
+                workInvoked = true;
+                return Task.FromException(workFailure);
+            }, Channel(pipeName), deadline.Token);
+
+            var actual = await Assert.ThrowsAsync<ListenerFailure>(() => childTask.WaitAsync(deadline.Token));
+            await serverTask.WaitAsync(deadline.Token);
+
+            Assert.Same(workFailure, actual);
+            Assert.True(workInvoked);
+            Assert.True(completionReceived);
+        }
+        finally
+        {
+            deadline.Cancel();
+            await server.DisposeAsync();
+            try
+            {
+                await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }
+            catch (IOException) { }
+            finally
+            {
+                if (childTask is not null)
+                {
+                    try { await childTask.WaitAsync(TimeSpan.FromSeconds(5)); }
+                    catch (ListenerFailure) { }
+                    catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }
+                    catch (InvalidOperationException) when (deadline.IsCancellationRequested) { }
+                }
+            }
+        }
+    }
+
     [Theory]
     [InlineData("wrong-id")]
     [InlineData("disconnect")]

@@ -1002,12 +1002,6 @@ public static class EvidenceArtifactValidation
         ArgumentNullException.ThrowIfNull(slot);
         var normalizedRoot = slot.MaximumFiles is null ? NormalizeRelativePath(slot.RelativeRoot) : NormalizePortableRelativePath(slot.RelativeRoot);
         var normalizedPath = slot.MaximumFiles is null ? NormalizeRelativePath(relativePath) : NormalizePortableRelativePath(relativePath);
-        if (slot.MaximumFiles is not null && (!string.Equals(normalizedPath, relativePath, StringComparison.Ordinal)
-            || !string.Equals(normalizedRoot, slot.RelativeRoot, StringComparison.Ordinal)))
-        {
-            throw new ArgumentException("Multi-file slot paths must already be canonical.", nameof(relativePath));
-        }
-
         if (!string.Equals(normalizedPath, normalizedRoot, StringComparison.Ordinal)
             && !normalizedPath.StartsWith(normalizedRoot + "/", StringComparison.Ordinal))
         {
@@ -1187,10 +1181,7 @@ public static class EvidenceCanonicalJson
         }
 
         public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options)
-        {
-            if (!Enum.IsDefined(value)) throw new JsonException($"Undefined {typeof(TEnum).Name} value.");
-            writer.WriteStringValue(value.ToString());
-        }
+            => throw new NotSupportedException("The strict contract reader converter does not support serialization.");
     }
 
     private static void WriteElement(JsonElement element, Utf8JsonWriter writer)

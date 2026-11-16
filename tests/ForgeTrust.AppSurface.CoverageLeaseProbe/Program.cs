@@ -40,11 +40,12 @@ if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "do
         await Console.Out.WriteLineAsync(new string('1', 129));
         return 0;
     }
-    if (mode == "change")
+    if (mode is "change" or "fail-after-first")
     {
         var marker = Path.Join(sdkProbeRoot, "sdk-probe.first-query");
         var first = !File.Exists(marker);
         if (first) await File.WriteAllTextAsync(marker, "queried");
+        if (!first && mode == "fail-after-first") return 17;
         await Console.Out.WriteLineAsync(first ? "10.0.402" : "10.0.403");
         return 0;
     }
