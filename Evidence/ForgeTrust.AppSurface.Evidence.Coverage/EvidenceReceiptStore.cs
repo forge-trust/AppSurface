@@ -663,11 +663,18 @@ internal sealed class EvidenceReceiptStore
         /// <param name="requests">Distinct producer and key publication requests.</param>
         /// <param name="cancellationToken">Cancels source verification and staging before authority commit.</param>
         /// <param name="afterAuthorityCommitForTests">Optional per-call fault seam invoked immediately after the quota authority commit returns. If it throws, the result is refused while final payloads and their quota accounting remain intact because the committed authority may be visible.</param>
+        /// <param name="beforeArtifactCopyForTests">Optional per-call staging fault seam. Invoked for each artifact after
+        /// complete source preflight and metadata staging, immediately before copying that artifact. Tests can use it
+        /// to cancel or mutate their owned fixture; normal copy verification and reservation cleanup still apply.
+        /// Production callers omit this callback. It does not run for artifacts refused during preflight.
+        /// Any exception escaping staging attempts cleanup of all earlier staged requests before propagation;
+        /// unconfirmed cleanup retains its quota reservation.</param>
         /// <returns>A publication result for each requested producer.</returns>
         internal static async Task<IReadOnlyDictionary<string, EvidenceReceiptPublicationResult>> PublishInvocationCoreAsync(
             string storeRoot, string repositoryNamespace, string executionId, EvidencePlan originPlan,
             EvidenceManifest originManifest, IReadOnlyList<EvidenceReceiptPublicationRequest> requests,
-            CancellationToken cancellationToken, Action? afterAuthorityCommitForTests = null)
+            CancellationToken cancellationToken, Action? afterAuthorityCommitForTests = null,
+            Action<EvidenceReceiptPublicationRequest, EvidenceArtifactResult>? beforeArtifactCopyForTests = null)
         {
             var outputs = new Dictionary<string, EvidenceReceiptPublicationResult>(StringComparer.Ordinal);
             var auditBatch = requests.Any(request => request.Lease.ReadState()?.AuditIntentExecutionId == executionId);
@@ -678,7 +685,7 @@ internal sealed class EvidenceReceiptStore
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var outcome = await request.Lease.StagePublicationAsync(executionId, originPlan, originManifest, request,
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken, beforeArtifactCopyForTests).ConfigureAwait(false);
                     if (outcome.Stage is { } stage)
                     {
                         staged.Add(stage);
@@ -693,8 +700,9 @@ internal sealed class EvidenceReceiptStore
                         return outputs;
                     }
                 }
+                cancellationToken.ThrowIfCancellationRequested();
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch
             {
                 await CleanupStagedAsync(staged).ConfigureAwait(false);
                 throw;
@@ -742,7 +750,8 @@ internal sealed class EvidenceReceiptStore
         }
 
         private async Task<StagePublicationOutcome> StagePublicationAsync(string executionId, EvidencePlan originPlan,
-            EvidenceManifest originManifest, EvidenceReceiptPublicationRequest request, CancellationToken cancellationToken)
+            EvidenceManifest originManifest, EvidenceReceiptPublicationRequest request, CancellationToken cancellationToken,
+            Action<EvidenceReceiptPublicationRequest, EvidenceArtifactResult>? beforeArtifactCopyForTests)
         {
             try
             {
@@ -809,6 +818,7 @@ internal sealed class EvidenceReceiptStore
                         foreach (var artifact in artifacts.OrderBy(static item => item.RelativePath, StringComparer.Ordinal))
                         {
                             cancellationToken.ThrowIfCancellationRequested();
+                            beforeArtifactCopyForTests?.Invoke(request, artifact);
                             await CopySourceArtifactToStageAsync(sourceRoot, artifactsRoot, artifact, cancellationToken).ConfigureAwait(false);
                         }
                         VerifyArtifacts(stage, artifacts, cancellationToken);
@@ -842,8 +852,17 @@ internal sealed class EvidenceReceiptStore
                 {
                     var payloadDeleted = TryDeleteOwnedPayload(directory, payloadName);
                     var stageDeleted = TryDeleteOwnedPayload(directory, stageName, stageIdentity);
-                    ReleaseReservationAfterConfirmedCleanup(payloadDeleted && stageDeleted,
-                        () => EvidenceReceiptQuota.ReleasePayloadReservation(storeRoot, repositoryNamespace, Key, reservationId));
+                    try
+                    {
+                        ReleaseReservationAfterConfirmedCleanup(payloadDeleted && stageDeleted,
+                            () => EvidenceReceiptQuota.ReleasePayloadReservation(storeRoot, repositoryNamespace, Key, reservationId));
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
+                        or JsonException or ArgumentException or InvalidOperationException or NotSupportedException or KeyNotFoundException)
+                    {
+                        // Retain the charge if release is unavailable, preserving the original staging failure
+                        // and especially caller cancellation instead of replacing it with a cleanup refusal.
+                    }
                     throw;
                 }
             }
@@ -899,7 +918,12 @@ internal sealed class EvidenceReceiptStore
                         () => EvidenceReceiptQuota.ReleasePayloadReservation(item.Lease.StoreRoot,
                             item.Lease.RepositoryNamespace, item.Lease.Key, item.ReservationId));
                 }
-                catch (IOException) { }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
+                    or JsonException or ArgumentException or InvalidOperationException or NotSupportedException or KeyNotFoundException)
+                {
+                    // An unsafe or unreadable quota index keeps the reservation charged; still attempt the other
+                    // owned stages. Cleanup uncertainty must never turn into unaccounted retained payload bytes.
+                }
                 await Task.Yield();
             }
         }
@@ -983,10 +1007,18 @@ internal sealed class EvidenceReceiptStore
             VerifyExactTree(artifactsRoot, artifacts.Select(static item => item.RelativePath).ToHashSet(StringComparer.Ordinal));
         }
 
+        /// <summary>Verifies every declared artifact before optional receipt custody is staged.</summary>
+        /// <param name="sourceRoot">Execution report root; it need not exist when the complete inventory is empty.</param>
+        /// <param name="artifacts">Complete result inventory, already checked against the producer's slot declarations.</param>
+        /// <param name="cancellationToken">Cancels validation before filesystem access and between streaming reads.</param>
+        /// <remarks>Empty generic inventories require no source files or directory. The caller independently checks
+        /// source/store separation, passing origin claims, coverage-specific completeness, and exact retained custody.</remarks>
         private static async Task VerifySourceArtifactsAsync(string sourceRoot,
             IReadOnlyList<EvidenceArtifactResult> artifacts, CancellationToken cancellationToken)
         {
             ValidateInventoryBounds(artifacts);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (artifacts.Count == 0) return;
             using var root = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetFullPath(sourceRoot), false, false)
                 ?? throw new DirectoryNotFoundException("Producer artifact root is unavailable.");
             long total = 0;
@@ -1031,7 +1063,19 @@ internal sealed class EvidenceReceiptStore
             return (length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
         }
 
-        private static (long Length, string Digest) HashStream(Stream input, long expectedLength,
+        /// <summary>Hashes an exact-length receipt stream using bounded reads without taking stream ownership.</summary>
+        /// <param name="input">Caller-owned readable stream exposing its length, at the beginning of its declared artifact bytes.</param>
+        /// <param name="expectedLength">Manifest length, from zero through the 256-MiB payload bound.</param>
+        /// <param name="cancellationToken">Checked before each read, including the final end-of-stream observation.</param>
+        /// <returns>The observed length and lower-case SHA-256 after exact-length end-of-stream verification.</returns>
+        /// <remarks>
+        /// This internal validation boundary is intentionally exposed for contract tests without reflection.
+        /// It checks the initial length and refuses either growth or truncation while streaming in at most 64-KiB reads.
+        /// The caller retains the stream, its position, and responsibility for disposal on success and failure.
+        /// </remarks>
+        /// <exception cref="InvalidDataException">The manifest length is outside its bound or the stream differs from it.</exception>
+        /// <exception cref="OperationCanceledException">The caller cancelled a read boundary.</exception>
+        internal static (long Length, string Digest) HashStream(Stream input, long expectedLength,
             CancellationToken cancellationToken)
         {
             if (expectedLength < 0 || expectedLength > MaximumPayloadBytes || input.Length != expectedLength)

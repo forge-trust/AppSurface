@@ -353,7 +353,24 @@ internal sealed class CoverageEvidenceProducer
         }
     }
 
-    private static async Task PreserveOrdinaryReportsAsync(
+    /// <summary>Validates and copies one managed execution's closed ordinary report set.</summary>
+    /// <param name="sourceRoot">Execution root retaining the original reports. Source files are never removed.</param>
+    /// <param name="finalRoot">Current invocation's report root, opened without following links.</param>
+    /// <param name="execution">Successful collection and completed gate decision identifying required reports.</param>
+    /// <param name="publications">Complete writer-owned publication inventory, relative to the coverage directory.</param>
+    /// <param name="cancellationToken">Cancels validation, hashing, and copying; every opened handle is disposed.</param>
+    /// <remarks>
+    /// This internal boundary is intentionally available to contract tests without reflection. Production calls it
+    /// through the producer's failure-reporting wrapper. It checks canonical paths, case collisions, required aggregate
+    /// and project reports, lengths, and digests before claiming successful delivery. Existing destination files are
+    /// accepted only when their bytes match; differing or linked files are preserved and rejected. Cancellation or an
+    /// I/O failure can leave already copied destination files, so callers must withhold completion on any exception.
+    /// This operation has no receipt-size limit and does not publish a receipt or change the coverage gate verdict.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The execution or closed publication metadata is incomplete or invalid.</exception>
+    /// <exception cref="IOException">A source changed or a destination cannot safely accept its exact bytes.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled validation or delivery.</exception>
+    internal static async Task PreserveOrdinaryReportsAsync(
         string sourceRoot,
         string finalRoot,
         CoverageEvidenceExecutionResult execution,

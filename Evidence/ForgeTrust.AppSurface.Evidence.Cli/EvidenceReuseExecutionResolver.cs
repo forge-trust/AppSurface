@@ -9,9 +9,18 @@ using ForgeTrust.AppSurface.Evidence.Coverage;
 namespace ForgeTrust.AppSurface.Evidence.Cli;
 
 /// <summary>Adapts the existing CLI producers to the private whole-invocation receipt coordinator.</summary>
-internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer coverageProducer)
+/// <param name="coverageProducer">The existing in-process coverage execution adapter.</param>
+/// <param name="sdkExecutableForTests">Optional fully qualified executable used only for SDK version queries in
+/// deterministic process-lifetime tests. Production callers omit it to retain normal <c>dotnet</c> resolution.
+/// It does not replace the coverage engine's process runner or add a user-facing executable override.</param>
+/// <exception cref="ArgumentException">The supplied test executable path is not fully qualified.</exception>
+internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer coverageProducer,
+    string? sdkExecutableForTests = null)
 {
     private const string CoverageImplementationIdentity = "appsurface-coverage-evidence-adapter-v1";
+    private readonly string _sdkExecutable = sdkExecutableForTests is null ? "dotnet"
+        : Path.IsPathFullyQualified(sdkExecutableForTests) ? sdkExecutableForTests
+        : throw new ArgumentException("The SDK query test executable must have a fully qualified path.", nameof(sdkExecutableForTests));
 
     internal async Task<EvidenceReuseRunResult> RunAsync(
         EvidencePlan plan,
@@ -56,11 +65,11 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 useInvocationArtifactRoot: plan.Profile.Producers.Count == 1));
             var executionRoot = producerRoots[producer.Id].Execution;
             var sdkVersion = RequiresCoverageIdentity(producer, solutionPath)
-                ? await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken).ConfigureAwait(false)
+                ? await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken, _sdkExecutable).ConfigureAwait(false)
                 : "not-applicable";
             var adapter = new CoverageProducerAdapter(producer.Id, coverageProducer, solutionPath, executionRoot,
                 finalReportRoot: producerRoots[producer.Id].Artifacts, diffSnapshot: diffSnapshot, output: output, error: error,
-                sdkVersion: sdkVersion, repositoryRoot: repositoryRoot);
+                sdkVersion: sdkVersion, sdkExecutable: _sdkExecutable, repositoryRoot: repositoryRoot);
             adapters.Add(producer.Id, adapter);
             registrations.Add(producer.Id, new EvidenceReuseProducerRegistration(adapter,
                 string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
@@ -168,11 +177,11 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         foreach (var producer in plan.Profile.Producers)
         {
             var sdkVersion = RequiresCoverageIdentity(producer, solutionPath)
-                ? await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken).ConfigureAwait(false)
+                ? await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken, _sdkExecutable).ConfigureAwait(false)
                 : "not-applicable";
             var adapter = new CoverageProducerAdapter(producer.Id, coverageProducer, solutionPath, string.Empty,
                 finalReportRoot: null, diffSnapshot: diffSnapshot, output: TextWriter.Null, error: TextWriter.Null,
-                sdkVersion: sdkVersion, repositoryRoot: repositoryRoot);
+                sdkVersion: sdkVersion, sdkExecutable: _sdkExecutable, repositoryRoot: repositoryRoot);
             registrations.Add(producer.Id, new EvidenceReuseProducerRegistration(adapter,
                 string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
                     ? CoverageImplementationIdentity : "appsurface-cli-consumer-host-required-v1",
@@ -325,7 +334,8 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             useInvocationArtifactRoot ? outputDirectory : Path.Join(outputDirectory, "producers", producerDirectory));
     }
 
-    private static async Task<string> ReadDotnetSdkVersionAsync(string? solutionPath, CancellationToken cancellationToken)
+    private static async Task<string> ReadDotnetSdkVersionAsync(string? solutionPath, CancellationToken cancellationToken,
+        string sdkExecutable)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
@@ -334,7 +344,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             : Path.GetDirectoryName(Path.GetFullPath(solutionPath)) ?? Directory.GetCurrentDirectory();
         using var process = new Process
         {
-            StartInfo = new ProcessStartInfo("dotnet", "--version")
+            StartInfo = new ProcessStartInfo(sdkExecutable, "--version")
             {
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = false,
@@ -381,7 +391,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
     private sealed class CoverageProducerAdapter(
         string id, CoverageEvidenceProducer producer, string? solutionPath, string outputDirectory,
         string? finalReportRoot,
-        EvidenceDiffSnapshot? diffSnapshot, TextWriter output, TextWriter error, string sdkVersion,
+        EvidenceDiffSnapshot? diffSnapshot, TextWriter output, TextWriter error, string sdkVersion, string sdkExecutable,
         string repositoryRoot) : IEvidenceProducer, IEvidenceProducerKeyMaterial, IEvidenceProducerReceiptEligibility
     {
         private EvidenceProducerReuseSession? _session;
@@ -415,7 +425,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 throw new InvalidOperationException("reuse.solution_required");
             if (!IsSolutionIdentitySafe(repositoryRoot, solutionPath))
                 throw new InvalidOperationException("reuse.solution_identity_unavailable");
-            var currentSdkVersion = await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+            var currentSdkVersion = await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken, sdkExecutable).ConfigureAwait(false);
             if (string.Equals(sdkVersion, "unavailable", StringComparison.Ordinal)
                 || string.Equals(currentSdkVersion, "unavailable", StringComparison.Ordinal))
                 throw new InvalidOperationException("reuse.sdk_unavailable");

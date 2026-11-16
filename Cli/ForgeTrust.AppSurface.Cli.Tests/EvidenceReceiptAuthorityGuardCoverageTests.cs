@@ -1,0 +1,212 @@
+using System.Text;
+using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
+
+namespace ForgeTrust.AppSurface.Cli.Tests;
+
+public sealed class EvidenceReceiptAuthorityGuardCoverageTests
+{
+    [Theory]
+    [InlineData("ascii")]
+    [InlineData("two-byte")]
+    [InlineData("surrogate-pair")]
+    public async Task AssertionByteLimitIsEnforcedBeforeAuthorityMutationAndAcceptsTheExactBoundary(string shape)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var exact = shape switch
+        {
+            "ascii" => new string('a', 4096),
+            "two-byte" => new string('é', 2048),
+            _ => string.Concat(Enumerable.Repeat("😀", 1024))
+        };
+        Assert.Equal(4096, Encoding.UTF8.GetByteCount(exact));
+        var original = fixture.IndexBytes();
+
+        Assert.Throws<InvalidDataException>(() => fixture.Lease.EstablishAuthority("audit", auditIntent: true,
+            expectedAssertions: exact + "x"));
+        Assert.Null(fixture.Lease.ReadState());
+        Assert.Equal(original, fixture.IndexBytes());
+
+        fixture.Lease.EstablishAuthority("audit", auditIntent: true, expectedAssertions: exact);
+        fixture.Lease.SettleExecution("audit");
+        var beforeMismatch = fixture.Lease.ReadState();
+        var beforeIndex = fixture.IndexBytes();
+        Assert.Throws<InvalidDataException>(() => fixture.Lease.MarkAuditMismatch("audit", exact + "x"));
+        Assert.Equal(beforeMismatch, fixture.Lease.ReadState());
+        Assert.Equal(beforeIndex, fixture.IndexBytes());
+
+        fixture.Lease.MarkAuditMismatch("audit", exact);
+        var state = fixture.Lease.ReadState()!;
+        Assert.True(state.AuditMismatch);
+        Assert.Equal("audit", state.AuditIntentExecutionId);
+        Assert.Equal(exact, state.AuditExpectedAssertions);
+        Assert.Null(state.InFlightExecutionId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task MissingExecutionIdentifierCannotCreateOrQuarantineAuthority(string? execution)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var original = fixture.IndexBytes();
+
+        Assert.ThrowsAny<ArgumentException>(() => fixture.Lease.EstablishAuthority(execution!));
+        Assert.ThrowsAny<ArgumentException>(() => fixture.Lease.MarkAuditMismatch(execution!, "[]"));
+
+        Assert.Null(fixture.Lease.ReadState());
+        Assert.Equal(original, fixture.IndexBytes());
+    }
+
+    [Fact]
+    public async Task EstablishAuthorityCannotReplaceAnUnresolvedExecutionOwner()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("first-execution");
+        var originalState = fixture.Lease.ReadState();
+        var originalIndex = fixture.IndexBytes();
+
+        Assert.Throws<InvalidOperationException>(() => fixture.Lease.EstablishAuthority("second-execution"));
+
+        Assert.Equal(originalState, fixture.Lease.ReadState());
+        Assert.Equal(originalIndex, fixture.IndexBytes());
+        Assert.Equal("first-execution", fixture.Lease.ReadState()?.InFlightExecutionId);
+    }
+
+    [Fact]
+    public async Task SettleExecutionCannotClearAnotherExecutionsAuthority()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("current-execution");
+        var originalState = fixture.Lease.ReadState();
+        var originalIndex = fixture.IndexBytes();
+
+        Assert.Throws<InvalidOperationException>(() => fixture.Lease.SettleExecution("different-execution"));
+
+        Assert.Equal(originalState, fixture.Lease.ReadState());
+        Assert.Equal(originalIndex, fixture.IndexBytes());
+        Assert.Equal("current-execution", fixture.Lease.ReadState()?.InFlightExecutionId);
+    }
+
+    [Theory]
+    [InlineData("digest-null", typeof(ArgumentException))]
+    [InlineData("digest-short", typeof(ArgumentException))]
+    [InlineData("digest-nonhex", typeof(ArgumentException))]
+    [InlineData("future-origin", typeof(ArgumentOutOfRangeException))]
+    [InlineData("payload-escape", typeof(InvalidDataException))]
+    [InlineData("record-null", typeof(ArgumentNullException))]
+    [InlineData("record-oversized", typeof(InvalidDataException))]
+    public async Task InvalidPassedCommitCannotReplaceOrSettleTheCurrentExecution(string defect, Type expectedException)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("execution");
+        var state = fixture.Lease.ReadState();
+        var original = fixture.IndexBytes();
+        var hash = defect switch { "digest-null" => null!, "digest-short" => "abcd", "digest-nonhex" => new string('g', 64), _ => new string('b', 64) };
+        var completed = fixture.Clock.GetUtcNow() + (defect == "future-origin" ? TimeSpan.FromTicks(1) : TimeSpan.Zero);
+        var payload = defect == "payload-escape" ? "../outside" : "payload-guard";
+        var record = defect switch
+        {
+            "record-null" => null!,
+            "record-oversized" => new byte[32 * 1024 + 1],
+            _ => EvidenceCanonicalJson.Serialize(new EvidenceProducerResult("producer", EvidenceProducerOutcome.Passed, []))
+        };
+
+        var failure = Record.Exception(() => fixture.Lease.CommitPassed("execution", hash, completed, payload, record));
+
+        Assert.IsType(expectedException, failure);
+        Assert.Equal(state, fixture.Lease.ReadState());
+        Assert.Equal(original, fixture.IndexBytes());
+        Assert.Equal("execution", fixture.Lease.ReadState()!.InFlightExecutionId);
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(fixture.Lease.DirectoryPath, "payload-guard")));
+        if (defect == "payload-escape")
+        {
+            var escaped = TestPathUtils.PathUnder(Path.GetDirectoryName(fixture.Lease.DirectoryPath)!, "outside");
+            Assert.False(File.Exists(escaped));
+            Assert.False(Directory.Exists(escaped));
+        }
+    }
+
+    [Fact]
+    public async Task QuarantinedFreshCommitCannotClearAnotherExecutionsAuditIntent()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("audit", auditIntent: true, expectedAssertions: "[\"expected\"]");
+        fixture.Lease.MarkAuditMismatch("audit", "[\"expected\"]");
+        fixture.Lease.SettleExecution("audit");
+        fixture.Lease.EstablishAuthority("fresh", allowQuarantinedFresh: true);
+        var state = fixture.Lease.ReadState();
+        var original = fixture.IndexBytes();
+
+        Assert.Throws<InvalidOperationException>(() => fixture.Lease.CommitPassed("fresh", new string('b', 64),
+            fixture.Clock.GetUtcNow(), "payload-guard", EvidenceCanonicalJson.Serialize(
+                new EvidenceProducerResult("producer", EvidenceProducerOutcome.Passed, []))));
+
+        Assert.Equal(state, fixture.Lease.ReadState());
+        Assert.Equal(original, fixture.IndexBytes());
+        Assert.Equal("audit", fixture.Lease.ReadState()!.AuditIntentExecutionId);
+        Assert.Equal("fresh", fixture.Lease.ReadState()!.InFlightExecutionId);
+        Assert.True(fixture.Lease.ReadState()!.AuditMismatch);
+    }
+
+    [Fact]
+    public async Task DisposedKeyLeaseCannotReadOrRewriteRetainedExecutionAuthority()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("execution");
+        fixture.Lease.Dispose();
+        var afterDisposal = fixture.IndexBytes();
+
+        Assert.Throws<ObjectDisposedException>(() => fixture.Lease.ReadState());
+        Assert.Throws<ObjectDisposedException>(() => fixture.Lease.VerifyBinding());
+        Assert.Throws<ObjectDisposedException>(() => fixture.Lease.EstablishAuthority("another"));
+        Assert.Throws<ObjectDisposedException>(() => fixture.Lease.MarkAuditMismatch("execution", "[]"));
+        fixture.Lease.Dispose();
+
+        Assert.Equal(afterDisposal, fixture.IndexBytes());
+        var state = EvidenceReceiptQuota.ReadAuthority(fixture.Root, new string('a', 64), new string('c', 64));
+        Assert.Equal("execution", state!.InFlightExecutionId);
+    }
+
+    private sealed class FixedClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    }
+
+    private sealed class Fixture(TestDirectory directory, string root, TimeProvider clock,
+        EvidenceReceiptStore.EvidenceReceiptKeyLease lease) : IDisposable
+    {
+        internal string Root => root;
+        internal TimeProvider Clock => clock;
+        internal EvidenceReceiptStore.EvidenceReceiptKeyLease Lease => lease;
+        internal byte[] IndexBytes() => File.ReadAllBytes(TestPathUtils.PathUnder(root, "quota-index.json"));
+        internal static async Task<Fixture> CreateAsync()
+        {
+            var directory = TestDirectory.Create();
+            IReadOnlyList<EvidenceReceiptStore.EvidenceReceiptKeyLease>? leases = null;
+            try
+            {
+                var root = TestPathUtils.PathUnder(directory.Path, "receipts");
+                var clock = new FixedClock();
+                var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+                { RootDirectory = root, RepositoryNamespace = new string('a', 64), Clock = clock });
+                leases = await store.AcquireAsync([new string('c', 64)], CancellationToken.None);
+                var lease = Assert.Single(leases);
+                return new(directory, root, clock, lease);
+            }
+            catch
+            {
+                try { if (leases is not null) foreach (var acquired in leases) acquired.Dispose(); }
+                finally { directory.Dispose(); }
+                throw;
+            }
+        }
+        public void Dispose()
+        {
+            try { lease.Dispose(); }
+            finally { directory.Dispose(); }
+        }
+    }
+}

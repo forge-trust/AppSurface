@@ -48,7 +48,9 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     /// <remarks>Includes the current-run history sidecar when the managed session published one. That sidecar is
     /// optional in the existing retention workflow; receipt eligibility does not enable or require history storage.
     /// Rejects oversized publication counts before enumerating publications or reading optional metadata. Ordinary
-    /// report delivery remains independent of this receipt-only limit.</remarks>
+    /// report delivery remains independent of this receipt-only limit. Project schema numbers must be integral,
+    /// representable 32-bit values equal to the supported version; malformed numbers refuse receipt capture
+    /// without replacing the actual fresh collection and gate outcome.</remarks>
     internal static CoverageEvidenceInventory Capture(string outputRoot, CoverageEvidenceExecutionResult result,
         IReadOnlyList<CoverageArtifactInventoryEntry> publications, CancellationToken token)
     {
@@ -104,7 +106,8 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
             using var projectManifest = Open(root, $"coverage/projects/{slug}/{CoverageProjectManifest.FileName}");
             if (projectManifest.Length > MaximumMetadataBytes) throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
             using var projectDocument = JsonDocument.Parse(projectManifest);
-            if (projectDocument.RootElement.GetProperty("schemaVersion").GetInt32() != 1
+            if (!projectDocument.RootElement.GetProperty("schemaVersion").TryGetInt32(out var schemaVersion)
+                || schemaVersion != 1
                 || projectDocument.RootElement.GetProperty("slug").GetString() != slug)
                 throw new CoverageEvidenceInventoryException("inventory-project-manifest-mismatch");
             foreach (var report in project.GetProperty("testResults").EnumerateArray())

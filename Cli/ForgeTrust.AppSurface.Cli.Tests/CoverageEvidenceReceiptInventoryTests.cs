@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -9,6 +10,7 @@ using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
+[Collection("CoverageGate process state")]
 public sealed class CoverageEvidenceReceiptInventoryTests
 {
     [Theory]
@@ -442,10 +444,24 @@ public sealed class CoverageEvidenceReceiptInventoryTests
     [InlineData("unsafe-attachment")]
     [InlineData("file-count")]
     [InlineData("corrupt-run-manifest")]
+    [InlineData("run-manifest-outcome")]
+    [InlineData("run-manifest-inventory")]
+    [InlineData("run-manifest-oversized")]
+    [InlineData("timings-oversized")]
+    [InlineData("project-manifest-oversized")]
     [InlineData("oversized-attachment")]
+    [InlineData("missing-timings-projects")]
+    [InlineData("project-schema-mismatch")]
+    [InlineData("project-schema-overflow")]
+    [InlineData("project-schema-fractional")]
+    [InlineData("project-slug-mismatch")]
     public async Task ActualWorkflowRejectsIncompleteOrUnsafeInventoryWithoutLosingFreshPass(string failure)
     {
         using var directory = TestDirectory.Create();
+        // Isolate optional history publication so shared-store capacity or earlier corrupt fixtures cannot
+        // prevent the deterministic post-publication fault from running.
+        using var artifactHome = new EnvironmentVariableScope("APPSURFACE_ARTIFACT_HOME",
+            TestPathUtils.PathUnder(directory.Path, "history"));
         var solution = Path.Join(directory.Path, "sample.slnx");
         var project = Path.Join(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
         Directory.CreateDirectory(Path.GetDirectoryName(project)!);
@@ -456,14 +472,39 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         var runManifestPath = TestPathUtils.PathUnder(output, "coverage", CoverageArtifactSession.SidecarName);
         // Managed storage republishes this optional sidecar after collection and again after gate reports.
         // Corrupt every completed publication, so the fixture does not depend on storage being unavailable.
-        using TextWriter outputWriter = failure == "corrupt-run-manifest"
-            ? new SidecarCorruptingWriter(runManifestPath) : TextWriter.Null;
+        var changesSidecar = failure == "corrupt-run-manifest" || failure.StartsWith("run-manifest-", StringComparison.Ordinal);
+        using var corruptingWriter = changesSidecar ? new SidecarCorruptingWriter(runManifestPath, failure) : null;
+        TextWriter outputWriter = corruptingWriter ?? (TextWriter)TextWriter.Null;
         void MutateManifest()
         {
             // The test owns one declared project's fixed destination; production never discovers outputs this way.
             var manifest = Directory.GetFiles(Path.Join(output, "coverage", "projects"), "coverage-project.json", SearchOption.AllDirectories).Single();
             if (failure == "missing-project-manifest") File.Delete(manifest);
             if (failure == "corrupt-project-manifest") File.WriteAllText(manifest, "broken json");
+            if (failure == "project-manifest-oversized")
+                File.AppendAllText(manifest, new string(' ', CoverageEvidenceInventory.MaximumMetadataBytes));
+            if (failure.StartsWith("project-schema-", StringComparison.Ordinal) || failure == "project-slug-mismatch")
+            {
+                var metadata = JsonNode.Parse(File.ReadAllText(manifest))!;
+                if (failure == "project-schema-overflow") metadata["schemaVersion"] = long.MaxValue;
+                else if (failure == "project-schema-fractional") metadata["schemaVersion"] = 1.5;
+                else if (failure == "project-schema-mismatch") metadata["schemaVersion"] = 0;
+                else metadata["slug"] = "a-different-project";
+                File.WriteAllText(manifest, metadata.ToJsonString());
+            }
+            if (failure == "missing-timings-projects")
+            {
+                // The existing timing seam runs before this one fixture-owned staging file is committed.
+                var timings = Directory.GetFiles(TestPathUtils.PathUnder(output, "coverage"), ".timings.*.tmp").Single();
+                var metadata = JsonNode.Parse(File.ReadAllText(timings))!.AsObject();
+                Assert.True(metadata.Remove("projects"));
+                File.WriteAllText(timings, metadata.ToJsonString());
+            }
+            if (failure == "timings-oversized")
+            {
+                var timings = Directory.GetFiles(TestPathUtils.PathUnder(output, "coverage"), ".timings.*.tmp").Single();
+                File.AppendAllText(timings, new string(' ', CoverageEvidenceInventory.MaximumMetadataBytes));
+            }
             if (failure == "corrupt-run-manifest") File.WriteAllText(runManifestPath, "broken json");
             if (failure == "unsafe-attachment") File.WriteAllText(Path.Join(runner.RawDirectory!, "CON.txt"), "unsafe retained name");
             if (failure == "file-count")
@@ -479,9 +520,22 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
             CoverageTextWriters.Create(outputWriter, TextWriter.Null), CancellationToken.None, writer, childLifetime);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
-        if (failure == "corrupt-run-manifest") Assert.Equal("broken json", await File.ReadAllTextAsync(runManifestPath));
+        if (changesSidecar)
+        {
+            Assert.True(corruptingWriter!.CorruptionCount > 0, "The controlled managed sidecar publication must complete before injecting corruption.");
+            if (failure == "corrupt-run-manifest") Assert.Equal("broken json", await File.ReadAllTextAsync(runManifestPath));
+            else if (failure == "run-manifest-oversized") Assert.True(new FileInfo(runManifestPath).Length > CoverageEvidenceInventory.MaximumMetadataBytes);
+            else
+            {
+                var sidecar = JsonNode.Parse(await File.ReadAllTextAsync(runManifestPath))!;
+                if (failure == "run-manifest-outcome") Assert.Equal("failed", sidecar["manifestBase"]!["outcome"]!.GetValue<string>());
+                else Assert.Empty(sidecar["inventory"]!.AsArray());
+            }
+        }
         Assert.Null(execution.Inventory);
         Assert.NotNull(execution.InventoryIneligibilityReason);
+        if (failure.StartsWith("project-schema-", StringComparison.Ordinal) || failure == "project-slug-mismatch")
+            Assert.Equal("inventory-project-manifest-mismatch", execution.InventoryIneligibilityReason);
         Assert.Null(execution.Result.Artifacts);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(target));
@@ -571,12 +625,31 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    private sealed class SidecarCorruptingWriter(string path) : StringWriter
+    private sealed class SidecarCorruptingWriter(string path, string failure) : StringWriter
     {
+        internal int CorruptionCount { get; private set; }
         public override Task WriteLineAsync(string? value)
         {
             if (value?.StartsWith("Coverage storage: current=", StringComparison.Ordinal) == true)
-                File.WriteAllText(path, "broken json");
+            {
+                // Open never creates a missing sidecar: every corruption must target the actual publication.
+                using var published = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+                string replacement;
+                if (failure == "corrupt-run-manifest") replacement = "broken json";
+                else if (failure == "run-manifest-oversized") replacement = new string(' ', CoverageEvidenceInventory.MaximumMetadataBytes + 1);
+                else
+                {
+                    var sidecar = JsonNode.Parse(published)!;
+                    if (failure == "run-manifest-outcome") sidecar["manifestBase"]!["outcome"] = "failed";
+                    else sidecar["inventory"] = new JsonArray();
+                    replacement = sidecar.ToJsonString();
+                }
+                published.Position = 0;
+                published.SetLength(0);
+                published.Write(System.Text.Encoding.UTF8.GetBytes(replacement));
+                published.Flush(flushToDisk: true);
+                CorruptionCount++;
+            }
             return Task.CompletedTask;
         }
     }

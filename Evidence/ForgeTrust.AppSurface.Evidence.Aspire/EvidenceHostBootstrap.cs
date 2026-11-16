@@ -69,7 +69,9 @@ public sealed record EvidenceHostOptions(
     public IProgress<EvidenceReuseWaitProgress>? ReceiptWaitProgress { get; init; }
 
     /// <summary>Gets the exact captured patch bytes when the plan declares a patch coverage requirement.</summary>
-    /// <remarks>Preparation copies this memory and verifies its SHA-256 against the plan. A normalized changed-path list cannot replace these bytes.</remarks>
+    /// <remarks>Preparation copies supplied memory. Null means no snapshot was supplied and remains absent;
+    /// it never becomes an empty snapshot. Reuse verifies a required patch's SHA-256 against the plan.
+    /// A normalized changed-path list cannot replace these bytes.</remarks>
     public ReadOnlyMemory<byte>? CapturedPatch { get; init; }
 
     /// <summary>Gets the per-invocation environment reader used to verify protected contexts without global test mutation.</summary>

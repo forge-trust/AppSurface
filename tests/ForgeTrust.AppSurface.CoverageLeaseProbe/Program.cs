@@ -3,6 +3,135 @@ using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
+// A separately opted-in renamed apphost exercises SDK identity failures without replacing a real SDK.
+if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "dotnet", StringComparison.OrdinalIgnoreCase)
+    && Environment.GetEnvironmentVariable("APPSURFACE_IDENTITY_SDK_PROBE_ROOT") is { Length: > 0 } sdkProbeRoot)
+{
+    var mode = Environment.GetEnvironmentVariable("APPSURFACE_IDENTITY_SDK_PROBE_MODE");
+    await File.WriteAllTextAsync(Path.Join(sdkProbeRoot, "sdk-probe.observed"), mode);
+    if (mode == "deadline")
+    {
+        var attempted = Path.Join(sdkProbeRoot, "sdk-probe.deadline-started");
+        // Model a timed-out initial discovery followed by an unavailable SDK, without repeating a long wait.
+        if (File.Exists(attempted)) return 17;
+        await File.WriteAllTextAsync(attempted, "started");
+    }
+    if (mode is "cancel" or "deadline")
+    {
+        var pid = Path.Join(sdkProbeRoot, "sdk-probe.pid");
+        await File.WriteAllTextAsync(pid + ".part", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        File.Move(pid + ".part", pid);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        while (!File.Exists(Path.Join(sdkProbeRoot, "stop-sdk-probe")))
+        {
+            // gstack-timing-ok: independently bounded fixture shutdown, with actual process exit asserted.
+            await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+        }
+        return 0;
+    }
+    if (mode == "nonzero")
+    {
+        await Console.Error.WriteAsync("private-sdk-probe-error-marker");
+        return 17;
+    }
+    if (mode == "blank") return 0;
+    if (mode == "long")
+    {
+        await Console.Out.WriteLineAsync(new string('1', 129));
+        return 0;
+    }
+    if (mode == "change")
+    {
+        var marker = Path.Join(sdkProbeRoot, "sdk-probe.first-query");
+        var first = !File.Exists(marker);
+        if (first) await File.WriteAllTextAsync(marker, "queried");
+        await Console.Out.WriteLineAsync(first ? "10.0.402" : "10.0.403");
+        return 0;
+    }
+    await Console.Out.WriteLineAsync("10.0.402");
+    return 0;
+}
+
+// A renamed copy of this test-only apphost stands in for Git, so identity tests can verify bounded
+// process output and actual cancellation/exit without depending on a shell or a real repository's size.
+if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "git", StringComparison.OrdinalIgnoreCase)
+    && Environment.GetEnvironmentVariable("APPSURFACE_IDENTITY_GIT_PROBE_ROOT") is { Length: > 0 } gitProbeRoot)
+{
+    var mode = Environment.GetEnvironmentVariable("APPSURFACE_IDENTITY_GIT_PROBE_MODE");
+    if (mode is not null && (mode.StartsWith("inventory-", StringComparison.Ordinal)
+        || mode.StartsWith("common-", StringComparison.Ordinal)))
+    {
+        if (args.Contains("--show-toplevel", StringComparer.Ordinal))
+        {
+            await Console.Out.WriteLineAsync(gitProbeRoot);
+            return 0;
+        }
+        if (args.Contains("--git-common-dir", StringComparer.Ordinal))
+        {
+            var counter = Path.Join(gitProbeRoot, "git-probe-common-count");
+            var count = File.Exists(counter) ? int.Parse(await File.ReadAllTextAsync(counter), System.Globalization.CultureInfo.InvariantCulture) : 0;
+            await File.WriteAllTextAsync(counter, (count + 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var common = mode == "common-flip" && count > 0 ? "common-b"
+                : mode == "common-loss" && count > 0 ? "missing-common" : "common-a";
+            await Console.Out.WriteLineAsync(Path.Join(gitProbeRoot, common));
+            return 0;
+        }
+        if (args.Contains("--stage", StringComparer.Ordinal))
+        {
+            if (mode == "inventory-delete") File.Delete(Path.Join(gitProbeRoot, "input.txt"));
+            return 0;
+        }
+        var listingCounter = Path.Join(gitProbeRoot, "git-probe-listing-count");
+        var listings = File.Exists(listingCounter) ? int.Parse(await File.ReadAllTextAsync(listingCounter), System.Globalization.CultureInfo.InvariantCulture) : 0;
+        await File.WriteAllTextAsync(listingCounter, (listings + 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var files = JsonSerializer.Deserialize<string[]>(await File.ReadAllTextAsync(Path.Join(gitProbeRoot, "git-probe-files.json")))!;
+        if (mode == "inventory-change" && listings > 0)
+        {
+            await File.WriteAllTextAsync(Path.Join(gitProbeRoot, "added.txt"), "added after input hashing");
+            files = [.. files, "added.txt"];
+        }
+        await Console.Out.WriteAsync(string.Join('\0', files) + "\0");
+        return 0;
+    }
+    if (mode is "namespace-missing" or "namespace-linked")
+    {
+        await Console.Out.WriteLineAsync(args.Contains("--show-toplevel", StringComparer.Ordinal)
+            ? gitProbeRoot : Path.Join(gitProbeRoot, ".git"));
+        return 0;
+    }
+    if (mode == "cancel")
+    {
+        var pid = Path.Join(gitProbeRoot, "git-probe.pid");
+        await File.WriteAllTextAsync(pid + ".part", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        File.Move(pid + ".part", pid);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (!File.Exists(Path.Join(gitProbeRoot, "stop-git-probe")))
+        {
+            // gstack-timing-ok: independent bounded fixture shutdown; tests assert actual exit, not elapsed time.
+            await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+        }
+        return 0;
+    }
+    if (mode == "invalid-utf8")
+    {
+        await Console.OpenStandardOutput().WriteAsync(new byte[] { 0xff });
+        return 0;
+    }
+    if (mode == "stderr-limit")
+    {
+        await Console.Error.WriteAsync(new string('e', 64 * 1024 + 1));
+        await Console.Out.WriteLineAsync(gitProbeRoot);
+        return 0;
+    }
+    if (mode is "stdout-limit" or "stdout-boundary")
+    {
+        await Console.Out.WriteAsync(new string('x', 16 * 1024 * 1024 + (mode == "stdout-limit" ? 2 : 1)));
+        return 0;
+    }
+    await Console.Error.WriteAsync("private-git-probe-error-marker");
+    return 17;
+}
+
 if (args.Length > 0 && args[0].StartsWith("settlement-", StringComparison.Ordinal))
 {
     return args[0] switch

@@ -30,6 +30,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     private readonly string _pipeName;
     private readonly TimeProvider _clock;
     private readonly Action? _beforeListenerCreation;
+    private readonly Func<NamedPipeServerStream, CancellationToken, Task>? _waitForConnectionForTests;
     private readonly CancellationTokenSource _acceptStop = new();
     private readonly CancellationTokenSource _pendingStop = new();
     private readonly ConcurrentDictionary<long, Task> _handlers = new();
@@ -49,11 +50,13 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     private Task? _disposeTask;
     private ExceptionDispatchInfo? _fatalFailure;
 
-    private EvidenceChildLifetimeSession(string executionId, TimeProvider clock, Action? beforeListenerCreation)
+    private EvidenceChildLifetimeSession(string executionId, TimeProvider clock, Action? beforeListenerCreation,
+        Func<NamedPipeServerStream, CancellationToken, Task>? waitForConnectionForTests)
     {
         ExecutionId = executionId;
         _clock = clock;
         _beforeListenerCreation = beforeListenerCreation;
+        _waitForConnectionForTests = waitForConnectionForTests;
         // Keep the Unix-domain socket path formed by BCL named pipes below the platform limit,
         // even when the system temporary-directory path is long.
         _pipeName = RandomNumberGenerator.GetHexString(8).ToLowerInvariant();
@@ -90,13 +93,19 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     /// <param name="executionId">A unique printable ID for the execution; it is never part of a producer key.</param>
     /// <param name="clock">Optional time provider for bounded settlement waits.</param>
     /// <param name="beforeListenerCreation">Optional per-call fault seam before opening each listener; production omits it.</param>
+    /// <param name="waitForConnectionForTests">Optional per-call replacement for the native listener wait, used by
+    /// transport failure and shutdown tests. The session retains ownership of the supplied pipe and its cancellation
+    /// token; the callback must return its actual operation task and must not dispose or retain the pipe after that task
+    /// settles. Omission calls <see cref="NamedPipeServerStream.WaitForConnectionAsync(CancellationToken)"/> directly.
+    /// Injected failures follow the ordinary listener recovery, custody, and disposal paths.</param>
     internal static EvidenceChildLifetimeSession Start(string executionId, TimeProvider? clock = null,
-        Action? beforeListenerCreation = null)
+        Action? beforeListenerCreation = null,
+        Func<NamedPipeServerStream, CancellationToken, Task>? waitForConnectionForTests = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
         if (executionId.Length > 128 || executionId.Any(static character => !char.IsAsciiLetterOrDigit(character) && character is not '-' and not '_'))
             throw new ArgumentException("Execution ID must be at most 128 ASCII letters, digits, hyphens, or underscores.", nameof(executionId));
-        return new EvidenceChildLifetimeSession(executionId, clock ?? TimeProvider.System, beforeListenerCreation);
+        return new EvidenceChildLifetimeSession(executionId, clock ?? TimeProvider.System, beforeListenerCreation, waitForConnectionForTests);
     }
 
     /// <summary>Closes further enrollment; existing admitted clients remain active until completion or become unknown.</summary>
@@ -170,7 +179,13 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
                 _listenerReady.TrySetResult();
             }
 
-            try { await pipe.WaitForConnectionAsync(_acceptStop.Token).ConfigureAwait(false); }
+            try
+            {
+                var waiting = _waitForConnectionForTests is null
+                    ? pipe.WaitForConnectionAsync(_acceptStop.Token)
+                    : _waitForConnectionForTests(pipe, _acceptStop.Token);
+                await waiting.ConfigureAwait(false);
+            }
             catch (OperationCanceledException) when (_acceptStop.IsCancellationRequested)
             { pipe.Dispose(); return; }
             catch (ObjectDisposedException) when (_acceptStop.IsCancellationRequested)

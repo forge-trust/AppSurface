@@ -132,7 +132,8 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             }
             var output = options.Reuse ? EvidenceReuseOutput.CreateFreshRoot(options.ArtifactDirectory, Path.Join("TestResults", "evidence"))
                 : Path.GetFullPath(options.ArtifactDirectory ?? Path.Join("TestResults", "evidence", "artifacts"));
-            options = options with { ArtifactDirectory = output, CapturedPatch = options.CapturedPatch is { } captured ? new ReadOnlyMemory<byte>(captured.ToArray()) : null };
+            // Preserve absence explicitly; null can otherwise convert through byte[] to non-null empty memory.
+            options = options with { ArtifactDirectory = output, CapturedPatch = options.CapturedPatch is { } captured ? new ReadOnlyMemory<byte>(captured.ToArray()) : (ReadOnlyMemory<byte>?)null };
             var bindings = producers.ToDictionary(static pair => pair.Key, static pair =>
                 new EvidenceReuseProducerRegistration(pair.Value.Producer, pair.Value.ImplementationIdentity, pair.Value.ToolIdentity), StringComparer.Ordinal);
             var artifactDirectories = new ReadOnlyDictionary<string, string>(frozen.Profile.Producers.ToDictionary(static producer => producer.Id,

@@ -20,6 +20,8 @@ internal interface IEvidenceProducerReceiptEligibility
 }
 
 /// <summary>Configures one private reuse invocation; run-local paths and execution IDs never enter content keys.</summary>
+/// <remarks>Captured patch memory is copied during preparation. An absent snapshot remains null; only supplied
+/// bytes can establish a required patch identity. A supplied digest cannot manufacture missing bytes.</remarks>
 internal sealed record EvidenceProducerReuseOptions(bool Enabled, string RepositoryRoot, string? StoreRoot,
     TimeSpan WaitTimeout, TimeSpan ProducerCleanupTimeout, bool VerifyReuse, bool ReadOnly,
     ReadOnlyMemory<byte>? CapturedPatch, TimeProvider Clock)
@@ -94,7 +96,8 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         _plan = plan;
         _registrations = registrations;
         _resourceIdentities = resourceIdentities;
-        _options = options with { CapturedPatch = options.CapturedPatch is { } captured ? new ReadOnlyMemory<byte>(captured.ToArray()) : null };
+        // The nullable cast prevents an absent snapshot from using the null-array-to-empty-memory conversion.
+        _options = options with { CapturedPatch = options.CapturedPatch is { } captured ? new ReadOnlyMemory<byte>(captured.ToArray()) : (ReadOnlyMemory<byte>?)null };
         _artifactRoot = artifactRoot;
     }
 
