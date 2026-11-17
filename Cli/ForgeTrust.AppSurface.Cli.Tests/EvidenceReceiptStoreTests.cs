@@ -378,7 +378,7 @@ public sealed class EvidenceReceiptStoreTests
             }
 
             EvidenceReceiptQuota.Maintain(storeRoot, completedAt.AddDays(7));
-            var keyDirectory = Path.Combine(storeRoot, Hash("repo").ToLowerInvariant(), key);
+            var keyDirectory = Path.Combine(storeRoot, Hash("repo").ToLowerInvariant(), key.ToLowerInvariant());
             Assert.Equal("missing", EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
             { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") }).Peek(key).Reason);
             Assert.Empty(Directory.EnumerateFileSystemEntries(keyDirectory));

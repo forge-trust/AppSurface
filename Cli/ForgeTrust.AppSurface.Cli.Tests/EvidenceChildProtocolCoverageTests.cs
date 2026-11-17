@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Net.Sockets;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
@@ -363,9 +364,22 @@ public sealed class EvidenceChildProtocolCoverageTests
             catch (IOException) { /* The server may close the rejected oversized frame before the client flushes it. */ }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             var response = new byte[1];
-            Assert.Equal(0, await pipe.ReadAsync(response, timeout.Token));
+            try { Assert.Equal(0, await pipe.ReadAsync(response, timeout.Token)); }
+            catch (IOException error) when (error.InnerException is SocketException
+            { SocketErrorCode: SocketError.ConnectionReset })
+            {
+                // Unix can reset the unadmitted pipe when its oversized frame is rejected.
+            }
         }
 
+        var admitted = false;
+        using var childTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await EvidenceOwnedChild.RunAsync(_ =>
+        {
+            admitted = true;
+            return Task.CompletedTask;
+        }, session.Environment, childTimeout.Token);
+        Assert.True(admitted);
         Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
         Assert.False(session.IsUnknown);
     }

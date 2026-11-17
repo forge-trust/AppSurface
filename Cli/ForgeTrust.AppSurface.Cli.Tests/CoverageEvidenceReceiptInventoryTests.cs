@@ -130,6 +130,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
     [InlineData("failed-gate-promotion-conflict")]
     public async Task ReuseFreshFallbackPreservesCompleteReportsAtFinalRunRoot(string scenario)
     {
+        using var localContext = new EnvironmentVariableScope("GITHUB_ACTIONS", null);
         using var directory = TestDirectory.Create();
         var repositoryRoot = FindRepositoryRoot();
         var solution = Path.Join(repositoryRoot, "ForgeTrust.AppSurface.slnx");
@@ -253,6 +254,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
     [Fact]
     public async Task MultipleCoverageProducerFallbacksKeepReportsInDisjointProducerRoots()
     {
+        using var localContext = new EnvironmentVariableScope("GITHUB_ACTIONS", null);
         using var directory = TestDirectory.Create();
         var repositoryRoot = FindRepositoryRoot();
         var solution = Path.Join(repositoryRoot, "ForgeTrust.AppSurface.slnx");

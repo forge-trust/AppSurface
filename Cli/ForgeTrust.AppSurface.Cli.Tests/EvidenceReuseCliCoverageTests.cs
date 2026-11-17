@@ -293,6 +293,7 @@ public sealed class EvidenceReuseCliCoverageTests
     [Fact]
     public async Task ResolverExplainAndRunReportCustomProducerAdmissionWithoutExecutingIt()
     {
+        using var localContext = new EnvironmentVariableScope("GITHUB_ACTIONS", null);
         using var directory = TestDirectory.Create();
         var declaration = new EvidenceProducerDeclaration("custom", "browser-e2e", "1", [], ["browser/assertion@1"], [], 10);
         var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [declaration],
