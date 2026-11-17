@@ -834,7 +834,7 @@ public sealed class EvidenceProducerReuseSessionTests
 
         public ValueTask DisposeAsync()
         {
-            if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
+            new TestDirectory(Root).Dispose();
             return ValueTask.CompletedTask;
         }
     }

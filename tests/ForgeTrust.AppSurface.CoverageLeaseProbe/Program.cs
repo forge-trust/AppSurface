@@ -59,6 +59,7 @@ if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "gi
     && Environment.GetEnvironmentVariable("APPSURFACE_IDENTITY_GIT_PROBE_ROOT") is { Length: > 0 } gitProbeRoot)
 {
     var mode = Environment.GetEnvironmentVariable("APPSURFACE_IDENTITY_GIT_PROBE_MODE");
+    if (mode == "inventory-collision") Console.OutputEncoding = System.Text.Encoding.UTF8;
     if (mode is not null && (mode.StartsWith("inventory-", StringComparison.Ordinal)
         || mode.StartsWith("common-", StringComparison.Ordinal)))
     {
@@ -131,6 +132,12 @@ if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "gi
     }
     await Console.Error.WriteAsync("private-git-probe-error-marker");
     return 17;
+}
+
+if (args.Length == 1 && args[0] == "environment-clear")
+{
+    const string sentinel = "APPSURFACE_EVIDENCE_CHILD_ENVIRONMENT_CLEAR_SENTINEL";
+    return Environment.GetEnvironmentVariable(sentinel) is null ? 1 : 0;
 }
 
 if (args.Length > 0 && args[0].StartsWith("settlement-", StringComparison.Ordinal))

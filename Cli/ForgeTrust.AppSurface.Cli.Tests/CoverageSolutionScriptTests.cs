@@ -333,7 +333,7 @@ public sealed class CoverageSolutionScriptTests
     [Fact]
     public void CoverageEfficiencyWorkflow_ShouldCaptureCompleteReadOnlyEvidenceWithoutChangingPrValidation()
     {
-        var workflow = ReadRepositoryFile(".github", "workflows", "coverage-efficiency.yml");
+        var workflow = ReadRepositoryFile(".github", "workflows", "coverage-efficiency.yml").ReplaceLineEndings("\n");
         var yaml = new YamlStream();
         using var reader = new StringReader(workflow);
         yaml.Load(reader);

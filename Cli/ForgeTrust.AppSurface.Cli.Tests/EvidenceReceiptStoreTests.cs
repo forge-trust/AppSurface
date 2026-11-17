@@ -381,7 +381,10 @@ public sealed class EvidenceReceiptStoreTests
             var keyDirectory = Path.Combine(storeRoot, Hash("repo").ToLowerInvariant(), key.ToLowerInvariant());
             Assert.Equal("missing", EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
             { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") }).Peek(key).Reason);
-            Assert.Empty(Directory.EnumerateFileSystemEntries(keyDirectory));
+            Assert.Equal(OperatingSystem.IsWindows() ? [".appsurface-coverage-operation.lock"] : Array.Empty<string>(),
+                Directory.EnumerateFileSystemEntries(keyDirectory).Select(Path.GetFileName));
+            if (OperatingSystem.IsWindows())
+                Assert.Equal(0, new FileInfo(Path.Combine(keyDirectory, ".appsurface-coverage-operation.lock")).Length);
         }
         finally { DeleteIfPresent(storeRoot); DeleteIfPresent(sourceRoot); }
     }

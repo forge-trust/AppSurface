@@ -374,8 +374,11 @@ public sealed class EvidenceIdentityCoverageTests
 
     internal sealed class TestRepository : IDisposable
     {
-        private TestRepository(string root)
+        private readonly TestDirectory _directory;
+
+        private TestRepository(string root, TestDirectory directory)
         {
+            _directory = directory;
             Root = root;
         }
 
@@ -383,10 +386,11 @@ public sealed class EvidenceIdentityCoverageTests
         internal static async Task<TestRepository> CreateAsync()
         {
             var created = Directory.CreateTempSubdirectory("evidence-identity-coverage-");
+            var directory = new TestDirectory(created.FullName);
             try
             {
                 // Resolve the owned directory independently of Git, including macOS /var -> /private/var.
-                var repository = new TestRepository(PhysicalDirectory(created));
+                var repository = new TestRepository(PhysicalDirectory(created), directory);
                 await repository.GitAsync("init", "--quiet");
                 await repository.GitAsync("config", "user.email", "test@example.invalid");
                 await repository.GitAsync("config", "user.name", "Identity Coverage Test");
@@ -400,18 +404,17 @@ public sealed class EvidenceIdentityCoverageTests
             catch
             {
                 // Never use a Git-derived path as deletion authority, even when initialization fails.
-                created.Delete(recursive: true);
+                directory.Dispose();
                 throw;
             }
         }
 
         private static string PhysicalDirectory(DirectoryInfo directory)
         {
+            if (directory.Parent is not { } parent) return directory.FullName;
             if (directory.ResolveLinkTarget(returnFinalTarget: true) is { } target)
                 return PhysicalDirectory(new DirectoryInfo(target.FullName));
-            return directory.Parent is { } parent
-                ? TestPathUtils.PathUnder(PhysicalDirectory(parent), directory.Name)
-                : directory.FullName;
+            return TestPathUtils.PathUnder(PhysicalDirectory(parent), directory.Name);
         }
         internal async Task WriteAsync(string path, string contents)
         {
@@ -448,6 +451,6 @@ public sealed class EvidenceIdentityCoverageTests
             if (process.ExitCode != 0) throw new InvalidOperationException(await error);
             return await output;
         }
-        public void Dispose() => Directory.Delete(Root, recursive: true);
+        public void Dispose() => _directory.Dispose();
     }
 }

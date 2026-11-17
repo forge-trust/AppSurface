@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
+[Collection(EvidenceReuseSyntheticLocalContextCollection.Name)]
 public sealed class EvidenceChildLifetimeTests
 {
     private static readonly IReadOnlyDictionary<string, string> EmptyEnvironment = new Dictionary<string, string>();
@@ -112,12 +114,26 @@ public sealed class EvidenceChildLifetimeTests
     [Fact]
     public async Task RunProcessAsync_ShouldNotRestoreVariablesRemovedFromCallerEnvironment()
     {
-        var startInfo = new ProcessStartInfo
+        const string sentinel = "APPSURFACE_EVIDENCE_CHILD_ENVIRONMENT_CLEAR_SENTINEL";
+        using var parentSentinel = new EnvironmentVariableScope(sentinel, "set-in-parent-environment");
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent!.Name;
+        var probeAssembly = TestPathUtils.PathUnder(repository, "tests", "ForgeTrust.AppSurface.CoverageLeaseProbe", "bin",
+            configuration, "net10.0", "ForgeTrust.AppSurface.CoverageLeaseProbe.dll");
+        var runtimeDirectory = new DirectoryInfo(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory());
+        var dotnetRoot = runtimeDirectory.Parent!.Parent!.Parent!.FullName;
+        var dotnetHost = TestPathUtils.PathUnder(dotnetRoot, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        Assert.True(File.Exists(probeAssembly), $"The coverage lease probe was not built: {probeAssembly}");
+        Assert.True(File.Exists(dotnetHost), $"The current .NET host was not found: {dotnetHost}");
+
+        var startInfo = new ProcessStartInfo(dotnetHost)
         {
-            FileName = OperatingSystem.IsWindows() ? Path.Combine(System.Environment.SystemDirectory, "cmd.exe") : "/usr/bin/printenv",
-            Arguments = OperatingSystem.IsWindows() ? "/d /c \"set PATH >nul 2>&1\"" : "PATH",
             UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         };
+        startInfo.ArgumentList.Add(probeAssembly);
+        startInfo.ArgumentList.Add("environment-clear");
         startInfo.Environment.Clear();
 
         var exitCode = await RunProcessAsync(startInfo, CancellationToken.None, EmptyEnvironment);

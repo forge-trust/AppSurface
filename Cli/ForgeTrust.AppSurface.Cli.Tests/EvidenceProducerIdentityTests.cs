@@ -63,7 +63,7 @@ public sealed class EvidenceProducerIdentityTests
         }
         finally
         {
-            Directory.Delete(clonePath, recursive: true);
+            new TestDirectory(clonePath).Dispose();
         }
     }
 
@@ -457,6 +457,6 @@ public sealed class EvidenceProducerIdentityTests
             if (process.ExitCode != 0) throw new InvalidOperationException(await stderr);
             return output.TrimEnd('\r', '\n');
         }
-        public void Dispose() => Directory.Delete(Root, recursive: true);
+        public void Dispose() => new TestDirectory(Root).Dispose();
     }
 }

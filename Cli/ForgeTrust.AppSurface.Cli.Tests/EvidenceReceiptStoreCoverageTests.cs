@@ -2209,7 +2209,34 @@ public sealed class EvidenceReceiptStoreCoverageTests
     private static Dictionary<string, byte[]> SnapshotStoreBytes(string storeRoot)
         => Directory.EnumerateFiles(storeRoot, "*", SearchOption.AllDirectories)
             .Order(StringComparer.Ordinal)
-            .ToDictionary(path => Path.GetRelativePath(storeRoot, path), File.ReadAllBytes, StringComparer.Ordinal);
+            .ToDictionary(path => Path.GetRelativePath(storeRoot, path), ReadStoreSnapshotFile, StringComparer.Ordinal);
+
+    [Fact]
+    public void StoreSnapshotRetainsEmptyCoordinationFilesAndRejectsTheirContent()
+    {
+        using var directory = TestDirectory.Create();
+        var coordination = directory.WriteFile(".appsurface-coverage-operation.lock", string.Empty);
+        directory.WriteFile("authority.json", "retained authority");
+
+        var snapshot = SnapshotStoreBytes(directory.Path);
+
+        Assert.Empty(snapshot[".appsurface-coverage-operation.lock"]);
+        Assert.Equal("retained authority", Encoding.UTF8.GetString(snapshot["authority.json"]));
+        File.WriteAllText(coordination, "unexpected content");
+        Assert.Throws<Xunit.Sdk.EqualException>(() => SnapshotStoreBytes(directory.Path));
+    }
+
+    private static byte[] ReadStoreSnapshotFile(string path)
+    {
+        if (Path.GetFileName(path) == ".appsurface-coverage-operation.lock")
+        {
+            // Windows protects the coordination byte range from reads while held. The
+            // file is deliberately empty; preserve its presence and exact size in the snapshot.
+            Assert.Equal(0, new FileInfo(path).Length);
+            return [];
+        }
+        return File.ReadAllBytes(path);
+    }
 
     private static void AssertStoreSnapshotUnchanged(IReadOnlyDictionary<string, byte[]> expected, string storeRoot)
     {

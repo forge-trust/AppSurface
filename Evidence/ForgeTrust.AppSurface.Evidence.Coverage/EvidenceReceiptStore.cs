@@ -518,6 +518,7 @@ internal sealed class EvidenceReceiptStore
         /// <param name="writer">Fresh current-run writer that owns restored artifact paths.</param>
         /// <param name="cancellationToken">Cancels verification and restoration.</param>
         /// <returns>A restored result, an ordinary miss for owned invalid payload, or unavailable for unknown authority.</returns>
+        /// <remarks>Validation and restore handles close before invalid payload retirement, including on Windows.</remarks>
         internal async Task<EvidenceReceiptReadResult> ReadReceiptAsync(EvidenceProducerDeclaration producer,
             EvidenceArtifactWriter writer, CancellationToken cancellationToken)
         {
@@ -544,12 +545,12 @@ internal sealed class EvidenceReceiptStore
                     if (!names.SetEquals(requiredNames)
                         || rootEntries.Single(static entry => entry.Name == "artifacts").IsDirectory is false
                         || rootEntries.Where(static entry => entry.Name != "artifacts").Any(static entry => entry.IsDirectory))
-                        return InvalidateOwned(state, "payload-container-invalid");
+                        throw new InvalidOwnedReceiptException("payload-container-invalid");
                     var planBytes = ReadImmediate(payload.Root, "origin.plan.json", 4 * 1024 * 1024);
                     var manifestBytes = ReadImmediate(payload.Root, "origin.manifest.json", 4 * 1024 * 1024);
                     var resultBytes = ReadImmediate(payload.Root, "passed-producer.json", 64 * 1024);
                     if (!DecodePassedProducerRecord(state.PassedProducerRecord).AsSpan().SequenceEqual(resultBytes))
-                        return InvalidateOwned(state, "passed-producer-record-invalid");
+                        throw new InvalidOwnedReceiptException("passed-producer-record-invalid");
                     var originPlan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(planBytes);
                     var originManifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(manifestBytes);
                     var persistedResult = EvidenceCanonicalJson.Deserialize<EvidenceProducerResult>(resultBytes);
@@ -558,11 +559,11 @@ internal sealed class EvidenceReceiptStore
                     {
                         var identityBytes = ReadImmediate(payload.Root, "identity.json", EvidenceProducerIdentityBuilder.MaximumMetadataBytes);
                         if (!StringComparer.Ordinal.Equals(Hash(identityBytes), state.InputIdentityDigest))
-                            return InvalidateOwned(state, "input-identity-digest-invalid");
+                            throw new InvalidOwnedReceiptException("input-identity-digest-invalid");
                         inputIdentity = EvidenceCanonicalJson.Deserialize<EvidenceReceiptInputIdentity>(identityBytes);
                         inputIdentity.Validate();
                         if (!identityBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(inputIdentity)))
-                            return InvalidateOwned(state, "input-identity-noncanonical");
+                            throw new InvalidOwnedReceiptException("input-identity-noncanonical");
                     }
                     if (!planBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(originPlan))
                         || !manifestBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(originManifest))
@@ -573,7 +574,7 @@ internal sealed class EvidenceReceiptStore
                         || !StringComparer.Ordinal.Equals(originManifest.ManifestDigest,
                             EvidenceDigest.CanonicalSha256(originManifest with { ManifestDigest = string.Empty }))
                         || !StringComparer.Ordinal.Equals(originPlan.PlanDigest, originManifest.PlanDigest))
-                        return InvalidateOwned(state, "origin-binding-invalid");
+                        throw new InvalidOwnedReceiptException("origin-binding-invalid");
 
                     var declaration = originPlan.Profile.Producers.SingleOrDefault(item => item.Id == producer.Id);
                     var originResult = originManifest.ProducerResults.SingleOrDefault(item => item.ProducerId == producer.Id);
@@ -584,7 +585,7 @@ internal sealed class EvidenceReceiptStore
                         || originResult.Outcome != EvidenceProducerOutcome.Passed
                         || !EvidenceArtifactValidation.AreValid(producer, originResult.Artifacts)
                         || !EvidenceCanonicalJson.Serialize(originResult).AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(persistedResult)))
-                        return InvalidateOwned(state, "passed-producer-invalid");
+                        throw new InvalidOwnedReceiptException("passed-producer-invalid");
 
                     var artifacts = originResult.Artifacts ?? [];
                     VerifyArtifacts(payload.Root, artifacts, cancellationToken);
@@ -602,7 +603,7 @@ internal sealed class EvidenceReceiptStore
                             var restored = await writer.WriteAsync(artifact.LogicalName, artifact.RelativePath,
                                 opened.Stream, cancellationToken).ConfigureAwait(false);
                             if (!ArtifactMetadataEquals(restored, artifact))
-                                return InvalidateOwned(state, "restore-artifact-changed-during-copy");
+                                throw new InvalidOwnedReceiptException("restore-artifact-changed-during-copy");
                         }
                         if (!await writer.VerifyWrittenArtifactsAsync(cancellationToken).ConfigureAwait(false))
                             return EvidenceReceiptReadResult.Miss("restore-artifact-verification-failed", state);
@@ -630,6 +631,11 @@ internal sealed class EvidenceReceiptStore
                     return EvidenceReceiptReadResult.Restored(reused, originPlan, originManifest,
                         state.OriginCompletedAt!.Value, inputIdentity, persistedResult.ElapsedMilliseconds);
                 }
+            }
+            catch (InvalidOwnedReceiptException exception)
+            {
+                // All validation/restore handles have unwound before native payload deletion.
+                return InvalidateOwned(state, exception.Reason);
             }
             catch (Exception exception) when (exception is InvalidDataException || exception is FileNotFoundException
                 || exception is DirectoryNotFoundException || exception is JsonException || exception is FormatException
@@ -936,6 +942,12 @@ internal sealed class EvidenceReceiptStore
         {
             internal static StagePublicationOutcome Ready(StagedReceiptPublication stage) => new(stage, null);
             internal static StagePublicationOutcome Refused(string reason) => new(null, EvidenceReceiptPublicationResult.Refused(reason));
+        }
+
+        /// <summary>Carries a typed validation miss outside open payload handles before invalidation.</summary>
+        private sealed class InvalidOwnedReceiptException(string reason) : Exception
+        {
+            internal string Reason { get; } = reason;
         }
 
         private EvidenceReceiptReadResult InvalidateOwned(EvidenceReceiptState state, string reason)
