@@ -269,8 +269,10 @@ internal static class Program
             ReportProfileId = reportProfile,
         };
 
-        var reportPath = Path.Join(v3Root, "synthetic-primary.cobertura.xml");
-        var timingsPath = Path.Join(v3Root, "synthetic-primary-timings.json");
+        var producerRoot = Path.Join(v3Root, "producer");
+        Directory.CreateDirectory(producerRoot);
+        var reportPath = Path.Join(producerRoot, "synthetic-primary.cobertura.xml");
+        var timingsPath = Path.Join(producerRoot, "synthetic-primary-timings.json");
         await File.WriteAllTextAsync(reportPath, SyntheticAggregateReport()).ConfigureAwait(false);
         await File.WriteAllTextAsync(timingsPath, JsonSerializer.Serialize(new
         {
