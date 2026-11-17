@@ -18,7 +18,8 @@ jobs:
   native-evidence:
     name: Native evidence (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Windows completed 760 Aspire cases before CLI execution; keep both suites within one bounded lane.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 25 }}
     strategy:
       fail-fast: false
       matrix:

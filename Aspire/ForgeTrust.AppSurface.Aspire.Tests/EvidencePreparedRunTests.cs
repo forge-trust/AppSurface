@@ -394,6 +394,8 @@ public sealed class EvidencePreparedRunTests
         private void Git(params string[] arguments)
         {
             using var process = new Process { StartInfo = new("git") { WorkingDirectory = Repository, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true } };
+            // A fixture commit must not leave automatic Git maintenance writing into its owned tree.
+            foreach (var argument in new[] { "-c", "maintenance.auto=false", "-c", "gc.auto=0" }) process.StartInfo.ArgumentList.Add(argument);
             foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
             process.Start();
             var output = process.StandardOutput.ReadToEnd();

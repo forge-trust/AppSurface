@@ -894,7 +894,15 @@ public sealed class EvidenceReuseCliCoverageTests
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(root, file).Replace(Path.DirectorySeparatorChar, '/');
-            var bytes = await File.ReadAllBytesAsync(file);
+            byte[] bytes;
+            if (Path.GetFileName(file) == ".appsurface-coverage-operation.lock")
+            {
+                // Windows protects the held byte range even for this empty coordination file.
+                // Prove its complete contents are empty by length, retaining the entry and its exact hash.
+                Assert.Equal(0, new FileInfo(file).Length);
+                bytes = [];
+            }
+            else bytes = await File.ReadAllBytesAsync(file);
             snapshot.Add("F:" + relative, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant());
         }
         return snapshot;

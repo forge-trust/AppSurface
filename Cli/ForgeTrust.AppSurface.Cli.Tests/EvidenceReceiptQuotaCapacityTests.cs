@@ -66,11 +66,13 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 owner.EstablishAuthority("partial-stage-execution");
                 Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repositoryNamespace, key,
                     8_000_000, now, reservationId, stageName, payloadName));
-                using var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(owner.DirectoryPath, false, true)!;
-                using var stage = keyRoot.CreateArtifactDirectory(stageName);
-                using var file = stage.OpenArtifactFile("partial.bin", createNew: true);
-                file.Write(stagedBytes);
-                file.Flush(flushToDisk: true);
+                using (var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(owner.DirectoryPath, false, true)!)
+                using (var stage = keyRoot.CreateArtifactDirectory(stageName))
+                using (var file = stage.OpenArtifactFile("partial.bin", createNew: true))
+                {
+                    file.Write(stagedBytes);
+                    file.Flush(flushToDisk: true);
+                }
                 Assert.Equal(8_000_000 - stagedBytes.Length,
                     EvidenceReceiptQuota.ReconcilePayloadReservations(owner));
             }

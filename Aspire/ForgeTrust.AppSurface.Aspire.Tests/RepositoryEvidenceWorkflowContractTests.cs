@@ -100,6 +100,15 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
+    public void NativeWindowsLaneRetainsBothSuitesWithItsBoundedExecutionAllowance()
+    {
+        Assert.Equal("${{ matrix.os == 'windows-latest' && 45 || 25 }}", NativeJob["timeout-minutes"].AsScalar());
+        var command = FindStep(NativeJob["steps"].AsSequence(), "Test native lifecycle contracts for selected producers")["run"].AsScalar();
+        Assert.Contains("dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj", command);
+        Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", command);
+    }
+
+    [Fact]
     public void ValidationBuildPrecedesEventBoundCollection()
     {
         var steps = NativeJob["steps"].AsSequence();

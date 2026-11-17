@@ -898,10 +898,24 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         }
     }
 
-    private static InvalidOperationException DockerPrerequisiteFailure(string cause) => new(
+    private static InvalidOperationException DockerPrerequisiteFailure(string cause) => new DockerPrerequisiteException(cause);
+
+    /// <summary>Retains only a closed Docker prerequisite category for the safe first-work failure marker.</summary>
+    /// <remarks>This category is diagnostic only; it never changes the five-second probe or its failure outcome.</remarks>
+    internal sealed class DockerPrerequisiteException(string cause) : InvalidOperationException(
         $"Docker is required for FirstDurableWork; availability is checked for at most five seconds ({cause}). "
         + "Start Docker and rerun: dotnet test --filter FullyQualifiedName~FirstDurableWork. "
-        + "Read https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md#three-command-first-proof.");
+        + "Read https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md#three-command-first-proof.")
+    {
+        /// <summary>Gets the closed diagnostic token, excluding raw exceptions and Docker output.</summary>
+        internal string SafeCause { get; } = cause switch
+        {
+            nameof(TimeoutException) => "docker-probe-timeout",
+            nameof(InvalidOperationException) => "docker-probe-process-failure",
+            "daemon-unavailable" => "docker-daemon-unavailable",
+            _ => "docker-prerequisite-unknown",
+        };
+    }
 
     private static string NewPassword() => Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
 

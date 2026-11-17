@@ -7,6 +7,40 @@ public sealed class DurableTemplateFirstWorkDiagnosticTests
     private const string Secret = "private-first-work-credential";
 
     [Theory]
+    [InlineData("docker-probe-timeout")]
+    [InlineData("docker-probe-process-failure")]
+    [InlineData("docker-daemon-unavailable")]
+    public void Docker_prerequisite_cause_retains_only_a_closed_value_at_its_boundary(string cause)
+    {
+        var result = Assert.IsType<DurableTemplateFirstWorkDiagnostic>(DurableTemplateFirstWorkDiagnostic.Read(
+            Marker(phase: "postgresql-fixture-setup", code: "InvalidOperationException",
+                location: "<RequireDockerAsync>d__49.MoveNext", cause: cause, retry: Secret)));
+
+        Assert.Equal(cause, result.DockerPrerequisiteCause);
+        var json = JsonSerializer.Serialize(result);
+        Assert.DoesNotContain(Secret, json, StringComparison.Ordinal);
+        Assert.DoesNotContain("RequireDockerAsync", json, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("initial-readiness", "InvalidOperationException", "<RequireDockerAsync>d__49.MoveNext", "docker-probe-timeout")]
+    [InlineData("postgresql-fixture-setup", "TimeoutException", "<RequireDockerAsync>d__49.MoveNext", "docker-probe-timeout")]
+    [InlineData("postgresql-fixture-setup", "InvalidOperationException", "<StartDockerAsync>d__31.MoveNext", "docker-probe-timeout")]
+    [InlineData("postgresql-fixture-setup", "InvalidOperationException", "<RequireDockerAsync>d__49.MoveNext", Secret)]
+    [InlineData("postgresql-fixture-setup", "InvalidOperationException", "<RequireDockerAsync>d__49.MoveNext", "docker-probe-timeout secret")]
+    [InlineData("postgresql-fixture-setup", "InvalidOperationException", "<RequireDockerAsync>d__49.MoveNext", "docker-prerequisite-unknown")]
+    public void Unbound_or_unrecognized_Docker_causes_are_omitted(string phase, string code, string location, string cause)
+    {
+        var result = Assert.IsType<DurableTemplateFirstWorkDiagnostic>(DurableTemplateFirstWorkDiagnostic.Read(
+            Marker(phase: phase, code: code, location: location, cause: cause)));
+
+        Assert.Null(result.DockerPrerequisiteCause);
+        var json = JsonSerializer.Serialize(result);
+        Assert.DoesNotContain("DockerPrerequisiteCause", json, StringComparison.Ordinal);
+        Assert.DoesNotContain(Secret, json, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("postgresql-fixture-setup")]
     [InlineData("host-read-only-startup")]
     [InlineData("read-only-startup-catalog")]

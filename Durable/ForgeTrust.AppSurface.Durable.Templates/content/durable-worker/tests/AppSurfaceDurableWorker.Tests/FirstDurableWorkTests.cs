@@ -53,6 +53,7 @@ public sealed class FirstDurableWorkTests
         var phase = "postgresql-fixture-setup";
         var primaryFailure = (string?)null;
         var primaryFailureLocation = (string?)null;
+        var prerequisiteCause = (string?)null;
         var cleanupFailures = new List<string>();
         var checkpoints = new List<string>(capacity: 4);
         var cleanupStartedAt = 0L;
@@ -241,7 +242,8 @@ public sealed class FirstDurableWorkTests
         }
         catch (Exception exception)
         {
-            primaryFailure = exception.GetType().Name;
+            primaryFailure = exception is PostgreSqlFixture.DockerPrerequisiteException ? nameof(InvalidOperationException) : exception.GetType().Name;
+            prerequisiteCause = (exception as PostgreSqlFixture.DockerPrerequisiteException)?.SafeCause;
             primaryFailureLocation = GetSafeFailureLocation(exception);
         }
         finally
@@ -282,7 +284,7 @@ public sealed class FirstDurableWorkTests
                 ? "Confirm Docker, the packaged PostgreSQL role recipe, and the disposable fixture, then rerun: dotnet test --filter FullyQualifiedName~FirstDurableWork"
                 : "Confirm the generated package graph and rerun the FirstDurableWork test";
             _output.WriteLine(
-                $"[FirstDurableWork] failure phase={phase} code={failureCode} at={primaryFailureLocation ?? "unknown"} cause=The bounded phase did not satisfy its assertion or owned cleanup contract; cleanup={cleanup}; retry={retry}; docs={FirstProofLink}");
+                $"[FirstDurableWork] failure phase={phase} code={failureCode} at={primaryFailureLocation ?? "unknown"} cause={prerequisiteCause ?? "The bounded phase did not satisfy its assertion or owned cleanup contract"}; cleanup={cleanup}; retry={retry}; docs={FirstProofLink}");
             throw new InvalidOperationException($"FirstDurableWork failed in phase {phase} ({failureCode}); see {FirstProofLink}.");
         }
 

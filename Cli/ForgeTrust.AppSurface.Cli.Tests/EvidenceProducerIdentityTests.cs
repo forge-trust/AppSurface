@@ -25,7 +25,8 @@ public sealed class EvidenceProducerIdentityTests
     [Fact]
     public async Task BuildAsync_ShouldPreserveWhitespaceInRepositoryPath()
     {
-        using var repo = await TestRepository.CreateAsync(" producer root ");
+        // Win32 aliases a trailing-space component; internal whitespace remains significant on every platform.
+        using var repo = await TestRepository.CreateAsync(OperatingSystem.IsWindows() ? " producer root path" : " producer root ");
         await repo.WriteAsync("src/file", "data");
         await repo.CommitAsync("base");
 
