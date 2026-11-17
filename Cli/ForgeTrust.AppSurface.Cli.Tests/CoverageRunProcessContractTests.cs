@@ -9,6 +9,32 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageRunProcessContractTests
 {
     [Fact]
+    public async Task OptionalMemoryObservation_ShouldNotFailWhenTheChildHasExited()
+    {
+        var request = CreateProbeRequest(Directory.GetCurrentDirectory(), "replacement");
+        using var child = new System.Diagnostics.Process
+        {
+            StartInfo = new(request.FileName) { UseShellExecute = false, RedirectStandardOutput = true }
+        };
+        foreach (var argument in request.Arguments) child.StartInfo.ArgumentList.Add(argument);
+        Assert.True(child.Start());
+        await child.StandardOutput.ReadToEndAsync();
+        await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+
+        // An unavailable peak is explicit null; a reaped child must not throw into the v2/v3 adapter.
+        var value = CoverageProcessTelemetry.TryGetPeakWorkingSet(child);
+        Assert.True(value is null or > 0);
+        Assert.Equal(0, child.ExitCode);
+    }
+
+    [Fact]
+    public void OptionalMemoryObservation_ShouldReturnNullForAnUnassociatedProcess()
+    {
+        using var child = new System.Diagnostics.Process();
+        Assert.Null(CoverageProcessTelemetry.TryGetPeakWorkingSet(child));
+    }
+
+    [Fact]
     public void ProcessRequest_ShouldPreserveLegacyDefaultsAndSnapshotOptionalInputs()
     {
         var input = Encoding.UTF8.GetBytes("snapshot");

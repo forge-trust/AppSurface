@@ -18,6 +18,8 @@ public sealed class CoverageFanInV3DiffTests
     [InlineData("sha1", "rename")]
     [InlineData("sha1", "deletion")]
     [InlineData("sha1", "empty")]
+    [InlineData("sha1", "tag-object")]
+    [InlineData("sha256", "tag-object")]
     public async Task RealPinnedObjectViewsHaveExactPortableCorrespondence(string format, string shape)
     {
         using var temp = TestDirectory.Create();
@@ -51,10 +53,21 @@ public sealed class CoverageFanInV3DiffTests
             ReportProfileId = "coverlet-collector-cobertura-v1",
             Gate = new(CoverageGateMode.AggregateAndPatch, DiffBase: basis)
         };
+        if (shape == "tag-object")
+        {
+            await Git("tag", "-a", "baseline", basis, "-m", "annotated baseline");
+            policy = policy with { Gate = policy.Gate with { DiffBase = await Git("rev-parse", "refs/tags/baseline") } };
+        }
         var request = new CoverageFanInEngineRequest(new(CoveragePolicyEncoding.ToElement(policy), CoveragePolicyEncoding.Digest(policy)), root);
         var context = new CoverageFanInDiffContext(request, new CoverageFanInBudget(policy.Limits?.TotalBytes ?? 1L << 32));
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await context.InitializeAsync(deadline.Token);
+        if (shape == "tag-object")
+        {
+            var refusal = await Assert.ThrowsAsync<CoverageFanInEvidenceException>(() => context.ReadAsync(deadline.Token));
+            Assert.Equal("identity-mismatch", refusal.Cause);
+            return;
+        }
         var input = await context.ReadAsync(deadline.Token);
         var changes = CoverageFanInDiffParser.Parse(input);
         Assert.Equal(basis, input.RequestedBase); Assert.Equal(basis, input.MergeBase); Assert.Equal(head, input.Head);

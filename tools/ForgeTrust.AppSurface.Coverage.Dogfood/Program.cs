@@ -197,10 +197,23 @@ internal static class CoverageDogfood
         foreach (var arg in arguments) process.StartInfo.ArgumentList.Add(arg);
         process.Start();
         var stdout = process.StandardOutput.ReadToEndAsync(deadline.Token); var stderr = process.StandardError.ReadToEndAsync(deadline.Token);
-        try { await process.WaitForExitAsync(deadline.Token); }
+        long? peakWorkingSet = null;
+        try
+        {
+            var exit = process.WaitForExitAsync(deadline.Token);
+            while (!exit.IsCompleted)
+            {
+                // Some runtimes cannot query a reaped child. Resource telemetry is optional and
+                // must not turn a successful v2/v3 command into a failed operation.
+                if (CoverageProcessTelemetry.TryGetPeakWorkingSet(process) is { } observed)
+                    peakWorkingSet = Math.Max(peakWorkingSet ?? 0, observed);
+                await Task.WhenAny(exit, Task.Delay(25, deadline.Token));
+            }
+            await exit;
+        }
         catch { try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } throw; }
         var result = await stdout; var errors = await stderr;
-        measurements?.Record(stage, Stopwatch.GetElapsedTime(started).TotalMilliseconds, process.PeakWorkingSet64, process.ExitCode);
+        measurements?.Record(stage, Stopwatch.GetElapsedTime(started).TotalMilliseconds, peakWorkingSet, process.ExitCode);
         if (process.ExitCode != 0 || result.Length > 1048576 || errors.Length > 1048576) throw new InvalidDataException();
         return result.Trim();
     }
@@ -252,8 +265,9 @@ internal static class CoverageDogfood
         var expected = new CoverageFanInExpected(policy, string.Empty);
         var context = new CoverageFanInDiffContext(new CoverageFanInEngineRequest(expected, root), budget);
         var started = Stopwatch.GetTimestamp();
-        await context.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
-        var diff = await context.ReadAsync(CancellationToken.None).ConfigureAwait(false);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(limits.OperationSeconds));
+        await context.InitializeAsync(deadline.Token).ConfigureAwait(false);
+        var diff = await context.ReadAsync(deadline.Token).ConfigureAwait(false);
         measurements.ExpectedPatchBudgetBytes = limits.TotalBytes - budget.Remaining;
         measurements.Record("expected-patch-diff", Stopwatch.GetElapsedTime(started).TotalMilliseconds,
             null, 0);
@@ -369,9 +383,10 @@ internal static class CoverageDogfood
             .Where(path => !string.Equals(Path.GetFileName(path), ShadowProofFileName, StringComparison.Ordinal))
             .Select(path => new FileInfo(path)).ToArray();
         var outputBytes = outputFiles.Aggregate(0L, (sum, file) => checked(sum + file.Length));
-        var ownPeak = Process.GetCurrentProcess().PeakWorkingSet64;
-        var observedPeaks = measurements.Processes.Where(x => x.PeakWorkingSetBytes.HasValue)
-            .Select(x => x.PeakWorkingSetBytes!.Value).Append(ownPeak).ToArray();
+        using var ownProcess = Process.GetCurrentProcess();
+        var ownPeak = CoverageProcessTelemetry.TryGetPeakWorkingSet(ownProcess);
+        var observedPeaks = measurements.Processes.Where(x => x.PeakWorkingSetBytes is > 0)
+            .Select(x => x.PeakWorkingSetBytes!.Value).Concat(ownPeak is { } ownValue ? [ownValue] : Array.Empty<long>()).ToArray();
         var commandsWithinDeadline = measurements.Processes.All(x => x.ElapsedMilliseconds <= policy.Limits!.OperationSeconds * 1000d);
         var proof = new
         {
@@ -408,7 +423,7 @@ internal static class CoverageDogfood
             process = new
             {
                 peakWorkingSetMeasurement = "Maximum observed Process.PeakWorkingSet64 for this adapter and its direct child processes; child Git processes supervised inside the CLI are not sampled individually.",
-                peakWorkingSetBytes = observedPeaks.Max(),
+                peakWorkingSetBytes = observedPeaks.Length == 0 ? (long?)null : observedPeaks.Max(),
                 measuredProcessCount = observedPeaks.Length,
                 elapsedMilliseconds = Stopwatch.GetElapsedTime(measurements.StartedAt).TotalMilliseconds,
                 commandsWithinOperationDeadline = commandsWithinDeadline,

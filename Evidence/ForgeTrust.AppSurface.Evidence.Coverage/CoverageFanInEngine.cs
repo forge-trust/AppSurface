@@ -135,7 +135,7 @@ internal static partial class CoverageFanInEngine
                 var cause = exception is CoverageExecutionException { ExitCode: 124 } ? "deadline-exceeded"
                     : exception is ArgumentException ? "invalid-policy" : exception is InvalidDataException or XmlException or FormatException or OverflowException or JsonException or KeyNotFoundException
                         ? "report-invalid" : "unexpected-failure";
-                return state.Result(outcome, [new(code == "ASCOV301" ? "ASCOV302" : code, operation, operation,
+                return state.Result(outcome, [new(code, operation, operation,
                     "Preserve current output and reconcile effects; correct supported evidence or escalate the operation ID to the maintainer before one fresh retry.")
                 { Cause = cause, Context = V3Context(request, cause == "unexpected-failure" ? exception.GetType().Name : null), Trace = cause == "unexpected-failure" ? SafeV3Trace(exception) : null }]);
             }

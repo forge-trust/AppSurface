@@ -133,12 +133,12 @@ public sealed record CoveragePatchMetricSet(CoveragePatchMetricResult Line, Cove
 /// </remarks>
 public sealed record CoveragePatchApplicability(CoveragePatchMetricSet Primary, CoveragePatchMetricSet Composed);
 
-/// <summary>Capture successful trusted producer artifacts, native collector facts, or portable v2 evidence into local custody.</summary>
+/// <summary>Capture successful trusted producer artifacts, native collector facts, or homogeneous portable evidence into local custody.</summary>
 /// <remarks>
 /// Supply exactly one input form: a normalized primary report and its successful timings; a single-project native
 /// capture with <see cref="RawCoveragePath"/>, optional <see cref="CoveragePath"/>, and no timings; an indexed native
 /// capture with <see cref="RawCoveragePaths"/> and <see cref="TimingsPath"/>, but no <see cref="CoveragePath"/>; or
-/// a portable-v2 import with no report or timing selectors. Native measurements are derived from original collector
+/// a portable import matching the selected policy version, with no report or timing selectors. Native measurements are derived from original collector
 /// class and method facts. A supplied <see cref="CoveragePath"/> on a single-project native capture is bounded
 /// compatibility input, not the measurement source. Raw collector root summaries remain in the byte-exact originals,
 /// but canonical native root totals derive from serialized class-line points; method points are retained for patch measurement. The primary aggregate gate remains

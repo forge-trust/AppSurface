@@ -158,6 +158,14 @@ internal sealed class CoverageFanInDiffContext(CoverageFanInEngineRequest reques
         var length = format switch { "sha1" => 40, "sha256" => 64, _ => throw Fail("unsupported-diff", "Use a qualified sha1 or sha256 Git object format.") };
         if (!IsOid(head, length) || !IsOid(requestedBase, length) || !IsOid(request.Expected.Source.GetProperty("tree").GetString()!, length))
             throw Fail("identity-mismatch", "Use full source/base object IDs from the matching repository object format.");
+        // merge-base peels annotated tags. The public contract requires the supplied object itself to
+        // be a commit, so never publish a tag object's ID under requestedBaseCommit.
+        string baseType;
+        try { baseType = (await RunAsync(["cat-file", "-t", requestedBase], token).ConfigureAwait(false)).TrimEnd('\r', '\n'); }
+        catch (CoverageFanInEvidenceException exception) when (exception.Cause == "unsupported-diff")
+        { throw Fail("merge-base-unavailable", "Restore the complete pinned base commit object before regenerating; no automatic fetch is performed."); }
+        if (baseType != "commit")
+            throw Fail("identity-mismatch", "Resolve the requested base to its full commit object ID before freezing the v3 policy.");
         string mergeBases;
         try { mergeBases = await RunAsync(["merge-base", "--all", requestedBase, head], token).ConfigureAwait(false); }
         catch (CoverageFanInEvidenceException exception) when (exception.Cause == "unsupported-diff")

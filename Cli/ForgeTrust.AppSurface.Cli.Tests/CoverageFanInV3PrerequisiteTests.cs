@@ -50,6 +50,46 @@ public sealed class CoverageFanInV3PrerequisiteTests
         Assert.DoesNotContain(fixture.Runner.Requests, request => request.Arguments.Contains("fetch", StringComparer.Ordinal));
     }
 
+    [Theory]
+    [InlineData("tag")]
+    [InlineData("tree")]
+    [InlineData("blob")]
+    public async Task ReadRefusesBaseObjectsThatAreNotCommitsBeforeMergeBase(string objectType)
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.BaseObjectType = objectType;
+
+        await AssertCauseAsync(() => fixture.ReadAsync(), "identity-mismatch");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.Arguments.Contains("merge-base", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReadRefusesMissingBaseObjectWithHistoryRecovery()
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.BaseObjectMissing = true;
+
+        await AssertCauseAsync(() => fixture.ReadAsync(), "merge-base-unavailable");
+    }
+
+    [Fact]
+    public async Task InvalidV3EngineRequestKeepsThePolicyDiagnosticCode()
+    {
+        var policy = CoverageFanInPolicyTests.Policy() with
+        {
+            ContractVersion = 3,
+            ReportProfileId = "coverlet-collector-cobertura-v1"
+        };
+        var expected = new CoverageFanInExpected(CoveragePolicyEncoding.ToElement(policy), CoveragePolicyEncoding.Digest(policy));
+        var result = await CoverageFanInEngine.ExecuteAsync("capture", new(expected, " "),
+            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+
+        Assert.Equal("Rejected", result.Outcome);
+        Assert.Equal("ASCOV301", Assert.Single(result.Diagnostics).Code);
+        Assert.Equal("invalid-policy", Assert.Single(result.Diagnostics).Cause);
+        Assert.False(result.Created);
+    }
+
     [Fact]
     public async Task ReadRefusesMultipleMergeBases()
     {
@@ -67,7 +107,7 @@ public sealed class CoverageFanInV3PrerequisiteTests
             $":000000 100644 {new string('0', 40)} {NewBlob} A\0file-{index}.cs\0"));
 
         await AssertCauseAsync(() => fixture.ReadAsync(), "limit-exceeded");
-        Assert.DoesNotContain(fixture.Runner.Requests, request => request.Arguments.Contains("cat-file", StringComparer.Ordinal));
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.Arguments.Any(argument => argument.StartsWith("--batch-check", StringComparison.Ordinal)));
     }
 
     [Theory]
@@ -200,6 +240,8 @@ public sealed class CoverageFanInV3PrerequisiteTests
         internal string ObjectFormat { get; set; } = "sha1";
         internal string MergeBases { get; set; } = BaseCommit + "\n";
         internal string Raw { get; set; } = $":100644 100644 {OldBlob} {NewBlob} M\0source.cs\0";
+        internal string BaseObjectType { get; set; } = "commit";
+        internal bool BaseObjectMissing { get; set; }
         internal string? BatchCorruption { get; set; }
         internal bool TruncatePatch { get; set; }
 
@@ -214,6 +256,8 @@ public sealed class CoverageFanInV3PrerequisiteTests
             if (args.Contains("--git-common-dir", StringComparer.Ordinal)) return Task.FromResult(Result(".git\n"));
             if (args.Contains("--show-object-format", StringComparer.Ordinal)) return Task.FromResult(Result(ObjectFormat + "\n"));
             if (args.Contains("merge-base", StringComparer.Ordinal)) return Task.FromResult(Result(MergeBases));
+            if (args.Contains("cat-file", StringComparer.Ordinal) && args.Contains("-t", StringComparer.Ordinal))
+                return Task.FromResult(Result(BaseObjectMissing ? string.Empty : BaseObjectType + "\n", BaseObjectMissing ? 1 : 0));
             if (args.Contains("cat-file", StringComparer.Ordinal)) return Task.FromResult(Result(BatchOutput(request)));
             if (args.Contains("--raw", StringComparer.Ordinal)) return Task.FromResult(Result(Raw));
             if (args.Contains("--patch", StringComparer.Ordinal))
