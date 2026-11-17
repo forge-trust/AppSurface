@@ -110,7 +110,7 @@ public sealed class CoverageFanInConsumerIntegrationTests
         Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
         Assert.Equal(declaration.AssertionIds, result.SatisfiedAssertionIds);
         var artifact = Assert.Single(writer.WrittenArtifacts);
-        using var delivered = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, artifact.RelativePath)));
+        using var delivered = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, artifact.RelativePath)));
         var value = delivered.RootElement;
         Assert.Equal(3, value.GetProperty("contractVersion").GetInt32());
         Assert.Equal(CoveragePolicyEncoding.InitialReportProfileId, value.GetProperty("reportProfileId").GetString());
@@ -216,7 +216,7 @@ public sealed class CoverageFanInConsumerIntegrationTests
         Assert.Equal(covered ? EvidenceProducerOutcome.Passed : EvidenceProducerOutcome.Failed, result.Outcome);
         Assert.Equal(covered ? 1 : 0, result.SatisfiedAssertionIds.Count);
         var artifact = Assert.Single(writer.WrittenArtifacts);
-        using var delivered = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, artifact.RelativePath)));
+        using var delivered = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, artifact.RelativePath)));
         Assert.Equal(JsonValueKind.Null, delivered.RootElement.GetProperty("patchApplicability").ValueKind);
         Assert.Equal(covered, delivered.RootElement.GetProperty("accepted").GetBoolean());
         Assert.Equal(covered, File.Exists(Path.Join(fixture.Accepted, "acceptance.json")));
