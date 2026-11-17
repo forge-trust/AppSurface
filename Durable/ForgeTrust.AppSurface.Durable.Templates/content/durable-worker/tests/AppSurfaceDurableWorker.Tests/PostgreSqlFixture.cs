@@ -846,15 +846,20 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         sqlPath,
     ];
 
-    private static async Task RequireDockerAsync()
+    /// <summary>Requires a live daemon response within the existing Docker probe budget.</summary>
+    /// <param name="run">Optional command seam for prerequisite failure and command-selection tests.</param>
+    /// <remarks>
+    /// Query the server version directly. Docker info also enumerates CLI plugins, whose metadata
+    /// processes can stall independently of daemon availability. Never substitute a client-only version.
+    /// </remarks>
+    internal static async Task RequireDockerAsync(
+        Func<IReadOnlyList<string>, TimeSpan, Task<BoundedProcessResult>>? run = null)
     {
+        run ??= (arguments, budget) => BoundedProcessRunner.RunAsync("docker", arguments, environment: null, budget);
         BoundedProcessResult result;
         try
         {
-            result = await BoundedProcessRunner.RunAsync(
-                "docker",
-                ["info", "--format", "{{.ServerVersion}}"],
-                environment: null,
+            result = await run(["version", "--format", "{{.Server.Version}}"],
                 FixtureBudgets.DockerProbe).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is InvalidOperationException or TimeoutException)

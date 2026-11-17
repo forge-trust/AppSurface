@@ -342,3 +342,69 @@ public sealed partial class TypedWorkScenarioTests
     [JsonSerializable(typeof(ScenarioResult))]
     private sealed partial class ScenarioJsonContext : JsonSerializerContext;
 }
+
+public sealed partial class TypedWorkScenarioTests
+{
+    [Fact]
+    public async Task A_live_daemon_does_not_require_cli_plugin_metadata()
+    {
+        var calls = 0;
+
+        await PostgreSqlFixture.RequireDockerAsync((arguments, budget) =>
+        {
+            calls++;
+            Assert.Equal(TimeSpan.FromSeconds(5), budget);
+            // Model an unrelated plugin metadata stall without a timing-dependent sleep.
+            if (arguments[0] == "info") throw new TimeoutException("private plugin metadata");
+            Assert.Equal(["version", "--format", "{{.Server.Version}}"], arguments);
+            return Task.FromResult(new BoundedProcessResult(0, "29.0.0\n", "", false, false));
+        });
+
+        Assert.Equal(1, calls);
+    }
+
+    [Theory]
+    [InlineData(1, "29.0.0", false, false)]
+    [InlineData(0, "", false, false)]
+    [InlineData(0, " \r\n", false, false)]
+    [InlineData(0, "29.0.0", true, false)]
+    [InlineData(0, "29.0.0", false, true)]
+    public async Task Unavailable_or_incomplete_daemon_response_is_rejected(
+        int exitCode, string output, bool stdoutTruncated, bool stderrTruncated)
+    {
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            PostgreSqlFixture.RequireDockerAsync((_, _) => Task.FromResult(
+                new BoundedProcessResult(exitCode, output, "private daemon output", stdoutTruncated, stderrTruncated))));
+
+        Assert.Contains("daemon-unavailable", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Launch_failure_or_probe_timeout_is_rejected_without_private_details(bool timeout)
+    {
+        Exception cause = timeout
+            ? new TimeoutException("private timeout detail")
+            : new InvalidOperationException("private launch detail");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            PostgreSqlFixture.RequireDockerAsync((_, _) => Task.FromException<BoundedProcessResult>(cause)));
+
+        Assert.Contains(cause.GetType().Name, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private", error.Message, StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public async Task Unexpected_failure_is_not_converted_to_daemon_unavailability()
+    {
+        var failure = new IOException("unexpected adapter failure");
+
+        var error = await Record.ExceptionAsync(() =>
+            PostgreSqlFixture.RequireDockerAsync((_, _) => Task.FromException<BoundedProcessResult>(failure)));
+
+        Assert.Same(failure, error);
+    }
+}
