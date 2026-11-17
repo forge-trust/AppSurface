@@ -9,6 +9,43 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class NativeValidationJsonTests
 {
+    [Theory]
+    [InlineData("missing-profile")]
+    [InlineData("null-profile")]
+    [InlineData("missing-proof")]
+    [InlineData("missing-diagnostic")]
+    [InlineData("case-variant")]
+    [InlineData("duplicate")]
+    [InlineData("case-variant-duplicate")]
+    public void Receipt_ReadRejectsMissingOrAmbiguousMembersEvenWithAValidDigest(string defect)
+    {
+        var (_, receipt) = CreateRecipeReceipt();
+        var json = JsonNode.Parse(NativeValidationReceiptCodec.Serialize(receipt))!.AsObject();
+        switch (defect)
+        {
+            case "missing-profile": json.Remove("ProfileId"); break;
+            case "null-profile": json["ProfileId"] = null; break;
+            case "missing-proof": json.Remove("EvidenceHostProofProduced"); break;
+            case "missing-diagnostic": json["Journeys"]![0]!.AsObject().Remove("Diagnostic"); break;
+            case "case-variant": json["profileId"] = json["ProfileId"]!.DeepClone(); json.Remove("ProfileId"); break;
+            case "duplicate":
+            case "case-variant-duplicate": break;
+            default: throw new InvalidOperationException("Unknown receipt shape defect.");
+        }
+
+        var bound = JsonSerializer.Deserialize<NativeValidationReceipt>(json.ToJsonString(),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        json["ReceiptDigest"] = EvidenceDigest.CanonicalSha256(bound with { ReceiptDigest = string.Empty });
+        var text = json.ToJsonString();
+        if (defect is "duplicate" or "case-variant-duplicate")
+        {
+            var name = defect == "duplicate" ? "RunOutcome" : "runOutcome";
+            text = text[..^1] + ",\"" + name + "\":\"passed\"}";
+        }
+
+        Assert.Throws<JsonException>(() => NativeValidationReceiptCodec.Deserialize(Encoding.UTF8.GetBytes(text)));
+    }
+
     [Fact]
     public void Receipt_RejectsUnknownSchemaAndCannotSatisfyEvidenceManifestContract()
     {
@@ -134,7 +171,16 @@ public sealed class NativeValidationJsonTests
             default: throw new InvalidOperationException("Unknown receipt defect.");
         }
 
-        Assert.Throws<JsonException>(() => NativeValidationReceiptCodec.Deserialize(Encoding.UTF8.GetBytes(json.ToJsonString())));
+        var corruptedJson = Encoding.UTF8.GetBytes(json.ToJsonString());
+        if (defect != "digest")
+        {
+            var corruptedReceipt = JsonSerializer.Deserialize<NativeValidationReceipt>(corruptedJson)!;
+            var unsealed = corruptedReceipt with { ReceiptDigest = string.Empty };
+            corruptedReceipt = unsealed with { ReceiptDigest = EvidenceDigest.CanonicalSha256(unsealed) };
+            corruptedJson = EvidenceCanonicalJson.Serialize(corruptedReceipt);
+        }
+
+        Assert.Throws<JsonException>(() => NativeValidationReceiptCodec.Deserialize(corruptedJson));
     }
 
     [Fact]
@@ -142,9 +188,14 @@ public sealed class NativeValidationJsonTests
     {
         var (plan, receipt) = CreateRecipeReceipt();
 
-        Assert.False(NativeValidationReceiptCodec.Verify(plan with { PolicySnapshot = null }, receipt));
-        Assert.False(NativeValidationReceiptCodec.Verify(plan with { PolicyDigest = new string('0', 64) }, receipt));
-        Assert.False(NativeValidationReceiptCodec.Verify(plan with { ChangedPaths = [new NormalizedDiffPath("Other.cs")] }, receipt));
+        var missingSnapshot = ResealPlan(plan with { PolicySnapshot = null });
+        Assert.False(NativeValidationReceiptCodec.Verify(missingSnapshot, ResealReceiptForPlan(receipt, missingSnapshot)));
+
+        var changedPolicyDigest = ResealPlan(plan with { PolicyDigest = new string('0', 64) });
+        Assert.False(NativeValidationReceiptCodec.Verify(changedPolicyDigest, ResealReceiptForPlan(receipt, changedPolicyDigest)));
+
+        var changedDiff = ResealPlan(plan with { ChangedPaths = [new NormalizedDiffPath("Other.cs")] });
+        Assert.False(NativeValidationReceiptCodec.Verify(changedDiff, ResealReceiptForPlan(receipt, changedDiff)));
     }
 
     [Theory]
@@ -294,6 +345,8 @@ public sealed class NativeValidationJsonTests
 
     [Theory]
     [InlineData("unknown-outcome")]
+    [InlineData("null-profile")]
+    [InlineData("blank-profile")]
     [InlineData("empty-selection")]
     [InlineData("duplicate-journey")]
     [InlineData("cleanup-diagnostic-after-success")]
@@ -307,6 +360,8 @@ public sealed class NativeValidationJsonTests
         var changed = defect switch
         {
             "unknown-outcome" => receipt with { Journeys = [journey with { Outcome = "invented" }] },
+            "null-profile" => receipt with { ProfileId = null! },
+            "blank-profile" => receipt with { ProfileId = " " },
             "empty-selection" => receipt with { Journeys = [] },
             "duplicate-journey" => receipt with { Journeys = [journey, journey] },
             "cleanup-diagnostic-after-success" => receipt with { CleanupDiagnostic = "cleanup failed" },
@@ -329,6 +384,18 @@ public sealed class NativeValidationJsonTests
         var journey = new NativeValidationJourneyReceipt(declaration.Id, "passed", declaration.AssertionIds, declaration.AssertionIds, [], [], null, 1);
         var receipt = NativeValidationReceiptCodec.Create(plan, new string('b', 64), [journey], true, null, false);
         return (plan, receipt);
+    }
+
+    private static EvidencePlan ResealPlan(EvidencePlan plan)
+    {
+        var unsealed = plan with { PlanDigest = string.Empty };
+        return unsealed with { PlanDigest = EvidenceDigest.CanonicalSha256(unsealed) };
+    }
+
+    private static NativeValidationReceipt ResealReceiptForPlan(NativeValidationReceipt receipt, EvidencePlan plan)
+    {
+        var unsealed = receipt with { PlanDigest = plan.PlanDigest, ReceiptDigest = string.Empty };
+        return unsealed with { ReceiptDigest = EvidenceDigest.CanonicalSha256(unsealed) };
     }
 
     [Fact]

@@ -67,7 +67,7 @@ internal static class Program
                 Direct --package mode emits a native-validation-receipt with no EvidenceHost claim or authority.
                 Repository --operation paths retain their policy-backed manifest and verification contracts.
                 Output is caller-owned durable data; only freshly owned scratch is cleaned.
-                Exit zero requires every selected journey, assertion, artifact and cleanup to pass.
+                Direct --package mode: exit zero requires every selected journey, assertion, artifact and cleanup to pass.
                 See tools/ForgeTrust.AppSurface.Evidence.Validation/README.md.
                 """);
             return args.Length == 0 ? 2 : 0;
