@@ -508,7 +508,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
                 File.AppendAllText(timings, new string(' ', CoverageEvidenceInventory.MaximumMetadataBytes));
             }
             if (failure == "corrupt-run-manifest") File.WriteAllText(runManifestPath, "broken json");
-            if (failure == "unsafe-attachment") File.WriteAllText(Path.Join(runner.RawDirectory!, "CON.txt"), "unsafe retained name");
+            if (failure == "unsafe-attachment") File.WriteAllText(Path.Join(runner.RawDirectory!, "cafe\u0301.txt"), "unsafe retained name");
             if (failure == "file-count")
                 for (var index = 0; index < 129; index++) File.WriteAllText(Path.Join(runner.RawDirectory!, $"report-{index}.txt"), "retained");
         }
@@ -536,6 +536,8 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         }
         Assert.Null(execution.Inventory);
         Assert.NotNull(execution.InventoryIneligibilityReason);
+        if (failure == "unsafe-attachment")
+            Assert.Equal("inventory-path-invalid", execution.InventoryIneligibilityReason);
         if (failure.StartsWith("project-schema-", StringComparison.Ordinal) || failure == "project-slug-mismatch")
             Assert.Equal("inventory-project-manifest-mismatch", execution.InventoryIneligibilityReason);
         Assert.Null(execution.Result.Artifacts);

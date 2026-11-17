@@ -283,8 +283,8 @@ public sealed class FirstDurableWorkTests
             var retry = phase == "postgresql-fixture-setup"
                 ? "Confirm Docker, the packaged PostgreSQL role recipe, and the disposable fixture, then rerun: dotnet test --filter FullyQualifiedName~FirstDurableWork"
                 : "Confirm the generated package graph and rerun the FirstDurableWork test";
-            _output.WriteLine(
-                $"[FirstDurableWork] failure phase={phase} code={failureCode} at={primaryFailureLocation ?? "unknown"} cause={prerequisiteCause ?? "The bounded phase did not satisfy its assertion or owned cleanup contract"}; cleanup={cleanup}; retry={retry}; docs={FirstProofLink}");
+            _output.WriteLine(FirstWorkFailureMarker.Format(
+                phase, failureCode, primaryFailureLocation, prerequisiteCause, cleanup, retry, FirstProofLink));
             throw new InvalidOperationException($"FirstDurableWork failed in phase {phase} ({failureCode}); see {FirstProofLink}.");
         }
 

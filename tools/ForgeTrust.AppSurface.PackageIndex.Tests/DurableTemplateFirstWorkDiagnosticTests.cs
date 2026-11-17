@@ -7,6 +7,40 @@ public sealed class DurableTemplateFirstWorkDiagnosticTests
     private const string Secret = "private-first-work-credential";
 
     [Theory]
+    [InlineData("docker-probe-timeout", "docker-probe-timeout")]
+    [InlineData("docker-probe-process-failure", "docker-probe-process-failure")]
+    [InlineData("docker-daemon-unavailable", "docker-daemon-unavailable")]
+    [InlineData("docker-prerequisite-unknown", null)]
+    public void Authored_fixture_marker_round_trips_closed_Docker_causes(string cause, string? expected)
+    {
+        var marker = DurableWorkerTemplate.Tests.FirstWorkFailureMarker.Format(
+            "postgresql-fixture-setup", "InvalidOperationException", "<RequireDockerAsync>d__49.MoveNext",
+            cause, "none", Secret, "https://example.invalid/first-proof");
+
+        var result = Assert.IsType<DurableTemplateFirstWorkDiagnostic>(DurableTemplateFirstWorkDiagnostic.Read(marker));
+
+        Assert.Equal("postgresql-fixture-setup", result.Phase);
+        Assert.Equal("InvalidOperationException", result.Code);
+        Assert.Equal("none", result.Cleanup);
+        Assert.Equal("docker-prerequisite", result.SetupOperation);
+        Assert.Equal(expected, result.DockerPrerequisiteCause);
+        Assert.DoesNotContain(Secret, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Authored_fixture_marker_preserves_the_ordinary_failure_without_optional_context()
+    {
+        var marker = DurableWorkerTemplate.Tests.FirstWorkFailureMarker.Format(
+            "initial-readiness", "TimeoutException", null, null, "none", "rerun proof", "https://example.invalid/first-proof");
+
+        Assert.Equal("[FirstDurableWork] failure phase=initial-readiness code=TimeoutException at=unknown "
+            + "cause=The bounded phase did not satisfy its assertion or owned cleanup contract; cleanup=none; "
+            + "retry=rerun proof; docs=https://example.invalid/first-proof", marker);
+        Assert.Equal(new DurableTemplateFirstWorkDiagnostic("initial-readiness", "TimeoutException", "none"),
+            DurableTemplateFirstWorkDiagnostic.Read(marker));
+    }
+
+    [Theory]
     [InlineData("docker-probe-timeout")]
     [InlineData("docker-probe-process-failure")]
     [InlineData("docker-daemon-unavailable")]
