@@ -4,7 +4,7 @@
 
 Start with the [EvidenceHost guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/evidencehost.md) before installing a package. Use this package directly only when you are authoring a consumer-owned producer, policy tool, or gate integration. It starts no process, discovers no test code, provisions no resources, and sends no telemetry.
 
-Canonical emitted plan and manifest snapshots are described by the versioned [1.0 JSON Schema](./schemas/evidence-contracts-1.0.schema.json) and [1.1 JSON Schema](./schemas/evidence-contracts-1.1.schema.json). These schemas use canonical PascalCase property names and are reference shape checks; the contract reader also enforces semantic graph, digest, authorization, and artifact rules. Policy authoring readers may accept case-insensitive property names, while these schemas intentionally describe canonical output only.
+Canonical emitted plan and manifest snapshots are described by the versioned [1.0 JSON Schema](https://github.com/forge-trust/AppSurface/blob/58f30b019939f4a79bd51685324ec7e070f85c04/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/schemas/evidence-contracts-1.0.schema.json) and [1.1 JSON Schema](https://github.com/forge-trust/AppSurface/blob/58f30b019939f4a79bd51685324ec7e070f85c04/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/schemas/evidence-contracts-1.1.schema.json). These schemas use canonical PascalCase property names and are reference shape checks; the contract reader also enforces semantic graph, digest, authorization, and artifact rules. Policy authoring readers may accept case-insensitive property names, while these schemas intentionally describe canonical output only.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
