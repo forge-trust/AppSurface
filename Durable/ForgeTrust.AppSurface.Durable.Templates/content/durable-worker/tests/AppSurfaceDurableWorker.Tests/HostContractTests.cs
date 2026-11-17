@@ -43,19 +43,6 @@ public sealed class HostContractTests
     private const string ValidToken = "local-token-for-host-contract-tests";
     private const string SensitiveMarker = "must-never-appear-in-a-host-response";
 
-    [Theory]
-    [InlineData("TimeoutException", "docker-probe-timeout")]
-    [InlineData("InvalidOperationException", "docker-probe-process-failure")]
-    [InlineData("daemon-unavailable", "docker-daemon-unavailable")]
-    [InlineData(SensitiveMarker, "docker-prerequisite-unknown")]
-    public void Docker_prerequisite_diagnostic_keeps_a_closed_cause_and_a_failure(string cause, string expected)
-    {
-        var failure = new PostgreSqlFixture.DockerPrerequisiteException(cause);
-
-        Assert.IsAssignableFrom<InvalidOperationException>(failure);
-        Assert.Equal(expected, failure.SafeCause);
-        Assert.DoesNotContain(SensitiveMarker, failure.SafeCause, StringComparison.Ordinal);
-    }
     private const string ActivationPath = "/private/durable/activate";
 
     [Theory]

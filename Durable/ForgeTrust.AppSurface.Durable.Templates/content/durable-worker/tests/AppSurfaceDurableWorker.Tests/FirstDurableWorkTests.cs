@@ -786,3 +786,20 @@ public sealed class GeneratedPostgreSqlActivationCollection
     /// <summary>Collection identity shared by the first proof and real activation concurrency scenarios.</summary>
     public const string Name = "generated-postgresql-activation";
 }
+
+public sealed class DockerPrerequisiteDiagnosticTests
+{
+    [Theory]
+    [InlineData("TimeoutException", "docker-probe-timeout")]
+    [InlineData("InvalidOperationException", "docker-probe-process-failure")]
+    [InlineData("daemon-unavailable", "docker-daemon-unavailable")]
+    [InlineData("must-never-appear-in-a-host-response", "docker-prerequisite-unknown")]
+    public void Docker_prerequisite_diagnostic_keeps_a_closed_cause_and_a_failure(string cause, string expected)
+    {
+        var failure = new PostgreSqlFixture.DockerPrerequisiteException(cause);
+
+        Assert.IsAssignableFrom<InvalidOperationException>(failure);
+        Assert.Equal(expected, failure.SafeCause);
+        Assert.DoesNotContain("must-never-appear-in-a-host-response", failure.SafeCause, StringComparison.Ordinal);
+    }
+}
