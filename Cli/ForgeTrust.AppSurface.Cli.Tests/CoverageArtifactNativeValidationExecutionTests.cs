@@ -13,6 +13,149 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
     private const string AssertionId = "ordinary/assertion@1";
     private static readonly string InputDigest = new('a', 64);
 
+    [Theory]
+    [InlineData("success")]
+    [InlineData("io")]
+    [InlineData("fatal")]
+    public async Task ArtifactVerification_SettledFaultIsObservedWhenTheDeadlineWins(string outcome)
+    {
+        Exception? failure = outcome switch
+        {
+            "success" => null,
+            "io" => new IOException("settled artifact failure"),
+            "fatal" => new AccessViolationException("settled fatal artifact failure"),
+            _ => throw new ArgumentOutOfRangeException(nameof(outcome)),
+        };
+        var execution = NativeValidationExecution.VerifyArtifactsAsync(
+            _ => failure is null ? Task.FromResult(true) : Task.FromException<bool>(failure),
+            NativeValidationExecution.MaximumJoinAllowance,
+            async (work, token) =>
+            {
+                await work.ContinueWith(static _ => { }, CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                throw new OperationCanceledException(token);
+            });
+
+        if (outcome == "fatal")
+        {
+            Assert.Same(failure, await Record.ExceptionAsync(() => execution));
+        }
+        else
+        {
+            Assert.False(await execution);
+        }
+    }
+
+    [Theory]
+    [InlineData("success")]
+    [InlineData("io")]
+    [InlineData("fatal")]
+    public async Task JoinAsync_CompletionAfterWaitTimeoutPreservesTheOriginalFaultAndDeadline(string outcome)
+    {
+        Exception? failure = outcome switch
+        {
+            "success" => null,
+            "io" => new IOException("settled cleanup failure"),
+            "fatal" => new AccessViolationException("settled fatal cleanup failure"),
+            _ => throw new ArgumentOutOfRangeException(nameof(outcome)),
+        };
+        var work = failure is null ? Task.CompletedTask : Task.FromException(failure);
+        var timeout = new TimeoutException("The deadline won immediately before the work settled.");
+
+        var observed = await Record.ExceptionAsync(() => NativeValidationExecution.JoinAsync(
+            work, NativeValidationExecution.MaximumJoinAllowance, () => Task.FromException(timeout)));
+
+        Assert.Same(failure ?? timeout, observed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_FatalDisposalFaultPropagatesThroughEitherDisposalContract(bool asynchronous)
+    {
+        using var directory = new TemporaryDirectory();
+        var plan = ResolvePlan();
+        var fatal = new AccessViolationException("fatal cleanup failure");
+        var produce = new Func<EvidenceProducerContext, CancellationToken, ValueTask<EvidenceProducerResult>>((_, _) =>
+            ValueTask.FromResult(new EvidenceProducerResult(ProducerId, EvidenceProducerOutcome.Failed, [])));
+        IEvidenceProducer producer = asynchronous
+            ? new FixedRecipeProducer(ProducerId, produce, () => ValueTask.FromException(fatal))
+            : new FixedSyncDisposableProducer(ProducerId, produce, () => throw fatal);
+
+        var observed = await Record.ExceptionAsync(() => NativeValidationExecution.ExecuteAsync(
+            plan, [producer], directory.Root, InputDigest, CancellationToken.None));
+
+        Assert.Same(fatal, observed);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task StalledArtifactVerification_FailsWithoutWaitingForLateReadCompletion(bool synchronousOpen, bool lateFault)
+    {
+        var started = NewSignal();
+        var release = NewSignal();
+        var finished = NewSignal();
+        var verificationToken = CancellationToken.None;
+        var tokenUsableAfterTimeout = false;
+        var verification = Task.Run(() => NativeValidationExecution.VerifyArtifactsAsync(async token =>
+        {
+            verificationToken = token;
+            started.TrySetResult();
+            try
+            {
+                if (synchronousOpen) release.Task.GetAwaiter().GetResult();
+                else await release.Task;
+                using var registration = token.Register(static () => { });
+                tokenUsableAfterTimeout = token.WaitHandle is not null;
+                if (lateFault) throw new IOException("late artifact read failure");
+                return true;
+            }
+            finally
+            {
+                finished.TrySetResult();
+            }
+        }, TimeSpan.FromMilliseconds(50)));
+
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(await verification.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.True(verificationToken.IsCancellationRequested);
+            Assert.False(finished.Task.IsCompleted);
+            Assert.NotNull(verificationToken.WaitHandle);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await finished.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            try { await verification.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (IOException) when (lateFault) { }
+        }
+
+        Assert.True(tokenUsableAfterTimeout);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ArtifactVerification_NonFatalReadFailureCannotPass(bool cancelled)
+    {
+        Assert.False(await NativeValidationExecution.VerifyArtifactsAsync(_ => Task.FromException<bool>(
+            cancelled ? new OperationCanceledException() : new IOException("artifact read failed")),
+            NativeValidationExecution.MaximumJoinAllowance));
+    }
+
+    [Fact]
+    public async Task ArtifactVerification_FatalReadFailurePropagates()
+    {
+        await Assert.ThrowsAsync<AccessViolationException>(() => NativeValidationExecution.VerifyArtifactsAsync(
+            _ => Task.FromException<bool>(new AccessViolationException("fatal artifact read failure")),
+            NativeValidationExecution.MaximumJoinAllowance));
+    }
+
     [Fact]
     public async Task ExecuteAsync_RequiredAssertionAndArtifactPassWithoutEvidenceHostClaim()
     {
@@ -34,7 +177,11 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
         Assert.Equal("none", receipt.EvidenceHostClaim);
         Assert.Equal("none", receipt.EvidenceHostEligibility);
         Assert.False(receipt.EvidenceHostProofProduced);
-        Assert.False(NativeValidationReceiptCodec.Verify(plan, receipt with { EvidenceHostClaim = "targeted-complete" }));
+        var authorityBearing = receipt with { EvidenceHostClaim = "targeted-complete" };
+        Assert.False(NativeValidationReceiptCodec.Verify(plan, authorityBearing with
+        {
+            ReceiptDigest = EvidenceDigest.CanonicalSha256(authorityBearing with { ReceiptDigest = string.Empty }),
+        }));
     }
 
     [Theory]
@@ -663,19 +810,24 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
         Assert.Empty(receipt.Journeys.Single().SatisfiedAssertionIds);
     }
 
-    [Fact]
-    public async Task ExecuteAsync_BoundsLongProducerDiagnosticBeforePublishingReceipt()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_BoundsLongProducerDiagnosticBeforePublishingReceipt(bool splitSurrogatePair)
     {
         using var directory = new TemporaryDirectory();
         var plan = ResolvePlan();
+        var diagnostic = splitSurrogatePair ? new string('x', 2047) + "\ud83d\ude80tail" : new string('x', 3000);
         var producer = new FixedRecipeProducer(ProducerId, (_, _) => ValueTask.FromResult(
-            new EvidenceProducerResult(ProducerId, EvidenceProducerOutcome.Failed, [], new string('x', 3000))));
+            new EvidenceProducerResult(ProducerId, EvidenceProducerOutcome.Failed, [], diagnostic)));
 
         var receipt = await ExecuteAsync(plan, producer, directory.Root);
 
         Assert.True(NativeValidationReceiptCodec.Verify(plan, receipt));
         Assert.Equal("failed", receipt.RunOutcome);
         Assert.Equal(NativeValidationReceiptCodec.MaximumDiagnosticCharacters, receipt.Journeys.Single().Diagnostic!.Length);
+        var roundTrip = NativeValidationReceiptCodec.Deserialize(NativeValidationReceiptCodec.Serialize(receipt));
+        Assert.True(NativeValidationReceiptCodec.Verify(plan, roundTrip));
     }
 
     private static Task<NativeValidationReceipt> ExecuteAsync(
@@ -776,8 +928,10 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
         {
             await task.WaitAsync(TimeSpan.FromSeconds(2));
         }
-        catch (Exception)
+        catch (NativeValidationUnjoinedWorkException)
         {
+            // The test already asserted this terminal failure before releasing the owned callback.
+            _ = task.Exception;
         }
     }
 

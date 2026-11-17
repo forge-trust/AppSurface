@@ -5,6 +5,20 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
 /// <summary>Records the result of this repository's package-validation recipe, without EvidenceHost authority.</summary>
+/// <param name="SchemaVersion">The closed receipt schema version.</param>
+/// <param name="ReceiptType">The discriminator identifying this as a native package-validation receipt.</param>
+/// <param name="RunOutcome">The aggregate outcome: <c>passed</c>, <c>failed</c>, or <c>cancelled</c>.</param>
+/// <param name="ProfileId">The nonblank selected package-validation profile identifier.</param>
+/// <param name="PlanDigest">The digest of the plan against which the journeys were run.</param>
+/// <param name="InputDigest">The caller-supplied lowercase SHA-256 digest identifying recipe inputs; verification checks its shape, not its origin.</param>
+/// <param name="Journeys">The ordered result for each producer selected by the plan.</param>
+/// <param name="CleanupCompleted">Whether recipe cleanup completed successfully.</param>
+/// <param name="CleanupDiagnostic">A bounded diagnostic when cleanup did not complete.</param>
+/// <param name="CallerCancellationRequested">Whether the runner observed caller cancellation when it created this receipt.</param>
+/// <param name="EvidenceHostClaim">Always <c>none</c>; this receipt carries no EvidenceHost admission claim.</param>
+/// <param name="EvidenceHostEligibility">Always <c>none</c>; this receipt carries no EvidenceHost eligibility decision.</param>
+/// <param name="EvidenceHostProofProduced">Always <see langword="false"/>; this receipt is not EvidenceHost proof.</param>
+/// <param name="ReceiptDigest">The canonical SHA-256 digest over the receipt with this field empty.</param>
 internal sealed record NativeValidationReceipt(
     int SchemaVersion,
     string ReceiptType,
@@ -22,6 +36,14 @@ internal sealed record NativeValidationReceipt(
     string ReceiptDigest);
 
 /// <summary>Describes one selected repository-only package journey and its independently checked outputs.</summary>
+/// <param name="ProducerId">The producer identifier declared by the selected plan.</param>
+/// <param name="Outcome">The producer's known execution outcome.</param>
+/// <param name="DeclaredAssertionIds">The assertion identifiers declared by the producer.</param>
+/// <param name="SatisfiedAssertionIds">The assertion identifiers reported as satisfied.</param>
+/// <param name="DeclaredArtifactSlots">The artifact slots declared by the producer.</param>
+/// <param name="Artifacts">The independently validated results written to declared artifact slots.</param>
+/// <param name="Diagnostic">An optional bounded producer diagnostic.</param>
+/// <param name="ElapsedMilliseconds">The non-negative producer execution duration in milliseconds.</param>
 internal sealed record NativeValidationJourneyReceipt(
     string ProducerId,
     string Outcome,
@@ -33,19 +55,39 @@ internal sealed record NativeValidationJourneyReceipt(
     long ElapsedMilliseconds);
 
 /// <summary>Serializes and verifies the closed, versioned receipt emitted by the native package recipe.</summary>
+/// <remarks>
+/// A valid receipt is a package-validation result only. Its digest checks internal consistency, not
+/// authenticated origin, and grants no EvidenceHost admission authority.
+/// </remarks>
 internal static class NativeValidationReceiptCodec
 {
+    /// <summary>Gets the only receipt schema version accepted by this codec.</summary>
     internal const int CurrentSchemaVersion = 1;
+
+    /// <summary>Gets the discriminator identifying native package-validation receipts.</summary>
     internal const string ReceiptTypeName = "appsurface-native-validation-receipt";
-    // Retains an already bounded 1,024-character fan-in diagnostic plus its fixed context prefix.
+
+    /// <summary>Gets the maximum number of characters allowed in a journey diagnostic.</summary>
+    /// <remarks>The value retains an already bounded 1,024-character fan-in diagnostic plus its fixed context prefix.</remarks>
     internal const int MaximumDiagnosticCharacters = 2048;
     private const int MaximumReceiptBytes = 4 * 1024 * 1024;
     private static readonly JsonSerializerOptions ReceiptOptions = new()
     {
-        PropertyNameCaseInsensitive = true,
+        RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true,
+        AllowDuplicateProperties = false,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     };
 
+    /// <summary>Creates and seals the aggregate receipt for one completed package-validation run.</summary>
+    /// <param name="plan">The selected plan whose profile and digest are recorded.</param>
+    /// <param name="inputDigest">The caller-computed lowercase SHA-256 digest identifying recipe inputs.</param>
+    /// <param name="journeys">The ordered producer results collected by the runner.</param>
+    /// <param name="cleanupCompleted">Whether cleanup completed successfully.</param>
+    /// <param name="cleanupDiagnostic">An optional bounded cleanup diagnostic.</param>
+    /// <param name="callerCancellationRequested">The runner's final sampled caller-cancellation state.</param>
+    /// <returns>A receipt with a canonical digest and an aggregate outcome derived from the supplied results.</returns>
+    /// <remarks>This records the supplied input digest but does not independently authenticate or recompute it.</remarks>
     internal static NativeValidationReceipt Create(
         EvidencePlan plan,
         string inputDigest,
@@ -77,6 +119,14 @@ internal static class NativeValidationReceiptCodec
         return draft with { ReceiptDigest = ComputeDigest(draft) };
     }
 
+    /// <summary>Serializes a receipt as canonical JSON after recomputing its digest.</summary>
+    /// <param name="receipt">The receipt to serialize.</param>
+    /// <returns>Canonical UTF-8 JSON bytes.</returns>
+    /// <remarks>
+    /// Serialization reseals the supplied in-memory value. It therefore does not detect whether that value
+    /// was modified after an earlier seal and does not authenticate its origin. Use <see cref="Verify"/>
+    /// with the original plan to check plan binding and receipt semantics.
+    /// </remarks>
     internal static byte[] Serialize(NativeValidationReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
@@ -89,6 +139,15 @@ internal static class NativeValidationReceiptCodec
         return EvidenceCanonicalJson.Serialize(sealedReceipt);
     }
 
+    /// <summary>Reads a bounded, closed-schema receipt and validates its embedded digest.</summary>
+    /// <param name="utf8Json">The UTF-8 JSON bytes to parse.</param>
+    /// <returns>The structurally valid receipt.</returns>
+    /// <remarks>
+    /// Every constructor member must be present, with exact PascalCase names and no duplicate properties.
+    /// Null values are permitted only for nullable constructor parameters.
+    /// This method validates receipt structure and its digest, but it does not bind the receipt to a plan.
+    /// Call <see cref="Verify"/> with the original plan before relying on its reported results.
+    /// </remarks>
     internal static NativeValidationReceipt Deserialize(ReadOnlySpan<byte> utf8Json)
     {
         if (utf8Json.Length > MaximumReceiptBytes)
@@ -111,6 +170,15 @@ internal static class NativeValidationReceiptCodec
         return receipt;
     }
 
+    /// <summary>Checks receipt integrity, plan binding, producer results, and aggregate outcome consistency.</summary>
+    /// <param name="plan">The original plan against which the receipt must be checked.</param>
+    /// <param name="receipt">The parsed or otherwise supplied receipt.</param>
+    /// <returns><see langword="true"/> when the receipt is internally consistent with the plan; otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    /// Verification checks that <see cref="NativeValidationReceipt.InputDigest"/> has the expected SHA-256 shape,
+    /// but the digest is caller supplied and is not independently authenticated or compared with external inputs.
+    /// A successful result establishes package-recipe consistency only, not EvidenceHost admission authority.
+    /// </remarks>
     internal static bool Verify(EvidencePlan plan, NativeValidationReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -169,6 +237,7 @@ internal static class NativeValidationReceiptCodec
         && receipt.EvidenceHostEligibility == "none"
         && !receipt.EvidenceHostProofProduced
         && receipt.RunOutcome is "passed" or "failed" or "cancelled"
+        && !string.IsNullOrWhiteSpace(receipt.ProfileId)
         && receipt.Journeys is { Count: > 0 }
         && receipt.Journeys.All(static journey => journey is not null
             && !string.IsNullOrWhiteSpace(journey.ProducerId)
@@ -198,6 +267,11 @@ internal static class NativeValidationReceiptCodec
         && string.Equals(plan.PlanDigest,
             EvidenceDigest.CanonicalSha256(plan with { PlanDigest = string.Empty }), StringComparison.Ordinal);
 
+    /// <summary>Checks that artifact results match a producer's declared slots.</summary>
+    /// <param name="declaration">The producer declaration containing the slot definitions.</param>
+    /// <param name="artifacts">The artifact results to validate.</param>
+    /// <param name="requireRequiredSlots">When <see langword="true"/>, every required slot must have a valid result; otherwise required slots are treated as optional while undeclared or invalid results remain rejected.</param>
+    /// <returns><see langword="true"/> when the results satisfy the slot contract.</returns>
     internal static bool ValidArtifactSet(
         EvidenceProducerDeclaration declaration,
         IReadOnlyList<EvidenceArtifactResult> artifacts,

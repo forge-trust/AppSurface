@@ -7,10 +7,18 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 /// <remarks>This type is internal to the validation executable and has no protected-gate or admission role.</remarks>
 internal static class NativeValidationExecution
 {
+    /// <summary>Maximum wait for callback joins, each disposal and each final artifact verification.</summary>
     internal static readonly TimeSpan MaximumJoinAllowance = TimeSpan.FromSeconds(10);
 
     /// <summary>Executes every selected recipe and joins callbacks before disposal and final artifact verification.</summary>
-    /// <remarks>Only tests lower the join allowance. Unjoined work prevents all disposal, hashing and receipt publication.</remarks>
+    /// <param name="plan">Canonical selection and declarations for the fixed package journeys.</param>
+    /// <param name="producers">Exactly one registered callback per selected declaration.</param>
+    /// <param name="artifactsDirectory">Caller-owned root for declared artifact writers.</param>
+    /// <param name="inputDigest">Lowercase SHA-256 identity of the package and recipe settings.</param>
+    /// <param name="cancellationToken">Caller cancellation, sampled again when finalizing the receipt.</param>
+    /// <param name="loweredJoinAllowance">Test-only lower limit for joins, disposals and artifact verification.</param>
+    /// <returns>A finalized, plan-checked receipt with no EvidenceHost authority.</returns>
+    /// <remarks>Only tests lower the allowance. Unjoined producer or disposal work prevents further disposal, hashing and receipt publication.</remarks>
     internal static async Task<NativeValidationReceipt> ExecuteAsync(
         EvidencePlan plan,
         IReadOnlyList<IEvidenceProducer> producers,
@@ -90,13 +98,18 @@ internal static class NativeValidationExecution
                 {
                     if (execution is not null)
                     {
-                        try { await execution.WaitAsync(joinAllowance).ConfigureAwait(false); }
-                        catch (TimeoutException) when (!execution.IsCompleted)
+                        try { await JoinAsync(execution, joinAllowance).ConfigureAwait(false); }
+                        catch (NativeValidationUnjoinedWorkException)
                         {
                             unjoined = true;
-                            throw new NativeValidationUnjoinedWorkException();
+                            throw;
                         }
-                        catch (Exception exception) when (IsNonFatal(exception)) { }
+                        catch (Exception exception) when (IsNonFatal(exception))
+                        {
+                            // Observe the joined callback fault; cancellation/deadline below owns its outcome.
+                            // Do not log exception messages, which can contain private command or path data.
+                            _ = exception;
+                        }
                     }
                     result = cancellationToken.IsCancellationRequested
                         ? Failure(declaration.Id, EvidenceProducerOutcome.Cancelled, "The native package journey was cancelled.")
@@ -124,6 +137,7 @@ internal static class NativeValidationExecution
                     }
                     else
                     {
+                        _ = execution?.Exception;
                         producerCancellation.Dispose();
                         deadline.Dispose();
                     }
@@ -150,24 +164,12 @@ internal static class NativeValidationExecution
                     if (producer is IAsyncDisposable asyncDisposable)
                     {
                         var disposal = Task.Run(async () => await asyncDisposable.DisposeAsync().ConfigureAwait(false));
-                        try { await disposal.WaitAsync(joinAllowance).ConfigureAwait(false); }
-                        catch (TimeoutException) when (!disposal.IsCompleted)
-                        {
-                            _ = disposal.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
-                                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                            throw new NativeValidationUnjoinedWorkException();
-                        }
+                        await JoinAsync(disposal, joinAllowance).ConfigureAwait(false);
                     }
                     else if (producer is IDisposable disposable)
                     {
                         var disposal = Task.Run(disposable.Dispose);
-                        try { await disposal.WaitAsync(joinAllowance).ConfigureAwait(false); }
-                        catch (TimeoutException) when (!disposal.IsCompleted)
-                        {
-                            _ = disposal.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
-                                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                            throw new NativeValidationUnjoinedWorkException();
-                        }
+                        await JoinAsync(disposal, joinAllowance).ConfigureAwait(false);
                     }
                 }
                 catch (Exception exception) when (IsNonFatal(exception) && exception is not NativeValidationUnjoinedWorkException)
@@ -186,7 +188,7 @@ internal static class NativeValidationExecution
                 journey.Declaration, artifacts, requireRequiredSlots: journey.Result.Outcome == EvidenceProducerOutcome.Passed);
             try
             {
-                valid &= await journey.Writer.VerifyWrittenArtifactsAsync(CancellationToken.None).ConfigureAwait(false);
+                valid &= await VerifyArtifactsAsync(journey.Writer.VerifyWrittenArtifactsAsync, joinAllowance).ConfigureAwait(false);
             }
             catch (Exception exception) when (IsNonFatal(exception))
             {
@@ -221,6 +223,85 @@ internal static class NativeValidationExecution
         }
 
         return receipt;
+    }
+
+    /// <summary>Joins producer or disposal work under the runner's existing allowance.</summary>
+    /// <param name="work">The actual work whose completion and fault must be observed.</param>
+    /// <param name="allowance">The positive, capped allowance already validated by the runner.</param>
+    /// <param name="wait">Optional test-only wait boundary for forcing deadline/completion ordering.</param>
+    /// <returns>A task that succeeds only when work joins successfully within the allowance.</returns>
+    /// <remarks>
+    /// A wait timeout remains unsuccessful if work settles before inspection. Observe a settled task's
+    /// real fault before classifying the timeout so fatal faults cannot become nonfatal diagnostics.
+    /// Unsettled work still stops cleanup and receipt publication; any late fault is observed.
+    /// </remarks>
+    internal static async Task JoinAsync(Task work, TimeSpan allowance, Func<Task>? wait = null)
+    {
+        try { await (wait?.Invoke() ?? work.WaitAsync(allowance)).ConfigureAwait(false); }
+        catch (TimeoutException)
+        {
+            if (work.IsCompleted)
+            {
+                await work.ConfigureAwait(false);
+                throw;
+            }
+
+            _ = work.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw new NativeValidationUnjoinedWorkException();
+        }
+    }
+
+    /// <summary>Verifies artifacts after cleanup; exposed internally for controlled I/O-stall tests.</summary>
+    /// <param name="verify">The written-artifact verifier; production always supplies the real writer.</param>
+    /// <param name="allowance">The positive, capped allowance already validated by the runner.</param>
+    /// <param name="wait">Optional test-only wait boundary for forcing verification/deadline ordering.</param>
+    /// <returns>Whether all artifacts pass final verification.</returns>
+    /// <remarks>
+    /// An independent deadline preserves receipt finalization after caller cancellation. The outer wait
+    /// also bounds synchronous file opening. A late verifier only reads artifacts; its token source
+    /// remains owned until completion, when any fault is observed. It cannot change the failed receipt.
+    /// A verifier already settled when the wait fails is awaited so its fatal fault still propagates.
+    /// </remarks>
+    internal static async Task<bool> VerifyArtifactsAsync(Func<CancellationToken, Task<bool>> verify, TimeSpan allowance,
+        Func<Task<bool>, CancellationToken, Task<bool>>? wait = null)
+    {
+        var deadline = new CancellationTokenSource(allowance);
+        var verification = Task.Run(() => verify(deadline.Token), CancellationToken.None);
+        try
+        {
+            var verified = await (wait?.Invoke(verification, deadline.Token) ?? verification.WaitAsync(deadline.Token)).ConfigureAwait(false);
+            return verified && !deadline.IsCancellationRequested;
+        }
+        catch (Exception exception) when (IsNonFatal(exception))
+        {
+            if (verification.IsCompleted)
+            {
+                try { await verification.ConfigureAwait(false); }
+                catch (Exception settledException) when (IsNonFatal(settledException))
+                {
+                    _ = settledException;
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            if (verification.IsCompleted)
+            {
+                _ = verification.Exception;
+                deadline.Dispose();
+            }
+            else
+            {
+                _ = verification.ContinueWith(task =>
+                {
+                    _ = task.Exception;
+                    deadline.Dispose();
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
+        }
     }
 
     private static EvidenceProducerResult ValidateResult(
