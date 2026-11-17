@@ -6,6 +6,42 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageFanInIOTests
 {
     [Fact]
+    public void RejectedBudgetAdmissionsPreserveAllPreviouslyAcceptedCounters()
+    {
+        var budget = new CoverageFanInBudget(10);
+        budget.AdmitInput(2, xml: true, json: false);
+        budget.AdmitInput(3, xml: false, json: true);
+        budget.AdmitXmlRecords(4, 5);
+        budget.AdmitStagedFile(6);
+        var before = budget.Snapshot();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => budget.AdmitInput(-1, false, false));
+        Assert.Throws<ArgumentOutOfRangeException>(() => budget.AdmitInput(1, true, true));
+        Assert.Throws<ArgumentOutOfRangeException>(() => budget.AdmitXmlRecords(-1, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => budget.AdmitXmlRecords(0, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => budget.AdmitStagedFile(-1));
+        Assert.Throws<CoverageFanInEvidenceException>(() => budget.Charge(-1));
+        Assert.Throws<CoverageFanInEvidenceException>(() => budget.AdmitStagedFile(5));
+
+        Assert.Equal(before, budget.Snapshot());
+        Assert.Equal(4, budget.Remaining);
+    }
+
+    [Fact]
+    public void GeneratedOutputReadbackRequiresExactPathAndIdentityAndConsumesCreditOnce()
+    {
+        var budget = new CoverageFanInBudget(20);
+        budget.ChargeGeneratedOutput("report.xml", "identity-1", 4);
+        budget.ChargeGeneratedOutput("report.xml", "identity-1", 3);
+
+        Assert.Equal(0, budget.ConsumeGeneratedOutputReadback("other.xml", "identity-1", 7));
+        Assert.Equal(0, budget.ConsumeGeneratedOutputReadback("report.xml", "identity-2", 7));
+        Assert.Equal(5, budget.ConsumeGeneratedOutputReadback("report.xml", "identity-1", 5));
+        Assert.Equal(0, budget.ConsumeGeneratedOutputReadback("report.xml", "identity-1", 5));
+        Assert.Equal(13, budget.Remaining);
+    }
+
+    [Fact]
     public void V3ProcessesRetainedInputsAndStagingUseOneBudgetWithoutChargingCachedReadsTwice()
     {
         using var temp = TestDirectory.Create();

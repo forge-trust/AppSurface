@@ -7,6 +7,24 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class CoverageFanInPolicyTests
 {
+    [Fact]
+    public void DirectPolicyConverterRejectsNullRatherThanManufacturingDefaultIdentity()
+    {
+        var bytes = Encoding.UTF8.GetBytes("null");
+        var reader = new Utf8JsonReader(bytes);
+        Assert.True(reader.Read());
+        var refused = false;
+        try
+        {
+            _ = new CoverageFanInPolicyJsonConverter().Read(ref reader, typeof(CoverageFanInPolicy), new(JsonSerializerDefaults.Web));
+        }
+        catch (JsonException)
+        {
+            refused = true;
+        }
+        Assert.True(refused);
+    }
+
     private const string CanonicalGolden = """{"gate":{"diffBase":null,"minBranch":85,"minLine":95,"minPatchBranch":85,"minPatchLine":95,"mode":"aggregateOnly","patchLineMode":"codecov","tolerance":0.5},"instrumentation":{"driver":"collector","exclude":"[*.Tests]*,[*.IntegrationTests]*","format":"cobertura","include":null,"normalization":"appsurface-coverage-merge"},"limits":{"attributesPerElement":32,"branchRecordsPerReport":2000000,"depth":64,"identitySeconds":30,"inputBundles":32,"jsonBytes":1048576,"lineRecordsPerReport":1000000,"operationSeconds":300,"tokenCharacters":65536,"totalBytes":4294967296,"totalRecords":2000000,"xmlBytes":536870912,"xmlElementsPerReport":8000000},"run":{"attempt":1,"producerSystem":"local","runId":"run-1","runScope":"dogfood"},"source":{"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","configuration":"Release","sdk":"10.0.102","tree":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"supplements":[],"testProjects":["tests/First.csproj","tests/Second.csproj"]}""";
 
     internal static CoverageFanInPolicy Policy() => new(

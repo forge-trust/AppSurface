@@ -73,6 +73,26 @@ public sealed class CoverageFanInV3PrerequisiteTests
     }
 
     [Fact]
+    public async Task ReadRefusesNoCommonAncestorWithoutFallingBackToEitherEndpoint()
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.MergeBases = string.Empty;
+
+        await AssertCauseAsync(() => fixture.ReadAsync(), "merge-base-unavailable");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.Arguments.Contains("--raw", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReadMapsMergeBaseCommandFailureToHistoryRecovery()
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.FailureToken = "merge-base";
+
+        await AssertCauseAsync(() => fixture.ReadAsync(), "merge-base-unavailable");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.Arguments.Contains("--raw", StringComparer.Ordinal));
+    }
+
+    [Fact]
     public async Task InvalidV3EngineRequestKeepsThePolicyDiagnosticCode()
     {
         var policy = CoverageFanInPolicyTests.Policy() with
@@ -156,6 +176,65 @@ public sealed class CoverageFanInV3PrerequisiteTests
     }
 
     [Fact]
+    public async Task ReadRefusesRepositoryConfigurationChangedAfterPatchCollection()
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.Configurations = ["", "", "diff.algorithm"];
+
+        await AssertCauseAsync(() => fixture.ReadAsync(), "identity-mismatch");
+        Assert.Equal(3, fixture.Runner.ConfigurationReads);
+    }
+
+    [Fact]
+    public async Task MetadataSnapshotRefusesAChangedButOtherwiseNeutralizedConfiguration()
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.Configurations = ["diff.algorithm", "diff.context"];
+        await fixture.Context.InitializeAsync(CancellationToken.None);
+
+        await AssertCauseAsync(() => fixture.Context.VerifyMetadataAsync(CancellationToken.None), "identity-mismatch");
+        Assert.Equal(2, fixture.Runner.ConfigurationReads);
+    }
+
+    [Theory]
+    [InlineData("git version 2.46", "2.46")]
+    [InlineData("git version 2.54.0 (Apple Git-157)", "2.54.0")]
+    [InlineData("git version 2.46.2.windows.1", "2.46.2.windows.1")]
+    public async Task InitializeRetainsTheSupportedGitVersionSpelling(string version, string expected)
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.GitVersion = version;
+
+        await fixture.Context.InitializeAsync(CancellationToken.None);
+
+        Assert.Equal(expected, fixture.Context.GitVersion);
+    }
+
+    [Theory]
+    [InlineData("exit-code", "unsupported-diff")]
+    [InlineData("stderr", "unsupported-diff")]
+    [InlineData("truncated-output", "truncated-diff")]
+    [InlineData("invalid-utf8", "malformed-diff")]
+    public async Task RunAsyncClosesChildOutputFailuresToEvidenceCauses(string failure, string expectedCause)
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.FailureToken = "probe";
+        fixture.Runner.Failure = failure;
+
+        await AssertCauseAsync(() => fixture.Context.RunAsync(["probe"], CancellationToken.None), expectedCause);
+    }
+
+    [Fact]
+    public async Task RunAsyncUsesCombinedOutputOnlyWhenSeparateStandardOutputIsAbsent()
+    {
+        using var fixture = new Fixture();
+        fixture.Runner.FailureToken = "probe";
+        fixture.Runner.Failure = "null-standard-output";
+
+        Assert.Equal("fallback output", await fixture.Context.RunAsync(["probe"], CancellationToken.None));
+    }
+
+    [Fact]
     public async Task DiffCommandsUseTheSubmoduleHeadForItsAttributeSource()
     {
         using var fixture = new Fixture();
@@ -236,6 +315,9 @@ public sealed class CoverageFanInV3PrerequisiteTests
     {
         internal List<CoverageRunProcessRequest> Requests { get; } = [];
         internal string Configuration { get; set; } = string.Empty;
+        internal string[]? Configurations { get; set; }
+        internal int ConfigurationReads { get; private set; }
+        internal string GitVersion { get; set; } = "git version 2.46.0";
         internal string Shallow { get; set; } = "false";
         internal string ObjectFormat { get; set; } = "sha1";
         internal string MergeBases { get; set; } = BaseCommit + "\n";
@@ -244,14 +326,33 @@ public sealed class CoverageFanInV3PrerequisiteTests
         internal bool BaseObjectMissing { get; set; }
         internal string? BatchCorruption { get; set; }
         internal bool TruncatePatch { get; set; }
+        internal string? FailureToken { get; set; }
+        internal string Failure { get; set; } = "exit-code";
 
         public Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
             var args = request.Arguments;
-            if (args.Contains("--version", StringComparer.Ordinal)) return Task.FromResult(Result("git version 2.46.0\n"));
+            if (FailureToken is { } token && args.Contains(token, StringComparer.Ordinal))
+            {
+                if (Failure == "invalid-utf8") throw new DecoderFallbackException("invalid child encoding");
+                if (Failure == "null-standard-output")
+                    return Task.FromResult(new CoverageRunProcessResult(0, "fallback output", StandardOutput: null));
+                if (Failure == "stderr")
+                    return Task.FromResult(new CoverageRunProcessResult(0, "probe output", StandardOutput: "probe output")
+                    { StandardError = "child diagnostic" });
+                if (Failure == "truncated-output")
+                    return Task.FromResult(new CoverageRunProcessResult(0, "partial", OutputTruncated: true));
+                return Task.FromResult(new CoverageRunProcessResult(2, "probe output"));
+            }
+            if (args.Contains("--version", StringComparer.Ordinal)) return Task.FromResult(Result(GitVersion + "\n"));
             if (args.Contains("config", StringComparer.Ordinal))
-                return Task.FromResult(Result(Configuration, Configuration.Length == 0 ? 1 : 0));
+            {
+                var index = ConfigurationReads++;
+                var configuration = Configurations is { } sequence && index < sequence.Length
+                    ? sequence[index] : Configuration;
+                return Task.FromResult(Result(configuration, configuration.Length == 0 ? 1 : 0));
+            }
             if (args.Contains("--is-shallow-repository", StringComparer.Ordinal)) return Task.FromResult(Result(Shallow + "\n"));
             if (args.Contains("--git-common-dir", StringComparer.Ordinal)) return Task.FromResult(Result(".git\n"));
             if (args.Contains("--show-object-format", StringComparer.Ordinal)) return Task.FromResult(Result(ObjectFormat + "\n"));

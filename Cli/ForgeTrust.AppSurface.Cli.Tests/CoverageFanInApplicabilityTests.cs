@@ -195,6 +195,117 @@ public sealed class CoverageFanInApplicabilityTests
         await AssertV3ReadOnlyVerifyAsync(fixture, [], result);
     }
 
+    [Fact]
+    public async Task V3NotApplicablePatchCannotOverrideAFailedPrimaryAggregateGate()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.SelectManifestOnlyPatchAsync();
+        fixture.UseV3Contract();
+        await fixture.CapturePrimaryAsync(Report(aggregate: true, changedSource: true, changedSourceHit: false));
+        await fixture.ComposeAsync([]);
+        var input = await fixture.ReadV3DiffAsync();
+
+        var result = await fixture.AcceptV3Async([], input);
+
+        Assert.Equal(CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.False(result.Accepted);
+        Assert.False(result.Verified);
+        var metrics = Assert.IsType<CoveragePatchApplicability>(result.PatchApplicability);
+        AssertV3NotApplicable(metrics.Primary.Line, 1);
+        AssertV3NotApplicable(metrics.Composed.Branch, 1);
+        Assert.Equal("threshold-failed", Assert.Single(result.Diagnostics).Cause);
+        Assert.True(File.Exists(Path.Join(fixture.Accepted, "rejection.json")));
+        Assert.False(File.Exists(Path.Join(fixture.Accepted, "acceptance.json")));
+        using var primaryGate = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Accepted, "primary-gate.json")));
+        using var composedGate = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Accepted, "composed-gate.json")));
+        Assert.False(primaryGate.RootElement.GetProperty("passed").GetBoolean());
+        Assert.True(composedGate.RootElement.GetProperty("passed").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("measurable", true)]
+    [InlineData("codecov", false)]
+    public async Task V3PartiallyCoveredReportedBranchKeepsVersionedPatchLineMode(string mode, bool accepted)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.SelectSourcePatchAsync();
+        fixture.UseV3Contract();
+        fixture.UsePatchLineMode(mode);
+        var report = XDocument.Parse(Report(aggregate: true, aggregateClasses: 20, changedSource: true));
+        var point = report.Descendants("class").Single(item => item.Attribute("name")!.Value == "Example")
+            .Descendants("line").Single();
+        point.SetAttributeValue("condition-coverage", "50% (1/2)");
+        report.Root!.SetAttributeValue("branches-covered", 41);
+        report.Root.SetAttributeValue("branch-rate", Rate(41, 42));
+        await fixture.CapturePrimaryAsync(report.ToString(SaveOptions.DisableFormatting));
+        await fixture.ComposeAsync([]);
+        var input = await fixture.ReadV3DiffAsync();
+
+        var result = await fixture.AcceptV3Async([], input);
+
+        Assert.Equal(accepted, result.Accepted);
+        Assert.Equal(accepted, result.Verified);
+        Assert.Equal(accepted ? CoverageOperationOutcome.Succeeded : CoverageOperationOutcome.Rejected, result.Outcome);
+        var metrics = Assert.IsType<CoveragePatchApplicability>(result.PatchApplicability);
+        AssertV3Measured(metrics.Composed.Line, 1, 1, accepted ? 1 : 0, accepted ? 100m : 0m);
+        AssertV3Measured(metrics.Composed.Branch, 1, 2, 1, 50m);
+        Assert.Equal(accepted, File.Exists(Path.Join(fixture.Accepted, "acceptance.json")));
+        Assert.Equal(!accepted, File.Exists(Path.Join(fixture.Accepted, "rejection.json")));
+        if (accepted) await AssertV3ReadOnlyVerifyAsync(fixture, [], result);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task V3AggregateOnlyAcceptanceWritesOnlyAggregateEvidenceAndReplaysReadOnly(bool passes)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.UseV3AggregateOnlyContract();
+        await fixture.CapturePrimaryAsync(Report(aggregate: true, changedSource: true, changedSourceHit: passes));
+        await fixture.ComposeAsync([]);
+
+        var result = await fixture.AcceptAggregateOnlyV3Async();
+
+        Assert.Equal(passes ? CoverageOperationOutcome.Succeeded : CoverageOperationOutcome.Rejected, result.Outcome);
+        Assert.Equal(passes, result.Accepted);
+        Assert.Equal(passes, result.Verified);
+        Assert.Equal(passes ? "PatchNotRequested" : "NotEvaluated", result.PatchOutcome);
+        Assert.Null(result.PatchApplicability);
+        Assert.True(result.Effects.GenerationCommitted);
+        Assert.True(File.Exists(Path.Join(fixture.Accepted, "primary-gate.json")));
+        Assert.False(File.Exists(Path.Join(fixture.Accepted, "composed-gate.json")));
+        Assert.False(File.Exists(Path.Join(fixture.Accepted, "patch-applicability.json")));
+        Assert.False(File.Exists(Path.Join(fixture.Accepted, "diff.patch")));
+        if (passes)
+        {
+            Assert.True(File.Exists(Path.Join(fixture.Accepted, "acceptance.json")));
+            Assert.False(File.Exists(Path.Join(fixture.Accepted, "rejection.json")));
+            using var gate = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Accepted, "primary-gate.json")));
+            Assert.True(gate.RootElement.GetProperty("passed").GetBoolean());
+            var beforeVerify = Snapshot(fixture.Accepted);
+
+            var verified = await CoverageFanIn.VerifyAsync(fixture.VerifyRequest([]));
+
+            Assert.Equal(CoverageOperationOutcome.Succeeded, verified.Outcome);
+            Assert.True(verified.Verified);
+            Assert.False(verified.Accepted);
+            Assert.Equal("PatchNotRequested", verified.PatchOutcome);
+            Assert.Null(verified.PatchApplicability);
+            Assert.False(verified.Effects.OutputCreated);
+            Assert.False(verified.Effects.GenerationCommitted);
+            Assert.Equal(beforeVerify, Snapshot(fixture.Accepted));
+        }
+        else
+        {
+            Assert.False(File.Exists(Path.Join(fixture.Accepted, "acceptance.json")));
+            Assert.True(File.Exists(Path.Join(fixture.Accepted, "rejection.json")));
+            using var gate = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Accepted, "primary-gate.json")));
+            Assert.False(gate.RootElement.GetProperty("passed").GetBoolean());
+            using var rejection = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Accepted, "rejection.json")));
+            Assert.Equal("gate-failed", rejection.RootElement.GetProperty("reason").GetString());
+        }
+    }
+
     [Theory]
     [InlineData("empty", true, "", "", "")]
     [InlineData("delete", false, "deleted", "src/Example.cs", "")]
@@ -720,6 +831,17 @@ public sealed class CoverageFanInApplicabilityTests
                 Gate = new(CoverageGateMode.AggregateAndPatch, DiffBase: diffBase ?? BaseCommit)
             };
 
+        internal void UsePatchLineMode(string mode) => Policy = Policy with
+        { Gate = Policy.Gate with { PatchLineMode = mode, MinPatchBranch = 0 } };
+
+        internal void UseV3AggregateOnlyContract() =>
+            Policy = Policy with
+            {
+                ContractVersion = 3,
+                ReportProfileId = CoveragePolicyEncoding.InitialReportProfileId,
+                Gate = new(CoverageGateMode.AggregateOnly, MinLine: 95, MinBranch: 85)
+            };
+
         internal async Task SelectManifestOnlyPatchAsync()
         {
             File.WriteAllText(Path.Join(Repository, "coverage.manifest"), "version=1\nenabled=true\n");
@@ -803,6 +925,9 @@ public sealed class CoverageFanInApplicabilityTests
             await CoverageFanIn.AcceptAsync(new(Policy, Repository, PrimaryCapture, supplements,
                 Composed, Accepted, outputMode)
             { ExpectedPatchSha256 = Hash(input.Patch) });
+
+        internal async Task<CoverageFanInResult> AcceptAggregateOnlyV3Async() =>
+            await CoverageFanIn.AcceptAsync(new(Policy, Repository, PrimaryCapture, [], Composed, Accepted));
 
         internal async Task ForgeComposedLineAsNotApplicableAndRepublishAsync()
         {

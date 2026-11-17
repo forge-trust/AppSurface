@@ -60,6 +60,15 @@ public sealed class CoverageRunCollectorVersionPreflightTests
     }
 
     [Fact]
+    public void CollectorVersionPreflight_ShouldRejectANullRequiredVersion()
+    {
+        Assert.False(CoverageRunCollectorVersionPreflight.HasExactVersion(
+            CapabilityJson("net10.0", version: "10.0.1"),
+            "net10.0",
+            null!));
+    }
+
+    [Fact]
     public async Task DriverPreflight_ShouldQueryCentralVersionsAndEvaluateEverySelectedFramework()
     {
         using var directory = TestDirectory.Create();
@@ -126,6 +135,55 @@ public sealed class CoverageRunCollectorVersionPreflightTests
         Assert.Single(runner.Requests);
         Assert.Contains("-getItem:PackageReference", runner.Requests[0].Arguments);
         Assert.DoesNotContain("-getItem:PackageReference,PackageVersion", runner.Requests[0].Arguments);
+    }
+
+    [Fact]
+    public async Task DriverPreflight_ShouldRejectAnIncorrectSingleFrameworkCollectorVersion()
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console);
+        var project = new CoverageRunProject(
+            "Sample.Tests.csproj",
+            Path.Join(directory.Path, "Sample.Tests.csproj"),
+            "sample-tests",
+            false);
+        var resolution = new CoverageProjectResolution(null, directory.Path, [project], []);
+        var runner = new CapabilityProcessRunner(_ => CapabilityJson("net10.0", version: "10.0.0"));
+        var observedFrameworks = new List<string?>();
+
+        var exception = await Assert.ThrowsAsync<CoverageExecutionException>(() => CoverageRunDriverPreflight.ValidateAsync(
+            CoverageRunDriver.Collector,
+            "Release",
+            resolution,
+            runner,
+            supervisor,
+            CancellationToken.None,
+            observeCapabilities: (_, framework, _) => observedFrameworks.Add(framework),
+            requiredCollectorVersion: "10.0.1"));
+
+        Assert.Contains("Sample.Tests.csproj: coverlet.collector must be exactly 10.0.1", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(new string?[] { null }, observedFrameworks);
+        Assert.Single(runner.Requests);
+        Assert.Contains("-getItem:PackageReference,PackageVersion", runner.Requests[0].Arguments);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("not-json")]
+    [InlineData("[]")]
+    [InlineData("{\"Properties\":{},\"Properties\":{},\"Items\":{\"PackageReference\":[]}}")]
+    [InlineData("{\"Properties\":{\"TargetFramework\":\"net10.0\"}}")]
+    [InlineData("{\"Properties\":{\"TargetFramework\":\"net10.0\"},\"Items\":{\"PackageReference\":{}}}")]
+    [InlineData("{\"Properties\":{\"TargetFramework\":\"net10.0\"},\"Items\":{\"PackageReference\":[{\"Identity\":\"coverlet.collector\",\"Version\":null}]}}")]
+    [InlineData("{\"Properties\":{\"TargetFramework\":\"net10.0\"},\"Items\":{\"PackageReference\":[{\"Identity\":\"coverlet.collector\",\"VersionOverride\":10,\"Version\":\"10.0.1\"}]}}")]
+    [InlineData("{\"Properties\":{\"TargetFramework\":\"net10.0\"},\"Items\":{\"PackageReference\":[{\"Identity\":\"coverlet.collector\",\"Version\":\"10.0.1\",\"Version\":\"10.0.1\"}]}}")]
+    [InlineData("{\"Properties\":{\"TargetFramework\":\"net10.0\"},\"Items\":{\"PackageReference\":[{\"Identity\":\"coverlet.collector\"}]}}")]
+    [InlineData("{\"Properties\":{\"TargetFramework\":\"net10.0\"},\"Items\":{\"PackageReference\":[{\"Identity\":\"coverlet.collector\",\"Version\":10}]}}")]
+    [InlineData("{\"Properties\":{\"TargetFramework\":\"net10.0\"},\"Items\":{\"PackageReference\":[{\"Identity\":\"coverlet.collector\"}],\"PackageVersion\":[{\"Identity\":\"coverlet.collector\",\"Version\":null}]}}")]
+    public void CollectorVersionPreflight_ShouldRejectMalformedOrAmbiguousCapabilityProof(string json)
+    {
+        Assert.False(CoverageRunCollectorVersionPreflight.HasExactVersion(json, "net10.0", "10.0.1"));
     }
 
     private static string CapabilityJson(

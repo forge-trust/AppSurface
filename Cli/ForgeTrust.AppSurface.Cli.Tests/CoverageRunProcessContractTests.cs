@@ -35,6 +35,15 @@ public sealed class CoverageRunProcessContractTests
     }
 
     [Fact]
+    public void OptionalMemoryObservation_ShouldReturnNullForADisposedProcess()
+    {
+        var child = new System.Diagnostics.Process();
+        child.Dispose();
+
+        Assert.Null(CoverageProcessTelemetry.TryGetPeakWorkingSet(child));
+    }
+
+    [Fact]
     public void ProcessRequest_ShouldPreserveLegacyDefaultsAndSnapshotOptionalInputs()
     {
         var input = Encoding.UTF8.GetBytes("snapshot");
@@ -152,6 +161,28 @@ public sealed class CoverageRunProcessContractTests
     }
 
     [Fact]
+    public async Task ProcessRunner_ShouldPropagateStandardInputBudgetFaultAndReleaseChildLease()
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console);
+        using var operation = supervisor.Start("standard input budget fault");
+        var expected = new InvalidOperationException("input budget callback failed");
+        var request = CreateProbeRequest(directory.Path, "hold", Path.Join(directory.Path, "child-ready.txt")) with
+        {
+            Lease = operation.ReserveProcess(),
+            StandardInputBytes = Encoding.UTF8.GetBytes("input-payload"),
+            BudgetCharge = _ => throw expected,
+        };
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15)));
+
+        Assert.Same(expected, actual);
+        Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
+    }
+
+    [Fact]
     public async Task ProcessRunner_ShouldIgnoreObserverFaultWhileBudgetStillChargesActualBytes()
     {
         using var directory = TestDirectory.Create();
@@ -200,6 +231,30 @@ public sealed class CoverageRunProcessContractTests
     }
 
     [Fact]
+    public async Task ProcessRunner_ShouldCompleteAnEmptyStrictBufferedStreamAtEof()
+    {
+        using var directory = TestDirectory.Create();
+        var observedBytes = 0;
+        long chargedBytes = 0;
+        var request = CreateProbeRequest(directory.Path, "stdout", "0") with
+        {
+            StrictUtf8 = true,
+            OutputObserver = count => Interlocked.Add(ref observedBytes, count),
+            BudgetCharge = bytes => Interlocked.Add(ref chargedBytes, bytes),
+        };
+
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.StandardOutput!);
+        Assert.Empty(result.StandardError);
+        Assert.Empty(result.Output);
+        Assert.False(result.OutputTruncated);
+        Assert.Equal(0, observedBytes);
+        Assert.Equal(0, chargedBytes);
+    }
+
+    [Fact]
     public async Task ProcessRunner_ShouldStopAndReapWhenStrictOutputLimitIsExceeded()
     {
         using var directory = TestDirectory.Create();
@@ -217,6 +272,147 @@ public sealed class CoverageRunProcessContractTests
 
         Assert.True(result.OutputTruncated);
         Assert.True(result.StandardOutput!.Length <= 128);
+        Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(int.MaxValue)]
+    public async Task ProcessRunner_ShouldRejectAnInvalidOutputLimitBeforeStartingAChild(long outputLimit)
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console);
+        using var operation = supervisor.Start("invalid output limit");
+        var outputFile = Path.Join(directory.Path, "invalid-limit.log");
+        var observedBytes = 0;
+        var request = CreateProbeRequest(directory.Path, "stdout", "1") with
+        {
+            Lease = operation.ReserveProcess(),
+            OutputFile = outputFile,
+            OutputObserver = count => Interlocked.Add(ref observedBytes, count),
+            StandardOutputLimitBytes = outputLimit,
+        };
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None));
+
+        Assert.False(File.Exists(outputFile));
+        Assert.Equal(0, observedBytes);
+        Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
+    }
+
+    [Theory]
+    [InlineData(128, false)]
+    [InlineData(129, true)]
+    public async Task ProcessRunner_ShouldAddATruncationMarkerOnlyAfterBufferedOutputExceedsItsLimit(
+        int outputBytes,
+        bool expectedTruncation)
+    {
+        using var directory = TestDirectory.Create();
+        const int outputLimit = 128;
+        long charged = 0;
+        var request = CreateProbeRequest(directory.Path, "stdout", outputBytes.ToString()) with
+        {
+            StandardOutputLimitBytes = outputLimit,
+            BudgetCharge = bytes => Interlocked.Add(ref charged, bytes),
+        };
+
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(expectedTruncation, result.OutputTruncated);
+        Assert.Equal(outputBytes, charged);
+        if (expectedTruncation)
+        {
+            Assert.StartsWith(new string('x', outputLimit), result.StandardOutput!, StringComparison.Ordinal);
+            Assert.Contains("[output truncated after 128 bytes]", result.StandardOutput!, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Equal(new string('x', outputLimit), result.StandardOutput);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessRunner_ShouldTruncateStrictStreamedOutputAtTheLimitAndReapTheChild()
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console);
+        using var operation = supervisor.Start("strict streamed output limit");
+        const int outputLimit = 128;
+        var outputFile = Path.Join(directory.Path, "strict-process.log");
+        var request = CreateProbeRequest(directory.Path, "stdout", "16384") with
+        {
+            Lease = operation.ReserveProcess(),
+            OutputFile = outputFile,
+            StrictUtf8 = true,
+            StandardOutputLimitBytes = outputLimit,
+        };
+
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.True(result.OutputTruncated);
+        Assert.Equal(outputLimit, new FileInfo(outputFile).Length);
+        Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
+    }
+
+    [Fact]
+    public async Task ProcessRunner_ShouldKeepStrictStreamedOutputAtAnExactLimit()
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console);
+        using var operation = supervisor.Start("strict streamed output at limit");
+        const int outputLimit = 128;
+        var outputFile = Path.Join(directory.Path, "strict-process.log");
+        var request = CreateProbeRequest(directory.Path, "stdout", outputLimit.ToString()) with
+        {
+            Lease = operation.ReserveProcess(),
+            OutputFile = outputFile,
+            StrictUtf8 = true,
+            StandardOutputLimitBytes = outputLimit,
+        };
+
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(result.OutputTruncated);
+        Assert.Equal(outputLimit, new FileInfo(outputFile).Length);
+        Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
+    }
+
+    [Fact]
+    public async Task ProcessRunner_ShouldDrainBothStrictUtf8StreamsThroughEof()
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console);
+        using var operation = supervisor.Start("strict dual-stream EOF");
+        const int outputBytesPerStream = 64;
+        var outputFile = Path.Join(directory.Path, "strict-dual-stream.log");
+        var request = CreateProbeRequest(directory.Path, "streams", outputBytesPerStream.ToString()) with
+        {
+            Lease = operation.ReserveProcess(),
+            OutputFile = outputFile,
+            StrictUtf8 = true,
+            StandardOutputLimitBytes = 128,
+        };
+
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(result.OutputTruncated);
+        Assert.Empty(result.Output);
+        Assert.Equal(new string('e', outputBytesPerStream), result.StandardError);
+        Assert.Equal(2L * outputBytesPerStream, new FileInfo(outputFile).Length);
+        var streamedLog = File.ReadAllText(outputFile);
+        Assert.Equal(outputBytesPerStream, streamedLog.Count(character => character == 'o'));
+        Assert.Equal(outputBytesPerStream, streamedLog.Count(character => character == 'e'));
         Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
     }
 
