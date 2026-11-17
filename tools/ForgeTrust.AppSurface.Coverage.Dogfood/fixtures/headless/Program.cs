@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Coverage;
 
@@ -228,8 +229,310 @@ internal static class Program
             || cliTampered.GetProperty("result").GetProperty("verified").GetBoolean())
             return 1;
 
-        Console.WriteLine($"Real primary and current-host native collection/import, direct API and installed CLI composition/acceptance/verification, and tamper rejection passed. Source SDK: {sdk}.");
+        await RunV3ManifestOnlyProofAsync(runRoot, repository, installedCli, commit, sdk, nativeProjects)
+            .ConfigureAwait(false);
+
+        Console.WriteLine($"Real v2 primary and current-host native collection/import, plus installed public-API and CLI v3 synthetic manifest-only applicability with four N/A metrics and tamper rejection, passed. The v3 synthetic report does not claim native collection. Source SDK: {sdk}.");
         return 0;
+    }
+
+    private static async Task RunV3ManifestOnlyProofAsync(string runRoot, string repository, string installedCli,
+        string baseCommit, string sdk, IReadOnlyList<string> testProjects)
+    {
+        var v3Root = Path.Join(runRoot, "v3-manifest-only");
+        Directory.CreateDirectory(v3Root);
+        Directory.CreateDirectory(Path.Join(v3Root, "api"));
+        await File.WriteAllTextAsync(Path.Join(repository, "coverage.manifest"), "version=1\nenabled=true\n")
+            .ConfigureAwait(false);
+        _ = await RunCommandAsync(repository, "git", ["add", "--", "coverage.manifest"], IdentityCommandTimeout)
+            .ConfigureAwait(false);
+        _ = await RunCommandAsync(repository, "git", ["commit", "-m", "add manifest-only v3 patch"], IdentityCommandTimeout)
+            .ConfigureAwait(false);
+
+        var headCommit = await RunCommandAsync(repository, "git", ["rev-parse", "HEAD"], IdentityCommandTimeout)
+            .ConfigureAwait(false);
+        var tree = await RunCommandAsync(repository, "git", ["rev-parse", "HEAD^{tree}"], IdentityCommandTimeout)
+            .ConfigureAwait(false);
+        var status = await RunCommandAsync(repository, "git", ["status", "--porcelain", "--untracked-files=all"], IdentityCommandTimeout)
+            .ConfigureAwait(false);
+        if (status.Length != 0 || baseCommit.Length != headCommit.Length
+            || !IsFullGitObjectId(baseCommit) || !IsFullGitObjectId(headCommit) || !IsFullGitObjectId(tree))
+            throw new InvalidOperationException("The v3 source must be clean and use explicit full Git identities.");
+
+        var reportProfile = "coverlet-collector-cobertura-v1";
+        var policy = new CoverageFanInPolicy(
+            new CoverageSourceIdentity(headCommit, tree, sdk, "Release"),
+            new CoverageRunIdentity("local", "installed-package-dogfood-v3", Guid.NewGuid().ToString("N"), 1),
+            testProjects, [], new CoverageGatePolicy(CoverageGateMode.AggregateAndPatch, DiffBase: baseCommit))
+        {
+            ContractVersion = 3,
+            ReportProfileId = reportProfile,
+        };
+
+        var reportPath = Path.Join(v3Root, "synthetic-primary.cobertura.xml");
+        var timingsPath = Path.Join(v3Root, "synthetic-primary-timings.json");
+        await File.WriteAllTextAsync(reportPath, SyntheticAggregateReport()).ConfigureAwait(false);
+        await File.WriteAllTextAsync(timingsPath, JsonSerializer.Serialize(new
+        {
+            configuration = "Release",
+            coverageDriver = "collector",
+            merge = new { exitCode = 0 },
+            artifacts = new { coverageFiles = testProjects.Count },
+            projects = testProjects.Select(project => new
+            {
+                project,
+                exitCode = 0,
+                executionStatus = "completed",
+                coverageArtifactStatus = "produced",
+            }),
+        })).ConfigureAwait(false);
+
+        var patch = await CreatePinnedGitPatchAsync(repository, baseCommit, headCommit, Path.Join(v3Root, "patch.diff"))
+            .ConfigureAwait(false);
+        var patchSha256 = Convert.ToHexStringLower(SHA256.HashData(patch));
+        if (patch.Length == 0 || !Encoding.UTF8.GetString(patch).Contains("+enabled=true", StringComparison.Ordinal))
+            throw new InvalidDataException("The expected v3 Git patch is not the manifest-only change.");
+
+        var apiCapture = Path.Join(v3Root, "api", "primary-capture");
+        var apiComposition = Path.Join(v3Root, "api", "composition");
+        var apiAccepted = Path.Join(v3Root, "api", "accepted");
+        var apiCaptured = await RecordAsync("v3-api-capture", runRoot, (token, progress, diagnostics) =>
+            CoverageFanIn.CaptureAsync(new CoverageCaptureRequest(policy, repository, apiCapture, "primary",
+                CoveragePath: reportPath, TimingsPath: timingsPath), token, progress, diagnostics)).ConfigureAwait(false);
+        PrintResult(apiCaptured);
+        if (apiCaptured.Outcome != CoverageOperationOutcome.Succeeded || !apiCaptured.Effects.GenerationCommitted)
+            throw new InvalidOperationException("Installed public Coverage API v3 capture failed.");
+
+        var apiComposed = await RecordAsync("v3-api-compose", runRoot, (token, progress, diagnostics) =>
+            CoverageFanIn.ComposeAsync(new CoverageComposeRequest(policy, repository, apiCapture, [], apiComposition),
+                token, progress, diagnostics)).ConfigureAwait(false);
+        PrintResult(apiComposed);
+        if (apiComposed.Outcome != CoverageOperationOutcome.Succeeded || apiComposed.Accepted || apiComposed.Verified)
+            throw new InvalidOperationException("Installed public Coverage API v3 composition failed.");
+
+        var apiAcceptance = await RecordAsync("v3-api-accept", runRoot, (token, progress, diagnostics) =>
+            CoverageFanIn.AcceptAsync(new CoverageAcceptRequest(policy, repository, apiCapture, [], apiComposition, apiAccepted)
+            {
+                ExpectedPatchSha256 = patchSha256,
+            }, token, progress, diagnostics)).ConfigureAwait(false);
+        PrintResult(apiAcceptance);
+        if (apiAcceptance.Outcome != CoverageOperationOutcome.Succeeded || !apiAcceptance.Accepted || !apiAcceptance.Verified)
+            throw new InvalidOperationException("Installed public Coverage API v3 acceptance failed.");
+        RequireFourNotApplicableMetrics(apiAcceptance.PatchApplicability, changedLines: 1);
+        RequirePositivePrimaryAggregate(apiAccepted);
+
+        var apiVerification = await RecordAsync("v3-api-verify", runRoot, (token, progress, diagnostics) =>
+            CoverageFanIn.VerifyAsync(new CoverageVerifyRequest(policy, repository, apiCapture, [], apiComposition, apiAccepted),
+                token, progress, diagnostics)).ConfigureAwait(false);
+        PrintResult(apiVerification);
+        if (apiVerification.Outcome != CoverageOperationOutcome.Succeeded || !apiVerification.Verified
+            || apiVerification.Effects.OutputCreated || apiVerification.Effects.GenerationCommitted)
+            throw new InvalidOperationException("Installed public Coverage API v3 read-only verification failed.");
+
+        await File.WriteAllTextAsync(Path.Join(apiComposition, "coverage.cobertura.xml"), "tampered").ConfigureAwait(false);
+        var apiTampered = await CoverageFanIn.VerifyAsync(
+            new CoverageVerifyRequest(policy, repository, apiCapture, [], apiComposition, apiAccepted)).ConfigureAwait(false);
+        if (apiTampered.Outcome == CoverageOperationOutcome.Succeeded || apiTampered.Verified)
+            throw new InvalidOperationException("Installed public Coverage API v3 verification accepted tampered evidence.");
+
+        var cliRoot = Path.Join(v3Root, "cli");
+        Directory.CreateDirectory(cliRoot);
+        var cliCapture = Path.Join(cliRoot, "primary-capture");
+        var cliComposition = Path.Join(cliRoot, "composition");
+        var cliAccepted = Path.Join(cliRoot, "accepted");
+        var cliCaptured = await InvokeCliAsync(installedCli, repository, cliRoot, "capture",
+            new CoverageCaptureRequest(policy, repository, cliCapture, "primary",
+                CoveragePath: reportPath, TimingsPath: timingsPath), contractVersion: 3).ConfigureAwait(false);
+        RequireCliSuccess(cliCaptured);
+        var cliComposed = await InvokeCliAsync(installedCli, repository, cliRoot, "compose",
+            new CoverageComposeRequest(policy, repository, cliCapture, [], cliComposition), contractVersion: 3)
+            .ConfigureAwait(false);
+        RequireCliSuccess(cliComposed);
+        var cliAcceptance = await InvokeCliAsync(installedCli, repository, cliRoot, "accept",
+            new CoverageAcceptRequest(policy, repository, cliCapture, [], cliComposition, cliAccepted)
+            {
+                ExpectedPatchSha256 = patchSha256,
+            }, contractVersion: 3).ConfigureAwait(false);
+        RequireCliSuccess(cliAcceptance);
+        var cliResult = cliAcceptance.GetProperty("result");
+        if (!cliResult.GetProperty("accepted").GetBoolean() || !cliResult.GetProperty("verified").GetBoolean())
+            throw new InvalidOperationException("Installed candidate CLI v3 acceptance failed.");
+        RequireCliFourNotApplicableMetrics(cliResult.GetProperty("patchApplicability"), changedLines: 1);
+        RequirePositivePrimaryAggregate(cliAccepted);
+
+        var cliVerification = await InvokeCliAsync(installedCli, repository, cliRoot, "verify",
+            new CoverageVerifyRequest(policy, repository, cliCapture, [], cliComposition, cliAccepted), contractVersion: 3)
+            .ConfigureAwait(false);
+        RequireCliSuccess(cliVerification);
+        var verifyResult = cliVerification.GetProperty("result");
+        if (!verifyResult.GetProperty("verified").GetBoolean()
+            || verifyResult.GetProperty("effects").GetProperty("outputCreated").GetBoolean()
+            || verifyResult.GetProperty("effects").GetProperty("generationCommitted").GetBoolean())
+            throw new InvalidOperationException("Installed candidate CLI v3 verify was not read-only.");
+
+        await File.WriteAllTextAsync(Path.Join(cliComposition, "coverage.cobertura.xml"), "tampered").ConfigureAwait(false);
+        var cliTampered = await InvokeCliAsync(installedCli, repository, cliRoot, "verify",
+            new CoverageVerifyRequest(policy, repository, cliCapture, [], cliComposition, cliAccepted),
+            expectedExitCode: 1, contractVersion: 3).ConfigureAwait(false);
+        if (cliTampered.GetProperty("schemaVersion").GetInt32() != 3
+            || cliTampered.GetProperty("operationOutcome").GetString() == "succeeded"
+            || cliTampered.GetProperty("result").GetProperty("verified").GetBoolean())
+            throw new InvalidOperationException("Installed candidate CLI v3 verification accepted tampered evidence.");
+    }
+
+    private static string SyntheticAggregateReport() => """
+        <coverage lines-covered="1" lines-valid="1" branches-covered="2" branches-valid="2" line-rate="1" branch-rate="1">
+          <packages><package name="fixture"><classes>
+            <class name="Branchy.Decision" filename="checks/Branchy/Decision.cs">
+              <lines><line number="3" hits="1" branch="true" condition-coverage="100% (2/2)" /></lines>
+            </class>
+          </classes></package></packages>
+        </coverage>
+        """;
+
+    private static void RequireFourNotApplicableMetrics(CoveragePatchApplicability? applicability, int changedLines)
+    {
+        if (applicability is null)
+            throw new InvalidDataException("V3 acceptance omitted patch applicability.");
+        foreach (var metric in new[]
+        {
+            applicability.Primary.Line, applicability.Primary.Branch,
+            applicability.Composed.Line, applicability.Composed.Branch,
+        })
+        {
+            if (metric.Outcome != CoveragePatchApplicabilityOutcome.NotApplicable
+                || metric.Reason != "no-reported-patch-points" || metric.ChangedLines != changedLines
+                || metric.Measurable != 0 || metric.Covered != 0 || metric.Percent is not null)
+                throw new InvalidDataException("V3 manifest-only proof did not produce four exact N/A metrics.");
+        }
+    }
+
+    private static void RequireCliFourNotApplicableMetrics(JsonElement applicability, int changedLines)
+    {
+        foreach (var stage in new[] { "primary", "composed" })
+        foreach (var dimension in new[] { "line", "branch" })
+        {
+            var metric = applicability.GetProperty(stage).GetProperty(dimension);
+            if (metric.GetProperty("outcome").GetString() != "notApplicable"
+                || metric.GetProperty("reason").GetString() != "no-reported-patch-points"
+                || metric.GetProperty("changedLines").GetInt32() != changedLines
+                || metric.GetProperty("measurable").GetInt32() != 0
+                || metric.GetProperty("covered").GetInt32() != 0
+                || metric.GetProperty("percent").ValueKind != JsonValueKind.Null)
+                throw new InvalidDataException("Installed CLI v3 did not return four exact N/A metrics.");
+        }
+    }
+
+    private static void RequirePositivePrimaryAggregate(string accepted)
+    {
+        using var gate = JsonDocument.Parse(File.ReadAllBytes(Path.Join(accepted, "primary-gate.json")));
+        var root = gate.RootElement;
+        if (!root.GetProperty("passed").GetBoolean()
+            || root.GetProperty("line").GetProperty("valid").GetInt32() <= 0
+            || root.GetProperty("branch").GetProperty("valid").GetInt32() <= 0)
+            throw new InvalidDataException("Synthetic v3 primary aggregate must pass with positive line and branch denominators.");
+    }
+
+    private static bool IsFullGitObjectId(string value) =>
+        value.Length is 40 or 64 && value.All(Uri.IsHexDigit) && value == value.ToLowerInvariant();
+
+    private static async Task<byte[]> CreatePinnedGitPatchAsync(string repository, string baseCommit, string headCommit,
+        string retainedPatchPath)
+    {
+        var nullDevice = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+        var common = new[]
+        {
+            "--no-pager", "--no-replace-objects",
+            "-c", "core.fsmonitor=false", "-c", "core.quotePath=true", "-c", $"core.attributesFile={nullDevice}",
+            "-c", "diff.renames=true", "-c", "diff.renameLimit=1000", "-c", $"diff.orderFile={nullDevice}",
+            "-c", "diff.mnemonicPrefix=false", "-c", "diff.noprefix=false", "-c", "diff.suppressBlankEmpty=false",
+        };
+        var mergeBaseBytes = await RunPinnedGitAsync(repository, common.Concat(["merge-base", "--all", baseCommit, headCommit]).ToArray(), headCommit)
+            .ConfigureAwait(false);
+        var mergeBases = new UTF8Encoding(false, true).GetString(mergeBaseBytes).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (mergeBases.Length != 1 || mergeBases[0] != baseCommit)
+            throw new InvalidDataException("The v3 local Git history must have exactly one merge base equal to the pinned base.");
+
+        var diffArguments = common.Concat(new[]
+        {
+            "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative",
+            "--no-renames", "--find-renames=50%", "--no-rename-empty", "-l1000",
+            "--diff-algorithm=myers", "--no-indent-heuristic", "--ignore-submodules=none", "--submodule=short",
+            "--patch", "--unified=0", "--inter-hunk-context=0", "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
+            "--output-indicator-new=+", "--output-indicator-old=-", "--output-indicator-context= ",
+            mergeBases[0], headCommit, "--",
+        }).ToArray();
+        var patch = await RunPinnedGitAsync(repository, diffArguments, headCommit).ConfigureAwait(false);
+        await File.WriteAllBytesAsync(retainedPatchPath, patch).ConfigureAwait(false);
+        var retained = await File.ReadAllBytesAsync(retainedPatchPath).ConfigureAwait(false);
+        if (!retained.AsSpan().SequenceEqual(patch))
+            throw new IOException("The retained v3 patch changed after Git capture.");
+        return retained;
+    }
+
+    private static async Task<byte[]> RunPinnedGitAsync(string repository, IReadOnlyList<string> arguments, string pinnedHead)
+    {
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = repository,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in arguments)
+            start.ArgumentList.Add(argument);
+        var inheritedGitVariables = start.Environment.Keys
+            .Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray();
+        foreach (var key in inheritedGitVariables)
+            start.Environment.Remove(key);
+        var nullDevice = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+        start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+        start.Environment["GIT_CONFIG_GLOBAL"] = nullDevice;
+        start.Environment["GIT_CONFIG_SYSTEM"] = nullDevice;
+        start.Environment["GIT_ATTR_NOSYSTEM"] = "1";
+        start.Environment["GIT_ATTR_SOURCE"] = pinnedHead;
+        start.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        start.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+        start.Environment["GIT_NO_LAZY_FETCH"] = "1";
+        start.Environment["LC_ALL"] = "C";
+        start.Environment["LANG"] = "C";
+
+        using var process = new Process { StartInfo = start };
+        if (!process.Start())
+            throw new InvalidOperationException("Could not start pinned Git patch capture.");
+        using var deadline = new CancellationTokenSource(IdentityCommandTimeout);
+        var outputTask = ReadBoundedBytesAsync(process.StandardOutput.BaseStream, 1024 * 1024, deadline.Token);
+        var errorTask = ReadBoundedAsync(process.StandardError, deadline.Token);
+        var exitTask = process.WaitForExitAsync(deadline.Token);
+        try
+        {
+            await Task.WhenAll(outputTask, errorTask, exitTask).ConfigureAwait(false);
+        }
+        catch
+        {
+            deadline.Cancel();
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            throw;
+        }
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Pinned Git patch capture failed: {errorTask.Result}");
+        return outputTask.Result;
+    }
+
+    private static async Task<byte[]> ReadBoundedBytesAsync(Stream stream, int maximumBytes, CancellationToken cancellationToken)
+    {
+        using var output = new MemoryStream();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+                return output.ToArray();
+            if (output.Length + read > maximumBytes)
+                throw new IOException("Pinned Git output exceeded its fixture limit.");
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static async Task CreateSourceAsync(string repository)
@@ -258,6 +561,8 @@ internal static class Program
             """).ConfigureAwait(false);
 
         await File.WriteAllTextAsync(Path.Join(repository, ".gitignore"), "**/bin/\n**/obj/\n**/TestResults/\n")
+            .ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Join(repository, "coverage.manifest"), "version=1\n")
             .ConfigureAwait(false);
         await File.WriteAllTextAsync(Path.Join(library, "Branchy.csproj"), """
             <Project Sdk="Microsoft.NET.Sdk">
@@ -505,7 +810,7 @@ internal static class Program
     }
 
     private static async Task<JsonElement> InvokeCliAsync(string executable, string repository, string root,
-        string operation, object request, int expectedExitCode = 0)
+        string operation, object request, int expectedExitCode = 0, int contractVersion = 2)
     {
         var stem = operation + "-" + Guid.NewGuid().ToString("N");
         var requestPath = Path.Join(root, stem + "-request.json");
@@ -515,7 +820,19 @@ internal static class Program
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) },
         };
-        var envelope = new { schemaVersion = 2, operation, request };
+        var requestNode = JsonSerializer.SerializeToNode(request, options)
+            ?? throw new InvalidDataException("Installed CLI request could not be serialized.");
+        if (contractVersion == 2 && requestNode["policy"] is JsonObject v2Policy)
+        {
+            v2Policy.Remove("contractVersion");
+            v2Policy.Remove("reportProfileId");
+        }
+        var envelope = new JsonObject
+        {
+            ["schemaVersion"] = contractVersion,
+            ["operation"] = operation,
+            ["request"] = requestNode,
+        };
         await File.WriteAllBytesAsync(requestPath, JsonSerializer.SerializeToUtf8Bytes(envelope, options)).ConfigureAwait(false);
         _ = await RunCommandAsync(repository, executable,
             ["coverage", "fan-in", operation, "--request", requestPath, "--result", resultPath, "--json"],
@@ -524,7 +841,7 @@ internal static class Program
             throw new InvalidDataException("Installed CLI did not write its requested result document.");
         using var result = JsonDocument.Parse(await File.ReadAllBytesAsync(resultPath).ConfigureAwait(false));
         var document = result.RootElement;
-        if (document.GetProperty("schemaVersion").GetInt32() != 2
+        if (document.GetProperty("schemaVersion").GetInt32() != contractVersion
             || document.GetProperty("operation").GetString() != operation)
             throw new InvalidDataException("Installed CLI returned an unexpected result envelope.");
         return document.Clone();

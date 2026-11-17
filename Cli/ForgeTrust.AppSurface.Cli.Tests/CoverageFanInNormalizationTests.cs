@@ -107,6 +107,57 @@ public sealed class CoverageFanInNormalizationTests
             .MergeAsync([input], Path.Join(temp.Path, "output"), CancellationToken.None));
     }
 
+    [Fact]
+    public async Task GeneratedOutputConsumesSharedBudgetAndCancelsTheExactGeneratorOnExhaustion()
+    {
+        using var temp = TestDirectory.Create();
+        var input = temp.WriteFile("coverage.xml", "<coverage/>");
+        var inputBytes = new FileInfo(input).Length;
+        var drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runtime = new Runtime(async (directory, token) =>
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Join(directory, "Cobertura.xml"), "<coverage/>");
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+            finally { drained.TrySetResult(); }
+        });
+        var budget = new CoverageFanInBudget(inputBytes + 5);
+
+        await Assert.ThrowsAsync<CoverageFanInEvidenceException>(() => new CoverageFanInNormalization(runtime, Bounds, budget)
+            .MergeAsync([input], Path.Join(temp.Path, "output"), CancellationToken.None));
+
+        Assert.True(drained.Task.IsCompletedSuccessfully);
+        Assert.Equal(1, runtime.Calls);
+        Assert.Equal(inputBytes, budget.Snapshot().UsedBytes);
+        Assert.True(budget.Snapshot().UsedBytes <= budget.Snapshot().LimitBytes);
+    }
+
+    [Fact]
+    public async Task GeneratedOutputReadbackDoesNotChargeTheSharedBudgetTwice()
+    {
+        using var temp = TestDirectory.Create();
+        var input = temp.WriteFile("coverage.xml", "<coverage/>");
+        var output = Path.Join(temp.Path, "output");
+        var runtime = new Runtime((directory, _) =>
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Join(directory, "Cobertura.xml"), "<coverage/>");
+            File.WriteAllText(Path.Join(directory, "Summary.txt"), "summary");
+            return Task.CompletedTask;
+        });
+        var expectedBytes = new FileInfo(input).Length + "<coverage/>".Length + "summary".Length;
+        var budget = new CoverageFanInBudget(expectedBytes);
+
+        await new CoverageFanInNormalization(runtime, Bounds, budget).MergeAsync([input], output, CancellationToken.None);
+        Assert.Equal(expectedBytes, budget.Snapshot().UsedBytes);
+        using var readback = new CoverageFanInIO(Bounds, CancellationToken.None, budget);
+        readback.Acquire([(output, false)], requireCoordination: false);
+
+        Assert.Equal("<coverage/>", System.Text.Encoding.UTF8.GetString(readback.Read(Path.Join(output, "Cobertura.xml"), xml: true)));
+        Assert.Equal("summary", System.Text.Encoding.UTF8.GetString(readback.Read(Path.Join(output, "Summary.txt"))));
+        Assert.Equal(expectedBytes, budget.Snapshot().UsedBytes);
+    }
+
     private sealed class Runtime(Func<string, CancellationToken, Task> run) : ICoverageRunReportGenerator
     {
         internal int Calls { get; private set; }

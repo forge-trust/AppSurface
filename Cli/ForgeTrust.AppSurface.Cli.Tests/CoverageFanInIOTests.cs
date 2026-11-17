@@ -5,6 +5,43 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class CoverageFanInIOTests
 {
+    [Fact]
+    public void V3ProcessesRetainedInputsAndStagingUseOneBudgetWithoutChargingCachedReadsTwice()
+    {
+        using var temp = TestDirectory.Create();
+        var input = temp.CreateDirectory("input");
+        var file = Path.Join(input, "facts.json");
+        File.WriteAllBytes(file, new byte[10]);
+        var xmlBytes = Encoding.UTF8.GetBytes("<coverage><line><condition /></line></coverage>");
+        var xmlPath = Path.Join(input, "coverage.xml");
+        File.WriteAllBytes(xmlPath, xmlBytes);
+        var otherInput = temp.CreateDirectory("other-input");
+        File.WriteAllBytes(Path.Join(otherInput, "more.json"), new byte[3]);
+        var expectedUsed = 5 + 10 + xmlBytes.Length + 3 + 10 + 5;
+        var budget = new CoverageFanInBudget(expectedUsed);
+        budget.Charge(5); // Prior bounded Git probe, including its streams.
+        using var io = new CoverageFanInIO(Bounds(total: 100), CancellationToken.None, budget);
+        io.Acquire([(input, false)], requireCoordination: false);
+        Assert.Equal(10, io.Read(file).Length);
+        Assert.Equal(10, io.Read(file).Length);
+        Assert.Equal(xmlBytes.Length, io.Read(xmlPath, xml: true).Length);
+        Assert.Same(io.Xml(xmlBytes), io.Xml(xmlBytes));
+        Assert.Equal(expectedUsed - 5 - 10 - xmlBytes.Length, budget.Remaining);
+
+        using var secondIo = new CoverageFanInIO(Bounds(total: 100), CancellationToken.None, budget);
+        secondIo.Acquire([(otherInput, false)], requireCoordination: false);
+        Assert.Equal(3, secondIo.Read(Path.Join(otherInput, "more.json")).Length);
+        Assert.Equal(expectedUsed - 5 - 10 - xmlBytes.Length - 3, budget.Remaining);
+
+        io.AdmitOutput([new byte[10]]); Assert.Equal(5, budget.Remaining);
+        Assert.Equal("limit-exceeded", Assert.Throws<CoverageFanInEvidenceException>(() => io.AdmitMetadata(6)).Cause);
+        Assert.Equal(5, budget.Remaining);
+        io.AdmitMetadata(5); Assert.Equal(0, budget.Remaining);
+        Assert.Equal(new CoverageFanInBudgetSnapshot(expectedUsed, expectedUsed, xmlBytes.Length, 13, 1, 1, 15, 2), budget.Snapshot());
+        io.VerifyBindings();
+        secondIo.VerifyBindings();
+    }
+
     private static CoverageFanInBounds Bounds(long xml = 10000, long json = 1000, long total = 100000,
         int depth = 20, int lines = 20, int elements = 100, int attributes = 10, int token = 1000,
         int branches = 20, int records = 40) => new(xml, json, total, depth, lines, elements, attributes, token, branches, records);

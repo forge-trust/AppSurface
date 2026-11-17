@@ -85,9 +85,9 @@ internal static partial class CoverageFanInEngine
     /// <summary>Finds exactly one original attachment per successful invocation without accepting linked traversal.</summary>
     internal static IReadOnlyDictionary<string, string> FindNativeReports(string collection, string[] projects,
         CoverageFanInExpected expected, CancellationToken token, Action<string>? observeTimingsHash = null,
-        Action<IReadOnlyDictionary<string, string>>? observeReportHashes = null)
+        Action<IReadOnlyDictionary<string, string>>? observeReportHashes = null, CoverageFanInBudget? budget = null)
     {
-        using var io = new CoverageFanInIO(expected.Bounds, token);
+        using var io = new CoverageFanInIO(expected.Bounds, token, budget);
         io.Acquire([(collection, false)], requireCoordination: false);
         var bytes = io.Read(Path.Join(collection, "timings.json"));
         var timings = Parse(bytes);

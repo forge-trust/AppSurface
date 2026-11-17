@@ -13,7 +13,7 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// Independently checks the semantic facts published by the coverage fan-in producer.
 /// This verifier owns its identity, record, path, inventory, diff, and gate calculations.
 /// </summary>
-internal static class CoverageFanInIndependentVerifier
+internal static partial class CoverageFanInIndependentVerifier
 {
     private const string CompositionError = "Coverage composition failed independent verification.";
     private const string InventoryError = "Primary coverage inventory failed independent verification.";

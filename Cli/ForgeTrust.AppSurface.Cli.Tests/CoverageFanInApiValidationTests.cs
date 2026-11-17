@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ForgeTrust.AppSurface.Coverage;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
@@ -35,6 +34,55 @@ public sealed class CoverageFanInApiValidationTests
         Assert.Throws<ArgumentException>(() => CoverageFanIn.ComposeAsync(new(policy, temp.Path, "primary", null!, output)));
         Assert.Throws<ArgumentException>(() => CoverageFanIn.AcceptAsync(new(policy, temp.Path, "primary", null!, "composed", output)));
         Assert.Throws<ArgumentException>(() => CoverageFanIn.VerifyAsync(new(policy, temp.Path, "primary", null!, "composed", "accepted")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Path));
+    }
+
+    [Fact]
+    public void UnsupportedFanInContractFailsThroughThePublicFacadeBeforeFilesystemEffects()
+    {
+        using var temp = TestDirectory.Create();
+        var policy = CoverageFanInPolicyTests.Policy() with { ContractVersion = 4 };
+        var output = Path.Join(temp.Path, "output");
+
+        Assert.Throws<ArgumentException>(() => CoverageFanIn.CaptureAsync(new(policy, temp.Path, output, "primary")));
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Path));
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public void V3PatchPolicyRequiresFullObjectFormatBaseBeforeFilesystemEffects()
+    {
+        using var temp = TestDirectory.Create();
+        var policy = CoverageFanInPolicyTests.Policy() with
+        {
+            ContractVersion = 3,
+            ReportProfileId = "coverlet-collector-cobertura-v1",
+            Gate = new(CoverageGateMode.AggregateAndPatch, DiffBase: "main")
+        };
+        var output = Path.Join(temp.Path, "output");
+
+        Assert.Throws<ArgumentException>(() => CoverageFanIn.AcceptAsync(new(policy, temp.Path,
+            "primary", [], "composed", output)
+        { ExpectedPatchSha256 = new string('a', 64) }));
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Path));
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public void V3PatchRequiresExpectedCanonicalHashBeforeWork()
+    {
+        using var temp = TestDirectory.Create();
+        var policy = CoverageFanInPolicyTests.Policy() with
+        {
+            ContractVersion = 3,
+            ReportProfileId = "coverlet-collector-cobertura-v1",
+            Gate = new(CoverageGateMode.AggregateAndPatch, DiffBase: new string('c', 40))
+        };
+        var error = Assert.Throws<ArgumentException>(() => CoverageFanIn.AcceptAsync(new(policy, temp.Path,
+            "primary", [], "composed", Path.Join(temp.Path, "output"))));
+        Assert.Contains("expectedPatchSha256", error.Message, StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Path));
     }
 
@@ -123,7 +171,7 @@ public sealed class CoverageFanInApiValidationTests
         };
         var frozen = CoveragePolicyEncoding.Freeze(policy);
         var expected = new CoverageFanInExpected(
-            JsonSerializer.SerializeToElement(frozen, CoveragePolicyEncoding.Json),
+            CoveragePolicyEncoding.ToElement(frozen),
             CoveragePolicyEncoding.Digest(frozen));
         var request = new CoverageFanInEngineRequest(expected, temp.Path, Path.Join(temp.Path, "output"))
         {
@@ -218,7 +266,7 @@ public sealed class CoverageFanInApiValidationTests
     private static CoverageFanInExpected Expected()
     {
         var policy = CoveragePolicyEncoding.Freeze(CoverageFanInPolicyTests.Policy());
-        return new(JsonSerializer.SerializeToElement(policy, CoveragePolicyEncoding.Json),
+        return new(CoveragePolicyEncoding.ToElement(policy),
             CoveragePolicyEncoding.Digest(policy));
     }
 

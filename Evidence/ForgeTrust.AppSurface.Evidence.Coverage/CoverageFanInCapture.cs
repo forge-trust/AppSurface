@@ -64,7 +64,7 @@ internal static partial class CoverageFanInEngine
             throw new InvalidDataException("Declared native platform differs from this producer host.");
         var manifest = Serialize(new
         {
-            schemaVersion = 2,
+            schemaVersion = r.Expected.ContractVersion,
             producerId = r.ProducerId,
             scope = r.ProducerId == "primary" ? "solution" : "native",
             sourceRoot = Full(r.RepositoryRoot),
@@ -107,7 +107,7 @@ internal static partial class CoverageFanInEngine
         var manifest = Parse(manifestBytes);
         ExactProperties(manifest, ["schemaVersion", "producerId", "scope", "sourceRoot", "source", "run", "policy",
             "policyDigest", "policyEncoding", "platform", "filter", "observation", "files"]);
-        if (manifest.GetProperty("schemaVersion").GetInt32() != 2
+        if (manifest.GetProperty("schemaVersion").GetInt32() != r.Expected.ContractVersion
             || manifest.GetProperty("producerId").GetString() != producerId
             || manifest.GetProperty("scope").GetString() != (producerId == "primary" ? "solution" : "native")
             || manifest.GetProperty("policyEncoding").GetString() != "coverage-policy-c14n-1"

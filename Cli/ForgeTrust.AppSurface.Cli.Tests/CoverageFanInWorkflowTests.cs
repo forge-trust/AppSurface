@@ -960,7 +960,7 @@ public sealed class CoverageFanInWorkflowTests
             }
         });
         var request = new CoverageFanInEngineRequest(
-            new(JsonSerializer.SerializeToElement(policy, CoveragePolicyEncoding.Json), CoveragePolicyEncoding.Digest(policy)),
+            new(CoveragePolicyEncoding.ToElement(policy), CoveragePolicyEncoding.Digest(policy)),
             fixture.Repository, PrimaryCaptureDirectory: fixture.Captured, SupplementaryCaptureDirectories: [],
             ComposedOutputDirectory: fixture.Composed, AcceptedOutputDirectory: fixture.Accepted)
         { IdentityRunner = runner };

@@ -78,6 +78,7 @@ internal static class CoverageRunDriverPreflight
     /// <param name="cancellationToken">Cancellation token for capability evaluation.</param>
     /// <param name="testArguments">Original literal test arguments used by an observer to resolve invocation overrides.</param>
     /// <param name="observeCapabilities">Optional observer called once for each successfully parsed outer or framework evaluation.</param>
+    /// <param name="requiredCollectorVersion">Optional exact collector version to verify from each selected framework's evaluated package graph; when supplied, capability queries also include central <c>PackageVersion</c> items.</param>
     /// <returns>A task that completes when every project is compatible.</returns>
     /// <remarks>Throws a stable coverage execution diagnostic for an engine incompatibility or aggregated project package and capability failures in stable project order.</remarks>
     public static async Task ValidateAsync(
@@ -88,7 +89,8 @@ internal static class CoverageRunDriverPreflight
         CoverageRunWatchdogSupervisor supervisor,
         CancellationToken cancellationToken,
         IReadOnlyList<string>? testArguments = null,
-        Action<CoverageRunProject, string?, string>? observeCapabilities = null)
+        Action<CoverageRunProject, string?, string>? observeCapabilities = null,
+        string? requiredCollectorVersion = null)
     {
         ValidateEngine(resolution.SolutionDirectory);
         var requiredPackage = driver == CoverageRunDriver.Collector ? "coverlet.collector" : "coverlet.msbuild";
@@ -103,7 +105,8 @@ internal static class CoverageRunDriverPreflight
                 resolution.SolutionDirectory,
                 processRunner,
                 supervisor,
-                cancellationToken);
+                cancellationToken,
+                includePackageVersions: requiredCollectorVersion is not null);
 
             if (result.ExitCode != 0
                 || result.StandardOutput is null
@@ -120,6 +123,15 @@ internal static class CoverageRunDriverPreflight
                 continue;
             }
             observeCapabilities?.Invoke(project, null, result.StandardOutput);
+
+            if (requiredCollectorVersion is not null
+                && !CoverageRunCollectorVersionPreflight.HasExactVersion(
+                    result.StandardOutput,
+                    framework: null,
+                    requiredVersion: requiredCollectorVersion))
+            {
+                failures.Add($"{project.RelativePath}: coverlet.collector must be exactly {requiredCollectorVersion}");
+            }
 
             if (hasDuplicatePackage)
             {
@@ -154,7 +166,8 @@ internal static class CoverageRunDriverPreflight
                     resolution.SolutionDirectory,
                     processRunner,
                     supervisor,
-                    cancellationToken);
+                    cancellationToken,
+                    includePackageVersions: requiredCollectorVersion is not null);
                 if (innerResult.ExitCode != 0
                     || innerResult.StandardOutput is null
                     || !TryReadCapabilities(innerResult.StandardOutput, requiredPackage, out var innerHasPackage, out var innerHasDuplicatePackage, out var innerUsesMtp, out _, out _))
@@ -163,6 +176,15 @@ internal static class CoverageRunDriverPreflight
                     continue;
                 }
                 observeCapabilities?.Invoke(project, targetFramework, innerResult.StandardOutput);
+
+                if (requiredCollectorVersion is not null
+                    && !CoverageRunCollectorVersionPreflight.HasExactVersion(
+                        innerResult.StandardOutput,
+                        targetFramework,
+                        requiredVersion: requiredCollectorVersion))
+                {
+                    failures.Add($"{project.RelativePath} [{targetFramework}]: coverlet.collector must be exactly {requiredCollectorVersion}");
+                }
 
                 if (innerHasDuplicatePackage)
                 {
@@ -192,13 +214,14 @@ internal static class CoverageRunDriverPreflight
         string solutionDirectory,
         ICoverageRunProcessRunner processRunner,
         CoverageRunWatchdogSupervisor supervisor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includePackageVersions)
     {
         var args = new List<string>
         {
             "msbuild",
             project.FullPath,
-            "-getItem:PackageReference",
+            includePackageVersions ? "-getItem:PackageReference,PackageVersion" : "-getItem:PackageReference",
             "-getProperty:TestingPlatformDotnetTestSupport,TargetFramework,TargetFrameworks,RunSettingsFilePath,Configuration",
             $"-property:Configuration={configuration}",
             "-nologo",

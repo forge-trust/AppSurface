@@ -71,7 +71,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("COVERAGE_RUN_SCOPE: ${{ github.repository }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ID: ${{ github.run_id }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn", workflow, StringComparison.Ordinal);
+        Assert.Contains("FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_DOGFOOD_OUTPUT", workflow, StringComparison.Ordinal);
         Assert.Contains("/composed/coverage.cobertura.xml", workflow, StringComparison.Ordinal);
         Assert.Contains("steps.solution-coverage.outcome == 'success'", workflow, StringComparison.Ordinal);
@@ -290,7 +290,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--configuration Release", runCommand, StringComparison.Ordinal);
         Assert.Contains("--no-restore", runCommand, StringComparison.Ordinal);
         Assert.Contains("/p:TailwindEnabled=false", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--logger \"console;verbosity=detailed\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--results-directory \"${{ runner.temp }}/coverage-native-results\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--collect:\"XPlat Code Coverage\"", runCommand, StringComparison.Ordinal);

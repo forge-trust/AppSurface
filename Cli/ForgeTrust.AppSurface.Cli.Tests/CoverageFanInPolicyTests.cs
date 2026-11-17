@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -13,6 +14,22 @@ public sealed class CoverageFanInPolicyTests
         new("local", "dogfood", "run-1", 1),
         ["tests/Second.csproj", "tests/First.csproj"], [], new(CoverageGateMode.AggregateOnly));
 
+    private static CoverageFanInPolicy V3Policy(int objectIdLength = 40)
+    {
+        var policy = Policy();
+        return policy with
+        {
+            ContractVersion = 3,
+            ReportProfileId = "coverlet-collector-cobertura-v1",
+            Source = new(new string('a', objectIdLength), new string('b', objectIdLength), "10.0.102", "Release"),
+            Gate = policy.Gate with
+            {
+                Mode = CoverageGateMode.AggregateAndPatch,
+                DiffBase = new string('c', objectIdLength)
+            }
+        };
+    }
+
     [Fact]
     public void CanonicalPolicyMatchesTheCompleteVersionedGoldenVector()
     {
@@ -22,6 +39,136 @@ public sealed class CoverageFanInPolicyTests
         Assert.DoesNotContain("95.0", Encoding.UTF8.GetString(bytes));
         Assert.DoesNotContain(" ", Encoding.UTF8.GetString(bytes));
         Assert.NotEqual(0xEF, bytes[0]);
+    }
+
+    [Fact]
+    public void PolicyDefaultsToV2AndItsCanonicalProjectionOmitsNewVersionProperties()
+    {
+        var policy = Policy();
+        var element = CoveragePolicyEncoding.ToElement(policy);
+
+        Assert.Equal(2, policy.ContractVersion);
+        Assert.Null(policy.ReportProfileId);
+        Assert.False(element.TryGetProperty("contractVersion", out _));
+        Assert.False(element.TryGetProperty("reportProfileId", out _));
+        Assert.Equal(CanonicalGolden, Encoding.UTF8.GetString(CoveragePolicyEncoding.CanonicalBytes(policy)));
+        Assert.Equal("b0660c1b9a827c191d2363002f1c770d4d032e3205885a8e50ff9f88fe3bdc53",
+            CoveragePolicyEncoding.Digest(policy));
+    }
+
+    [Fact]
+    public void V3PolicyProjectionIncludesItsClosedProfileAndRoundTripsCanonically()
+    {
+        var policy = V3Policy();
+        var element = CoveragePolicyEncoding.ToElement(policy);
+        var canonical = Encoding.UTF8.GetString(CoveragePolicyEncoding.CanonicalBytes(policy));
+        var decoded = CoveragePolicyEncoding.Decode<CoverageFanInPolicy>(
+            JsonSerializer.SerializeToUtf8Bytes(policy, CoveragePolicyEncoding.Json));
+
+        Assert.Equal(3, element.GetProperty("contractVersion").GetInt32());
+        Assert.Equal("coverlet-collector-cobertura-v1", element.GetProperty("reportProfileId").GetString());
+        Assert.StartsWith("{\"contractVersion\":3,", canonical, StringComparison.Ordinal);
+        Assert.NotEqual(CoveragePolicyEncoding.Digest(Policy()), CoveragePolicyEncoding.Digest(policy));
+        Assert.Equal(CoveragePolicyEncoding.CanonicalBytes(policy), CoveragePolicyEncoding.CanonicalBytes(decoded));
+    }
+
+    [Fact]
+    public void GenericJsonKeepsV2PolicyClosedAndRoundTripsV3Selectors()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
+        var capture = new CoverageCaptureRequest(Policy(), ".", "output", "primary");
+        var captureJson = JsonSerializer.Serialize(capture, options);
+        using var captureDocument = JsonDocument.Parse(captureJson);
+        var v2PolicyJson = captureDocument.RootElement.GetProperty("policy");
+
+        Assert.False(v2PolicyJson.TryGetProperty("contractVersion", out _));
+        Assert.False(v2PolicyJson.TryGetProperty("reportProfileId", out _));
+        var decodedCapture = CoveragePolicyEncoding.Decode<CoverageCaptureRequest>(Encoding.UTF8.GetBytes(captureJson));
+        Assert.Equal(2, decodedCapture.Policy.ContractVersion);
+        Assert.Null(decodedCapture.Policy.ReportProfileId);
+        Assert.Equal(CanonicalGolden, Encoding.UTF8.GetString(
+            CoveragePolicyEncoding.CanonicalBytes(decodedCapture.Policy)));
+
+        var v3Policy = V3Policy();
+        var v3Json = JsonSerializer.Serialize(v3Policy, options);
+        using var v3Document = JsonDocument.Parse(v3Json);
+        Assert.Equal(3, v3Document.RootElement.GetProperty("contractVersion").GetInt32());
+        Assert.Equal("coverlet-collector-cobertura-v1",
+            v3Document.RootElement.GetProperty("reportProfileId").GetString());
+
+        var v3RoundTrip = JsonSerializer.Deserialize<CoverageFanInPolicy>(v3Json, options);
+        Assert.NotNull(v3RoundTrip);
+        Assert.Equal(3, v3RoundTrip.ContractVersion);
+        Assert.Equal(v3Policy.ReportProfileId, v3RoundTrip.ReportProfileId);
+        Assert.Equal(CoveragePolicyEncoding.CanonicalBytes(v3Policy),
+            CoveragePolicyEncoding.CanonicalBytes(v3RoundTrip));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    [InlineData(-1)]
+    public void UnsupportedContractVersionsAreRejectedDuringPolicyFreeze(int version)
+        => Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(Policy() with
+        { ContractVersion = version }));
+
+    [Fact]
+    public void PolicyFreezeRequiresTheExactVersionSpecificProfile()
+    {
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(Policy() with
+        { ReportProfileId = "coverlet-collector-cobertura-v1" }));
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(V3Policy() with
+        { ReportProfileId = null }));
+        Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(V3Policy() with
+        { ReportProfileId = "coverlet-cobertura-v1" }));
+    }
+
+    [Fact]
+    public void V3PatchBaseMustBeAFullLowercaseIdMatchingTheSourceObjectFormat()
+    {
+        Assert.Equal(new string('c', 40), CoveragePolicyEncoding.Freeze(V3Policy(40)).Gate.DiffBase);
+        Assert.Equal(new string('c', 64), CoveragePolicyEncoding.Freeze(V3Policy(64)).Gate.DiffBase);
+
+        foreach (var invalid in new[]
+        {
+            V3Policy() with { Gate = V3Policy().Gate with { DiffBase = "main" } },
+            V3Policy() with { Gate = V3Policy().Gate with { DiffBase = new string('c', 64) } },
+            V3Policy() with { Gate = V3Policy().Gate with { DiffBase = new string('C', 40) } },
+            V3Policy() with { Source = V3Policy().Source with { Tree = new string('b', 64) } }
+        })
+            Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(invalid));
+    }
+
+    [Fact]
+    public void PatchMetricWireShapeRequiresEveryFieldAndUsesClosedOutcomeStrings()
+    {
+        var metric = new CoveragePatchMetricResult(CoveragePatchApplicabilityOutcome.NotApplicable,
+            "no-reported-patch-points", 1, 0, 0, null);
+        const string expected = """{"outcome":"notApplicable","reason":"no-reported-patch-points","changedLines":1,"measurable":0,"covered":0,"percent":null}""";
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(metric, CoveragePolicyEncoding.Json);
+        var decoded = CoveragePolicyEncoding.Decode<CoveragePatchMetricResult>(bytes);
+
+        Assert.Equal(expected, Encoding.UTF8.GetString(bytes));
+        Assert.Equal(metric, decoded);
+        foreach (var (outcome, wire) in new[]
+        {
+            (CoveragePatchApplicabilityOutcome.Measured, "measured"),
+            (CoveragePatchApplicabilityOutcome.NotApplicable, "notApplicable"),
+            (CoveragePatchApplicabilityOutcome.Unverified, "unverified")
+        })
+        {
+            var serialized = JsonSerializer.SerializeToElement(new CoveragePatchMetricResult(
+                outcome, "reason", null, null, null, null), CoveragePolicyEncoding.Json);
+            Assert.Equal(wire, serialized.GetProperty("outcome").GetString());
+        }
+
+        Assert.Throws<JsonException>(() => CoveragePolicyEncoding.Decode<CoveragePatchMetricResult>(
+            Encoding.UTF8.GetBytes("""{"outcome":"unverified","reason":"invalid-evidence","changedLines":null,"measurable":null,"covered":null}""")));
+        Assert.Throws<JsonException>(() => CoveragePolicyEncoding.Decode<CoveragePatchMetricSet>(
+            Encoding.UTF8.GetBytes("""{"line":{"outcome":"unverified","reason":"invalid-evidence","changedLines":null,"measurable":null,"covered":null,"percent":null}}""")));
+        Assert.Throws<JsonException>(() => CoveragePolicyEncoding.Decode<CoveragePatchApplicability>(
+            Encoding.UTF8.GetBytes("""{"primary":{"line":{"outcome":"notApplicable","reason":"no-reported-patch-points","changedLines":1,"measurable":0,"covered":0,"percent":null},"branch":{"outcome":"notApplicable","reason":"no-reported-patch-points","changedLines":1,"measurable":0,"covered":0,"percent":null}}}""")));
     }
 
     [Fact]
