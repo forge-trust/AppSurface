@@ -1129,6 +1129,65 @@ public sealed class EvidenceReuseSessionCoverageTests
         Assert.Equal(0, producer.ExecutionCount);
     }
 
+    [Theory]
+    [InlineData("origin.plan.json")]
+    [InlineData("artifacts/reports/report.txt")]
+    public async Task NonprivateReceiptPayloadBlocksSessionAdmissionWithoutExecutingOrInvalidatingOrigin(string relativePath)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        await repository.WriteAsync("src/input.txt", "private receipt input");
+        await repository.CommitAsync();
+        var producer = new PublishingProbeProducer();
+        var declaration = ArtifactDeclaration(producer.Id);
+        var plan = CreatePlan(declaration);
+        var registrations = Registrations(producer);
+        var store = TestPathUtils.PathUnder(repository.Root, "private-payload-store");
+        var originalArtifacts = TestPathUtils.PathUnder(repository.Root, "original-artifacts");
+        var restoredArtifacts = TestPathUtils.PathUnder(repository.Root, "refused-artifacts");
+        var options = ReuseOptions(repository.Root, store);
+        string key;
+        await using (var seed = await EvidenceProducerReuseSession.PrepareAsync(plan, registrations,
+            new Dictionary<string, string>(), options, _ => originalArtifacts, CancellationToken.None))
+        {
+            key = Assert.IsType<string>(Assert.Single(seed.Decisions).ProducerKey);
+            Assert.True(await seed.BeginExecutionAsync(CancellationToken.None));
+            var result = await producer.ProduceAsync(new EvidenceProducerContext(plan, declaration,
+                TimeProvider.System, seed.GetWriter(declaration)), CancellationToken.None);
+            Assert.True(await seed.BeforeCleanupAsync(true, CancellationToken.None));
+            var completed = await seed.CompleteAsync(EvidenceManifestBuilder.Build(plan, [result],
+                metrics: new EvidenceExecutionMetrics { CleanupCompleted = true }), CancellationToken.None);
+            Assert.Equal(EvidenceExecutionVerdict.Passed, completed.ExecutionVerdict);
+        }
+        var identity = await BuildIdentityAsync(repository.Root, plan, declaration);
+        var authority = Assert.IsType<EvidenceReceiptState>(EvidenceReceiptQuota.ReadAuthority(
+            store, identity.RepositoryNamespace, key));
+        var payload = TestPathUtils.PathUnder(store, identity.RepositoryNamespace, key,
+            Assert.IsType<string>(authority.PayloadDirectoryName));
+        var file = TestPathUtils.PathUnder(payload, relativePath);
+        var bytes = await File.ReadAllBytesAsync(file);
+        var mode = File.GetUnixFileMode(file);
+        try
+        {
+            File.SetUnixFileMode(file, mode | UnixFileMode.GroupRead);
+            await using var refused = await EvidenceProducerReuseSession.PrepareAsync(plan, registrations,
+                new Dictionary<string, string>(), options, _ => restoredArtifacts, CancellationToken.None);
+
+            var decision = Assert.Single(refused.Decisions);
+            Assert.True(refused.IsUnavailable);
+            Assert.Equal(EvidenceProducerReuseStatus.Unavailable, decision.Status);
+            Assert.Equal("reuse.receipt-payload-io-unavailable", decision.Reason);
+            Assert.Empty(refused.ReusedResults);
+            Assert.False(await refused.BeginExecutionAsync(CancellationToken.None));
+            Assert.Equal(1, producer.ExecutionCount);
+            Assert.False(Directory.Exists(restoredArtifacts));
+            Assert.Equal(authority, EvidenceReceiptQuota.ReadAuthority(store, identity.RepositoryNamespace, key));
+            Assert.True(Directory.Exists(payload));
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(file));
+        }
+        finally { File.SetUnixFileMode(file, mode); }
+    }
+
     [Fact]
     public async Task FreshPublicationRestoresAValidatedArtifactOnTheNextPreparation()
     {
