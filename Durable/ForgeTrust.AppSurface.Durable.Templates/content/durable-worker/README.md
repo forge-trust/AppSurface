@@ -49,7 +49,7 @@ The Docker prerequisite queries the daemon with [`docker version --format '{{.Se
 This avoids client plugin discovery performed by [`docker info`](https://docs.docker.com/reference/cli/docker/system/info/); slow unrelated metadata plugins should not consume
 the daemon-availability budget. Missing or failed Docker, empty or truncated output and an expired deadline still fail.
 The pinned image, real container, four first-Work checkpoints and owned cleanup remain required; see the
-[first-proof contract](https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md#three-command-first-proof).
+[first-proof contract](https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md#install-create-and-prove).
 
 ## Run the host separately
 
