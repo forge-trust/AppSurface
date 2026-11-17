@@ -300,7 +300,7 @@ jobs:
           --configuration Release
           --no-restore
           /p:TailwindEnabled=false
-          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~Evidence"
+          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence"
           --logger "console;verbosity=detailed"
           --results-directory "${{ runner.temp }}/coverage-native-results"
           --collect:"XPlat Code Coverage"

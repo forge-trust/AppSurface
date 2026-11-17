@@ -401,7 +401,7 @@ public sealed class EvidencePreparedRunTests
             process.WaitForExit();
             Assert.True(process.ExitCode == 0, output + error);
         }
-        public void Dispose() => Directory.Delete(_root, true);
+        public void Dispose() => NativeEvidenceTestDirectory.Delete(_root);
     }
 
     private sealed class Producer(string id) : IEvidenceProducer, IAsyncDisposable
