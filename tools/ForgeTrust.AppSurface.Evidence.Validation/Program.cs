@@ -5,7 +5,7 @@ using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
-/// <summary>Plans and runs repository acceptance producers and publishes verifiable EvidenceHost manifests.</summary>
+/// <summary>Runs ordinary package recipes and routes policy-backed repository EvidenceHost operations.</summary>
 internal static class Program
 {
     internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -26,7 +26,7 @@ internal static class Program
         if (args.Length == 0 || args.Contains("--help", StringComparer.Ordinal))
         {
             Console.WriteLine("""
-                AppSurface EvidenceHost acceptance
+                AppSurface package recipes and repository EvidenceHost operations
                 --package <candidate.nupkg> --version <exact-version> --source-commit <sha>
                 --dotnet <absolute-dotnet-host> --output <fresh-evidence-directory>
                 [--repository <checkout>] [--scratch-parent <existing-directory>]
@@ -64,8 +64,10 @@ internal static class Program
                 --output <fresh-capture> --dotnet <absolute-host>
 
                 Defaults: all journeys, 2 GiB scratch per producer, 1 GiB free-space floor.
-                Output is caller-owned durable evidence; only freshly owned scratch is cleaned.
-                A failed, skipped, truncated, timed-out or unclean run cannot produce a complete claim.
+                Direct --package mode emits a native-validation-receipt with no EvidenceHost claim or authority.
+                Repository --operation paths retain their policy-backed manifest and verification contracts.
+                Output is caller-owned durable data; only freshly owned scratch is cleaned.
+                Direct --package mode: exit zero requires every selected journey, assertion, artifact and cleanup to pass.
                 See tools/ForgeTrust.AppSurface.Evidence.Validation/README.md.
                 """);
             return args.Length == 0 ? 2 : 0;
@@ -135,23 +137,22 @@ internal static class Program
             var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("tools/ForgeTrust.AppSurface.Evidence.Validation/Program.cs")]);
             Directory.CreateDirectory(output);
             await File.WriteAllBytesAsync(Path.Join(output, "evidence-plan.json"), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
-            await using var host = EvidenceHostBootstrap.Create(plan, registration =>
-            {
-                foreach (var producer in producers) registration.AddProducer(producer);
-            }, new EvidenceHostOptions(ArtifactDirectory: Path.Join(output, "artifacts")));
-            Console.WriteLine("Native evidence profile selected: " + string.Join(", ", declarations.Select(d => d.Id)));
-            var manifest = await host.RunAsync(cancellationToken: cancellationToken);
-            await File.WriteAllBytesAsync(Path.Join(output, "evidence-manifest.json"), EvidenceCanonicalJson.Serialize(manifest), CancellationToken.None);
-            ValidationProof.Require(EvidenceManifestBuilder.Verify(plan, manifest), "canonical manifest verification");
-            Console.WriteLine($"Claim: {manifest.ClaimKind}; cleanup: {manifest.Metrics.CleanupCompleted}; manifest: {Path.Join(output, "evidence-manifest.json")}");
-            foreach (var producer in manifest.ProducerResults)
-                Console.WriteLine($"{producer.ProducerId}: {producer.Outcome} {producer.Diagnostic}");
-            return manifest.ClaimKind == EvidenceClaimKind.TargetedComplete ? 0 : 1;
+            Console.WriteLine("Native package journeys selected: " + string.Join(", ", declarations.Select(d => d.Id)));
+            var receipt = await NativeValidationExecution.ExecuteAsync(
+                plan, producers, Path.Join(output, "artifacts"), inputDigest, cancellationToken);
+            var receiptPath = Path.Join(output, "native-validation-receipt.json");
+            await File.WriteAllBytesAsync(receiptPath, NativeValidationReceiptCodec.Serialize(receipt), CancellationToken.None);
+            ValidationProof.Require(NativeValidationReceiptCodec.Verify(plan, receipt), "native validation receipt verification");
+            Console.WriteLine($"Recipe: {receipt.RunOutcome}; cleanup: {receipt.CleanupCompleted}; receipt: {receiptPath}");
+            foreach (var journey in receipt.Journeys)
+                Console.WriteLine($"{journey.ProducerId}: {journey.Outcome} {journey.Diagnostic}");
+            return receipt.RunOutcome switch { "passed" => 0, "cancelled" => 130, _ => 1 };
         }
-        catch (OperationCanceledException) { Console.Error.WriteLine("Native validation cancelled; no complete claim."); return 130; }
-        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
+        catch (OperationCanceledException) { Console.Error.WriteLine("Validation cancelled; no package recipe was marked passed."); return 130; }
+        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException
+            and not AccessViolationException and not AppDomainUnloadedException)
         {
-            Console.Error.WriteLine("Native validation failed: " + exception.GetType().Name + ". See retained manifest and producer artifacts when available.");
+            Console.Error.WriteLine("Validation failed: " + exception.GetType().Name + ". See retained receipt, manifest or journey artifacts when available.");
             return 1;
         }
     }

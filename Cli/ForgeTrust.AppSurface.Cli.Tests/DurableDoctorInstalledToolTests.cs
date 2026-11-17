@@ -1735,7 +1735,7 @@ public sealed class DurableDoctorInstalledToolTests
 
     private static void AssertProcessSucceeded(string description, ProcessResult result)
     {
-        Assert.False(result.TimedOut, $"The {description} child process exceeded its finite timeout and was terminated.");
+        Assert.False(result.TimedOut, $"The {description} child process exceeded its finite timeout and was terminated. Output: {TrimForFailure(result.StandardOutput)} Error: {TrimForFailure(result.StandardError)}");
         Assert.True(result.ExitCode == 0, $"The {description} child process failed with exit code {result.ExitCode}. Output: {TrimForFailure(result.StandardOutput)} Error: {TrimForFailure(result.StandardError)}");
     }
 

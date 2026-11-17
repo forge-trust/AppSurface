@@ -89,13 +89,16 @@ public sealed class NativeEvidenceValidationTests
             }
             var exitCode = await Program.RunAsync(arguments.ToArray());
             var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
-            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
+            var receipt = NativeValidationReceiptCodec.Deserialize(await File.ReadAllBytesAsync(Path.Join(output, "native-validation-receipt.json")));
 
             Assert.True(exitCode == 0, "Native acceptance failed; retained evidence: " + parent);
-            Assert.All(manifest.ProducerResults, result => Assert.True(result.Outcome == EvidenceProducerOutcome.Passed, result.Diagnostic + "; retained evidence: " + parent));
-            Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
-            Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-            Assert.True(manifest.Metrics.CleanupCompleted);
+            Assert.All(receipt.Journeys, journey => Assert.True(journey.Outcome == "passed", journey.Diagnostic + "; retained evidence: " + parent));
+            Assert.Equal("passed", receipt.RunOutcome);
+            Assert.Equal("none", receipt.EvidenceHostClaim);
+            Assert.Equal("none", receipt.EvidenceHostEligibility);
+            Assert.False(receipt.EvidenceHostProofProduced);
+            Assert.True(receipt.CleanupCompleted);
+            Assert.False(File.Exists(Path.Join(output, "evidence-manifest.json")));
             Assert.Empty(Directory.EnumerateDirectories(parent, "evidence-workspace-*"));
             Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
             using var result = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(output, "artifacts/installed-consumer/proof/result.json")));
