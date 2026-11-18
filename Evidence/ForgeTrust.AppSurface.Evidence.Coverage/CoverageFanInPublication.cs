@@ -22,11 +22,11 @@ internal static class CoverageFanInPublication
         CoverageFanInBounds bounds, CancellationToken token, Action? onCreated = null,
         Action? beforeCommit = null, Action? afterCommit = null, Action? onEffectsStarted = null,
         CoverageArtifactOperationLease? heldOutputLease = null, bool imported = false,
-        Action<long>? admitMetadata = null, Func<CancellationToken, Task>? validateBeforeCommit = null)
+        Action<long>? admitMetadata = null, Func<CancellationToken, Task>? validateBeforeCommit = null, int contractVersion = 2)
     {
         token.ThrowIfCancellationRequested();
         output = Path.GetFullPath(output); repository = Path.GetFullPath(repository);
-        if (!Stages.Contains(stage) || files.Count is < 1 or > MaximumPayloadFiles || !Guid.TryParseExact(operationId, "N", out _)
+        if (contractVersion is not (2 or 3) || !Stages.Contains(stage) || files.Count is < 1 or > MaximumPayloadFiles || !Guid.TryParseExact(operationId, "N", out _)
             || policyDigest.Length != 64 || policyDigest.Any(c => !char.IsAsciiHexDigit(c)))
             throw new ArgumentException("Invalid publication metadata.");
         long admitted = 0;
@@ -61,7 +61,7 @@ internal static class CoverageFanInPublication
         IReadOnlyList<CoverageArtifactDirectoryEntry> priorEntries = [];
         if (existed && (heldOutputLease is null || replaceOwned))
         {
-            previous = ValidatePrevious(root, output, stage, store, bounds, token);
+            previous = ValidatePrevious(root, output, stage, store, bounds, token, contractVersion: contractVersion);
             priorEntries = root.EnumerateArtifactEntries(MaximumPayloadFiles + 3);
         }
         else if (root.EnumerateArtifactEntries(2).Any(x => x.Name != ".appsurface-coverage-operation.lock"))
@@ -95,7 +95,7 @@ internal static class CoverageFanInPublication
         }
         var marker = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            schemaVersion = 2,
+            schemaVersion = contractVersion,
             stage,
             generation,
             operationId,
@@ -119,7 +119,7 @@ internal static class CoverageFanInPublication
             // Snapshot succeeds before any previous payload is retired. Capture dependencies remain pinned.
             await store.SnapshotAsync(previous, pin: stage == "capture", automatic: false, token,
                 sourceLeaseHeld: true).ConfigureAwait(false);
-            _ = ValidatePrevious(root, output, stage, store, bounds, token, stagingName);
+            _ = ValidatePrevious(root, output, stage, store, bounds, token, stagingName, contractVersion);
             var oldMarker = priorEntries.Single(x => x.Name == CoverageFanInIO.CompletionName);
             root.DeleteArtifactEntry(oldMarker.Name, 1, oldMarker.Identity);
             foreach (var entry in priorEntries.Where(x => x.Name is not (CoverageFanInIO.CompletionName or ".appsurface-coverage-operation.lock")))
@@ -144,10 +144,10 @@ internal static class CoverageFanInPublication
             RunId = generation,
             OutputIdentity = root.ArtifactDirectoryIdentity,
             RepositoryIdentity = source.ArtifactDirectoryIdentity,
-            Version = "coverage-fanin-v2",
+            Version = "coverage-fanin-v" + contractVersion,
             Outcome = stage == "rejected-gates" ? "failed" : "success",
             CreatedAtUtc = DateTimeOffset.UtcNow,
-            Provenance = new(null, null, "coverage-fanin-v2:" + stage),
+            Provenance = new(null, null, "coverage-fanin-v" + contractVersion + ":" + stage),
             Complete = false
         }, inventory, output, repository);
         await store.RegisterAsync(run, token).ConfigureAwait(false);
@@ -167,12 +167,12 @@ internal static class CoverageFanInPublication
     }
 
     private static CoverageArtifactCurrentRun ValidatePrevious(CoverageRunOutputLease root, string output, string stage,
-        CoverageArtifactStore store, CoverageFanInBounds bounds, CancellationToken token, string? admittedStage = null)
+        CoverageArtifactStore store, CoverageFanInBounds bounds, CancellationToken token, string? admittedStage = null, int contractVersion = 2)
     {
         token.ThrowIfCancellationRequested();
         var run = store.GetCurrentRun(output) ?? throw new InvalidDataException("Unregistered output cannot be replaced.");
         if (run.ManifestBase.OutputIdentity != root.ArtifactDirectoryIdentity
-            || !IsCompatiblePurpose(run.ManifestBase.Provenance?.ConfigurationFingerprint, stage))
+            || !IsCompatiblePurpose(run.ManifestBase.Provenance?.ConfigurationFingerprint, stage, contractVersion))
             throw new InvalidDataException("Output purpose or physical registration differs.");
         var expected = run.Inventory.Select(x => x.Path).ToHashSet(StringComparer.Ordinal);
         expected.Add(".appsurface-coverage-operation.lock");
@@ -197,8 +197,8 @@ internal static class CoverageFanInPublication
         }
         using var markerFile = root.OpenArtifactFile(CoverageFanInIO.CompletionName, false);
         using var marker = JsonDocument.Parse(markerFile);
-        if (marker.RootElement.GetProperty("schemaVersion").GetInt32() != 2
-            || "coverage-fanin-v2:" + marker.RootElement.GetProperty("stage").GetString()
+        if (marker.RootElement.GetProperty("schemaVersion").GetInt32() != contractVersion
+            || "coverage-fanin-v" + contractVersion + ":" + marker.RootElement.GetProperty("stage").GetString()
                 != run.ManifestBase.Provenance?.ConfigurationFingerprint
             || marker.RootElement.GetProperty("generation").GetString() != run.ManifestBase.RunId
             || marker.RootElement.GetProperty("physicalIdentity").GetString() != root.ArtifactDirectoryIdentity)
@@ -207,9 +207,9 @@ internal static class CoverageFanInPublication
     }
     // Acceptance and numeric rejection are terminal states of the same gate-evaluation purpose.
     // The exact prior stage remains bound to its private registration and hashed completion marker.
-    private static bool IsCompatiblePurpose(string? fingerprint, string stage) =>
-        fingerprint == "coverage-fanin-v2:" + stage
-        || ((stage is "acceptance" or "rejected-gates")
+    private static bool IsCompatiblePurpose(string? fingerprint, string stage, int contractVersion) =>
+        fingerprint == "coverage-fanin-v" + contractVersion + ":" + stage
+        || (contractVersion == 2 && (stage is "acceptance" or "rejected-gates")
             && (fingerprint is "coverage-fanin-v2:acceptance" or "coverage-fanin-v2:rejected-gates"));
 
     private sealed record PayloadFact(long Length, string Sha256);

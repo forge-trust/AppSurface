@@ -15,7 +15,7 @@ internal sealed record CoverageFanInBounds(long XmlBytes, long JsonBytes, long T
 }
 
 /// <summary>One invocation's bounded native IO and deterministic reader/writer custody.</summary>
-internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationToken token) : IDisposable
+internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationToken token, CoverageFanInBudget? invocationBudget = null) : IDisposable
 {
     private readonly Dictionary<string, CoverageRunOutputLease> _roots = new(StringComparer.Ordinal);
     private readonly List<CoverageArtifactOperationLease> _leases = [];
@@ -77,26 +77,36 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
         {
             var limit = xml ? bounds.XmlBytes : bounds.FileBytes(Path.GetFileName(absolute));
             if (stream.Length > limit) throw new InvalidDataException("Fan-in input exceeds byte budget.");
+            var identity = CoverageRunOutputLease.GetArtifactObjectIdentity(stream.SafeFileHandle);
+            var precharged = invocationBudget?.ConsumeGeneratedOutputReadback(absolute, identity, stream.Length) ?? 0;
             using var memory = new MemoryStream();
             var buffer = new byte[81920];
+            long readTotal = 0;
             int read;
             while ((read = stream.Read(buffer)) != 0)
             {
                 token.ThrowIfCancellationRequested();
-                Charge(read);
+                var alreadyCharged = (int)Math.Min(read, Math.Max(0, precharged - readTotal));
+                Charge(read, alreadyCharged);
+                readTotal = checked(readTotal + read);
                 if (memory.Length + read > limit) throw new InvalidDataException("Fan-in input exceeds byte budget.");
                 memory.Write(buffer, 0, read);
             }
             root.VerifyArtifactBinding();
             var bytes = memory.ToArray();
-            _files.Add(absolute, new(stream, root, Path.GetFileName(absolute),
-                CoverageRunOutputLease.GetArtifactObjectIdentity(stream.SafeFileHandle), bytes, Hash(bytes)));
+            var extension = Path.GetExtension(absolute);
+            invocationBudget?.AdmitInput(bytes.LongLength,
+                xml || string.Equals(extension, ".xml", StringComparison.OrdinalIgnoreCase),
+                !xml && string.Equals(extension, ".json", StringComparison.OrdinalIgnoreCase));
+            _files.Add(absolute, new(stream, root, Path.GetFileName(absolute), identity, bytes, Hash(bytes)));
             return bytes;
         }
         catch { stream.Dispose(); throw; }
     }
 
-    /// <summary>Admits XML structure before DOM materialization. V2 wire XML forbids DTDs/entities.</summary>
+    /// <summary>Streams and admits XML structure before DOM materialization; shared v3 budgets cap all retained DOMs.
+    /// Without a shared budget, the legacy per-instance total remains in force. A cached document in this IO is not
+    /// admitted again; a distinct IO materializes and counts its own DOM even when given identical bytes.</summary>
     internal XDocument Xml(byte[] bytes, bool allowInertGeneratorDoctype = false)
     {
         if (bytes.LongLength > bounds.XmlBytes) throw new InvalidDataException("Fan-in XML exceeds byte budget.");
@@ -113,10 +123,14 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
             MaxCharactersInDocument = bounds.XmlBytes,
             MaxCharactersFromEntities = 1
         };
+        var lines = 0;
+        var branches = 0;
+        var records = 0;
+        var recordLimit = invocationBudget?.MaximumRecords ?? bounds.TotalRecords;
         using (var stream = new MemoryStream(bytes, writable: false))
         using (var reader = XmlReader.Create(stream, settings))
         {
-            var elements = 0; var lines = 0; var branches = 0;
+            var elements = 0;
             while (reader.Read())
             {
                 token.ThrowIfCancellationRequested();
@@ -132,19 +146,26 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
                     throw new InvalidDataException("Fan-in XML exceeds structure budget.");
                 if (reader.Name == "line")
                 {
-                    if (checked(++lines) > bounds.Lines || checked(++_records) > bounds.TotalRecords)
-                        throw new InvalidDataException("Fan-in XML exceeds record budget.");
+                    if (checked(++lines) > bounds.Lines || checked(++records) > recordLimit
+                        || invocationBudget is null && checked(_records + records) > bounds.TotalRecords)
+                        throw invocationBudget is null ? new InvalidDataException("Fan-in XML exceeds record budget.")
+                            : CoverageFanInBudget.RecordLimitExceeded();
                 }
                 if (reader.Name == "condition")
                 {
-                    if (checked(++branches) > bounds.Branches || checked(++_records) > bounds.TotalRecords)
-                        throw new InvalidDataException("Fan-in XML exceeds record budget.");
+                    if (checked(++branches) > bounds.Branches || checked(++records) > recordLimit
+                        || invocationBudget is null && checked(_records + records) > bounds.TotalRecords)
+                        throw invocationBudget is null ? new InvalidDataException("Fan-in XML exceeds record budget.")
+                            : CoverageFanInBudget.RecordLimitExceeded();
                 }
                 while (reader.MoveToNextAttribute())
                     if (reader.Value.Length > bounds.TokenCharacters) throw new InvalidDataException("Fan-in XML token exceeds budget.");
                 reader.MoveToElement();
             }
         }
+        // The shared lock arbitrates concurrent readers. Rejecting this document leaves both shared counters
+        // unchanged, and successful admission happens before XDocument.Load can allocate a DOM.
+        invocationBudget?.AdmitXmlRecords(lines, branches);
         using var input = new MemoryStream(bytes, writable: false);
         using var load = XmlReader.Create(input, settings);
         var result = XDocument.Load(load);
@@ -155,6 +176,7 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
             || !string.IsNullOrWhiteSpace(declaration.InternalSubset)))
             throw new InvalidDataException("Only the known inert normalizer declaration is supported.");
         result.DocumentType?.Remove();
+        if (invocationBudget is null) _records = checked(_records + records);
         _documents.Add(bytes, new(result, hadDoctype));
         return result;
     }
@@ -175,7 +197,7 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
     /// <summary>Serializes normalized output with byte and cancellation admission before buffer growth.</summary>
     internal byte[] EncodeXml(XDocument document)
     {
-        using var output = new BoundedXmlOutput(Math.Min(bounds.XmlBytes, bounds.TotalBytes - _bytes), token);
+        using var output = new BoundedXmlOutput(Math.Min(bounds.XmlBytes, invocationBudget?.Remaining ?? bounds.TotalBytes - _bytes), token);
         document.Save(output, SaveOptions.DisableFormatting);
         var bytes = output.ToArray();
         // A combined or method-preserving projection can contain more records than any
@@ -240,10 +262,17 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
         }
     }
     private static string Full(string path) => CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(path));
+    /// <summary>Charges generator growth under the same path and physical identity used by a later readback.</summary>
+    internal void ChargeGeneratedOutput(string path, string identity, long bytes)
+    {
+        token.ThrowIfCancellationRequested();
+        invocationBudget?.ChargeGeneratedOutput(Full(path), identity, bytes);
+    }
     private CoverageRunOutputLease Root(string directory) => _roots.TryGetValue(Full(directory), out var root)
         ? root : throw new InvalidOperationException("Fan-in IO requires retained custody.");
-    private void Charge(int count)
+    private void Charge(int count, int alreadyCharged = 0)
     {
+        invocationBudget?.Charge(count - alreadyCharged);
         _bytes = checked(_bytes + count);
         if (_bytes > bounds.TotalBytes) throw new InvalidDataException("Fan-in total byte budget exceeded.");
     }
@@ -253,6 +282,7 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
         foreach (var bytes in files)
         {
             token.ThrowIfCancellationRequested();
+            invocationBudget?.AdmitStagedFile(bytes.LongLength);
             _bytes = checked(_bytes + bytes.LongLength);
             if (_bytes > bounds.TotalBytes) throw new InvalidDataException("Fan-in total staging budget exceeded.");
         }
@@ -260,6 +290,7 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
     internal void AdmitMetadata(long length)
     {
         token.ThrowIfCancellationRequested();
+        invocationBudget?.AdmitStagedFile(length);
         _bytes = checked(_bytes + length);
         if (_bytes > bounds.TotalBytes) throw new InvalidDataException("Fan-in metadata exceeds the total operation budget.");
     }

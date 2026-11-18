@@ -18,11 +18,17 @@ namespace ForgeTrust.AppSurface.Coverage;
 /// <see cref="int.MaxValue"/>, and the total-byte limit is at most 1 TiB. Depth is 1–256, bundles 1–1024, operation
 /// seconds 1–86400, identity seconds 1–300, and other count/token limits are positive 32-bit integers. Relative project
 /// paths use forward slashes and reject traversal, platform aliases, controls, format characters, and invalid scalars.
-/// The policy digest is SHA-256 over the encoding-version line, then these exact canonical bytes.
+/// Version 2 uses an explicit legacy projection that excludes properties introduced by later contract versions, so
+/// its canonical bytes and digest remain unchanged. Version 3 uses a separate explicit projection that includes its
+/// required contract version and report profile. The policy digest is SHA-256 over the encoding-version line, then
+/// these exact canonical bytes.
 /// </remarks>
 internal static partial class CoveragePolicyEncoding
 {
     internal const string Version = "coverage-policy-c14n-1";
+    internal const int LegacyContractVersion = 2;
+    internal const int ReportApplicabilityContractVersion = 3;
+    internal const string InitialReportProfileId = "coverlet-collector-cobertura-v1";
     internal static readonly JsonSerializerOptions Json = CreateJson();
 
     private static JsonSerializerOptions CreateJson()
@@ -45,17 +51,24 @@ internal static partial class CoveragePolicyEncoding
         return options;
     }
 
+    /// <summary>Validate a policy and return a defensive snapshot before any operation can produce effects.</summary>
+    /// <param name="policy">Caller-supplied policy to validate and freeze.</param>
+    /// <returns>A policy whose mutable collections are copied into read-only snapshots.</returns>
+    /// <exception cref="ArgumentException">The policy is invalid or selects an unsupported contract/profile.</exception>
     internal static CoverageFanInPolicy Freeze(CoverageFanInPolicy policy)
     {
         ArgumentNullException.ThrowIfNull(policy);
         if (policy.Source is null || policy.Run is null || policy.Gate is null
             || policy.TestProjects is null || policy.Supplements is null)
             throw Invalid("policy");
+        ValidateContract(policy);
         if (policy.TestProjects.Count is < 1 or > 10000 || policy.Supplements.Count > 1023)
             throw Invalid("inventory");
         var source = policy.Source;
         if (!HexIdentity().IsMatch(source.Commit ?? "") || !HexIdentity().IsMatch(source.Tree ?? "")
             || !SdkIdentity().IsMatch(source.Sdk ?? "")) throw Invalid("source");
+        if (policy.ContractVersion == ReportApplicabilityContractVersion && source.Commit!.Length != source.Tree!.Length)
+            throw Invalid("source");
         Text(source.Configuration, "configuration");
         Text(policy.Run.ProducerSystem, "producerSystem"); Text(policy.Run.RunScope, "runScope");
         Text(policy.Run.RunId, "runId");
@@ -89,8 +102,12 @@ internal static partial class CoveragePolicyEncoding
             || gate.PatchLineMode is not ("codecov" or "measurable")) throw Invalid("gate");
         if (gate.Mode == CoverageGateMode.AggregateAndPatch)
         {
-            Text(gate.DiffBase, "diffBase");
-            if (gate.DiffBase!.StartsWith('-')) throw Invalid("diffBase");
+            var diffBase = gate.DiffBase ?? throw Invalid("diffBase");
+            Text(diffBase, "diffBase");
+            if (diffBase.StartsWith('-')) throw Invalid("diffBase");
+            if (policy.ContractVersion == ReportApplicabilityContractVersion
+                && (diffBase.Length != source.Commit!.Length || !HexIdentity().IsMatch(diffBase)))
+                throw Invalid("diffBase");
         }
         else if (gate.DiffBase is not null) throw Invalid("diffBase");
         var instrumentation = policy.Instrumentation ?? new();
@@ -119,21 +136,67 @@ internal static partial class CoveragePolicyEncoding
         };
     }
 
+    /// <summary>Encode the validated policy using its explicit version-specific canonical projection.</summary>
+    /// <param name="policy">Policy to validate and encode.</param>
+    /// <returns>Canonical UTF-8 bytes without a BOM or insignificant whitespace.</returns>
     internal static byte[] CanonicalBytes(CoverageFanInPolicy policy)
     {
-        var frozen = Freeze(policy);
-        var element = JsonSerializer.SerializeToElement(frozen, Json);
+        var element = ToElement(policy);
         using var memory = new MemoryStream();
         using (var writer = new Utf8JsonWriter(memory, new() { Encoder = JavaScriptEncoder.Default })) Write(writer, element);
         return memory.ToArray();
     }
 
+    /// <summary>Return the canonical JSON snapshot used by the facade and internal operation engine.</summary>
+    /// <remarks>
+    /// This method freezes the input and selects an explicit field whitelist for each supported contract version.
+    /// Version 2 omits <c>contractVersion</c> and <c>reportProfileId</c>; version 3 includes both fields.
+    /// </remarks>
+    /// <param name="policy">Policy to validate and project.</param>
+    /// <returns>A detached JSON element with canonical property ordering and normalized numeric values.</returns>
+    /// <exception cref="ArgumentException">The policy is invalid or selects an unsupported contract/profile.</exception>
+    internal static JsonElement ToElement(CoverageFanInPolicy policy)
+    {
+        var frozen = Freeze(policy);
+        var projected = frozen.ContractVersion switch
+        {
+            LegacyContractVersion => JsonSerializer.SerializeToElement(new PolicyV2Document(
+                frozen.Gate, frozen.Instrumentation, frozen.Limits, frozen.Run, frozen.Source,
+                frozen.Supplements, frozen.TestProjects), Json),
+            ReportApplicabilityContractVersion => JsonSerializer.SerializeToElement(new PolicyV3Document(
+                frozen.ContractVersion, frozen.ReportProfileId!, frozen.Gate, frozen.Instrumentation,
+                frozen.Limits, frozen.Run, frozen.Source, frozen.Supplements, frozen.TestProjects), Json),
+            _ => throw Invalid("contractVersion")
+        };
+
+        using var memory = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(memory, new() { Encoder = JavaScriptEncoder.Default })) Write(writer, projected);
+        using var document = JsonDocument.Parse(memory.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    /// <summary>Compute the SHA-256 policy digest over the frozen encoding identifier and canonical policy bytes.</summary>
+    /// <param name="policy">Policy to validate and digest.</param>
+    /// <returns>Lowercase hexadecimal SHA-256 digest.</returns>
     internal static string Digest(CoverageFanInPolicy policy)
     {
         var prefix = Encoding.UTF8.GetBytes(Version + "\n");
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         hash.AppendData(prefix); hash.AppendData(CanonicalBytes(policy));
         return Convert.ToHexStringLower(hash.GetHashAndReset());
+    }
+
+    private static void ValidateContract(CoverageFanInPolicy policy)
+    {
+        if (policy.ContractVersion == LegacyContractVersion)
+        {
+            if (policy.ReportProfileId is not null) throw Invalid("reportProfileId");
+            return;
+        }
+
+        if (policy.ContractVersion != ReportApplicabilityContractVersion) throw Invalid("contractVersion");
+        if (!StringComparer.Ordinal.Equals(policy.ReportProfileId, InitialReportProfileId))
+            throw Invalid("reportProfileId");
     }
 
     private static void Write(Utf8JsonWriter writer, JsonElement element)
@@ -316,6 +379,15 @@ internal static partial class CoveragePolicyEncoding
         public override void Write(Utf8JsonWriter writer, long value, JsonSerializerOptions options)
             => writer.WriteNumberValue(value);
     }
+
+    private sealed record PolicyV2Document(CoverageGatePolicy Gate, CoverageInstrumentation? Instrumentation,
+        CoverageOperationLimits? Limits, CoverageRunIdentity Run, CoverageSourceIdentity Source,
+        IReadOnlyList<CoverageSupplement> Supplements, IReadOnlyList<string> TestProjects);
+
+    private sealed record PolicyV3Document(int ContractVersion, string ReportProfileId, CoverageGatePolicy Gate,
+        CoverageInstrumentation? Instrumentation, CoverageOperationLimits? Limits, CoverageRunIdentity Run,
+        CoverageSourceIdentity Source, IReadOnlyList<CoverageSupplement> Supplements,
+        IReadOnlyList<string> TestProjects);
 
     private static (BigInteger Coefficient, int Scale) ParseDecimal(string raw)
     {

@@ -7,7 +7,7 @@ using System.Xml;
 
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
-/// <summary>Native v2 fan-in orchestration. Owns invocation custody and marker-last publication.</summary>
+/// <summary>Versioned fan-in orchestration. Owns invocation custody and marker-last publication.</summary>
 internal static partial class CoverageFanInEngine
 {
     private static readonly JsonSerializerOptions Json = new()
@@ -36,13 +36,21 @@ internal static partial class CoverageFanInEngine
         try
         {
             ValidateRequest(operation, request);
+            if (request.Expected.ContractVersion == 3)
+            {
+                var budget = new CoverageFanInBudget(request.Expected.Bounds.TotalBytes, request.Expected.Bounds.TotalRecords);
+                state.Budget = budget;
+                request = request with { Budget = budget };
+                request = request with { DiffContext = new CoverageFanInDiffContext(request, budget) };
+                await request.DiffContext.InitializeAsync(deadline.Token).ConfigureAwait(false);
+            }
             if (operation == "collect" && request.NoBuild)
                 return state.Failure("Rejected", "ASCOV301", "noBuild",
                     "Observed collection requires a rebuild; omit noBuild or set it to false.");
             deadline.Token.ThrowIfCancellationRequested();
             await VerifySourceAsync(request, deadline.Token, collecting: operation == "collect").ConfigureAwait(false);
             if (operation == "collect") return await CollectAsync(request, writers, state, deadline.Token).ConfigureAwait(false);
-            using var io = new CoverageFanInIO(request.Expected.Bounds, deadline.Token);
+            using var io = new CoverageFanInIO(request.Expected.Bounds, deadline.Token, request.Budget);
             var inputs = InputDirectories(operation, request);
             if (operation == "capture")
                 foreach (var input in inputs) RejectOverlap([input], request.OutputDirectory);
@@ -62,13 +70,20 @@ internal static partial class CoverageFanInEngine
                 if (operation == "compose") files = Compose(request, io, bundles);
                 else if (operation == "accept")
                 {
-                    var candidate = await AcceptAsync(request, io, bundles, deadline.Token).ConfigureAwait(false);
+                    var candidate = await AcceptAsync(request, io, bundles, state, deadline.Token).ConfigureAwait(false);
                     if (!candidate.Passed)
                     {
                         io.VerifyBindings();
                         io.AdmitOutput(candidate.Files.Values);
                         await VerifySourceAsync(request, deadline.Token).ConfigureAwait(false);
                         await PublishAsync(request, "rejected-gates", candidate.Files, state, deadline.Token, io).ConfigureAwait(false);
+                        if (candidate.EvidenceFailure is { } failure)
+                            return state.Result("Rejected", [new("ASCOV302", operation, failure.Role, failure.Recovery)
+                            { Cause = failure.Cause, Context = V3Context(request) }]);
+                        if (request.Expected.ContractVersion == 3)
+                            return state.Result("Rejected", [new("ASCOV307", operation, "gate",
+                                "Add honest tests for reported uncovered points; keep thresholds, tolerance and measurement scope unchanged.")
+                            { Cause = "threshold-failed", Context = V3Context(request) }]);
                         return state.Failure("Rejected", "ASCOV307", "gate",
                             "Inspect retained primary and composed gate reports; add honest tests without changing the declared thresholds or measurement scope.");
                     }
@@ -76,7 +91,7 @@ internal static partial class CoverageFanInEngine
                 }
                 else if (operation == "verify")
                 {
-                    await VerifyAcceptedAsync(request, io, bundles, deadline.Token).ConfigureAwait(false);
+                    await VerifyAcceptedAsync(request, io, bundles, state, deadline.Token).ConfigureAwait(false);
                     await VerifySourceAsync(request, deadline.Token).ConfigureAwait(false);
                     io.VerifyBindings();
                     state.Verified = true;
@@ -96,8 +111,18 @@ internal static partial class CoverageFanInEngine
         catch (OperationCanceledException)
         {
             if (state.Committed) return state.Result("Succeeded");
+            if (request.Expected.ContractVersion == 3)
+                return state.Result(callerToken.IsCancellationRequested ? "Cancelled" : "TimedOut",
+                    [new("ASCOV306", operation, "deadline", "Reconcile effects and retained output before one corrected retry within the existing deadline policy.")
+                    { Cause = callerToken.IsCancellationRequested ? "cancelled" : "deadline-exceeded", Context = V3Context(request) }]);
             return state.Failure(callerToken.IsCancellationRequested ? "Cancelled" : "TimedOut", "ASCOV306", "deadline",
                 "Reconcile retained partial output; use a fresh destination and an explicit adequate deadline.");
+        }
+        catch (CoverageFanInEvidenceException exception)
+        {
+            return state.Result(state.EffectsStarted && !state.Committed ? "Incomplete" : "Rejected",
+                [new("ASCOV302", operation, exception.Role, exception.Recovery)
+                { Cause = exception.Cause, Context = V3Context(request) }]);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidDataException or JsonException
             or IOException or UnauthorizedAccessException or NotSupportedException or InvalidOperationException
@@ -105,9 +130,35 @@ internal static partial class CoverageFanInEngine
         {
             var code = exception is ArgumentException ? "ASCOV301" : exception is CoverageExecutionException { ExitCode: 124 } ? "ASCOV306" : "ASCOV302";
             var outcome = exception is CoverageExecutionException { ExitCode: 124 } ? "TimedOut" : state.EffectsStarted ? "Incomplete" : "Rejected";
+            if (request.Expected.ContractVersion == 3)
+            {
+                var cause = exception is CoverageExecutionException { ExitCode: 124 } ? "deadline-exceeded"
+                    : exception is ArgumentException ? "invalid-policy" : exception is InvalidDataException or XmlException or FormatException or OverflowException or JsonException or KeyNotFoundException
+                        ? "report-invalid" : "unexpected-failure";
+                return state.Result(outcome, [new(code, operation, operation,
+                    "Preserve current output and reconcile effects; correct supported evidence or escalate the operation ID to the maintainer before one fresh retry.")
+                { Cause = cause, Context = V3Context(request, cause == "unexpected-failure" ? exception.GetType().Name : null), Trace = cause == "unexpected-failure" ? SafeV3Trace(exception) : null }]);
+            }
             return state.Failure(outcome, code, operation,
                 "Check the declared policy and retained inputs; preserve unknown output and retry once into a fresh destination after correcting the cause.");
         }
+    }
+
+    /// <summary>Sanitizes only known method/type names, never exception messages, arguments, source paths or foreign frames.</summary>
+    private static IReadOnlyList<string> SafeV3Trace(Exception exception)
+    {
+        var prefixes = new[] { "ForgeTrust.AppSurface.Coverage", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Cli" };
+        var frames = new List<string>();
+        foreach (var frame in new StackTrace(exception, false).GetFrames())
+        {
+            var method = frame.GetMethod(); var type = method?.DeclaringType;
+            if (type?.Namespace is not { } space || !prefixes.Any(prefix => space == prefix || space.StartsWith(prefix + ".", StringComparison.Ordinal))) continue;
+            var name = type.FullName + "." + method!.Name;
+            if (name.Length <= 256 && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '+' or '`' or '<' or '>')) frames.Add(name);
+            if (frames.Count == 8) break;
+        }
+        if (frames.Count == 0) frames.Add("handled-at:ForgeTrust.AppSurface.Evidence.Coverage.CoverageFanInEngine.ExecuteAsync");
+        return frames.AsReadOnly();
     }
 
     private sealed class InvocationState(string operation, string id, string digest, bool historical)
@@ -116,13 +167,27 @@ internal static partial class CoverageFanInEngine
         internal string? Observation;
         internal string Patch = "NotEvaluated";
         internal string? Generation;
+        internal JsonElement? PatchApplicability;
+        internal CoverageFanInBudget? Budget;
         internal readonly List<CoverageFanInEngineArtifact> Artifacts = [];
         internal CoverageFanInEngineResult Result(string outcome, IReadOnlyList<CoverageFanInEngineDiagnostic>? diagnostics = null) =>
             new(operation, outcome, id, digest, Created, Committed, !EffectsStarted || Committed, Imported, Generation,
                 Artifacts.ToArray(), diagnostics ?? [], Accepted, Verified, Patch, Observation, historical,
-                PrimaryImported);
+                PrimaryImported)
+            { PatchApplicability = PatchApplicability, Accounting = Budget?.Snapshot() };
         internal CoverageFanInEngineResult Failure(string outcome, string code, string field, string recovery) =>
             Result(outcome, [new(code, operation, field, recovery)]);
+    }
+
+    private static IReadOnlyDictionary<string, string> V3Context(CoverageFanInEngineRequest r, string? exceptionType = null)
+    {
+        var context = new Dictionary<string, string>(StringComparer.Ordinal) { ["contractVersion"] = "3", ["diffPolicyId"] = CoverageFanInDiffContext.PolicyId };
+        if (r.Expected.Policy.TryGetProperty("reportProfileId", out var profile)) context["reportProfileId"] = profile.GetString()!;
+        if (r.Expected.Gate.GetProperty("diffBase").GetString() is { } basis) context["baseCommit"] = basis;
+        context["headCommit"] = r.Expected.Source.GetProperty("commit").GetString()!;
+        if (r.DiffContext?.GitVersion is { } version) context["gitVersion"] = version;
+        if (exceptionType is not null) context["exceptionType"] = exceptionType;
+        return new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(context);
     }
 
     private static void ValidateRequest(string operation, CoverageFanInEngineRequest r)
@@ -194,6 +259,7 @@ internal static partial class CoverageFanInEngine
 
     private static async Task VerifySourceAsync(CoverageFanInEngineRequest r, CancellationToken token, bool collecting = false)
     {
+        if (r.DiffContext is { } context) await context.VerifyMetadataAsync(token).ConfigureAwait(false);
         var root = Full(r.RepositoryRoot);
         using var directory = CoverageRunOutputLease.AcquireArtifactDirectory(root, false, false)
             ?? throw new IOException("Source context unavailable.");
@@ -231,6 +297,7 @@ internal static partial class CoverageFanInEngine
         var unseenProjects = new HashSet<string>(projects, StringComparer.Ordinal);
         var projectDirectories = collecting ? new HashSet<string>(StringComparer.Ordinal) : null;
         var ignoredInventories = new List<(string Prefix, string Entries)>();
+        var trackedPaths = r.DiffContext is null ? null : new HashSet<string>(StringComparer.Ordinal);
         var pending = new Queue<(string Path, string Prefix, string? Commit)>();
         pending.Enqueue((root, string.Empty, null));
         var checkouts = 1;
@@ -245,6 +312,27 @@ internal static partial class CoverageFanInEngine
                         r, deadline.Token, checkout.Path).ConfigureAwait(false)).Length != 0))
                 throw new InvalidDataException("Pinned submodule source or clean state differs.");
             var entries = await IdentityAsync("git", ["ls-files", "--stage", "-v", "-z"], r, deadline.Token, checkout.Path).ConfigureAwait(false);
+            if (r.DiffContext is not null)
+            {
+                foreach (var entry in entries.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var tab = entry.IndexOf('\t');
+                    if (tab < 0) throw new InvalidDataException("Pinned source index entry is invalid.");
+                    var path = checkout.Prefix + entry[(tab + 1)..];
+                    try
+                    {
+                        _ = CoverageFanInDiffParser.Path(path);
+                    }
+                    catch (CoverageFanInEvidenceException exception) when (exception.Cause == "unsupported-diff")
+                    {
+                        // Inventory names may contain controls or private data. Identify the source boundary
+                        // without copying an untrusted path into a public recovery message.
+                        throw new CoverageFanInEvidenceException("unsupported-diff", "source",
+                            "The pinned tracked-file inventory, including submodules, contains unsupported portable path data; ask the maintainer to resolve the source inventory before fresh evidence, even if the path is outside the patch.");
+                    }
+                    if (!trackedPaths!.Add(path)) throw new InvalidDataException("Source index contains duplicate paths.");
+                }
+            }
             foreach (var (path, commit) in ReadSourceIndex(entries, checkout.Prefix, unseenProjects, projectDirectories))
             {
                 if (++checkouts > maximumCheckouts)
@@ -262,6 +350,14 @@ internal static partial class CoverageFanInEngine
                 ignoredInventories.Add((checkout.Prefix, ignored));
             }
             directory.VerifyArtifactBinding();
+        }
+        if (r.DiffContext is { } context && trackedPaths is not null)
+        {
+            if (trackedPaths.GroupBy(path => path.Normalize(NormalizationForm.FormC), StringComparer.OrdinalIgnoreCase).Any(group => group.Skip(1).Any()))
+                throw new CoverageFanInEvidenceException("report-invalid", "source", "Tracked path spellings contain a portable case/Unicode alias; ask the maintainer to resolve exact identities before collecting fresh evidence.");
+            if (context.TrackedPaths.Count != 0 && !context.TrackedPaths.SetEquals(trackedPaths))
+                throw new InvalidDataException("Pinned source index inventory changed.");
+            context.TrackedPaths = trackedPaths;
         }
         if (unseenProjects.Count != 0)
             throw new InvalidDataException("Declared test projects must be tracked regular files in the pinned source.");
@@ -333,13 +429,19 @@ internal static partial class CoverageFanInEngine
     private static async Task<string> IdentityAsync(string file, string[] arguments, CoverageFanInEngineRequest r,
         CancellationToken token, string? workingDirectory = null)
     {
+        if (file == "git" && r.DiffContext is { } context)
+        {
+            var text = await context.RunAsync(arguments, token, workingDirectory).ConfigureAwait(false);
+            return arguments.Contains("-z", StringComparer.Ordinal) ? text : text.TrimEnd('\r', '\n');
+        }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(r.Expected.Limits.GetProperty("identitySeconds").GetInt32()));
         var runner = r.IdentityRunner ?? new CliWrapCoverageRunProcessRunner();
         // Inspect the pinned objects without replacement refs or a repository-configured fsmonitor hook.
         var safeArguments = file == "git" ? new[] { "--no-replace-objects", "-c", "core.fsmonitor=false" }.Concat(arguments).ToArray() : arguments;
         var result = await runner.RunAsync(new(file, safeArguments, workingDirectory ?? Full(r.RepositoryRoot), null, null,
-            CoverageRunProcessLease.Detached()), deadline.Token).ConfigureAwait(false);
+            CoverageRunProcessLease.Detached())
+        { BudgetCharge = r.Budget is { } budget ? budget.Charge : static _ => { } }, deadline.Token).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.OutputTruncated) throw new InvalidDataException("Identity command failed.");
         var output = result.StandardOutput ?? result.Output;
         if (file != "git" || !arguments.Contains("-z", StringComparer.Ordinal)) return output.TrimEnd('\r', '\n');

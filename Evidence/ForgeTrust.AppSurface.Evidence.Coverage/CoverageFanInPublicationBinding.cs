@@ -18,7 +18,7 @@ internal static partial class CoverageFanInEngine
             {
                 invocation?.VerifyBindings();
                 await VerifySourceAsync(r, cancellation).ConfigureAwait(false);
-            }).ConfigureAwait(false);
+            }, contractVersion: r.Expected.ContractVersion).ConfigureAwait(false);
         state.Generation = result.Generation;
         state.Artifacts.AddRange(result.Artifacts);
         state.Committed = true;
@@ -30,7 +30,7 @@ internal static partial class CoverageFanInEngine
     {
         var markerBytes = io.Read(Path.Join(directory, CoverageFanInIO.CompletionName));
         var marker = Parse(markerBytes);
-        if (marker.GetProperty("schemaVersion").GetInt32() != 2 || marker.GetProperty("stage").GetString() != stage
+        if (marker.GetProperty("schemaVersion").GetInt32() != r.Expected.ContractVersion || marker.GetProperty("stage").GetString() != stage
             || marker.GetProperty("policyDigest").GetString() != r.Expected.Digest
             || marker.GetProperty("physicalIdentity").GetString() != io.PhysicalIdentity(directory)
             || marker.GetProperty("materialization").GetString() is not ("local" or "imported")
