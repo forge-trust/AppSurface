@@ -18,12 +18,14 @@ Avoid broad requests such as "improve the docs" without a concrete page, task, o
 
 ## Local setup
 
-Use a current .NET SDK supported by this repository, then restore and build from the repository root before opening a pull request:
+Install **.NET SDK 10.0.402**, selected by the repository's [`global.json`](https://github.com/forge-trust/AppSurface/blob/main/global.json), then restore and build from the repository root before opening a pull request. SDK roll-forward and prerelease selection are disabled: a newer installed SDK does not replace this version. See Microsoft's [SDK selection reference](https://learn.microsoft.com/dotnet/core/tools/global-json) when diagnosing a missing SDK.
 
 ```bash
 dotnet restore
 dotnet build
 ```
+
+Every [CI workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) installs that pin in a job-owned SDK directory under the runner's temporary directory. This also keeps isolated package consumers outside the checkout on the same SDK through `PATH` and `DOTNET_ROOT`, even when the hosted image contains a newer major SDK. Keep the setup inputs, coverage SDK constant and root pin coordinated when advancing the toolchain; workflow contracts check their agreement. Package caches retain their existing independent policy. The pin selects build tooling and does not change consumer target frameworks or coverage thresholds.
 
 Run the sample or package-specific command you changed, and include that command in your pull request notes. For broad changes, also run the full test suite and coverage command listed in [Local verification](#local-verification).
 
@@ -100,13 +102,13 @@ uses the direct patch gate for an existing local-tool manifest update with optio
 All four evidence producers, their obligations, and the 95/85 aggregate and applicable patch coverage
 thresholds remain required. Mixed implementation or policy changes retain native coverage selection.
 
-The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) resolves the shared evidence policy first. Coverage selections run full solution coverage and a separate packed Durable consumer proof. The native coverage-security matrix and PR fan-in run only when the root policy selection includes coverage plus another producer, except for the [tool-manifest-only inventory](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#tool-manifest-coverage-selection); test-only selections and qualifying tool updates use the direct patch gate. The consumer
+The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) resolves the shared evidence policy first. Coverage selections run full solution coverage and a separate packed Durable consumer proof. The native coverage-security matrix and PR fan-in run when the root policy selection includes coverage plus another producer and the tool manifest exception does not apply. Test-only selections and qualifying tool updates use the direct patch gate. The consumer
 job runs the same [packed-consumer verification](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) with the exact
 coverage SDK and locked restore. Its failure blocks the build and downstream documentation export.
 The coverage lane runs the complete solution through the C# repository evidence validation tool and preserves the existing aggregate and patch gates; see the [coverage fan-in guide](./guides/coverage-fan-in.md) for the current workflow and artifact layout.
 Keeping the packed consumer proof in its own job preserves the build job's 60-minute budget for solution verification; it does not reduce the selected tests, change exclusive scheduling, or relax either coverage gate.
 
-The direct Codecov-mode patch gate follows the [CLI's documented no-measurable-points behavior](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate). Native fan-in keeps its strict nonempty-denominator verification. Package checks are not exempted based on Git ignore status: ignored local artifacts in paths the existing package checks inspect can still cause a package-check failure; review the package diagnostics and remove or resolve unintended local artifacts.
+The direct Codecov-mode patch gate follows the [CLI's documented no-measurable-points behavior](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate). The selected [v2 fan-in policy](./guides/coverage-fan-in.md#current-ci-path) requires measurable patch lines. Ignored local artifacts in paths the package checks inspect can still cause a failure. Review the package diagnostics and resolve unintended local artifacts.
 
 The GitHub Actions full-solution coverage lane publishes a bounded, failure-first test summary from
 the AppSurface-managed JUnit output. The CLI owns this report alongside its slow-test diagnostics:

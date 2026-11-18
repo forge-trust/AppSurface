@@ -5,10 +5,12 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Validation;
 using ForgeTrust.AppSurface.Testing;
 
-namespace ForgeTrust.AppSurface.Aspire.Tests;
+namespace ForgeTrust.AppSurface.Cli.Tests;
 
-[Collection("Native evidence program")]
-public sealed class SolutionCoverageProducerTests
+// Keep the orchestration contracts in the native coverage collector's test project.
+// Retained collector method records must observe these branches, not just the normalized primary report.
+[Collection("CoverageGate process state")]
+public sealed class CoverageFanInSolutionCoverageProducerTests
 {
     [Fact]
     public async Task ProduceAsync_RejectsInvalidProducerContextBeforeRunningCommands()
@@ -60,12 +62,214 @@ public sealed class SolutionCoverageProducerTests
             .Where(pair => pair.First == "--exclusive-test-project").Select(pair => pair.Second).ToArray();
         Assert.Equal(9, exclusiveProjects.Length);
         Assert.Contains("ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj", exclusiveProjects);
-        Assert.Contains("--parallelism", run.Arguments);
+        Assert.Equal("2", ValueAfter(run.Arguments, "--parallelism"));
+        Assert.Equal("longest-first", ValueAfter(run.Arguments, "--schedule"));
+        Assert.DoesNotContain("--schedule-timings", run.Arguments);
         Assert.Contains("--require-non-sandbox", run.Arguments);
         Assert.Equal("proof/aggregate-gate.json", Assert.Single(fixture.Writer.WrittenArtifacts, x => x.LogicalName == "aggregate-gate").RelativePath);
         Assert.Contains(fixture.Writer.WrittenArtifacts, x => x.LogicalName == "result");
         Assert.Contains(fixture.Writer.WrittenArtifacts, x => x.LogicalName == "transcript");
         Assert.DoesNotContain(fixture.Writer.WrittenArtifacts, x => x.LogicalName == "patch-gate");
+    }
+
+    [Fact]
+    public async Task ProduceAsync_UsesPriorTimingsOnlyForScheduling()
+    {
+        using var fixture = new Fixture();
+        var history = Path.Join(fixture.Root, "prior-timings.json");
+        var commands = new List<EvidenceCommandRequest>();
+        var producer = fixture.CreateWithSettings(new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output)
+        { CoverageScheduleTimingsPath = history }, async (request, _) =>
+        {
+            commands.Add(request);
+            await fixture.CompleteCommandAsync(request);
+            return Success();
+        });
+
+        var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        var run = Assert.Single(commands, command => command.Arguments.Contains("--solution"));
+        Assert.Equal("longest-first", ValueAfter(run.Arguments, "--schedule"));
+        Assert.Equal(history, ValueAfter(run.Arguments, "--schedule-timings"));
+        Assert.All(commands.Where(command => command.Arguments.Contains("gate")),
+            command => Assert.DoesNotContain(history, command.Arguments));
+    }
+
+    [Fact]
+    public async Task CollectAsync_HandsOffCompleteCollectionWithoutClaimAndProducerStillRunsGates()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var collection = Path.Join(fixture.Root, "collection");
+            var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, collection);
+            var commands = new List<EvidenceCommandRequest>();
+            var collector = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                commands.Add(request);
+                await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            await collector.CollectAsync(CancellationToken.None);
+
+            Assert.Single(commands, command => command.Arguments.Contains("--solution"));
+            Assert.DoesNotContain(commands, command => command.Arguments.Contains("gate"));
+            Assert.Empty(fixture.Writer.WrittenArtifacts);
+            Assert.False(File.Exists(Path.Join(collection, "evidence-manifest.json")));
+            Assert.True(File.Exists(Path.Join(collection, "coverage", "collection-receipt.json")));
+            commands.Clear();
+            var producer = fixture.CreateWithSettings(new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output)
+            { CoverageCollectionDirectory = collection }, async (request, _) =>
+            {
+                commands.Add(request);
+                await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+            Assert.DoesNotContain(commands, command => command.Arguments.Contains("--solution"));
+            Assert.Single(commands, command => command.Arguments.Contains("gate"));
+            Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
+        });
+    }
+
+    [Fact]
+    public async Task CollectAsync_UsesInstalledCliWithoutNativeInputsWhenProvided()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var collection = Path.Join(fixture.Root, "collection");
+            var installedCli = Path.Join(fixture.Root, "appsurface");
+            await File.WriteAllTextAsync(installedCli, "installed coverage CLI");
+            var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, collection)
+            { CoverageCliPath = installedCli };
+            var commands = new List<EvidenceCommandRequest>();
+            var collector = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                commands.Add(request);
+                await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            await collector.CollectAsync(CancellationToken.None);
+
+            var run = Assert.Single(commands, command => command.Arguments.Contains("--solution"));
+            Assert.Equal(installedCli, run.FileName);
+            Assert.Equal("coverage", run.Arguments[0]);
+            Assert.Equal("run", run.Arguments[1]);
+            Assert.DoesNotContain("--project", run.Arguments);
+            Assert.DoesNotContain("--native-inputs", run.Arguments);
+            Assert.True(File.Exists(Path.Join(collection, "coverage", "collection-receipt.json")));
+        });
+    }
+
+    [Theory]
+    [InlineData("relative")]
+    [InlineData("missing")]
+    public async Task CollectAsync_RejectsInvalidInstalledCliBeforeExecution(string defect)
+    {
+        using var fixture = new Fixture();
+        var installedCli = defect == "relative" ? "appsurface" : Path.Join(fixture.Root, "missing-appsurface");
+        var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, Path.Join(fixture.Root, "collection"))
+        { CoverageCliPath = installedCli };
+        var collector = fixture.CreateWithSettings(settings, (_, _) =>
+            throw new Xunit.Sdk.XunitException("An invalid installed CLI must not execute."));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => collector.CollectAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ProduceAsync_RejectsInvalidImportedInventoryEvenWithMatchingReceipt()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var collection = Path.Join(fixture.Root, "collection");
+            var coverage = Path.Join(collection, "coverage");
+            Directory.CreateDirectory(coverage);
+            await File.WriteAllTextAsync(Path.Join(coverage, "coverage.cobertura.xml"), "<coverage />");
+            await fixture.WriteCoverageAsync(Path.Join(coverage, "timings.json"), omitProject: true);
+            var run = new[] { "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT" }
+                .ToDictionary(key => key, Environment.GetEnvironmentVariable);
+            await SolutionCoverageHandoff.WriteAsync(coverage, new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None);
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output)
+            { CoverageCollectionDirectory = collection }, (request, _) =>
+            {
+                commands.Add(request);
+                return Task.FromResult(Success());
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+            Assert.Empty(result.SatisfiedAssertionIds);
+            Assert.DoesNotContain(commands, command => command.Arguments.Contains("gate"));
+        });
+    }
+
+    [Theory]
+    [InlineData("existing-output")]
+    [InlineData("local-patch")]
+    [InlineData("native")]
+    [InlineData("collection")]
+    [InlineData("dirty")]
+    [InlineData("incomplete")]
+    [InlineData("failed-command")]
+    public async Task CollectAsync_RejectsInvalidOrUnsuccessfulCollectionWithoutReceipt(string defect)
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var output = defect == "existing-output" ? fixture.Output : Path.Join(fixture.Root, "collection");
+            var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, output,
+                NativeCoverageDirectory: defect == "native" ? "native" : null, DiffFile: defect == "local-patch" ? "patch" : null)
+            { CoverageCollectionDirectory = defect == "collection" ? "previous" : null };
+            if (defect == "dirty") fixture.GitStatusResponses.Enqueue(" M source.cs");
+            var collectionCommands = 0;
+            var collector = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                Assert.Contains("--solution", request.Arguments);
+                collectionCommands++;
+                if (defect == "failed-command") return new EvidenceCommandResult(1, "", "failed", 1);
+                await fixture.CompleteCommandAsync(request);
+                if (defect == "incomplete")
+                    await fixture.WriteCoverageAsync(Path.Join(output, "coverage", "timings.json"), omitProject: true);
+                return Success();
+            });
+
+            if (defect == "failed-command")
+                await Assert.ThrowsAsync<InvalidOperationException>(() => collector.CollectAsync(CancellationToken.None));
+            else if (defect is "dirty" or "incomplete")
+                await Assert.ThrowsAsync<InvalidDataException>(() => collector.CollectAsync(CancellationToken.None));
+            else
+                await Assert.ThrowsAsync<ArgumentException>(() => collector.CollectAsync(CancellationToken.None));
+
+            Assert.Equal(defect is "failed-command" or "incomplete" ? 1 : 0, collectionCommands);
+            Assert.False(File.Exists(Path.Join(output, "coverage", "collection-receipt.json")));
+            Assert.Empty(fixture.Writer.WrittenArtifacts);
+        });
+    }
+
+    private static async Task WithWorkflowAsync(Func<Task> action)
+    {
+        var values = new Dictionary<string, string>
+        { ["GITHUB_REPOSITORY"] = "forge-trust/AppSurface", ["GITHUB_RUN_ID"] = "123", ["GITHUB_RUN_ATTEMPT"] = "1" };
+        var original = values.Keys.ToDictionary(key => key, Environment.GetEnvironmentVariable);
+        try
+        {
+            foreach (var (key, value) in values) Environment.SetEnvironmentVariable(key, value);
+            await action();
+        }
+        finally
+        {
+            foreach (var (key, value) in original) Environment.SetEnvironmentVariable(key, value);
+        }
     }
 
     [Fact]
@@ -419,6 +623,41 @@ public sealed class SolutionCoverageProducerTests
     }
 
     [Fact]
+    public async Task ProduceAsync_RejectsCollectedCiCoverageForLocalPatch()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var collection = TestPathUtils.PathUnder(fixture.Root, "collection");
+            var collector = fixture.CreateWithSettings(new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, collection),
+                async (request, _) =>
+                {
+                    await fixture.CompleteCommandAsync(request);
+                    return Success();
+                });
+            await collector.CollectAsync(CancellationToken.None);
+            var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output,
+                DiffFile: TestPathUtils.PathUnder(fixture.Root, "local.patch"))
+            {
+                CoverageCollectionDirectory = collection,
+                VerifyLocalSourceAsync = _ => Task.CompletedTask,
+            };
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                commands.Add(request);
+                await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            await AssertFailedWithoutClaimsAsync(fixture, result, "collection");
+            Assert.DoesNotContain(commands, command => command.Arguments.Contains("--solution") || command.Arguments.Contains("gate"));
+        });
+    }
+
+    [Fact]
     public async Task ProduceAsync_RejectsPatchOverrideWithoutLocalSourceVerification()
     {
         using var fixture = new Fixture();
@@ -610,162 +849,164 @@ public sealed class SolutionCoverageProducerTests
     }
 
     [Theory]
-    [InlineData("Linux", "Linux")]
-    [InlineData("Windows", "Windows")]
-    [InlineData("FreeBSD", "Darwin")]
-    public async Task ProduceAsync_ComposesAndVerifiesNativeCapturesBeforePublishingCoverageClaims(string runnerOs, string expectedPlatform)
+    [InlineData("success")]
+    [InlineData("missing-verify")]
+    [InlineData("not-verified")]
+    [InlineData("not-accepted")]
+    [InlineData("delivery-failed")]
+    [InlineData("historical")]
+    [InlineData("wrong-policy")]
+    [InlineData("wrong-source")]
+    [InlineData("wrong-run")]
+    [InlineData("altered-gate")]
+    [InlineData("failed-aggregate")]
+    [InlineData("failed-patch")]
+    public async Task ProduceAsync_RequiresDeliveredNativeV2AcceptanceAndIndependentVerification(string defect)
     {
-        using var producerFixture = new Fixture();
-        using var fanInFixture = new EvidenceCoverageFanInTests.FanInFixture();
-        await fanInFixture.WriteMinimalBundleAsync();
-
-        const string commit = Fixture.Commit;
-        const string tree = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        const string sdk = "10.0.100";
-        var run = new Dictionary<string, string?>
+        using var fixture = new Fixture();
+        var values = new Dictionary<string, string?>
         {
             ["GITHUB_REPOSITORY"] = "forge-trust/appsurface",
             ["GITHUB_RUN_ID"] = "12345",
             ["GITHUB_RUN_ATTEMPT"] = "2",
         };
-        var nativeRoot = TestPathUtils.PathUnder(producerFixture.Root, "native-captures");
-        Directory.CreateDirectory(nativeRoot);
-        var platforms = new[] { "Linux", "Windows", "Darwin" };
-        for (var index = 0; index < platforms.Length; index++)
-        {
-            var nativeSource = fanInFixture.Native[index];
-            var nativeOutput = TestPathUtils.PathUnder(nativeRoot, platforms[index].ToLowerInvariant());
-            await EvidenceCoverageFanIn.CaptureAsync(new EvidenceCoverageCaptureRequest(
-                producerFixture.Root, nativeOutput,
-                TestPathUtils.PathUnder(nativeSource, "coverage.cobertura.xml"),
-                TestPathUtils.PathUnder(nativeSource, "collector.cobertura.xml"), null,
-                "native", commit, tree, sdk, "Release", run, platforms[index],
-                producerFixture.Projects.ToHashSet(StringComparer.Ordinal)));
-        }
-
-        var oldRepository = Environment.GetEnvironmentVariable("GITHUB_REPOSITORY");
-        var oldRunId = Environment.GetEnvironmentVariable("GITHUB_RUN_ID");
-        var oldAttempt = Environment.GetEnvironmentVariable("GITHUB_RUN_ATTEMPT");
-        var oldRunnerOs = Environment.GetEnvironmentVariable("RUNNER_OS");
-        Environment.SetEnvironmentVariable("GITHUB_REPOSITORY", run["GITHUB_REPOSITORY"]);
-        Environment.SetEnvironmentVariable("GITHUB_RUN_ID", run["GITHUB_RUN_ID"]);
-        Environment.SetEnvironmentVariable("GITHUB_RUN_ATTEMPT", run["GITHUB_RUN_ATTEMPT"]);
-        Environment.SetEnvironmentVariable("RUNNER_OS", runnerOs);
+        var previous = values.Keys.ToDictionary(key => key, Environment.GetEnvironmentVariable);
+        foreach (var (key, value) in values) Environment.SetEnvironmentVariable(key, value);
         try
         {
+            var settings = fixture.NativeSettings("base-commit");
+            foreach (var platform in new[] { "linux", "windows", "darwin" })
+                Directory.CreateDirectory(Path.Join(settings.NativeCoverageDirectory!, platform));
             var commands = new List<EvidenceCommandRequest>();
-            var settings = new RepositoryCheckSettings(producerFixture.Root, producerFixture.Dotnet,
-                producerFixture.Output, "diff", nativeRoot);
-            var producer = producerFixture.CreateWithSettings(settings, async (request, _) =>
+            var producer = fixture.CreateWithSettings(settings, async (request, _) =>
             {
                 commands.Add(request);
-                if (request.Arguments.Contains("--solution"))
+                if (request.Arguments.Contains("fanin"))
                 {
-                    await producerFixture.CompleteCommandAsync(request);
-                    var output = ValueAfter(request.Arguments, "--output");
-                    File.Copy(TestPathUtils.PathUnder(fanInFixture.Primary, "coverage.cobertura.xml"),
-                        TestPathUtils.PathUnder(output, "coverage.cobertura.xml"), overwrite: true);
-                    return Success();
+                    Assert.Equal(fixture.Dotnet, request.FileName);
+                    Assert.Equal(settings.CoverageCliPath, ValueAfter(request.Arguments, "--cli"));
+                    Assert.Equal(settings.DiffBase, ValueAfter(request.Arguments, "--diff-base"));
+                    Assert.Equal(settings.NativeCoverageDirectory, ValueAfter(request.Arguments, "--native-inputs"));
+                    await fixture.WriteNativeV2ProofAsync(ValueAfter(request.Arguments, "--output"), defect);
                 }
-
-                if (request.Arguments.Contains("gate", StringComparer.Ordinal))
+                else
                 {
-                    await WriteFanInGateAsync(request);
-                    return Success();
+                    Assert.Equal(settings.CoverageCliPath, request.FileName);
+                    await fixture.CompleteCommandAsync(request);
                 }
+                return Success();
+            });
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+            Assert.Single(commands, command => command.Arguments.Contains("--solution"));
+            Assert.Single(commands, command => command.Arguments.Contains("fanin"));
+            if (defect == "success")
+            {
+                Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+                Assert.Equal(["coverage/solution-complete@1", "coverage/thresholds@1"], result.SatisfiedAssertionIds);
+                Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
+                Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
+                using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(fixture.Root, "artifacts/proof/result.json")));
+                Assert.Equal(64, proof.RootElement.GetProperty("nativeFanInProofSha256").GetString()!.Length);
+            }
+            else await AssertFailedWithoutClaimsAsync(fixture, result, "native-fan-in");
+        }
+        finally { foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value); }
+    }
 
+    [Theory]
+    [InlineData("Linux", "linux", false)]
+    [InlineData("Windows", "windows", false)]
+    [InlineData("FreeBSD", "darwin", false)]
+    [InlineData("Linux", "linux", true)]
+    public async Task ProduceAsync_PassesNativeInputsThroughInstalledCliBeforePublishingCoverageClaims(
+        string runnerOs, string expectedPlatform, bool importedCollection)
+    {
+        using var fixture = new Fixture();
+        var run = new Dictionary<string, string?>
+        {
+            ["GITHUB_REPOSITORY"] = "forge-trust/appsurface",
+            ["GITHUB_RUN_ID"] = "12345",
+            ["GITHUB_RUN_ATTEMPT"] = "2",
+            ["RUNNER_OS"] = runnerOs,
+        };
+        var previous = run.Keys.ToDictionary(key => key, Environment.GetEnvironmentVariable);
+        foreach (var (key, value) in run) Environment.SetEnvironmentVariable(key, value);
+        try
+        {
+            var nativeRoot = TestPathUtils.PathUnder(fixture.Root, "native-captures");
+            foreach (var platform in new[] { "linux", "windows", "darwin" })
+                Directory.CreateDirectory(Path.Join(nativeRoot, platform));
+            Assert.True(Directory.Exists(Path.Join(nativeRoot, expectedPlatform)));
+
+            var collection = Path.Join(fixture.Root, "collection");
+            if (importedCollection)
+            {
+                var coverage = Path.Join(collection, "coverage");
+                Directory.CreateDirectory(coverage);
+                await File.WriteAllTextAsync(Path.Join(coverage, "coverage.cobertura.xml"), "<coverage />");
+                await fixture.WriteCoverageAsync(Path.Join(coverage, "timings.json"));
+                // RUNNER_OS selects the fixture host; handoff identity contains only the workflow provenance fields.
+                var workflowRun = run.Where(pair => pair.Key != "RUNNER_OS")
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+                await SolutionCoverageHandoff.WriteAsync(coverage,
+                    new(Fixture.Commit, new string('b', 40), "10.0.100"), workflowRun, CancellationToken.None);
+            }
+
+            var settings = fixture.NativeSettings("base-commit") with
+            { CoverageCollectionDirectory = importedCollection ? collection : null };
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                commands.Add(request);
+                if (request.Arguments.Contains("fanin"))
+                {
+                    Assert.Equal(fixture.Dotnet, request.FileName);
+                    Assert.Equal(settings.CoverageCliPath, ValueAfter(request.Arguments, "--cli"));
+                    Assert.Equal(settings.DiffBase, ValueAfter(request.Arguments, "--diff-base"));
+                    Assert.Equal(nativeRoot, ValueAfter(request.Arguments, "--native-inputs"));
+                    Assert.Equal(Path.Join(fixture.Output, "coverage-fanin"), ValueAfter(request.Arguments, "--output"));
+                    await fixture.WriteNativeV2ProofAsync(ValueAfter(request.Arguments, "--output"), "success");
+                }
+                else
+                {
+                    Assert.Equal(settings.CoverageCliPath, request.FileName);
+                    await fixture.CompleteCommandAsync(request);
+                }
                 return Success();
             });
 
-            var result = await producer.ProduceAsync(producerFixture.Context, CancellationToken.None);
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
 
             Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
             Assert.Equal(["coverage/solution-complete@1", "coverage/thresholds@1"], result.SatisfiedAssertionIds);
-            using (var primaryManifest = JsonDocument.Parse(await File.ReadAllTextAsync(
-                TestPathUtils.PathUnder(producerFixture.Output, "coverage-fanin", "manifest.json"))))
-                Assert.Equal(expectedPlatform, primaryManifest.RootElement.GetProperty("platform").GetString());
-            var gateCommands = commands.Where(command => command.Arguments.Contains("gate", StringComparer.Ordinal)).ToArray();
-            Assert.Equal(["aggregate-gate", "primary-gate", "patch-gate"], gateCommands.Select(command =>
-                Path.GetFileName(ValueAfter(command.Arguments, "--output"))));
-            var primaryGate = gateCommands[1];
-            Assert.Equal("diff", ValueAfter(primaryGate.Arguments, "--diff-base"));
-            Assert.Equal("codecov", ValueAfter(primaryGate.Arguments, "--patch-line-mode"));
-            Assert.DoesNotContain("--min-patch-line", primaryGate.Arguments);
-            var patchGate = gateCommands[2];
-            Assert.Equal("95", ValueAfter(patchGate.Arguments, "--min-patch-line"));
-            Assert.Equal("85", ValueAfter(patchGate.Arguments, "--min-patch-branch"));
-
-            var composed = TestPathUtils.PathUnder(producerFixture.Output, "coverage-fanin-composed");
-            var primaryGatePath = TestPathUtils.PathUnder(producerFixture.Output, "coverage", "primary-gate", "coverage-gate.json");
-            var patchGatePath = TestPathUtils.PathUnder(producerFixture.Output, "coverage", "patch-gate", "coverage-gate.json");
-            var nativeDirectories = Directory.GetDirectories(nativeRoot).Order(StringComparer.Ordinal).ToArray();
-            Assert.True(File.Exists(TestPathUtils.PathUnder(composed, "coverage.cobertura.xml")));
-            using (var receipt = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(composed, "verification.json"))))
-            {
-                Assert.Equal(4, receipt.RootElement.GetProperty("inputs").GetArrayLength());
-                Assert.Equal(1, receipt.RootElement.GetProperty("inventory").GetProperty("retainedClassLines").GetInt32());
-            }
-            Assert.True(File.Exists(primaryGatePath));
-            Assert.True(File.Exists(patchGatePath));
-
-            foreach (var capture in nativeDirectories)
-            {
-                using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(capture, "manifest.json")));
-                var root = manifest.RootElement;
-                Assert.Equal(commit, root.GetProperty("commit").GetString());
-                Assert.Equal(tree, root.GetProperty("tree").GetString());
-                Assert.Equal(sdk, root.GetProperty("sdk").GetString());
-                Assert.Equal("Release", root.GetProperty("configuration").GetString());
-                Assert.Equal(run["GITHUB_RUN_ID"], root.GetProperty("run").GetProperty("GITHUB_RUN_ID").GetString());
-                Assert.Equal(run["GITHUB_RUN_ATTEMPT"], root.GetProperty("run").GetProperty("GITHUB_RUN_ATTEMPT").GetString());
-            }
-
-            Assert.Contains(producerFixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
-            Assert.Contains(producerFixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
-            Assert.Contains(producerFixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "result");
+            Assert.Equal(importedCollection, !commands.Any(command => command.Arguments.Contains("--solution")));
+            var fanIn = Assert.Single(commands, command => command.Arguments.Contains("fanin"));
+            Assert.Equal(settings.CoverageCliPath, ValueAfter(fanIn.Arguments, "--cli"));
+            Assert.Equal(Path.Join(fixture.Output, "coverage", "coverage.cobertura.xml"), ValueAfter(fanIn.Arguments, "--primary"));
+            Assert.Equal(Path.Join(fixture.Output, "coverage", "timings.json"), ValueAfter(fanIn.Arguments, "--timings"));
+            Assert.Equal(nativeRoot, ValueAfter(fanIn.Arguments, "--native-inputs"));
+            Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
+            Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
+            using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(
+                Path.Join(fixture.Root, "artifacts", "proof", "result.json")));
+            Assert.Equal(64, proof.RootElement.GetProperty("nativeFanInProofSha256").GetString()!.Length);
         }
-        finally
+        finally { foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value); }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("relative-cli")]
+    [InlineData("missing-cli")]
+    public async Task ProduceAsync_RejectsMissingOrInvalidInstalledNativeCliBeforeExecution(string? cli)
+    {
+        using var fixture = new Fixture();
+        var settings = fixture.NativeSettings("base-commit") with
         {
-            Environment.SetEnvironmentVariable("GITHUB_REPOSITORY", oldRepository);
-            Environment.SetEnvironmentVariable("GITHUB_RUN_ID", oldRunId);
-            Environment.SetEnvironmentVariable("GITHUB_RUN_ATTEMPT", oldAttempt);
-            Environment.SetEnvironmentVariable("RUNNER_OS", oldRunnerOs);
-        }
-
-        async Task WriteFanInGateAsync(EvidenceCommandRequest request)
-        {
-            var output = ValueAfter(request.Arguments, "--output");
-            var report = Path.GetFileName(ValueAfter(request.Arguments, "--coverage"));
-            var patch = request.Arguments.Contains("--min-patch-line", StringComparer.Ordinal);
-            Directory.CreateDirectory(output);
-            var gate = new
-            {
-                passed = true,
-                coverage = report,
-                tolerancePercent = .5m,
-                patchLineMode = "codecov",
-                patchDiffSource = new { diffBase = "diff" },
-                thresholds = new
-                {
-                    line = patch ? 0m : 95m,
-                    branch = patch ? 0m : 85m,
-                    patchLine = patch ? 95m : (decimal?)null,
-                    patchBranch = patch ? 85m : (decimal?)null,
-                },
-                effectiveThresholds = new
-                {
-                    line = patch ? 0m : 94.5m,
-                    branch = patch ? 0m : 84.5m,
-                    patchLine = patch ? 94.5m : (decimal?)null,
-                    patchBranch = patch ? 84.5m : (decimal?)null,
-                },
-                line = new { covered = 1, valid = 1, percent = 100d },
-                branch = new { covered = 1, valid = 1, percent = 100d },
-                patchLine = new { covered = 1, measurable = 1, percent = 100d },
-                patchBranch = new { covered = 1, measurable = 1, percent = 100d },
-            };
-            await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, "coverage-gate.json"), JsonSerializer.Serialize(gate));
-        }
+            CoverageCliPath = cli == "missing-cli" ? Path.Join(fixture.Root, "missing-appsurface") : cli,
+        };
+        var producer = fixture.CreateWithSettings(settings, (_, _) => throw new Xunit.Sdk.XunitException("Invalid native CLI must not execute."));
+        await AssertFailedWithoutClaimsAsync(fixture, await producer.ProduceAsync(fixture.Context, CancellationToken.None), "settings");
     }
 
     private static async Task AssertFailedWithoutClaimsAsync(Fixture fixture, EvidenceProducerResult result, string expectedStage)
@@ -791,7 +1032,14 @@ public sealed class SolutionCoverageProducerTests
     private sealed class Fixture : IDisposable
     {
         public const string Commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        private readonly string _root = Directory.CreateTempSubdirectory("solution-coverage-producer-").FullName;
+        private readonly string _root = CreateRoot();
+
+        private static string CreateRoot()
+        {
+            var root = Directory.CreateTempSubdirectory("solution-coverage-producer-").FullName;
+            return OperatingSystem.IsMacOS() && (root.StartsWith("/var/", StringComparison.Ordinal) || root.StartsWith("/tmp/", StringComparison.Ordinal))
+                ? "/private" + root : root;
+        }
         private readonly string _dotnet;
         private readonly string _output;
         public string Root => _root;
@@ -844,7 +1092,67 @@ public sealed class SolutionCoverageProducerTests
             });
 
         public RepositoryCheckSettings NativeSettings(string? diffBase, string? diffFile = null) =>
-            new(_root, _dotnet, _output, diffBase, TestPathUtils.PathUnder(_root, "native-captures"), diffFile);
+            new(_root, _dotnet, _output, diffBase, TestPathUtils.PathUnder(_root, "native-captures"), diffFile, _dotnet);
+
+        public async Task WriteNativeV2ProofAsync(string output, string defect)
+        {
+            // This is a command-orchestration fixture using the CLI's delivered v2 shape.
+            // Native API/CLI semantic verification and real OS execution are tested separately.
+            Directory.CreateDirectory(Path.Join(output, "accepted"));
+            Directory.CreateDirectory(Path.Join(output, "composed"));
+            foreach (var operation in new[] { "accept", "verify" })
+            {
+                if (operation == "verify" && defect == "missing-verify") continue;
+                var terminal = new
+                {
+                    schemaVersion = 2,
+                    operation,
+                    status = "succeeded",
+                    operationOutcome = "succeeded",
+                    delivery = new { resultFileCommitted = defect != "delivery-failed" },
+                    result = new
+                    {
+                        operation,
+                        verified = defect != "not-verified",
+                        accepted = defect != "not-accepted",
+                        effects = new { cleanupComplete = true },
+                        patchOutcome = "PatchAccepted",
+                        evaluationIntent = defect == "historical" ? "historicalReplay" : "currentTrustedRun",
+                        policyDigest = operation == "verify" && defect == "wrong-policy" ? "another-policy" : "policy",
+                    },
+                };
+                await File.WriteAllTextAsync(Path.Join(output, operation + "-result.json"), JsonSerializer.Serialize(terminal));
+            }
+            foreach (var patch in new[] { false, true })
+            {
+                var gate = new
+                {
+                    passed = defect != (patch ? "failed-patch" : "failed-aggregate"),
+                    tolerancePercent = .5m,
+                    thresholds = new { line = 95m, branch = 85m, patchLine = 95m, patchBranch = 85m },
+                    patchLineMode = "codecov",
+                    line = new { percent = 99m },
+                    branch = new { percent = 90m },
+                    patchLine = new { percent = 99m },
+                    patchBranch = new { percent = 90m },
+                };
+                await File.WriteAllTextAsync(Path.Join(output, "accepted", patch ? "composed-gate.json" : "primary-gate.json"), JsonSerializer.Serialize(gate));
+            }
+            await File.WriteAllTextAsync(Path.Join(output, "composed", "verification.json"), "{\"schemaVersion\":2}");
+            async Task<string> Digest(string relative) => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+                await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, relative))));
+            var acceptance = new
+            {
+                policyDigest = "policy",
+                source = new { commit = defect == "wrong-source" ? new string('c', 40) : Commit, tree = new string('b', 40), sdk = "10.0.100", configuration = "Release" },
+                run = new { runScope = "forge-trust/appsurface", runId = "12345", attempt = defect == "wrong-run" ? 1 : 2 },
+                primaryGateSha256 = await Digest("accepted/primary-gate.json"),
+                composedGateSha256 = await Digest("accepted/composed-gate.json"),
+                compositionReceiptSha256 = await Digest("composed/verification.json"),
+            };
+            await File.WriteAllTextAsync(Path.Join(output, "accepted/acceptance.json"), JsonSerializer.Serialize(acceptance));
+            if (defect == "altered-gate") await File.AppendAllTextAsync(Path.Join(output, "accepted/primary-gate.json"), " ");
+        }
 
         public async Task CompleteCommandAsync(EvidenceCommandRequest request, bool alterGate = false)
         {

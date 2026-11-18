@@ -277,6 +277,15 @@ public sealed class TemplateRepositoryContractTests
         AssertProjectProperty(packageProps, "CentralPackageTransitivePinningEnabled", "true");
 
         var packageVersions = GetPackageVersions(packageProps);
+        var repositoryPackages = await LoadProjectAsync(
+            TestPathUtils.PathUnder(RepositoryRoot, "Directory.Packages.props"));
+        // The generated consumer must not downgrade the OpenTelemetry floor promoted by the packed Observability package.
+        foreach (var packageId in new[] { "OpenTelemetry", "OpenTelemetry.Exporter.OpenTelemetryProtocol", "OpenTelemetry.Extensions.Hosting" })
+        {
+            var repositoryPin = Assert.Single(GetItems(repositoryPackages, "PackageVersion"),
+                item => GetItemInclude(item) == packageId);
+            Assert.Equal((string?)repositoryPin.Attribute("Version"), packageVersions[packageId]);
+        }
         Assert.True(packageVersions.TryGetValue("coverlet.collector", out var coverletVersion),
             "coverlet.collector must be pinned in Directory.Packages.props.");
         Assert.Equal("10.0.1", coverletVersion);
@@ -326,6 +335,21 @@ public sealed class TemplateRepositoryContractTests
                 "tests/AppSurfaceDurableWorker.Tests/AppSurfaceDurableWorker.Tests.csproj"
             }.Order(StringComparer.Ordinal),
             solutionProjects);
+    }
+
+    [Fact]
+    public async Task AuthoredTelemetryPins_MatchThePackedObservabilityDependencyFloor()
+    {
+        var templatePackages = GetPackageVersions(await LoadProjectAsync(
+            TestPathUtils.PathUnder(TemplateRoot, "Directory.Packages.props")));
+        var repositoryPackages = await LoadProjectAsync(
+            TestPathUtils.PathUnder(RepositoryRoot, "Directory.Packages.props"));
+        foreach (var packageId in new[] { "OpenTelemetry", "OpenTelemetry.Exporter.OpenTelemetryProtocol", "OpenTelemetry.Extensions.Hosting" })
+        {
+            var repositoryPin = Assert.Single(GetItems(repositoryPackages, "PackageVersion"),
+                item => GetItemInclude(item) == packageId);
+            Assert.Equal((string?)repositoryPin.Attribute("Version"), templatePackages[packageId]);
+        }
     }
 
     private static async Task<XDocument> LoadProjectAsync(string path)

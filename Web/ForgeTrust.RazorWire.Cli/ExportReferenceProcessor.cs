@@ -594,10 +594,11 @@ internal sealed partial class ExportReferenceProcessor
     private string RewriteTagAttributeReferences(string html, string currentRoute, Func<ExportReference, string?> resolveArtifactUrl)
     {
         var replacements = new List<TextReplacement>();
+        var lines = new HtmlLineCounter(html);
 
         foreach (var tag in EnumerateTags(html))
         {
-            var attributes = ParseAttributes(html, tag).ToList();
+            var attributes = ParseAttributes(html, tag, lines).ToList();
             if (attributes.Count == 0)
             {
                 continue;
@@ -851,7 +852,7 @@ internal sealed partial class ExportReferenceProcessor
         return -1;
     }
 
-    private static IEnumerable<HtmlAttributeSpan> ParseAttributes(string html, TagSpan tag)
+    private static IEnumerable<HtmlAttributeSpan> ParseAttributes(string html, TagSpan tag, HtmlLineCounter lines)
     {
         var index = tag.NameEnd;
         while (index < tag.End)
@@ -886,7 +887,7 @@ internal sealed partial class ExportReferenceProcessor
 
             if (index >= tag.End || html[index] != '=')
             {
-                yield return new HtmlAttributeSpan(tag.Name, name, string.Empty, null, null, nameStart, CalculateLine(html, nameStart));
+                yield return new HtmlAttributeSpan(tag.Name, name, string.Empty, null, null, nameStart, lines.GetLine(nameStart));
                 continue;
             }
 
@@ -898,7 +899,7 @@ internal sealed partial class ExportReferenceProcessor
 
             if (index >= tag.End)
             {
-                yield return new HtmlAttributeSpan(tag.Name, name, string.Empty, index, 0, nameStart, CalculateLine(html, nameStart));
+                yield return new HtmlAttributeSpan(tag.Name, name, string.Empty, index, 0, nameStart, lines.GetLine(nameStart));
                 continue;
             }
 
@@ -937,14 +938,15 @@ internal sealed partial class ExportReferenceProcessor
                 valueStart,
                 valueEnd - valueStart,
                 nameStart,
-                CalculateLine(html, nameStart));
+                lines.GetLine(nameStart));
         }
     }
 
     private static IReadOnlyDictionary<HtmlAttributeLookupKey, HtmlAttributeSpan> CreateHtmlAttributeLookup(string html)
     {
         var lookup = new Dictionary<HtmlAttributeLookupKey, HtmlAttributeSpan>();
-        foreach (var attribute in EnumerateTags(html).SelectMany(tag => ParseAttributes(html, tag)))
+        var lines = new HtmlLineCounter(html);
+        foreach (var attribute in EnumerateTags(html).SelectMany(tag => ParseAttributes(html, tag, lines)))
         {
             lookup.TryAdd(CreateHtmlAttributeLookupKey(attribute.ElementName, attribute.Name, attribute.Value), attribute);
         }
@@ -1727,6 +1729,24 @@ internal sealed partial class ExportReferenceProcessor
         }
 
         return line;
+    }
+
+    /// <summary>Counts newlines once while HTML tags and their attributes advance in source order.</summary>
+    /// <remarks>Each extraction or rewrite owns its counter; no document text or state survives that operation.</remarks>
+    private sealed class HtmlLineCounter(string content)
+    {
+        private int _offset;
+        private int _line = 1;
+
+        public int GetLine(int offset)
+        {
+            var limit = Math.Min(offset, content.Length);
+            while (_offset < limit)
+            {
+                if (content[_offset++] == '\n') _line++;
+            }
+            return _line;
+        }
     }
 
     private readonly record struct CssReferenceToken(string RawValue, int ValueStart, int ValueLength, int TokenEnd, string TokenType);

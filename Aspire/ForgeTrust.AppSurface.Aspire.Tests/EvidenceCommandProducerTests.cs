@@ -8,7 +8,7 @@ public sealed class EvidenceCommandProducerTests
     [Fact]
     public void Constructor_RejectsMissingDependenciesAndId()
     {
-        var request = Request("true", "[Console]::Write('ok')");
+        var request = Request("true", "exit 0");
         var runner = new EvidenceCommandRunner();
         var evaluator = static (EvidenceCommandResult _, EvidenceProducerContext _, CancellationToken _) =>
             ValueTask.FromResult<IReadOnlyList<string>>(["assertion@1"]);
@@ -22,7 +22,7 @@ public sealed class EvidenceCommandProducerTests
     [Fact]
     public async Task ProduceAsync_RejectsNullAndMismatchedContexts()
     {
-        var producer = Producer(Request("true", "[Console]::Write('ok')"));
+        var producer = Producer(Request("true", "exit 0"));
         await Assert.ThrowsAsync<ArgumentNullException>(() => producer.ProduceAsync(null!, CancellationToken.None).AsTask());
 
         var declaration = Declaration("other", "assertion@1");
@@ -34,12 +34,12 @@ public sealed class EvidenceCommandProducerTests
     [Fact]
     public async Task ProduceAsync_MapsNonzeroExitAndTruncatedOutputToInvalidResults()
     {
-        var failed = await Producer(Request("exit 7", "[Environment]::Exit(7)"))
+        var failed = await Producer(Request("exit 7", "exit 7"))
             .ProduceAsync(Context(Declaration("native", "assertion@1")), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Failed, failed.Outcome);
         Assert.Empty(failed.SatisfiedAssertionIds);
 
-        var truncatedRequest = Request("printf 123456", "[Console]::Write('123456')") with { MaximumOutputBytes = 2 };
+        var truncatedRequest = Request("printf 123456", "echo 123456 & exit 0") with { MaximumOutputBytes = 2 };
         var truncated = await Producer(truncatedRequest)
             .ProduceAsync(Context(Declaration("native", "assertion@1")), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Invalid, truncated.Outcome);
@@ -57,7 +57,7 @@ public sealed class EvidenceCommandProducerTests
             ["undeclared@1"],
         })
         {
-            var producer = new EvidenceCommandProducer("native", new EvidenceCommandRunner(), Request("true", ""),
+            var producer = new EvidenceCommandProducer("native", new EvidenceCommandRunner(), Request("true", "exit 0"),
                 (_, _, _) => ValueTask.FromResult(assertions!));
             var result = await producer.ProduceAsync(context, CancellationToken.None);
             Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
@@ -68,7 +68,7 @@ public sealed class EvidenceCommandProducerTests
     [Fact]
     public async Task ProduceAsync_MapsTimeoutAndBothBudgetFailures()
     {
-        var timeoutRequest = Request("sleep 30", "Start-Sleep -Seconds 30") with { Timeout = TimeSpan.FromMilliseconds(100) };
+        var timeoutRequest = Request("sleep 30", "ping -n 30 127.0.0.1 >nul") with { Timeout = TimeSpan.FromMilliseconds(100) };
         var timedOut = await Producer(timeoutRequest)
             .ProduceAsync(Context(Declaration("native", "assertion@1")), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.TimedOut, timedOut.Outcome);
@@ -79,7 +79,7 @@ public sealed class EvidenceCommandProducerTests
             new InvalidOperationException("budget check failed"),
         })
         {
-            var request = Request("true", "[Console]::Write('unused')") with
+            var request = Request("true", "exit 0") with
             {
                 CheckBudget = _ => ValueTask.FromException(exception),
             };
@@ -95,7 +95,7 @@ public sealed class EvidenceCommandProducerTests
 
     private static EvidenceCommandRequest Request(string command, string windowsCommand) =>
         OperatingSystem.IsWindows()
-            ? new EvidenceCommandRequest("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsCommand], Environment.CurrentDirectory, TimeSpan.FromSeconds(10))
+            ? new EvidenceCommandRequest("cmd.exe", ["/d", "/c", windowsCommand], Environment.CurrentDirectory, TimeSpan.FromSeconds(10))
             : new EvidenceCommandRequest("sh", ["-c", command], Environment.CurrentDirectory, TimeSpan.FromSeconds(10));
 
     private static EvidenceProducerDeclaration Declaration(string id, string assertion) =>

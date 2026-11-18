@@ -12,7 +12,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting" VersionOverride="[13.4.4,14.0.0)" />
+    <ProjectReference Include="../../Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj" />
+    <PackageReference Include="Aspire.Hosting" VersionOverride="[13.6.5,14.0.0)" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Readiness/ForgeTrust.AppSurface.Evidence.Readiness.csproj" />
   </ItemGroup>

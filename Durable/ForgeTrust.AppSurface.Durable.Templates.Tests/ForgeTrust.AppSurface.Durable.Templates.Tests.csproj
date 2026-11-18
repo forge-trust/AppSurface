@@ -46,6 +46,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/BoundedProcessRunner.cs"
+             Link="GeneratedTests/BoundedProcessRunner.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/FixtureBudgets.cs"
+             Link="GeneratedTests/FixtureBudgets.cs" />
     <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/HostContractTests.cs"
              Condition="Exists('../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/HostContractTests.cs')"
              Link="GeneratedTests/HostContractTests.cs" />

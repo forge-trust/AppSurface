@@ -48,7 +48,7 @@ public sealed class PreflightConsumerTemplateTests : IDisposable
             StringComparer.Ordinal);
         Assert.Equal("10.0.3", explicitPackageReferences["Npgsql"]);
         Assert.Equal("4.13.0", explicitPackageReferences["Testcontainers.PostgreSql"]);
-        Assert.Equal("10.0.8", explicitPackageReferences["Microsoft.Extensions.DependencyInjection"]);
+        Assert.Equal("10.0.14", explicitPackageReferences["Microsoft.Extensions.DependencyInjection"]);
         Assert.Equal("2026.0.0", explicitPackageReferences["SSH.NET"]);
         Assert.Equal(4, explicitPackageReferences.Count);
         var templatePins = packageReferences

@@ -1,0 +1,2 @@
+<!-- appsurface:unreleased-entry section="included" -->
+- **Reduce CI waiting time** by running solution coverage alongside native and packed-consumer checks and exporting documentation in parallel. Coverage uses longest-first scheduling with optional timing history from successful main-branch workflows. The [CI collection contract](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#ci-collection-overlap-and-scheduling) preserves complete solution coverage, existing thresholds, native verification and required checks; no measured speedup is claimed yet.

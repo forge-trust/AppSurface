@@ -45,6 +45,12 @@ For the canonical settings and API reference, recovery instructions, independent
 
 The proof test namespace is fixed as `DurableWorkerTemplate.Tests`, independently of the generated application name. This keeps the documented `FullyQualifiedName~FirstDurableWork` filter limited to its Docker proof even when the project is named `FirstDurableWorker`; the separately configured native smoke is excluded. The friend-test assembly name still follows your application name.
 
+The Docker prerequisite queries the daemon with [`docker version --format '{{.Server.Version}}'`](https://docs.docker.com/reference/cli/docker/version/) within five seconds.
+This avoids client plugin discovery performed by [`docker info`](https://docs.docker.com/reference/cli/docker/system/info/); slow unrelated metadata plugins should not consume
+the daemon-availability budget. Missing or failed Docker, empty or truncated output and an expired deadline still fail.
+The pinned image, real container, four first-Work checkpoints and owned cleanup remain required; see the
+[first-proof contract](https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md#three-command-first-proof).
+
 ## Run the host separately
 
 The test fixture provisions only its disposable proof database. A normal run of this host never creates schema or roles and never initializes an epoch.

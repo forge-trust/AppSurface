@@ -720,6 +720,42 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         Assert.Equal("ForgeTrust.AppSurface.Web", entry.PackageId);
     }
 
+    [Theory]
+    [InlineData("0.0.0-ci.42", false)]
+    [InlineData("[0.0.0-ci.42, )", false)]
+    [InlineData("[0.0.0-ci.41]", false)]
+    [InlineData("[0.0.0-ci.42, 0.0.0-ci.43)", false)]
+    [InlineData("[0.0.0-ci.42]", true)]
+    public void PackageArtifactValidator_RequiresExactCoordinatedCoverageEngineDependency(string dependencyRange, bool expectedToPass)
+    {
+        const string facadeId = "ForgeTrust.AppSurface.Coverage";
+        const string engineId = "ForgeTrust.AppSurface.Evidence.Coverage";
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(artifactDirectory, facadeId, PackageVersion,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [engineId] = dependencyRange });
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj",
+                facadeId,
+                PackagePublishDecision.Publish,
+                [engineId],
+                IsTool: false)
+        ]);
+
+        if (expectedToPass)
+        {
+            var report = new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion);
+            Assert.Equal(facadeId, Assert.Single(report.Entries).PackageId);
+            return;
+        }
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion));
+        Assert.Contains("exact coordinated dependency", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void PackageArtifactValidator_RequiresCanonicalReleaseGuidanceInPackedReadme()
     {
@@ -7423,6 +7459,75 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         Assert.True(File.Exists(artifactManifestPath), $"Expected artifact manifest at {artifactManifestPath}.");
     }
 
+    [Fact]
+    public async Task PackageArtifactWorkflow_IncludesRestoreStandardOutputWhenRepositoryRestoreFails()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Install this first.
+                includes: Base web hosting.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("packages/third-party-payloads.yml",
+            """
+            schema_version: 1
+            audits:
+              - id: workflow-fixture-proof
+                package_id: ForgeTrust.AppSurface.Web
+                applies_to:
+                  - README.md
+                evidence_kind: fixture_audit
+                source_paths:
+                  - packages/package-index.yml
+                reason: Keeps the workflow test focused on command orchestration.
+                reviewed_on: 2026-06-07
+                source: test fixture
+                revalidate_when: fixture changes.
+            """);
+
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        var commandRunner = new FailedRepositoryRestoreCommandRunner();
+        var workflow = new PackageArtifactWorkflow(
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                    "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                    "ForgeTrust.AppSurface.Web")
+            }),
+            commandRunner,
+            new PackageArtifactValidator(),
+            new RecordingCoverageCliConsumerProofWorkflow(succeeded: true),
+            new RecordingDocsPackageConsumerProofWorkflow(succeeded: true));
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(
+            new PackageArtifactRequest(
+                _repositoryRoot,
+                ManifestPath,
+                artifactDirectory,
+                CombineSafeChildPath(artifactDirectory, "package-validation-report.md"),
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json"),
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                CombineSafeChildPath(artifactDirectory, "coverage-proof.md"),
+                CombineSafeChildPath(artifactDirectory, "docs-proof"),
+                CombineSafeChildPath(artifactDirectory, "docs-proof.md"),
+                "https://api.nuget.org/v3/index.json")));
+
+        Assert.Contains("restore stdout diagnostic", error.Message, StringComparison.Ordinal);
+        var restoreRequest = Assert.Single(commandRunner.Requests);
+        Assert.Equal("dotnet restore", restoreRequest.OperationName);
+        Assert.True(restoreRequest.IncludeStandardOutputOnFailure);
+    }
+
     [Theory]
     [InlineData(true, false, false)]
     [InlineData(false, false, false)]
@@ -10095,6 +10200,20 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
             }
 
             return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
+        }
+    }
+
+    private sealed class FailedRepositoryRestoreCommandRunner : ICommandRunner
+    {
+        public List<CommandRunRequest> Requests { get; } = [];
+
+        public Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var output = request.IncludeStandardOutputOnFailure
+                ? "\nFinal stdout:\nrestore stdout diagnostic"
+                : string.Empty;
+            throw new PackageIndexException($"Failed to restore 'repository' with dotnet restore.{output}");
         }
     }
 

@@ -149,6 +149,7 @@ mkdir -p "$typed_root"
 sed "s/{{PACKAGE_VERSION}}/$package_version/g" \
   "$source_root/tests/evidence-readiness-typed-consumer/Consumer.csproj.template" >"$typed_root/Consumer.csproj"
 cp "$source_root/tests/evidence-readiness-typed-consumer/Program.cs.fixture" "$typed_root/Program.cs"
+cp "$source_root/tests/evidence-readiness-typed-consumer/NativeDcpArchitecture.cs" "$typed_root/NativeDcpArchitecture.cs"
 typed_cache="$run_root/typed-cache"
 export NUGET_PACKAGES="$typed_cache"
 mkdir -p "$typed_cache"

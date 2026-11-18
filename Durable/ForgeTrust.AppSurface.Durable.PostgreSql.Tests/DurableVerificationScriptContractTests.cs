@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Xml.Linq;
 using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -50,6 +52,7 @@ public sealed class DurableVerificationScriptContractTests
         Assert.Contains("Workers/ForgeTrust.AppSurface.Workers", script, StringComparison.Ordinal);
         Assert.Contains("tests/ForgeTrust.AppSurface.Testing", script, StringComparison.Ordinal);
         Assert.Contains("Durable/compatibility/V2WorkHarness", script, StringComparison.Ordinal);
+        Assert.Contains("\"$repo_root/Durable/compatibility/Directory.Packages.props\"", script, StringComparison.Ordinal);
         Assert.Contains("Durable/packed-consumers", script, StringComparison.Ordinal);
         Assert.Contains("Durable/verify-packed-consumers.sh", script, StringComparison.Ordinal);
         Assert.Contains("ForgeTrust.AppSurface.slnx", script, StringComparison.Ordinal);
@@ -62,6 +65,31 @@ public sealed class DurableVerificationScriptContractTests
         Assert.Contains("source_fingerprint=\"$(sha256_file", script, StringComparison.Ordinal);
         Assert.DoesNotContain("$(shasum -a 256", script, StringComparison.Ordinal);
         Assert.DoesNotContain("$(sha256sum", script, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("V2WorkHarness")]
+    [InlineData("LegacyCoreProviderAbiConsumer")]
+    public void Historical_consumers_keep_their_locked_central_pins_independent_of_current_packages(string consumer)
+    {
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var compatibility = TestPathUtils.PathUnder(repositoryRoot, "Durable", "compatibility");
+        var policy = XDocument.Load(TestPathUtils.PathUnder(compatibility, "Directory.Packages.props"));
+        Assert.Empty(policy.Descendants("Import"));
+        foreach (var property in new[] { "ManagePackageVersionsCentrally", "CentralPackageTransitivePinningEnabled", "RestorePackagesWithLockFile", "RestoreLockedMode" })
+            Assert.Equal("true", Assert.Single(policy.Descendants(property)).Value);
+        var pins = policy.Descendants("PackageVersion").ToDictionary(
+            item => (string)item.Attribute("Include")!, item => (string)item.Attribute("Version")!, StringComparer.Ordinal);
+        using var locked = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(compatibility, consumer, "packages.lock.json")));
+        var dependencies = locked.RootElement.GetProperty("dependencies").GetProperty("net10.0");
+        foreach (var dependency in dependencies.EnumerateObject().Where(item => item.Value.GetProperty("type").GetString() == "CentralTransitive"))
+            Assert.Equal(dependency.Value.GetProperty("resolved").GetString(), pins[dependency.Name]);
+        Assert.Equal("0.2.0-preview.8", dependencies.GetProperty(
+            consumer == "V2WorkHarness" ? "ForgeTrust.AppSurface.Durable.PostgreSql" : "ForgeTrust.AppSurface.Durable.Provider")
+            .GetProperty("resolved").GetString());
+        var packedScript = File.ReadAllText(TestPathUtils.PathUnder(repositoryRoot, "Durable", "verify-packed-consumers.sh"));
+        Assert.Contains("cp \"$ROOT_DIR/Durable/compatibility/Directory.Packages.props\" \"$legacy_dir/Directory.Packages.props\"", packedScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("cp \"$ROOT_DIR/Directory.Packages.props\" \"$legacy_dir/Directory.Packages.props\"", packedScript, StringComparison.Ordinal);
     }
 
     private static string ReadScript()
