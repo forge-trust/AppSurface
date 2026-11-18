@@ -9,6 +9,16 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
 {
     [Fact]
+    public void PhysicalDirectoryPreservesFilesystemRoots()
+    {
+        var temporaryRoot = new DirectoryInfo(Path.GetTempPath()).Root;
+        var applicationRoot = new DirectoryInfo(AppContext.BaseDirectory).Root;
+
+        Assert.Equal(temporaryRoot.FullName, PhysicalDirectory(temporaryRoot));
+        Assert.Equal(applicationRoot.FullName, PhysicalDirectory(applicationRoot));
+    }
+
+    [Fact]
     public async Task ActualPackedConsumersRestoreTheOriginalReportsAndSkipWarmHostStartup()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
@@ -78,7 +88,7 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
         }
         finally
         {
-            if (passed) Directory.Delete(scratch, recursive: true);
+            if (passed) NativeEvidenceTestDirectory.Delete(scratch);
             else output.WriteLine("Retained packed consumer diagnostics: " + scratch);
         }
     }
@@ -97,11 +107,11 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
 
     private static string PhysicalDirectory(DirectoryInfo directory)
     {
+        // Volume and UNC roots are terminal; Windows cannot inspect them as links.
+        if (directory.Parent is not { } parent) return directory.FullName;
         if (directory.ResolveLinkTarget(returnFinalTarget: true) is { } target)
             return PhysicalDirectory(new DirectoryInfo(target.FullName));
-        return directory.Parent is { } parent
-            ? TestPathUtils.PathUnder(PhysicalDirectory(parent), directory.Name)
-            : directory.FullName;
+        return TestPathUtils.PathUnder(PhysicalDirectory(parent), directory.Name);
     }
 
     private static async Task<string> RunAsync(string executable, IReadOnlyList<string> arguments,
