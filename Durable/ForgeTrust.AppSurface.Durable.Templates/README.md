@@ -24,6 +24,13 @@ Blocking setup and cleanup adapters are invoked on dedicated threads before thei
 - The host remains passive and Work-only. It accepts typed Work through the separate producer path and exposes an authenticated empty wake. Normal startup validates authentication and read-only store compatibility; it applies no DDL or grants, initializes no epoch, and starts no background worker.
 - The proof fixture owns its disposable schema, role, epoch, container, SDK exporter, and cleanup. A missing Docker prerequisite is a test failure, not a skipped success.
 
+The five-second Docker prerequisite requests the daemon's version with [`docker version --format '{{.Server.Version}}'`](https://docs.docker.com/reference/cli/docker/version/).
+Unlike [`docker info`](https://docs.docker.com/reference/cli/docker/system/info/), this does not enumerate unrelated client metadata plugins before contacting the daemon.
+A missing daemon, empty or truncated response, command failure or deadline still fails the proof; the subsequent
+pinned-image, real container, four-checkpoint and cleanup requirements remain in force. Existing generated projects
+can copy the corresponding probe change from the [bounded process fixture](content/durable-worker/tests/AppSurfaceDurableWorker.Tests/BoundedProcessRunner.cs)
+and [PostgreSQL fixture](content/durable-worker/tests/AppSurfaceDurableWorker.Tests/PostgreSqlFixture.cs); template updates do not rewrite application-owned files.
+
 The current authored package graph and the exact v1 generated path inventory are recorded in the [versioned shape guide](../../releases/durable-worker-template-shape-v1.md). The template manifest is package metadata and is not copied into the generated application.
 
 The generated [central package pins](content/durable-worker/Directory.Packages.props) select OpenTelemetry 1.17.0 to match the packed [Observability dependencies](../../Observability/ForgeTrust.AppSurface.Observability/README.md). Keep those three telemetry pins coordinated when upgrading AppSurface; a lower central pin fails restore with `NU1109` because central transitive pinning remains enabled.
