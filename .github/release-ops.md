@@ -73,8 +73,10 @@ report to the publishing job through the artifact upload and download steps.
 The first `prepare` step, **Verify cache access is disabled**, prints the
 runner-provided `ACTIONS_CACHE_MODE` and requires its value to be exactly `none`.
 A missing, empty, or different value fails the job before checkout or release
-tooling runs, so the publishing job cannot proceed. Inspect this step in the
-next manually dispatched Release Prep run for runtime confirmation. Do not set
+tooling runs, so the publishing job cannot proceed. The guard explicitly uses
+Bash and runs in the foreground; policy tests reject failure suppression and
+environment overrides. Inspect this step in the next manually dispatched
+Release Prep run for runtime confirmation. Do not set
 `ACTIONS_CACHE_MODE` in workflow or job environment variables to satisfy the
 assertion: it verifies the runner's effective mode; `cache-mode: none` remains
 the control that restricts the token.

@@ -368,14 +368,19 @@ public sealed class ReleaseWorkflowPolicyTests
             Assert.IsType<YamlScalarNode>(firstStep.Children[new YamlScalarNode("name")]).Value);
         Assert.False(firstStep.Children.ContainsKey(new YamlScalarNode("if")));
         Assert.False(firstStep.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
-        foreach (var scope in new[] { root, prepare, firstStep })
+        Assert.False(firstStep.Children.ContainsKey(new YamlScalarNode("background")));
+        Assert.False(prepare.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        Assert.Equal("bash", Assert.IsType<YamlScalarNode>(firstStep.Children[new YamlScalarNode("shell")]).Value);
+
+        var environmentKey = new YamlScalarNode("env");
+        var environments = new[] { root, prepare, firstStep }
+            .Where(scope => scope.Children.ContainsKey(environmentKey))
+            .Select(scope => Assert.IsType<YamlMappingNode>(scope.Children[environmentKey]));
+        foreach (var environment in environments)
         {
-            if (scope.Children.TryGetValue(new YamlScalarNode("env"), out var environment))
-            {
-                Assert.False(
-                    Assert.IsType<YamlMappingNode>(environment).Children.ContainsKey(new YamlScalarNode("ACTIONS_CACHE_MODE")),
-                    "The cache-mode assertion must read the runner's effective mode without an environment override.");
-            }
+            Assert.False(
+                environment.Children.ContainsKey(new YamlScalarNode("ACTIONS_CACHE_MODE")),
+                "The cache-mode assertion must read the runner's effective mode without an environment override.");
         }
     }
 
