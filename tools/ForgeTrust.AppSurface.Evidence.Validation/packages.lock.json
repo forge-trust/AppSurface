@@ -481,16 +481,29 @@
         "resolved": "10.0.14",
         "contentHash": "lVqovhCt3HlZe7ONG5ydaj6BYwYI004gldVfMMkJl/lR5ueeCtWNpW4nejOX75sPmzm8vXCxB69GqwHaYCnyUQ=="
       },
+      "forgetrust.appsurface.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.evidence.aspire": {
         "type": "Project",
         "dependencies": {
           "Aspire.Hosting": "[13.6.5, 14.0.0)",
+          "ForgeTrust.AppSurface.Coverage": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.contracts": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )"
+        }
       },
       "forgetrust.appsurface.evidence.planner": {
         "type": "Project",
@@ -538,6 +551,12 @@
           "System.IO.Hashing": "10.0.14",
           "YamlDotNet": "18.1.0"
         }
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
       "KubernetesClient": {
         "type": "CentralTransitive",

@@ -5,6 +5,65 @@ namespace DurableWorkerTemplate.Tests;
 public sealed class SetupOperationLifetimeTests
 {
     [Fact]
+    public async Task Docker_prerequisite_queries_the_daemon_without_collecting_client_plugin_metadata()
+    {
+        var calls = 0;
+        await BoundedProcessRunner.RequireDockerAsync((arguments, budget) =>
+        {
+            calls++;
+            Assert.Equal(TimeSpan.FromSeconds(5), budget);
+            // The daemon endpoint is healthy. An info request would first wait on unrelated CLI plugins.
+            return arguments.SequenceEqual(["version", "--format", "{{.Server.Version}}"])
+                ? Task.FromResult(new BoundedProcessResult(0, "29.7.2\n", "", false, false))
+                : Task.FromException<BoundedProcessResult>(new TimeoutException("client metadata plugin did not finish"));
+        });
+        Assert.Equal(1, calls);
+    }
+
+    [Theory]
+    [InlineData(1, "29.7.2", false, false)]
+    [InlineData(0, "", false, false)]
+    [InlineData(0, " \t\r\n", false, false)]
+    [InlineData(0, "29.7.2", true, false)]
+    [InlineData(0, "29.7.2", false, true)]
+    public async Task Docker_prerequisite_rejects_failed_empty_or_incomplete_daemon_responses(
+        int exitCode, string output, bool outputTruncated, bool errorTruncated)
+    {
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            BoundedProcessRunner.RequireDockerAsync((_, _) => Task.FromResult(
+                new BoundedProcessResult(exitCode, output, "private daemon details", outputTruncated, errorTruncated))));
+        Assert.Contains("daemon-unavailable", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private daemon details", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Docker_prerequisite_sanitizes_launch_and_deadline_failures(bool deadline)
+    {
+        Exception cause = deadline ? new TimeoutException("private endpoint") : new InvalidOperationException("private endpoint");
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            BoundedProcessRunner.RequireDockerAsync((_, _) => Task.FromException<BoundedProcessResult>(cause)));
+        Assert.Contains(cause.GetType().Name, failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private endpoint", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Docker_prerequisite_keeps_unexpected_fault_identity()
+    {
+        var cause = new IOException("unexpected pipe failure");
+        var failure = await Assert.ThrowsAsync<IOException>(() =>
+            BoundedProcessRunner.RequireDockerAsync((_, _) => Task.FromException<BoundedProcessResult>(cause)));
+        Assert.Same(cause, failure);
+    }
+
+    [Fact]
+    public async Task Docker_prerequisite_rejects_a_missing_runner()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(() => BoundedProcessRunner.RequireDockerAsync(null!));
+    }
+
+    [Fact]
     public async Task Cancellation_does_not_forget_copy_until_owned_container_stop_observes_it()
     {
         var lifetime = new SetupOperationLifetime();

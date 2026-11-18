@@ -61,6 +61,9 @@
     <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj" />
     <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests.csproj" />
   </Folder>
+  <Folder Name="/Coverage/">
+    <Project Path="Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj" />
+  </Folder>
   <Folder Name="/Evidence/">
     <Project Path="Evidence/ForgeTrust.AppSurface.Evidence.Readiness/ForgeTrust.AppSurface.Evidence.Readiness.csproj" />
     <Project Path="Evidence/ForgeTrust.AppSurface.Evidence.Readiness.Tests/ForgeTrust.AppSurface.Evidence.Readiness.Tests.csproj" />
@@ -165,6 +168,7 @@
     <Project Path="tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj" />
+    <Project Path="tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.ReleaseContracts/ForgeTrust.AppSurface.ReleaseContracts.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj" />

@@ -145,7 +145,10 @@ internal sealed class EvidenceCliWorkflow
         cancellationToken.ThrowIfCancellationRequested();
         var policy = await ReadPolicyAsync(request.PolicyPath, cancellationToken).ConfigureAwait(false);
         var inputs = await ReadPathsAndSnapshotAsync(request, cancellationToken).ConfigureAwait(false);
-        return new EvidencePlanningResolution(_planner.Resolve(policy, inputs.Paths), inputs.Snapshot);
+        var plan = inputs.Snapshot is null
+            ? _planner.Resolve(policy, inputs.Paths)
+            : _planner.ResolvePatch(policy, inputs.Snapshot.Bytes, inputs.Paths);
+        return new EvidencePlanningResolution(plan, inputs.Snapshot);
     }
 
     /// <summary>
@@ -206,6 +209,13 @@ internal sealed class EvidenceCliWorkflow
         try
         {
             resolvedPlan = _planner.Resolve(plan.PolicySnapshot, plan.ChangedPaths);
+            if (plan.PatchSha256 is not null)
+            {
+                // The original raw patch is not part of the plan artifact. Check its recorded
+                // digest in the canonical binding, then recompute selection from normalized paths.
+                var bound = resolvedPlan with { PatchSha256 = plan.PatchSha256, PlanDigest = string.Empty };
+                resolvedPlan = bound with { PlanDigest = EvidenceDigest.CanonicalSha256(bound) };
+            }
         }
         catch (EvidencePlanningException exception)
         {
@@ -296,10 +306,9 @@ internal sealed class EvidenceCliWorkflow
         if (!string.IsNullOrWhiteSpace(request.DiffFile))
         {
             snapshot = await ReadDiffSnapshotAsync(request.DiffFile, cancellationToken).ConfigureAwait(false);
-            paths.AddRange(EvidenceUnifiedDiffReader.Read(snapshot.Text));
         }
 
-        if (paths.Count == 0)
+        if (paths.Count == 0 && (snapshot is null || EvidenceUnifiedDiffReader.Read(snapshot.Text).Count == 0))
         {
             throw new EvidenceCliException("ASEVD207", "No changed paths were supplied.", "Pass --path at least once or provide --diff-file with a unified diff.");
         }

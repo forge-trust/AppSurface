@@ -129,7 +129,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, [`appsurface deployment gcp-cloud-run observe-execution`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-deployment-gcp-cloud-run-observe-execution) exact read-only Cloud Run execution observation, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` local threshold enforcement, and [`appsurface coverage storage`](./guides/coverage-storage.md) history, warning, pin, restore, and cleanup controls.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, [`appsurface deployment gcp-cloud-run observe-execution`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-deployment-gcp-cloud-run-observe-execution) exact read-only Cloud Run execution observation, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` local threshold enforcement, [`appsurface coverage fan-in`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-fan-in) source/run-bound capture, composition, acceptance and independent verification, and [`appsurface coverage storage`](./guides/coverage-storage.md) history, warning, pin, restore, and cleanup controls.
 
 ### [EvidenceHost](./start-here/evidencehost.md)
 
@@ -244,9 +244,13 @@ inventory. If the results disagree, compare the commit and base, source paths, a
 changed-line counts. A file can have coverage in a hosted report while contributing no diff lines;
 a passing local gate does not establish that the hosted patch status passed.
 
-For repository-native code that needs platform-specific execution, the [verified cross-platform coverage
+For repository-native code that needs platform-specific execution, the [native coverage
 fan-in guide](./guides/coverage-fan-in.md) documents the matching-source and SDK manifest checks that
-extend the existing aggregate and patch gates without changing their thresholds or scope.
+extend the existing aggregate and patch gates without changing their thresholds or scope. The
+[issue #897 design](./docs/designs/issue-897-native-coverage-fan-in.md) and
+[test parity audit](./docs/plans/issue-897-test-parity.md) record the migration contract and evidence limits;
+the audit links the Linux, Windows and macOS runs that qualified the legacy producer for removal.
+Those runs predate the deletion commit; the final pull request head must also pass the validation gates.
 
 The repository lane requires a non-sandboxed host by default. Set
 `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check
@@ -374,6 +378,8 @@ The [coverage-run watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-r
 
 ### Focused and sharded coverage
 
+For the versioned native coverage fan-in contract, including opt-in v3 patch applicability and the current v2 repository default, see the [coverage fan-in guide](./guides/coverage-fan-in.md).
+
 `scripts/coverage-solution.sh` accepts no arguments and exists only for this
 repository's full run-and-gate policy. It enables VSTest's
 `console;verbosity=normal` logger so completed tests reach the
@@ -500,3 +506,5 @@ AppSurface is licensed under the [Polyform Small Business License 1.0.0](./licen
 Free for individuals and businesses with fewer than 100 people and under
 $1,000,000 USD prior-year revenue (inflation-adjusted). Larger companies
 require a commercial license.
+
+For identity-bound cross-platform coverage, use the neutral [Coverage package](Coverage/ForgeTrust.AppSurface.Coverage/README.md) and [native fan-in guide](guides/coverage-fan-in.md). The supported API and installed CLI retain complete primary execution and independent aggregate/patch acceptance, with explicit consumer policy and owned output custody.

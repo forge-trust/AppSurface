@@ -14,6 +14,8 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal sealed class PackageArtifactValidator
 {
     private const string RequiredPackageProjectUrl = "https://appsurface.dev";
+    private const string CoverageFacadePackageId = "ForgeTrust.AppSurface.Coverage";
+    private const string CoverageEnginePackageId = "ForgeTrust.AppSurface.Evidence.Coverage";
     private const string TailwindMainPackageId = "ForgeTrust.AppSurface.Web.Tailwind";
     private const string TailwindRuntimePackagePrefix = "ForgeTrust.AppSurface.Web.Tailwind.Runtime.";
     private const int MaxNoticeBytes = 256 * 1024;
@@ -241,13 +243,21 @@ internal sealed class PackageArtifactValidator
                     $"Package '{expected.PackageId}' is missing dependency '{expectedDependency}'.");
             }
 
+            var exactCoverageEngineDependency = string.Equals(expected.PackageId, CoverageFacadePackageId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(expectedDependency, CoverageEnginePackageId, StringComparison.OrdinalIgnoreCase);
+            var expectedDependencyVersion = exactCoverageEngineDependency ? $"[{packageVersion}]" : packageVersion;
             var mismatchedVersions = dependencyVersions
-                .Where(dependencyVersion => !DependencyVersionMatches(dependencyVersion, packageVersion))
+                .Where(dependencyVersion => exactCoverageEngineDependency
+                    ? !string.Equals(dependencyVersion, expectedDependencyVersion, StringComparison.Ordinal)
+                    : !DependencyVersionMatches(dependencyVersion, packageVersion))
                 .ToArray();
             if (mismatchedVersions.Length > 0)
             {
+                var requirement = exactCoverageEngineDependency
+                    ? $"exact coordinated dependency '{expectedDependencyVersion}'"
+                    : $"same-version dependency '{packageVersion}'";
                 throw new PackageIndexException(
-                    $"Package '{expected.PackageId}' dependency '{expectedDependency}' has version '{string.Join(", ", mismatchedVersions)}', expected same-version dependency '{packageVersion}'.");
+                    $"Package '{expected.PackageId}' dependency '{expectedDependency}' has version '{string.Join(", ", mismatchedVersions)}', expected {requirement}.");
             }
         }
 

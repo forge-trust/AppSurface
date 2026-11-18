@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Coverage/GitPatchPathHeader.cs" Link="GitPatchPathHeader.cs" />
   </ItemGroup>
 
   <ItemGroup>
