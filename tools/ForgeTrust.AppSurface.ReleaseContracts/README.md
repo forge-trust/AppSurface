@@ -76,7 +76,7 @@ return promotion switch
 
 ### Run the offline binding proof
 
-From the repository root, use the SDK pinned by [`global.json`](../../global.json) and restore project dependencies. The existing test projects can access these internal types through their assembly friendship. Application code does not consume a supported package API for this contract.
+From the repository root, use the SDK pinned by [`global.json`](https://github.com/forge-trust/AppSurface/blob/main/global.json) and restore project dependencies. The existing test projects can access these internal types through their assembly friendship. Application code does not consume a supported package API for this contract.
 
 ```sh
 dotnet --version
