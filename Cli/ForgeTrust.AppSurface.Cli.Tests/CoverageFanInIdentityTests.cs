@@ -106,7 +106,7 @@ public sealed class CoverageFanInIdentityTests
     {
         var policy = CoveragePolicyEncoding.Freeze(CoverageFanInPolicyTests.Policy() with
         { Limits = new CoverageOperationLimits(IdentitySeconds: 1) });
-        return new(new(JsonSerializer.SerializeToElement(policy, CoveragePolicyEncoding.Json), CoveragePolicyEncoding.Digest(policy)),
+        return new(new(CoveragePolicyEncoding.ToElement(policy), CoveragePolicyEncoding.Digest(policy)),
             root, Path.Join(root, "capture"), CoveragePath: Path.Join(root, "coverage.xml"), TimingsPath: Path.Join(root, "timings.json"));
     }
 

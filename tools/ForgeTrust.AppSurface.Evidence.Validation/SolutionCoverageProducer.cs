@@ -114,6 +114,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                     "run", "--project", Path.Join(root, "tools", "ForgeTrust.AppSurface.Coverage.Dogfood", "ForgeTrust.AppSurface.Coverage.Dogfood.csproj"),
                     "--configuration", "Release", "--", "--operation", "fanin", "--repository", root,
                     "--cli", _settings.CoverageCliPath!, "--output", fanInOutput, "--configuration", "Release",
+                    "--contract-version", "2",
                     "--primary", report, "--timings", timings, "--native-inputs", _settings.NativeCoverageDirectory!,
                     "--diff-base", _settings.DiffBase!, "--run-scope", run["GITHUB_REPOSITORY"]!,
                     "--run-id", run["GITHUB_RUN_ID"]!, "--attempt", run["GITHUB_RUN_ATTEMPT"]!,

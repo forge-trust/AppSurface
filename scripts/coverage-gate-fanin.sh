@@ -7,10 +7,16 @@ BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Debug}"
 COVERAGE_GATE_DIFF_BASE="${COVERAGE_GATE_DIFF_BASE-origin/main}"
 COVERAGE_DIRECTORY="${COVERAGE_DIRECTORY:-$ROOT_DIR/TestResults/coverage-merged}"
 CLI_PROJECT="$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
+COVERAGE_FANIN_CONTRACT_VERSION="${COVERAGE_FANIN_CONTRACT_VERSION:-2}"
 
 cd "$ROOT_DIR"
 
 if [[ -n "${COVERAGE_FANIN_NATIVE:-}" ]]; then
+  case "$COVERAGE_FANIN_CONTRACT_VERSION" in
+    2|3) ;;
+    *) printf '%s\n' 'COVERAGE_FANIN_CONTRACT_VERSION must be 2 or 3' >&2; exit 2 ;;
+  esac
+
   : "${COVERAGE_CLI_PATH:?COVERAGE_CLI_PATH must name the installed candidate appsurface executable}"
   : "${COVERAGE_DOGFOOD_OUTPUT:?COVERAGE_DOGFOOD_OUTPUT must name a unique, fresh output root}"
   : "${COVERAGE_RUN_SCOPE:?COVERAGE_RUN_SCOPE must identify the trusted repository scope}"
@@ -26,6 +32,7 @@ if [[ -n "${COVERAGE_FANIN_NATIVE:-}" ]]; then
     --primary "$COVERAGE_DIRECTORY/coverage.cobertura.xml"
     --timings "$COVERAGE_DIRECTORY/timings.json"
     --native-inputs "$COVERAGE_FANIN_NATIVE"
+    --contract-version "$COVERAGE_FANIN_CONTRACT_VERSION"
     --run-scope "$COVERAGE_RUN_SCOPE"
     --run-id "$COVERAGE_RUN_ID"
     --attempt "$COVERAGE_RUN_ATTEMPT"

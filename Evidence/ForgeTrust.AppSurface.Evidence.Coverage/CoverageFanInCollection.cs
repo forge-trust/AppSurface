@@ -13,9 +13,11 @@ internal static partial class CoverageFanInEngine
         if (Directory.Exists(collection) || File.Exists(collection)) throw new IOException("Collection destination must be fresh.");
         var locator = new StrictReportGeneratorRuntimeLocator();
         _ = locator.ResolveReportGeneratorDll();
-        var runner = new CliWrapCoverageRunProcessRunner();
+        ICoverageRunProcessRunner runner = r.Budget is { } budget
+            ? new V3CollectionProcessRunner(new CliWrapCoverageRunProcessRunner(), budget)
+            : new CliWrapCoverageRunProcessRunner();
         var workflow = new CoverageRunWorkflow(runner,
-            new CoverageFanInNormalization(new CoverageRunReportGenerator(runner, locator), r.Expected.Bounds), TimeProvider.System);
+            new CoverageFanInNormalization(new CoverageRunReportGenerator(runner, locator), r.Expected.Bounds, r.Budget), TimeProvider.System);
         var projects = producer is { } native && native.TryGetProperty("testProjects", out var inventory)
             && inventory.ValueKind == System.Text.Json.JsonValueKind.Array
             ? inventory.EnumerateArray().Select(x => x.GetString()!).ToArray() : r.Expected.TestProjects;
@@ -27,7 +29,12 @@ internal static partial class CoverageFanInEngine
             CoverageRunTestResultFormat.Junit, false, true, "normal", TimeSpan.FromSeconds(30),
             TimeSpan.FromMinutes(5), CoverageRunWatchdogMode.Fail, CoverageRunDriver.Collector, false,
             new(TimeProvider.System, TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(r.DeadlineSeconds)))
-        { ArtifactRetention = "full", WorkingDirectory = Full(r.RepositoryRoot), RequireRebuild = true };
+        {
+            ArtifactRetention = "full",
+            WorkingDirectory = Full(r.RepositoryRoot),
+            RequireRebuild = true,
+            RequiredCollectorVersion = r.Expected.ContractVersion == 3 ? "10.0.1" : null
+        };
         CoverageRunResult result;
         await writers.Output.WriteLineAsync("Coverage collection started for the declared inventory.").ConfigureAwait(false);
         // Child logs can contain arbitrary test output and host paths. Keep them in the
@@ -47,7 +54,7 @@ internal static partial class CoverageFanInEngine
         if (producer is not null)
         {
             var reports = FindNativeReports(collection, projects, r.Expected, token, hash => timingsHash = hash,
-                hashes => reportHashes = hashes);
+                hashes => reportHashes = hashes, budget: r.Budget);
             rawSet = reports;
         }
         var captureRequest = r with
@@ -57,7 +64,7 @@ internal static partial class CoverageFanInEngine
             RawCoveragePath = null,
             RawCoveragePaths = rawSet
         };
-        using var io = new CoverageFanInIO(r.Expected.Bounds, token);
+        using var io = new CoverageFanInIO(r.Expected.Bounds, token, r.Budget);
         io.Acquire(InputDirectories("capture", captureRequest).Select(x => (x, false)), requireCoordination: false);
         if (timingsHash is not null && CoverageFanInIO.Hash(io.Read(Path.Join(collection, "timings.json"))) != timingsHash)
             throw new InvalidDataException("Collected project-to-attachment timing binding changed before capture.");
@@ -68,6 +75,13 @@ internal static partial class CoverageFanInEngine
         io.AdmitOutput(files.Values);
         await PublishAsync(r, "capture", files, state, token, io).ConfigureAwait(false);
         return state.Result("Succeeded");
+    }
+
+    /// <summary>Preserves the existing supervised runner lifecycle while applying the same invocation budget to collection pipes.</summary>
+    private sealed class V3CollectionProcessRunner(ICoverageRunProcessRunner inner, CoverageFanInBudget budget) : ICoverageRunProcessRunner
+    {
+        public Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken) =>
+            inner.RunAsync(request with { BudgetCharge = budget.Charge }, cancellationToken);
     }
 
     /// <summary>Binds selection-time original report bytes to the retained capture IO through publication.</summary>

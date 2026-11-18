@@ -70,6 +70,7 @@ jobs:
       requires_coverage: ${{ steps.plan.outputs.requires_coverage }}
       requires_native_coverage: ${{ steps.plan.outputs.requires_native_coverage }}
       diff_base: ${{ steps.plan.outputs.diff_base }}
+      v3_shadow_diff_base: ${{ steps.plan.outputs.v3_shadow_diff_base }}
     steps:
       - name: Checkout exact event head with full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -99,6 +100,7 @@ jobs:
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_SHA: ${{ github.sha }}
+          GITHUB_PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           $root = Join-Path $env:RUNNER_TEMP "coverage-plan-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
@@ -116,6 +118,14 @@ jobs:
           "requires_native_coverage=$nativeRequired" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
           $diffBase = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $source.baseCommit } else { '' }
           "diff_base=$diffBase" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          $v3ShadowDiffBase = ''
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            $v3ShadowDiffBase = [string]$env:GITHUB_PULL_REQUEST_BASE_SHA
+            if ($v3ShadowDiffBase -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') {
+              throw 'The v3 shadow requires the full immutable pull-request base commit ID.'
+            }
+          }
+          "v3_shadow_diff_base=$v3ShadowDiffBase" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
       - name: Preserve coverage selection plan
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -198,7 +208,7 @@ jobs:
     if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' }}
     # Leave time for the native suite, candidate installation, and evidence upload.
     # The test command still uses a separate two-minute hang detector.
-    timeout-minutes: ${{ matrix.os == 'macos-latest' && 30 || 20 }}
+    timeout-minutes: ${{ (matrix.os == 'macos-latest' || matrix.os == 'windows-latest') && 30 || 20 }}
     strategy:
       fail-fast: false
       matrix:
@@ -207,6 +217,9 @@ jobs:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
       BUILD_CONFIGURATION: Release
       COVERAGE_GATE_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.diff_base }}
+      COVERAGE_V3_SHADOW_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.v3_shadow_diff_base }}
+      COVERAGE_V3_SHADOW_CONTRACT_VERSION: '3'
+      COVERAGE_V3_SHADOW_REPORT_PROFILE_ID: coverlet-collector-cobertura-v1
       COVERAGE_RUN_SCOPE: ${{ github.repository }}
       COVERAGE_RUN_ID: ${{ github.run_id }}
       COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -300,7 +313,7 @@ jobs:
           --configuration Release
           --no-restore
           /p:TailwindEnabled=false
-          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn"
+          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn"
           --logger "console;verbosity=detailed"
           --results-directory "${{ runner.temp }}/coverage-native-results"
           --collect:"XPlat Code Coverage"
@@ -336,6 +349,71 @@ jobs:
           name: coverage-native-${{ matrix.os }}
           path: ${{ steps.capture-native-coverage.outputs.capture-path }}
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Capture fresh v3 shadow native evidence
+        id: capture-v3-shadow-native
+        if: ${{ github.event_name == 'pull_request' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' }}
+        shell: pwsh
+        env:
+          COVERAGE_V3_SHADOW_OUTPUT: ${{ runner.temp }}/coverage-fanin-v3-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          COVERAGE_V3_SHADOW_NORMALIZED: ${{ runner.temp }}/coverage-fanin-v3-normalized-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:COVERAGE_V3_SHADOW_DIFF_BASE)) { throw "The v3 shadow has no pinned diff base." }
+          if (Test-Path -LiteralPath $env:COVERAGE_V3_SHADOW_OUTPUT) { throw "The v3 shadow output path is not fresh." }
+          if (Test-Path -LiteralPath $env:COVERAGE_V3_SHADOW_NORMALIZED) { throw "The v3 shadow normalization path is not fresh." }
+          $reports = @(Get-ChildItem -Path "${{ runner.temp }}/coverage-native-results" -Recurse -Filter coverage.cobertura.xml)
+          if ($reports.Count -ne 1) { throw "Expected exactly one original native collector report for the v3 shadow." }
+          & $env:COVERAGE_CLI_PATH coverage merge --source "${{ runner.temp }}/coverage-native-results" --output $env:COVERAGE_V3_SHADOW_NORMALIZED
+          if ($LASTEXITCODE -ne 0) { throw "Native v3 shadow normalization failed." }
+          $platform = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "Darwin" } else { "Linux" }
+          $adapter = @('--operation', 'native', '--contract-version', $env:COVERAGE_V3_SHADOW_CONTRACT_VERSION,
+            '--repository', $PWD.Path, '--cli', $env:COVERAGE_CLI_PATH, '--output', $env:COVERAGE_V3_SHADOW_OUTPUT,
+            '--configuration', 'Release', '--native-platform', $platform,
+            '--report', (Join-Path $env:COVERAGE_V3_SHADOW_NORMALIZED 'coverage.cobertura.xml'), '--raw', $reports[0].FullName,
+            '--run-scope', $env:COVERAGE_RUN_SCOPE, '--run-id', $env:COVERAGE_RUN_ID, '--attempt', $env:COVERAGE_RUN_ATTEMPT,
+            '--diff-base', $env:COVERAGE_V3_SHADOW_DIFF_BASE)
+          dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release --no-restore -- @adapter
+          if ($LASTEXITCODE -ne 0) { throw "Native v3 shadow capture failed." }
+          $manifestPath = Join-Path $env:COVERAGE_V3_SHADOW_OUTPUT 'capture/manifest.json'
+          if (!(Test-Path -LiteralPath $manifestPath)) { throw "Native v3 shadow capture manifest is missing." }
+          $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+          if ($manifest.schemaVersion -ne 3 -or $manifest.producerId -ne $platform.ToLowerInvariant() -or
+              $manifest.policy.contractVersion -ne 3 -or $manifest.policy.reportProfileId -ne $env:COVERAGE_V3_SHADOW_REPORT_PROFILE_ID -or
+              $manifest.policy.gate.diffBase -ne $env:COVERAGE_V3_SHADOW_DIFF_BASE -or
+              $manifest.source.commit -ne $env:COVERAGE_SOURCE_COMMIT -or
+              $manifest.run.runScope -ne $env:COVERAGE_RUN_SCOPE -or $manifest.run.runId -ne $env:COVERAGE_RUN_ID -or
+              [string]$manifest.run.attempt -ne $env:COVERAGE_RUN_ATTEMPT) {
+            throw "Native v3 shadow capture identity, profile, contract, or pinned base differs."
+          }
+          $proofPath = Join-Path $env:COVERAGE_V3_SHADOW_OUTPUT 'shadow-proof.json'
+          if (!(Test-Path -LiteralPath $proofPath)) { throw "Native v3 shadow proof output is missing." }
+          $proof = Get-Content -Raw -LiteralPath $proofPath | ConvertFrom-Json
+          $expectedAccountingScope = 'UsedBytes is the existing logical operation budget for streams, distinct Git blob work, retained inputs, and staged publication; it does not measure XML DOM heap or peak staged storage.'
+          if ($proof.schemaVersion -ne 1 -or $proof.contractVersion -ne 3 -or
+              $proof.collector.packageId -ne 'coverlet.collector' -or $proof.collector.verifiedVersion -ne '10.0.1' -or
+              $proof.reportProfileId -ne $env:COVERAGE_V3_SHADOW_REPORT_PROFILE_ID -or $proof.operation -ne 'native' -or
+              $proof.run.scope -ne $env:COVERAGE_RUN_SCOPE -or $proof.run.id -ne $env:COVERAGE_RUN_ID -or
+              [string]$proof.run.attempt -ne $env:COVERAGE_RUN_ATTEMPT -or
+              $proof.source.commit -ne $manifest.source.commit -or $proof.source.tree -ne $manifest.source.tree -or
+              $proof.diff.baseCommit -ne $env:COVERAGE_V3_SHADOW_DIFF_BASE -or $proof.completed -ne $true -or
+              $proof.accounting.scope -ne $expectedAccountingScope -or
+              $proof.accounting.logicalOperationBudgetWithinTotalBytes -ne $true -or
+              $proof.accounting.maximumAdmittedXmlBytes -le 0 -or
+              $proof.accounting.maximumAdmittedRecords -le 0 -or
+              $proof.accounting.maximumStagedBytes -le 0 -or $proof.accounting.maximumStagedFiles -le 0 -or
+              $proof.process.commandsWithinOperationDeadline -ne $true) {
+            throw "Native v3 shadow proof identity or completion metadata differs."
+          }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "capture-path=$(Join-Path $env:COVERAGE_V3_SHADOW_OUTPUT 'capture')"
+
+      - name: Upload isolated v3 shadow native evidence
+        if: ${{ always() && github.event_name == 'pull_request' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-fanin-v3-native-${{ matrix.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coverage-fanin-v3-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Upload coverage security diagnostics
@@ -915,6 +993,9 @@ jobs:
     env:
       CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+      COVERAGE_V3_SHADOW_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.v3_shadow_diff_base }}
+      COVERAGE_V3_SHADOW_CONTRACT_VERSION: '3'
+      COVERAGE_V3_SHADOW_REPORT_PROFILE_ID: coverlet-collector-cobertura-v1
 
     steps:
       - name: Checkout code
@@ -1032,6 +1113,14 @@ jobs:
           pattern: coverage-native-*
           path: ${{ runner.temp }}/coverage-native-inputs
 
+      - name: Download isolated fresh v3 shadow native evidence
+        id: download-v3-shadow-native
+        if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: coverage-fanin-v3-native-*-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coverage-fanin-v3-native-inputs
+
       - name: Run solution coverage and gate
         id: solution-coverage
         env:
@@ -1054,6 +1143,223 @@ jobs:
           if [[ "$(jq -r '.requiresCoverage' "$plan/selection.json")" == "true" ]]; then args+=(--coverage-collection "$RUNNER_TEMP/solution-coverage-collection"); fi
           dotnet "$validation" "${args[@]}"
           dotnet "$validation" --operation verify --scope coverage --policy .github/evidence.policy.json --changed-paths "$changes/changed-paths.json" --plan "$plan/evidence-plan.json" --manifest "$evidence_root/evidence-manifest.json" --artifact-root "$evidence_root/artifacts"
+
+      - name: Capture, accept, and replay v3 shadow fan-in
+        id: v3-shadow-fanin
+        if: ${{ always() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
+        env:
+          COVERAGE_V3_SHADOW_OUTPUT: ${{ runner.temp }}/coverage-fanin-v3-shadow-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          : "${COVERAGE_V3_SHADOW_DIFF_BASE:?The v3 shadow requires a separately pinned immutable base commit.}"
+          : "${COVERAGE_CLI_PATH:?The v3 shadow requires the same-run installed candidate CLI.}"
+          [[ "$COVERAGE_V3_SHADOW_DIFF_BASE" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || {
+            echo "The v3 shadow base is not a full immutable commit ID." >&2
+            exit 1
+          }
+          [[ ! -e "$COVERAGE_V3_SHADOW_OUTPUT" ]] || {
+            echo "The v3 shadow output path is not fresh." >&2
+            exit 1
+          }
+          primary_report="$RUNNER_TEMP/solution-coverage-collection/coverage/coverage.cobertura.xml"
+          primary_timings="$RUNNER_TEMP/solution-coverage-collection/coverage/timings.json"
+          native_inputs="$RUNNER_TEMP/coverage-fanin-v3-native-inputs"
+          [[ -s "$primary_report" && -s "$primary_timings" ]] || {
+            echo "The same-run primary collection report or timings are missing." >&2
+            exit 1
+          }
+          [[ -d "$native_inputs" ]] || {
+            echo "Fresh v3 native capture artifacts are missing." >&2
+            exit 1
+          }
+
+          source_tree="$(git rev-parse 'HEAD^{tree}')"
+          check_v3_shadow_manifest() {
+            local manifest_path="$1"
+            local producer="$2"
+            [[ -s "$manifest_path" ]] || {
+              echo "Required v3 capture manifest is missing: $manifest_path" >&2
+              return 1
+            }
+            jq -e \
+              --arg profile "$COVERAGE_V3_SHADOW_REPORT_PROFILE_ID" \
+              --arg base "$COVERAGE_V3_SHADOW_DIFF_BASE" \
+              --arg scope "$GITHUB_REPOSITORY" \
+              --arg run_id "$GITHUB_RUN_ID" \
+              --arg attempt "$GITHUB_RUN_ATTEMPT" \
+              --arg source "$COVERAGE_SOURCE_COMMIT" \
+              --arg producer "$producer" \
+              '.schemaVersion == 3 and .producerId == $producer
+               and .policy.contractVersion == 3 and .policy.reportProfileId == $profile
+               and .policy.gate.diffBase == $base and .source.commit == $source
+               and .run.runScope == $scope and .run.runId == $run_id
+               and .run.attempt == ($attempt | tonumber)' \
+              "$manifest_path" >/dev/null
+          }
+          check_v3_shadow_proof() {
+            local proof_path="$1"
+            local operation="$2"
+            local tree="$3"
+            jq -e \
+              --arg profile "$COVERAGE_V3_SHADOW_REPORT_PROFILE_ID" \
+              --arg base "$COVERAGE_V3_SHADOW_DIFF_BASE" \
+              --arg scope "$GITHUB_REPOSITORY" \
+              --arg run_id "$GITHUB_RUN_ID" \
+              --arg attempt "$GITHUB_RUN_ATTEMPT" \
+              --arg source "$COVERAGE_SOURCE_COMMIT" \
+              --arg tree "$tree" \
+              --arg operation "$operation" \
+              --arg accounting_scope 'UsedBytes is the existing logical operation budget for streams, distinct Git blob work, retained inputs, and staged publication; it does not measure XML DOM heap or peak staged storage.' \
+              '.schemaVersion == 1 and .contractVersion == 3 and .reportProfileId == $profile
+               and .collector.packageId == "coverlet.collector" and .collector.verifiedVersion == "10.0.1"
+               and .operation == $operation and .run.scope == $scope and .run.id == $run_id
+               and .run.attempt == ($attempt | tonumber) and .source.commit == $source
+               and .source.tree == $tree and .diff.baseCommit == $base and .completed == true
+               and .accounting.scope == $accounting_scope
+               and .accounting.logicalOperationBudgetWithinTotalBytes == true
+               and (.accounting.maximumAdmittedXmlBytes | type == "number" and . > 0)
+               and (.accounting.maximumAdmittedRecords | type == "number" and . > 0 and . <= 4000000)
+               and (.accounting.maximumStagedBytes | type == "number" and . > 0)
+               and (.accounting.maximumStagedFiles | type == "number" and . > 0 and . <= 10000)
+               and .process.commandsWithinOperationDeadline == true' \
+              "$proof_path" >/dev/null
+          }
+          mapfile -d '' -t native_capture_manifests < <(find "$native_inputs" -type f -path '*/capture/manifest.json' -print0)
+          [[ "${#native_capture_manifests[@]}" -eq 3 ]] || {
+            echo "Expected exactly three fresh v3 native capture manifests." >&2
+            exit 1
+          }
+          for manifest_path in "${native_capture_manifests[@]}"; do
+            producer="$(jq -er '.producerId' "$manifest_path")"
+            case "$producer" in linux|windows|darwin) ;; *) echo "Unexpected native producer: $producer" >&2; exit 1 ;; esac
+            check_v3_shadow_manifest "$manifest_path" "$producer"
+            native_root="${manifest_path%/capture/manifest.json}"
+            [[ -s "$native_root/shadow-proof.json" ]] || {
+              echo "Required v3 native shadow proof is missing for $producer." >&2
+              exit 1
+            }
+            native_tree="$(jq -er '.source.tree' "$manifest_path")"
+            check_v3_shadow_proof "$native_root/shadow-proof.json" native "$native_tree"
+          done
+
+          dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj \
+            --configuration Release --no-restore -- \
+            --operation fanin --contract-version "$COVERAGE_V3_SHADOW_CONTRACT_VERSION" \
+            --repository "$GITHUB_WORKSPACE" --cli "$COVERAGE_CLI_PATH" \
+            --output "$COVERAGE_V3_SHADOW_OUTPUT" --configuration Release \
+            --primary "$primary_report" \
+            --timings "$primary_timings" \
+            --native-inputs "$native_inputs" \
+            --diff-base "$COVERAGE_V3_SHADOW_DIFF_BASE" \
+            --run-scope "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
+
+          check_v3_shadow_cli_result() {
+            local result_path="$1"
+            local operation="$2"
+            [[ -s "$result_path" ]] || {
+              echo "Required v3 CLI result is missing: $result_path" >&2
+              return 1
+            }
+            jq -e --arg operation "$operation" \
+              '.schemaVersion == 3
+               and .operation == $operation
+               and .status == "succeeded"
+               and .result.operation == $operation
+               and .result.outcome == "succeeded"' \
+              "$result_path" >/dev/null
+          }
+          primary_manifest="$COVERAGE_V3_SHADOW_OUTPUT/primary/manifest.json"
+          check_v3_shadow_manifest "$primary_manifest" primary
+          for producer in linux windows darwin; do
+            check_v3_shadow_manifest "$COVERAGE_V3_SHADOW_OUTPUT/native-$producer/manifest.json" "$producer"
+          done
+          for operation_pair in \
+            "primary capture" "linux capture" "windows capture" "darwin capture" \
+            "compose compose" "accept accept" "verify verify"; do
+            read -r result_name operation <<<"$operation_pair"
+            check_v3_shadow_cli_result "$COVERAGE_V3_SHADOW_OUTPUT/$result_name-result.json" "$operation"
+          done
+
+          acceptance="$COVERAGE_V3_SHADOW_OUTPUT/accepted/acceptance.json"
+          applicability="$COVERAGE_V3_SHADOW_OUTPUT/accepted/patch-applicability.json"
+          diff_metadata="$COVERAGE_V3_SHADOW_OUTPUT/accepted/diff-metadata.json"
+          diff_patch="$COVERAGE_V3_SHADOW_OUTPUT/accepted/diff.patch"
+          shadow_proof="$COVERAGE_V3_SHADOW_OUTPUT/shadow-proof.json"
+          for proof_file in "$acceptance" "$applicability" "$diff_metadata" "$shadow_proof"; do
+            [[ -s "$proof_file" ]] || {
+              echo "Required v3 acceptance proof output is missing: $proof_file" >&2
+              exit 1
+            }
+          done
+          [[ -f "$diff_patch" ]] || {
+            echo "Required v3 accepted diff file is missing: $diff_patch" >&2
+            exit 1
+          }
+          jq -e \
+            --arg source "$COVERAGE_SOURCE_COMMIT" \
+            --arg tree "$source_tree" \
+            --arg scope "$GITHUB_REPOSITORY" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '.schemaVersion == 3
+             and .source.commit == $source
+             and .source.tree == $tree
+             and .run.runScope == $scope
+             and .run.runId == $run_id
+             and .run.attempt == ($attempt | tonumber)' \
+            "$acceptance" >/dev/null
+          jq -e \
+            --arg profile "$COVERAGE_V3_SHADOW_REPORT_PROFILE_ID" \
+            --arg source "$COVERAGE_SOURCE_COMMIT" \
+            --arg tree "$source_tree" \
+            --arg scope "$GITHUB_REPOSITORY" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '.schemaVersion == 3
+             and .reportProfileId == $profile
+             and .source.commit == $source
+             and .source.tree == $tree
+             and .run.runScope == $scope
+             and .run.runId == $run_id
+             and .run.attempt == ($attempt | tonumber)' \
+            "$applicability" >/dev/null
+          jq -e \
+            --arg base "$COVERAGE_V3_SHADOW_DIFF_BASE" \
+            --arg source "$COVERAGE_SOURCE_COMMIT" \
+            '.schemaVersion == 3
+             and .requestedBaseCommit == $base
+             and .headCommit == $source
+             and (.mergeBaseCommit | type == "string" and length > 0)' \
+            "$diff_metadata" >/dev/null
+          check_v3_shadow_proof "$shadow_proof" fanin "$source_tree"
+
+      - name: Summarize v3 shadow result
+        if: ${{ always() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
+        env:
+          COVERAGE_V3_SHADOW_OUTCOME: ${{ steps.v3-shadow-fanin.outcome }}
+          COVERAGE_V3_SHADOW_DOWNLOAD_OUTCOME: ${{ steps.download-v3-shadow-native.outcome }}
+        run: |
+          {
+            echo "### Fan-in v3 qualification (repository authority remains v2)"
+            echo
+            echo "- Outcome: ${COVERAGE_V3_SHADOW_OUTCOME}"
+            echo "- Native capture artifact download: ${COVERAGE_V3_SHADOW_DOWNLOAD_OUTCOME}"
+            echo "- Contract version: ${COVERAGE_V3_SHADOW_CONTRACT_VERSION}"
+            echo "- Report profile: ${COVERAGE_V3_SHADOW_REPORT_PROFILE_ID}"
+            echo "- Pinned base commit: ${COVERAGE_V3_SHADOW_DIFF_BASE}"
+            echo "- Run/attempt: ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+            echo "- Accounting scope: UsedBytes is the existing logical operation budget for streams, distinct Git blob work, retained inputs, and staged publication; it does not measure XML DOM heap or peak staged storage."
+            echo "- V2 remains the coverage acceptance authority; the v3 shadow must complete with current proof metadata and does not replace v2 acceptance."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload isolated v3 shadow replay output
+        if: ${{ always() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-fanin-v3-shadow-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coverage-fanin-v3-shadow-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload test-result diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -5,10 +5,11 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Aspire;
 
-/// <summary>Adapts native v2 coverage acceptance to an explicit EvidenceHost obligation.</summary>
+/// <summary>Adapts an explicitly versioned coverage acceptance to an EvidenceHost obligation.</summary>
 /// <remarks>Supplied captures are trusted-producer observations. Only independently accepted current-run evidence
 /// with completed cleanup and successful required result delivery may satisfy the declared assertion.
-/// Patch acceptance must match the exact patch SHA-256 recorded on the resolved plan.
+/// Patch acceptance must match the exact patch SHA-256 recorded on the resolved plan. A v3 patch obligation also
+/// requires complete primary and composed line/branch applicability; <c>PatchAccepted</c> alone is insufficient.
 /// Historical replay and aggregate-only baselines cannot satisfy a patch-required obligation.</remarks>
 public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
 {
@@ -66,22 +67,7 @@ public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
         { return new(Id, EvidenceProducerOutcome.Invalid, [], "ASCOV301 Correct the explicit fan-in request before retrying."); }
         try
         {
-            var json = JsonSerializer.SerializeToUtf8Bytes(new
-            {
-                result.Operation,
-                result.Outcome,
-                result.OperationId,
-                result.PolicyDigest,
-                result.Effects,
-                result.Accepted,
-                result.Verified,
-                result.PatchOutcome,
-                result.Observation,
-                result.PrimaryImported,
-                result.EvaluationIntent,
-                artifacts = result.Artifacts.Select(x => new { x.Role, x.Length, x.Sha256 }).ToArray(),
-                result.Diagnostics
-            }, new JsonSerializerOptions
+            var json = JsonSerializer.SerializeToUtf8Bytes(ResultProjection(result, _request.Policy), new JsonSerializerOptions
             { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } });
             await context.Artifacts.WriteAsync(_artifactSlot, "coverage/result.json", json, cancellationToken).ConfigureAwait(false);
         }
@@ -93,7 +79,7 @@ public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
         if (result.Outcome != CoverageOperationOutcome.Succeeded || !result.Accepted || !result.Verified
             || !result.Effects.GenerationCommitted || !result.Effects.CleanupComplete
             || result.EvaluationIntent != CoverageEvaluationIntent.CurrentTrustedRun
-            || _requirePatch && result.PatchOutcome != "PatchAccepted"
+            || !SatisfiesPatchAssurance(_request.Policy.ContractVersion, _requirePatch, patch, result)
             || _requireObservedPrimary && (result.PrimaryImported || result.Observation != CoverageObservation.CollectedExecution))
             return new(Id, result.Outcome switch
             {
@@ -139,4 +125,88 @@ public sealed class EvidenceCoverageFanInProducer : IEvidenceProducer
                 ?? throw new ArgumentException("Supplementary capture directories are required.", nameof(request)))
         };
     }
+
+    /// <summary>Checks the patch assertion at the consumer boundary, including all four v3 applicability dimensions.</summary>
+    /// <remarks>V2 retains its historical PatchAccepted check. A v3 patch policy always requires complete metric
+    /// assurance, even when the caller does not separately require the patch gate as its assertion.</remarks>
+    internal static bool SatisfiesPatchAssurance(int contractVersion, bool requirePatch, bool patchRequested,
+        CoverageFanInResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (contractVersion is not (2 or 3)) return false;
+        if (contractVersion == 2)
+            return !requirePatch || string.Equals(result.PatchOutcome, "PatchAccepted", StringComparison.Ordinal);
+        if (!patchRequested)
+            return !requirePatch && result.PatchOutcome == "PatchNotRequested" && result.PatchApplicability is null;
+        return string.Equals(result.PatchOutcome, "PatchAccepted", StringComparison.Ordinal)
+            && IsCompleteV3Applicability(result.PatchApplicability);
+    }
+
+    private static bool IsCompleteV3Applicability(CoveragePatchApplicability? applicability)
+    {
+        if (applicability?.Primary is null || applicability.Composed is null) return false;
+        var metrics = new[]
+        {
+            applicability.Primary.Line, applicability.Primary.Branch,
+            applicability.Composed.Line, applicability.Composed.Branch
+        };
+        if (metrics.Any(metric => metric is null || !IsMeasuredOrNotApplicable(metric))) return false;
+        return metrics.Select(metric => metric!.ChangedLines).Distinct().Count() == 1;
+    }
+
+    private static bool IsMeasuredOrNotApplicable(CoveragePatchMetricResult metric)
+        => metric.Outcome switch
+        {
+            CoveragePatchApplicabilityOutcome.Measured => metric.Reason == "reported-points"
+                && metric.ChangedLines is >= 0 && metric.Measurable is > 0 && metric.Covered is >= 0
+                && metric.Covered <= metric.Measurable && metric.Percent is >= 0 and <= 100,
+            CoveragePatchApplicabilityOutcome.NotApplicable => metric.Reason == "no-reported-patch-points"
+                && metric.ChangedLines is >= 0 && metric.Measurable == 0 && metric.Covered == 0 && metric.Percent is null,
+            _ => false
+        };
+
+    private static object ResultProjection(CoverageFanInResult result, CoverageFanInPolicy policy)
+    {
+        var artifacts = result.Artifacts.Select(x => new { x.Role, x.Length, x.Sha256 }).ToArray();
+        if (policy.ContractVersion == 3)
+            return new
+            {
+                result.Operation,
+                result.Outcome,
+                result.OperationId,
+                result.PolicyDigest,
+                result.Effects,
+                result.Accepted,
+                result.Verified,
+                result.PatchOutcome,
+                result.Observation,
+                result.PrimaryImported,
+                result.EvaluationIntent,
+                artifacts,
+                diagnostics = result.Diagnostics,
+                contractVersion = 3,
+                reportProfileId = policy.ReportProfileId,
+                patchApplicability = result.PatchApplicability
+            };
+        return new
+        {
+            result.Operation,
+            result.Outcome,
+            result.OperationId,
+            result.PolicyDigest,
+            result.Effects,
+            result.Accepted,
+            result.Verified,
+            result.PatchOutcome,
+            result.Observation,
+            result.PrimaryImported,
+            result.EvaluationIntent,
+            artifacts,
+            diagnostics = result.Diagnostics.Select(x => new CoverageDiagnosticV2Projection(
+                x.Code, x.Stage, x.Field, x.Recovery, x.Documentation)).ToArray()
+        };
+    }
+
+    private sealed record CoverageDiagnosticV2Projection(string Code, string Stage, string Field, string Recovery,
+        string Documentation);
 }

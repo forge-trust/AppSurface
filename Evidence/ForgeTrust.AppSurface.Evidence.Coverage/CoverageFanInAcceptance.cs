@@ -21,7 +21,7 @@ internal static partial class CoverageFanInEngine
             [PrimaryName] = primaryBytes,
             [ReceiptName] = Serialize(new
             {
-                schemaVersion = 2,
+                schemaVersion = r.Expected.ContractVersion,
                 policyDigest = r.Expected.Digest,
                 source = r.Expected.Source,
                 run = r.Expected.Run,
@@ -41,7 +41,7 @@ internal static partial class CoverageFanInEngine
         ExactProperties(receipt, ["schemaVersion", "policyDigest", "source", "run", "inputs", "coverageSha256", "primarySha256"]);
         var coverage = io.Read(Path.Join(directory, CoverageName), xml: true);
         var primary = io.Read(Path.Join(directory, PrimaryName), xml: true);
-        if (receipt.GetProperty("schemaVersion").GetInt32() != 2 || receipt.GetProperty("policyDigest").GetString() != r.Expected.Digest
+        if (receipt.GetProperty("schemaVersion").GetInt32() != r.Expected.ContractVersion || receipt.GetProperty("policyDigest").GetString() != r.Expected.Digest
             || !Same(receipt.GetProperty("source"), r.Expected.Source) || !Same(receipt.GetProperty("run"), r.Expected.Run)
             || receipt.GetProperty("coverageSha256").GetString() != CoverageFanInIO.Hash(coverage)
             || receipt.GetProperty("primarySha256").GetString() != CoverageFanInIO.Hash(primary))
@@ -58,11 +58,13 @@ internal static partial class CoverageFanInEngine
         return (coverage, primary, document, primaryDocument, receipt);
     }
 
-    private sealed record AcceptanceCandidate(Dictionary<string, byte[]> Files, bool Passed);
+    private sealed record AcceptanceCandidate(Dictionary<string, byte[]> Files, bool Passed,
+        CoverageFanInEvidenceException? EvidenceFailure = null);
 
     private static async Task<AcceptanceCandidate> AcceptAsync(CoverageFanInEngineRequest r, CoverageFanInIO io,
-        IReadOnlyList<CoverageFanInBundle> bundles, CancellationToken token)
+        IReadOnlyList<CoverageFanInBundle> bundles, InvocationState state, CancellationToken token)
     {
+        if (r.Expected.ContractVersion == 3) return await AcceptV3Async(r, io, bundles, state, token).ConfigureAwait(false);
         var composed = ReadComposition(r, io, bundles);
         var patchRequired = r.Expected.Gate.GetProperty("mode").GetString() == "aggregateAndPatch";
         var diff = patchRequired ? await GitDiffReader.ReadDiffAsync(Full(r.RepositoryRoot),
@@ -180,8 +182,13 @@ internal static partial class CoverageFanInEngine
     });
 
     private static async Task VerifyAcceptedAsync(CoverageFanInEngineRequest r, CoverageFanInIO io,
-        IReadOnlyList<CoverageFanInBundle> bundles, CancellationToken token)
+        IReadOnlyList<CoverageFanInBundle> bundles, InvocationState state, CancellationToken token)
     {
+        if (r.Expected.ContractVersion == 3)
+        {
+            await VerifyAcceptedV3Async(r, io, bundles, state, token).ConfigureAwait(false);
+            return;
+        }
         var composed = ReadComposition(r, io, bundles);
         var directory = r.AcceptedOutputDirectory!;
         var patchRequired = r.Expected.Gate.GetProperty("mode").GetString() == "aggregateAndPatch";
