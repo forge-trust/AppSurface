@@ -18,14 +18,14 @@ GitHub returned `Branch not protected` for `main` on 2026-06-02, so there is no 
 
 ### Browser and cold-Docker prerequisites
 
-The full-solution `coverage-collection` job in [build.yml](../.github/workflows/build.yml) uses
+The full-solution `coverage-collection` job in [build.yml](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) uses
 `ubuntu-24.04`, which the pinned [Playwright dependency](../Directory.Packages.props) supports.
 Keep that runner compatible with the installed Playwright version: a moving `ubuntu-latest` image
 can reach an OS that the pinned browser installer rejects before browser tests execute. Update the
 runner and browser dependency deliberately; an installation failure remains a failed collection,
 and all browser tests and coverage gates must still run.
 
-The [Durable template timing workflow](../.github/workflows/durable-template-evidence.yml) creates
+The [Durable template timing workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/durable-template-evidence.yml) creates
 five isolated Docker daemons for its cold samples. It reads each daemon's IPv4 address from the
 explicit `bridge` entry in Docker's [per-network inspection data](https://docs.docker.com/reference/cli/docker/inspect/#get-an-instances-ip-address),
 then validates it before recording a `tcp://<address>:2375` endpoint. The removed top-level
