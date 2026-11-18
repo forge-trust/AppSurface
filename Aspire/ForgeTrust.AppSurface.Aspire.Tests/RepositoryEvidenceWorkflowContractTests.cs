@@ -93,10 +93,18 @@ public sealed class RepositoryEvidenceWorkflowContractTests
             .Trim().TrimEnd(';'));
         var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
         var collector = FindStep(job["steps"].AsSequence(), "Run coverage security contracts")["run"].AsScalar();
-        var filter = Assert.Single(Regex.Matches(collector, "--filter\\s+\"([^\"]+)\"").Cast<Match>());
+        var filter = Assert.Single(Regex.Matches(collector, "\\$filter\\s*=\\s*\"([^\"]+)\"").Cast<Match>());
 
         Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
         Assert.Equal(declaredFilter, filter.Groups[1].Value);
+        Assert.Contains("'--test-argument', '--filter', '--test-argument', $filter", collector);
+        Assert.Contains("'--test-project', 'Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj'", collector);
+        Assert.Contains("'--test-project', 'Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj'", collector);
+        Assert.Contains("'--artifact-retention', 'full'", collector);
+        Assert.Contains("'--test-argument', '--blame-hang-timeout', '--test-argument', '2m'", collector);
+        var capture = FindStep(job["steps"].AsSequence(), "Attest successful native coverage evidence")["run"].AsScalar();
+        Assert.Contains("'--raw-index', $indexPath, '--timings', $timingsPath", capture);
+        Assert.Contains("$reports.Count -ne 2", capture);
     }
 
     [Fact]

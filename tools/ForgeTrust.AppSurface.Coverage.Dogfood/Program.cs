@@ -13,7 +13,7 @@ return args.Length > 0 && args[0] == "--package-proof"
 
 internal static class CoverageDogfood
 {
-    internal const string NativeFilter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence";
+    internal const string NativeFilter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceHost|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePrepared|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceProducerKeyMaterialExecution|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceKeyMaterialFailure|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceReusePackageProofTests|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePackedReuseJourneyTests|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.NativeEvidenceProgramTests";
     private static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -25,14 +25,14 @@ internal static class CoverageDogfood
     {
         if (args.Length == 1 && args[0] == "--help")
         {
-            Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--native-platform Linux|Windows|Darwin --report <normalized> --raw <collector>] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
+            Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--native-platform Linux|Windows|Darwin --raw-index <project-to-original-json> --timings <json>] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
             return 0;
         }
         try
         {
             if (args.Length % 2 != 0) throw new ArgumentException();
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
-            var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "native-platform", "report", "raw", "primary", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
+            var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "native-platform", "raw-index", "primary", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
             for (var i = 0; i < args.Length; i += 2)
                 if (!args[i].StartsWith("--", StringComparison.Ordinal) || !allowed.Contains(args[i][2..]) || !options.TryAdd(args[i][2..], args[i + 1])) throw new ArgumentException();
             string Required(string key) => options.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException();
@@ -46,7 +46,11 @@ internal static class CoverageDogfood
             var projects = solution.Descendants("Project").Select(x => x.Attribute("Path")?.Value)
                 .Where(x => x is not null && (x.EndsWith(".Tests.csproj", StringComparison.Ordinal) || x.EndsWith(".IntegrationTests.csproj", StringComparison.Ordinal)))
                 .Select(x => x!.Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
-            var nativeProjects = new[] { "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj" };
+            var nativeProjects = new[]
+            {
+                "Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj",
+                "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj"
+            };
             var policy = new CoverageFanInPolicy(new(await Command(root, "git", ["rev-parse", "HEAD"]),
                 await Command(root, "git", ["rev-parse", "HEAD^{tree}"]), await Command(root, "dotnet", ["--version"]), configuration),
                 new("github-actions", Required("run-scope"), Required("run-id"), int.Parse(Required("attempt"), System.Globalization.CultureInfo.InvariantCulture)),
@@ -70,8 +74,18 @@ internal static class CoverageDogfood
             {
                 var platform = Required("native-platform");
                 if (platform is not ("Linux" or "Windows" or "Darwin")) throw new ArgumentException();
+                using var index = File.OpenRead(Required("raw-index"));
+                if (index.Length > 1048576) throw new InvalidDataException();
+                var bytes = new byte[checked((int)index.Length)];
+                index.ReadExactly(bytes);
+                if (index.ReadByte() != -1) throw new InvalidDataException();
+                using var indexJson = JsonDocument.Parse(bytes);
+                var reports = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var report in indexJson.RootElement.EnumerateObject())
+                    if (!reports.TryAdd(report.Name, report.Value.GetString() ?? throw new InvalidDataException()))
+                        throw new InvalidDataException();
                 await Invoke("capture", new CoverageCaptureRequest(policy, root, Path.Join(output, "capture"), platform.ToLowerInvariant(),
-                    Required("report"), RawCoveragePath: Required("raw")), "native");
+                    TimingsPath: Required("timings"), RawCoveragePaths: reports), "native");
             }
             else if (Required("operation") == "fanin")
             {

@@ -40,9 +40,9 @@ The following recipe uses this repository's policy adapter to generate exact CLI
 
 ## Generate exact CLI requests and results
 
-The adapter requires a clean source checkout and explicit run identity. Supply real artifacts produced by the collector jobs: `NORMALIZED_REPORT` is the collector's normalized Cobertura report, `RAW_REPORT` is the original collector output, and the receiving fan-in input directory must contain one matching `manifest.json` for each required producer. Use the same run scope, run ID, attempt, source, SDK, and configuration across the native jobs and receiving job. Each `--output` value must name a fresh path.
+The adapter requires a clean source checkout and explicit run identity. Supply real artifacts produced by the collector jobs: `RAW_REPORT_INDEX` maps the exact declared Aspire and CLI test project paths to their original collector reports, `NATIVE_TIMINGS` is their complete successful `coverage run` timings file, and the receiving fan-in input directory must contain one matching `manifest.json` for each required producer. Use the same run scope, run ID, attempt, source, SDK, and configuration across the native jobs and receiving job. Each `--output` value must name a fresh path.
 
-On an actual native runner, capture that runner's supplied report pair:
+On an actual native runner, capture that runner's supplied indexed original reports and timings:
 
 ```sh
 : "${REPOSITORY_ROOT:?Set this to the clean source checkout}"
@@ -51,8 +51,8 @@ On an actual native runner, capture that runner's supplied report pair:
 : "${RUN_ID:?Set the trusted provider run ID}"
 : "${ATTEMPT:?Set the positive provider attempt number}"
 : "${NATIVE_PLATFORM:?Set Linux, Windows, or Darwin from the actual runner}"
-: "${NORMALIZED_REPORT:?Set the actual normalized Cobertura report path}"
-: "${RAW_REPORT:?Set the retained original collector report path}"
+: "${RAW_REPORT_INDEX:?Set the exact project-to-original-report JSON index path}"
+: "${NATIVE_TIMINGS:?Set the complete successful two-project timings path}"
 native_output="${TMPDIR:-/tmp}/appsurface-native-capture-$$"
 test ! -e "$native_output"
 dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood \
@@ -63,8 +63,8 @@ dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood \
   --output "$native_output" \
   --configuration Release \
   --native-platform "$NATIVE_PLATFORM" \
-  --report "$NORMALIZED_REPORT" \
-  --raw "$RAW_REPORT" \
+  --raw-index "$RAW_REPORT_INDEX" \
+  --timings "$NATIVE_TIMINGS" \
   --run-scope "$RUN_SCOPE" \
   --run-id "$RUN_ID" \
   --attempt "$ATTEMPT"
