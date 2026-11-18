@@ -99,6 +99,27 @@ Unmatched files still select the conservative profile, and policy edits cannot e
 New exceptions deserve the same review as test exemptions. Packaged README changes require package
 documentation verification; the root README and explicitly listed authored guides are exempt.
 
+### Tool-manifest coverage selection
+
+An update to the existing [local .NET tool manifest](../../.config/dotnet-tools.json), by itself or with
+new direct Markdown files under [`releases/unreleased.entries/`](../../releases/README.md#append-only-unreleased-entries),
+uses the direct patch gate instead of the native coverage supplement. The manifest must have change kind
+`modified`, each release entry must be `added`, and no path may have a previous rename/copy name. Paths
+are matched exactly and case-sensitively; nested release paths and non-Markdown additions do not qualify.
+Any other changed path, manifest addition/deletion, or rename retains the normal native selection.
+
+This exception changes only `selection.json.requiresNativeCoverage`. It preserves the shared policy's
+four producers, every obligation, full-solution coverage, package verification, and the native installed
+consumer and storage journeys. Aggregate and applicable patch thresholds remain 95% line / 85% branch,
+with 0.5-point tolerance and Codecov patch mode. The direct gate follows its documented
+[no-measurable-patch behavior](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate).
+A tool manifest is not a Cobertura source file, so native fan-in's nonempty patch-denominator contract
+cannot establish additional coverage for a manifest-only patch. The native fan-in verifier itself is
+unchanged. Use this narrow route for local-tool maintenance; C# implementation, tests, policy changes,
+and broader infrastructure updates keep their existing selection, even alongside a tool update.
+
+### Coverage and package producers
+
 `solution-coverage` invokes the existing collector over every solution test project, then reuses the built
 CLI for its gates. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md)
 exclusively, matching the [compatibility coverage command](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) so their
@@ -107,8 +128,8 @@ successful timing inventory, and requires 95% line / 85% branch coverage with 0.
 patch gates retain 95/85 and Codecov mode. The [CLI patch gate](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
 documents that a patch metric with no measurable changed lines or branches reports 100%. Native fan-in
 keeps its strict nonempty-denominator verification. Local patch snapshots include current tracked and
-untracked content, so uncommitted code participates. CI PRs whose root policy selection includes coverage
-and another producer retain native Linux/Windows/macOS supplementation, independent aggregate acceptance
+untracked content, so uncommitted code participates. Except for the [tool-manifest-only inventory](#tool-manifest-coverage-selection),
+CI PRs whose root policy selection includes coverage and another producer retain native Linux/Windows/macOS supplementation, independent aggregate acceptance
 and nondecreasing measurable patch denominators through the C#
 [fan-in capture/composition/verifier](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md).
 Main baseline runs enforce aggregate coverage without inventing a PR patch. Reports and diagnostics live
@@ -189,8 +210,9 @@ dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/Forge
 `plan` writes `evidence-plan.json`, `selection.json` (`profileId`, `requiresPackage`, `hasProducers`,
 `requiresCoverage`, `requiresNativeCoverage`, `requiresPackageChecks`, `producerIds`) and
 `evidence-summary.md` into a fresh directory. `requiresNativeCoverage` reflects the root policy selection:
-it is true when `solution-coverage` and at least one other producer are selected. CI uses it to select the
-native matrix and PR fan-in; a test-only coverage selection stays on the direct patch gate. `run` requires
+it is true when `solution-coverage` and at least one other producer are selected, except for the
+[tool-manifest-only inventory](#tool-manifest-coverage-selection). CI uses it to select the
+native matrix and PR fan-in; test-only coverage and qualifying tool updates use the direct patch gate. `run` requires
 that exact plan and independently resolves
 the policy and paths again before executing only its selected registrations through EvidenceHost. It
 writes the same plan/selection/summary plus `evidence-manifest.json` and declared artifacts. For an explicit
