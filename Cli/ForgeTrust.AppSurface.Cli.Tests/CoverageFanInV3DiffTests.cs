@@ -24,28 +24,49 @@ public sealed class CoverageFanInV3DiffTests
     {
         using var temp = TestDirectory.Create();
         var root = temp.Path;
-        async Task<string> Git(params string[] args)
+        async Task<string> GitWithInput(string? input, params string[] args)
         {
-            using var process = new Process { StartInfo = new("git") { WorkingDirectory = root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true } };
+            using var process = new Process { StartInfo = new("git") { WorkingDirectory = root, UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true } };
             foreach (var arg in args) process.StartInfo.ArgumentList.Add(arg);
             process.Start();
             var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+            if (input is not null) await process.StandardInput.WriteAsync(input);
+            process.StandardInput.Close();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             await process.WaitForExitAsync(timeout.Token);
             Assert.True(process.ExitCode == 0, await stderr);
             return (await stdout).TrimEnd('\r', '\n');
         }
+        Task<string> Git(params string[] args) => GitWithInput(null, args);
         await Git("init", "--object-format=" + format);
         await Git("config", "user.email", "fixture@example.invalid"); await Git("config", "user.name", "Fixture");
         var name = shape switch { "space" => "with space.cs", "unicode" => "café.cs", "quote" => "quote\".cs", "replacement" => "�.cs", _ => "file.cs" };
-        File.WriteAllText(Path.Join(root, name), "before\n");
-        await Git("add", "."); await Git("commit", "-m", "fixture baseline");
-        var basis = await Git("rev-parse", "HEAD");
-        if (shape == "rename") File.Move(Path.Join(root, name), Path.Join(root, "renamed.json"));
-        else if (shape == "deletion") File.Delete(Path.Join(root, name));
-        else if (shape != "empty") File.WriteAllText(Path.Join(root, name), "after\n");
-        await Git("add", "-A"); await Git("commit", "--allow-empty", "-m", "fixture change");
-        var head = await Git("rev-parse", "HEAD"); var tree = await Git("rev-parse", "HEAD^{tree}");
+        string basis;
+        string head;
+        string tree;
+        if (shape == "quote")
+        {
+            // Keep this Windows-invalid name in Git objects, never in the working tree.
+            var beforeBlob = await GitWithInput("before\n", "hash-object", "-w", "--stdin");
+            var beforeTree = await GitWithInput($"100644 blob {beforeBlob}\t{name}\0", "mktree", "-z");
+            basis = await GitWithInput("fixture baseline\n", "commit-tree", beforeTree);
+            var afterBlob = await GitWithInput("after\n", "hash-object", "-w", "--stdin");
+            var afterTree = await GitWithInput($"100644 blob {afterBlob}\t{name}\0", "mktree", "-z");
+            head = await GitWithInput("fixture change\n", "commit-tree", afterTree, "-p", basis);
+            await Git("update-ref", "HEAD", head);
+            tree = afterTree;
+        }
+        else
+        {
+            File.WriteAllText(Path.Join(root, name), "before\n");
+            await Git("add", "."); await Git("commit", "-m", "fixture baseline");
+            basis = await Git("rev-parse", "HEAD");
+            if (shape == "rename") File.Move(Path.Join(root, name), Path.Join(root, "renamed.json"));
+            else if (shape == "deletion") File.Delete(Path.Join(root, name));
+            else if (shape != "empty") File.WriteAllText(Path.Join(root, name), "after\n");
+            await Git("add", "-A"); await Git("commit", "--allow-empty", "-m", "fixture change");
+            head = await Git("rev-parse", "HEAD"); tree = await Git("rev-parse", "HEAD^{tree}");
+        }
         var policy = CoverageFanInPolicyTests.Policy() with
         {
             Source = new(head, tree, "10.0.402", "Release"),

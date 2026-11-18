@@ -260,12 +260,18 @@ public sealed class CoverageFanInV3PrerequisiteTests
         try
         {
             Environment.SetEnvironmentVariable(inheritedName, "temporary-value");
+            var environment = CoverageFanInDiffContext.ChildEnvironment(HeadCommit);
+            Assert.True(environment.TryGetValue(lookupName, out var removed));
+            Assert.Null(removed);
+
             using var fixture = new Fixture();
             await fixture.Context.InitializeAsync(CancellationToken.None);
 
             var overrides = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string?>>(fixture.Runner.Requests[0].EnvironmentOverrides);
-            Assert.True(overrides.TryGetValue(lookupName, out var removed));
-            Assert.Null(removed);
+            var removal = Assert.Single(overrides, entry => string.Equals(entry.Key, inheritedName,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+            Assert.Null(removal.Value);
+            Assert.Equal("temporary-value", Environment.GetEnvironmentVariable(inheritedName));
         }
         finally
         {
