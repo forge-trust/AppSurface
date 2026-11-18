@@ -557,7 +557,7 @@ verify_legacy_core_provider_abi_consumer() {
   # This locked historical compile is separate from V2WorkHarness's cached
   # preview.8 PostgreSQL runtime/artifact proof; it checks Core/Provider ABI only.
   cp -R "$ROOT_DIR/Durable/compatibility/LegacyCoreProviderAbiConsumer" "$legacy_dir"
-  cp "$ROOT_DIR/Directory.Packages.props" "$legacy_dir/Directory.Packages.props"
+  cp "$ROOT_DIR/Durable/compatibility/Directory.Packages.props" "$legacy_dir/Directory.Packages.props"
   mkdir -p "$legacy_packages"
   NUGET_PACKAGES="$legacy_packages" dotnet restore "$legacy_project" \
     --configfile "$LEGACY_ABI_CONFIG_FILE" \

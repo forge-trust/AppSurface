@@ -99,8 +99,7 @@ Unmatched files still select the conservative profile, and policy edits cannot e
 New exceptions deserve the same review as test exemptions. Packaged README changes require package
 documentation verification; the root README and explicitly listed authored guides are exempt.
 
-`solution-coverage` invokes the existing collector over every solution test project, then reuses the built
-CLI for its gates. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md)
+`solution-coverage` invokes the collector over every solution test project and applies the gates to that complete result. CI supplies `--coverage-cli /absolute/installed/appsurface`, verified against its same-source candidate package, for both collection and gate commands. When omitted for a direct local run, the producer uses the repository CLI project; a supplied path must be absolute and name an existing executable. Native fan-in requires the explicit installed command. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md)
 exclusively, matching the [compatibility coverage command](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) so their
 timing and transport fixtures do not compete with another test project. It verifies the complete
 successful timing inventory, and requires 95% line / 85% branch coverage with 0.5-point tolerance. Applicable
@@ -109,12 +108,18 @@ documents that a patch metric with no measurable changed lines or branches repor
 keeps its strict nonempty-denominator verification. Local patch snapshots include current tracked and
 untracked content, so uncommitted code participates. CI PRs whose root policy selection includes coverage
 and another producer retain native Linux/Windows/macOS supplementation, independent aggregate acceptance
-and nondecreasing measurable patch denominators through the C#
-[fan-in capture/composition/verifier](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md).
+and nondecreasing measurable patch denominators through the installed
+[schema-v2-default, v3-opt-in fan-in commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-fan-in). The repository [dogfood adapter](../ForgeTrust.AppSurface.Coverage.Dogfood/README.md) supplies AppSurface policy and invokes capture/import, composition, acceptance and separate independent verification. Its `--contract-version` defaults to 2 and accepts explicit value `3`; the selected repository policy remains v2 pending fresh same-run/attempt shadow proof.
 Main baseline runs enforce aggregate coverage without inventing a PR patch. Reports and diagnostics live
-under `coverage/`, with optional `coverage-fanin/` and `coverage-fanin-composed/` children. Test-only PRs
+under `coverage/`, with optional `coverage-fanin/` request/result files and `primary/`, `native-*`, `composed/` and `accepted/` children. Test-only PRs
 run the direct patch gate and do not produce those fan-in directories; source-code-plus-package PRs require
 the three native captures and fan-in verification.
+The native producer requires the adapter's delivered `accept-result.json` and separate
+`verify-result.json` to report current-run patch acceptance and independent verification with completed
+cleanup. Its `nativeFanInProofSha256` result field hashes the retained acceptance receipt, which binds
+the two gate reports and composition receipt to the checked source and workflow attempt. This adapter
+checks delivery and bindings; the installed verifier owns semantic composition, custody and measurable
+denominator validation. Missing results or altered bound reports cannot close the coverage assertion.
 CI coverage pins source identity and requires a clean, unchanged checkout before collection, after
 collection and after gate verification, including direct runs without native fan-in. Supply a pinned
 Git base for native fan-in; a local patch override cannot be combined with native CI captures. Dirty
@@ -122,6 +127,61 @@ local runs use their source digest and captured patch, with the local workflow c
 around execution instead of requiring a clean checkout. The local workflow supplies that digest check
 to each coverage checkpoint through an in-process callback. Direct `run --diff-file` calls fail closed;
 use `--operation local` to collect and verify a dirty working tree.
+
+### CI collection overlap and scheduling
+
+The [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml)
+starts full-solution collection after changed-path planning, alongside the native security matrix and
+packed Durable consumers. Docs export starts independently. The existing `build` job waits for collection,
+packed consumers and every selected native lane before producing and verifying the final coverage manifest.
+The stable `Coverage evidence gate` rejects failed, cancelled or skipped required collection/build/consumer
+jobs; an unselected native matrix may remain skipped. Pages deployment waits for docs export, `build` and
+that coverage gate. Existing job IDs and required check names remain available. Collection also owns the bounded slow-test
+summary and Codecov JUnit upload, so failed tests still publish diagnostics when final acceptance is skipped.
+The full report remains in `coverage-collection-diagnostics`; coverage-report upload stays behind final acceptance.
+
+The internal `--operation collect-coverage --repository <checkout> --dotnet <absolute-host>
+--output <fresh-directory>` command runs the same Release collector, complete solution inventory,
+parallelism `2`, explicit exclusive list and automatic exclusivity rules as normal producer execution.
+Supply `--coverage-cli <absolute-installed-appsurface>` to collect through the verified installed CLI;
+without it, direct invocations use the source CLI through the selected SDK host. The CI collection job
+requires its same-source candidate CLI, just as the final acceptance job does.
+It checks unchanged source before and after collection and writes `coverage/collection-receipt.json` only
+after every test project and coverage artifact passes validation. It does **not** evaluate gates, write an
+acceptance manifest or close any obligation. It requires `GITHUB_REPOSITORY`, `GITHUB_RUN_ID` and
+`GITHUB_RUN_ATTEMPT`; local patches continue through the normal local workflow.
+
+`run --scope coverage --coverage-collection <downloaded-directory>` imports that collection into fresh
+producer output. The schema-v1 receipt binds source commit/tree, SDK, Release configuration, repository,
+run and attempt, plus SHA-256 hashes of `coverage.cobertura.xml` and `timings.json`. Import rejects linked
+paths, overlapping or occupied output, missing inputs, directories in place of files, malformed receipts,
+changed identities and altered report/timing bytes. Overlap checks reject case aliases conservatively on
+every host, including case-sensitive filesystems. Missing-file and JSON decoding errors raise
+`InvalidDataException` with the original I/O or JSON exception for diagnostics. The producer revalidates
+the exact solution inventory, unchanged current source and all normal aggregate, applicable
+patch and selected native fan-in gates. The workflow downloads `solution-coverage-collection-<attempt>`
+from its current run only. Rerun the whole workflow when evidence must be regenerated: earlier attempts,
+caches and timing history cannot serve as coverage proof. This receipt checks consistency between trusted
+workflow jobs; it does not authenticate arbitrary artifact producers.
+
+The internal `Program.RunAsync` collection callback is a test seam for option dispatch only; production
+entrypoints always use `SolutionCoverageProducer.CollectAsync`. Replacing that callback in tests does
+not produce a collection receipt or acceptance evidence.
+
+Collection uses the CLI's [longest-first schedule](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)
+for non-exclusive projects. Exclusive suites still run first in stable input order. Optional
+`--coverage-schedule-timings <timings.json>` forwards duration hints to `coverage run --schedule-timings`;
+both `run` and `collect-coverage` resolve relative hint paths against the caller's current directory before
+starting collection in the selected repository. Use an absolute path when invoking from automation.
+Without history, unknown projects keep input order. The
+[history helper](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/coverage-schedule-history.py) reads the newest available
+`coverage-schedule-timings` artifact from successful `build.yml` push runs on the default branch of this repository.
+Fork PRs, other events and mismatched head repositories are never eligible. Only main push
+collections publish this advisory artifact; it becomes eligible for reuse only after the full workflow succeeds. The history lookup has a 45-second total API budget. API failures, expired/missing artifacts or invalid bounded
+history fall back to a fresh run without hints. It never restores coverage results or changes project
+selection, exclusions, parallelism, gates or thresholds. The first run after introducing this artifact
+has no history; the next successful main workflow supplies it. Do not confuse faster scheduling with
+reusable acceptance evidence.
 
 `package-checks` runs the existing [PackageIndex](../ForgeTrust.AppSurface.PackageIndex/README.md)
 `gate`, `verify` and `verify-packages` commands, using a fresh exact version and an isolated NuGet cache.
@@ -301,7 +361,7 @@ Only `TargetedComplete` returns exit zero. Missing prerequisites, failed asserti
 
 `--fan-in-request /absolute/trusted-request.json` adds a required producer using [native fan-in verification](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#verified-coverage-fan-in). Supply the trusted expected source commit/tree, SDK, Release/Debug configuration, workflow run and attempt, full solution project inventory, primary capture, exactly three native captures, composed reports and gate JSON. The request is trusted configuration, not an automatically authenticated attestation.
 
-The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and 95/85 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. The existing [coverage fan-in collection workflow](../../guides/coverage-fan-in.md) remains the producer of these inputs.
+The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and 95/85 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. This `--fan-in-request` option retains the historical schema-v1 compatibility contract. The current [coverage workflow](../../guides/coverage-fan-in.md#current-ci-path) selects v2; the dogfood adapter defaults `--contract-version` to 2 and offers v3 only by explicit value `3`. Repository acceptance remains v2, and the required fresh v3 shadow proof using the same workflow run and attempt across all selected lanes has not run. See the [v3 reference](../../guides/coverage-fan-in.md#opt-in-schema-v3-report-based-patch-applicability); v1, v2 and v3 captures cannot mix or be relabeled.
 
 The packed-storage fixture writes its explicit retention policy with owner-only access: mode `0600` on Unix and a protected current-user ACL on Windows. This satisfies the existing [private storage contract](../../guides/coverage-storage.md); it does not relax policy-file access validation. Failure artifacts redact the owned workspace path and retain at most 16 KiB of UTF-8 bytes per captured output stream, keeping the most recent complete UTF-8 text. External consumer output remains withheld. A size cap is not general secret redaction: do not pass secrets to fixture commands, because other failure details can appear in CI logs. Installed CLI assembly identity is checked only beneath the installed tool path private `.store`; at least one candidate must exist and every matching assembly must match the package archive hash, so workspace decoys cannot mask a mismatch.
 

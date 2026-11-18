@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "component": "ReportGenerator",
+  "version": "5.5.10",
+  "targetFramework": "net10.0",
+  "entryPoint": "ReportGenerator.dll",
+  "files": [
+    {
+      "path": "DotNetConfig.dll",
+      "sha256": "6e374b6da703f50b2809192c67221e9aae29751e27a713d73492bf6a0df5acaa"
+    },
+    {
+      "path": "McMaster.NETCore.Plugins.dll",
+      "sha256": "7bd030ee40776dd29156fac41d7b7f41602848c9d5df3641deefb047cacee052"
+    },
+    {
+      "path": "Microsoft.Build.Framework.dll",
+      "sha256": "f64c3943f9e82ea9af8d8ecfaffdfc53bf9871a60ccc807dc1e3c85778ff7833"
+    },
+    {
+      "path": "Microsoft.Build.Utilities.Core.dll",
+      "sha256": "3e000ad87d6de100e46bcd3db60d7b44b5aa231ede6c061aa0e82383ba23cf61"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.Abstractions.dll",
+      "sha256": "c47e50f3fc85f18585cc41af8e9900802a68933a34d70b36a08a50dee26ad9f2"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.Binder.dll",
+      "sha256": "e02d79ea407e364826744409cb729969ad787ed9b6171cf6ce8881dffa9da7ea"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.CommandLine.dll",
+      "sha256": "640782c7a432550e7e9686a72897faa272fcc35e289f4549c4e35c4808dc4b16"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.FileExtensions.dll",
+      "sha256": "c48ea0bd13c56886bd4895c362ecab10388dfa40b219a94ccffaa76abeb692a7"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.Json.dll",
+      "sha256": "063d52874c6f7aa048972d82e62227683ddd101332f46d594f3b500452d64dfe"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.dll",
+      "sha256": "e4721f9230b5bc6f82c7fda4efdf3bd648d936dbd254387a0375d571017725a2"
+    },
+    {
+      "path": "Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "sha256": "012e304bb41a63790fae6113b79d8429d12177aca1f29522e8da9bbb63875f18"
+    },
+    {
+      "path": "Microsoft.Extensions.FileProviders.Physical.dll",
+      "sha256": "ec3beace52339100009bdc970ec4ed82e19040f16caff1c7ce2378c2bd785512"
+    },
+    {
+      "path": "Microsoft.Extensions.FileSystemGlobbing.dll",
+      "sha256": "a19d53870bd3c6ceff7fcdec13f57ab6e15e9ed2d87286bcde65677d7e5c16d7"
+    },
+    {
+      "path": "Microsoft.Extensions.ObjectPool.dll",
+      "sha256": "f6a97b0445eba6d4d1f05321377eac68fd925b819125c8fe9231fca3a48463ba"
+    },
+    {
+      "path": "Microsoft.Extensions.Primitives.dll",
+      "sha256": "4fd0607f7b5b147fd46013ee5bf8470472aeb0e0c257fcabc4e51632a59eae1f"
+    },
+    {
+      "path": "Microsoft.NET.StringTools.dll",
+      "sha256": "887dec541cd0a719b7111458eb90a83b4491d6dd24eff2b16cf03d2782fd26a0"
+    },
+    {
+      "path": "ReportGenerator.Core.dll",
+      "sha256": "19d6be7f1af037a5e6abd3a96f0011813ea86dba82ab921719f1cdab1972cd24"
+    },
+    {
+      "path": "ReportGenerator.Core.xml",
+      "sha256": "3d51e36bd07ee4967dd88031173dc37daf87df0ff092754234e34f774e1da567"
+    },
+    {
+      "path": "ReportGenerator.DotnetCorePluginLoader.dll",
+      "sha256": "5f05690b78cc2a33cba9f63a72f6f538903abb4d504bfc5ec1f1eff8822c4725"
+    },
+    {
+      "path": "ReportGenerator.DotnetCorePluginLoader.xml",
+      "sha256": "f896a867ceb1d305b48b0db63abd62f144d6b33ddc154b397116df14e080d1d1"
+    },
+    {
+      "path": "ReportGenerator.MSBuild.dll",
+      "sha256": "e1da3e3ea7c4a7164577d196ccaec17d22b7d6302bdeeb3c90779b538f81b6f6"
+    },
+    {
+      "path": "ReportGenerator.deps.json",
+      "sha256": "194936acd9f5464b1f97e0571ec74c3245ccf075f12d6322fb7c0927ba2f27fa"
+    },
+    {
+      "path": "ReportGenerator.dll",
+      "sha256": "cfe1af466f456e4bfa726c0a5d1a4eed5cd68322d0549bd2ccb62e1d5b21472f"
+    },
+    {
+      "path": "ReportGenerator.exe",
+      "sha256": "b6d731090c364a49bf3f4154197441e1caed7de4d959d5d0928083c9c2b06573"
+    },
+    {
+      "path": "ReportGenerator.runtimeconfig.json",
+      "sha256": "58fa068eb95f45fa911aee49ce7a53c30de88feb1dab49f2a7eb370eb25433c8"
+    },
+    {
+      "path": "System.Configuration.ConfigurationManager.dll",
+      "sha256": "bc13d89af4e766684fa64a5f6bf106b1326a1bd266f9b82cbbf7cdd5bae079b4"
+    },
+    {
+      "path": "System.Diagnostics.EventLog.dll",
+      "sha256": "1b4056f16c0eb8864ae6b1d9d7390ccd897744e9825d89c570ac1868efbb68ac"
+    },
+    {
+      "path": "System.Security.Cryptography.ProtectedData.dll",
+      "sha256": "881812767fa0e7a31c13991989cac47bfbefca4c6f270ac95f4f798fcaa0fd4e"
+    },
+    {
+      "path": "appsettings.json",
+      "sha256": "d7787eee66b0f4e590dbecb57d96ee0100416f48387eadaac09f1d4cb232c6a1"
+    },
+    {
+      "path": "runtimes/win/lib/net10.0/System.Diagnostics.EventLog.Messages.dll",
+      "sha256": "2c4d0156896e1304982b7cce2697ee3f558bf1916460abd22c6d207c9914e0b7"
+    },
+    {
+      "path": "runtimes/win/lib/net10.0/System.Diagnostics.EventLog.dll",
+      "sha256": "c1937dc82bbecbbb75c497ba4ca96ff4d47f8d288a580243be88e196bc11cade"
+    }
+  ]
+}

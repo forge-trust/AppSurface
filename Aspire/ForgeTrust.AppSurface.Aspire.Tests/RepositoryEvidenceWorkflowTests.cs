@@ -255,8 +255,10 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             PlanOptions(paths, narrowedPolicy, NewPath("narrowed-conservative-plan")), CancellationToken.None));
     }
 
-    [Fact]
-    public async Task NoEvidencePlanRunAndVerify_SucceedWithoutPackageOrDotnet_AndRejectDrift()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NoEvidencePlanRunAndVerify_SucceedWithoutPackageOrDotnet_AndRejectDrift(bool collectionOptions)
     {
         var paths = await WritePathsAsync([new NormalizedDiffPath("README.md")]);
         var planned = await PlanAsync(paths, CheckedInPolicyPath);
@@ -266,6 +268,11 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
         var runOptions = WorkflowOptions("run", paths, CheckedInPolicyPath,
             ("--plan", Path.Join(planned.Output, "evidence-plan.json")),
             ("--output", runOutput));
+        if (collectionOptions)
+        {
+            runOptions["--coverage-collection"] = NewPath("unused-collection");
+            runOptions["--coverage-schedule-timings"] = NewPath("unused-timings.json");
+        }
         Assert.Equal(0, await RepositoryEvidenceWorkflow.RunAsync(runOptions, CancellationToken.None));
         var manifestPath = Path.Join(runOutput, "evidence-manifest.json");
         var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
@@ -500,6 +507,38 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             evidence.Plan, evidence.Manifest with { ManifestDigest = new string('0', 64) }, evidence.ArtifactRoot, CancellationToken.None));
         await Assert.ThrowsAsync<InvalidOperationException>(() => RepositoryEvidenceWorkflow.VerifyAsync(
             evidence.Plan with { PolicySnapshot = null }, evidence.Manifest, evidence.ArtifactRoot, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("relative-cli")]
+    [InlineData("missing-cli")]
+    [InlineData("native-without-cli")]
+    [InlineData("valid-cli")]
+    public async Task CoverageRunPreflight_ValidatesExplicitInstalledCommandBeforeCreatingOutput(string input)
+    {
+        var planned = await PlanAsync(["tests/Coverage.Tests/ExampleTests.cs"]);
+        var output = NewPath("coverage-cli-output");
+        var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
+            ("--plan", Path.Join(planned.Output, "evidence-plan.json")), ("--output", output),
+            ("--dotnet", ExistingProcessPath()), ("--repository", NewPath("missing-repository")));
+        if (input == "native-without-cli") options["--native-coverage-directory"] = NewPath("native");
+        else options["--coverage-cli"] = input switch
+        {
+            "relative-cli" => "appsurface",
+            "missing-cli" => NewPath("missing-appsurface"),
+            _ => ExistingProcessPath(),
+        };
+        if (input == "valid-cli")
+        {
+            // Valid command admission reaches the producer, whose absent checkout fails before execution.
+            await Assert.ThrowsAsync<InvalidOperationException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
+            Assert.True(Directory.Exists(output));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
+            Assert.False(Directory.Exists(output));
+        }
     }
 
     private async Task<PlannedEvidence> PlanAsync(string[] pathValues, string? policyPath = null, string? scope = null)

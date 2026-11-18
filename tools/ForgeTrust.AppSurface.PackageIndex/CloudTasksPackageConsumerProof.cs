@@ -415,7 +415,7 @@ internal sealed class CloudTasksPackageConsumerProof
               <ItemGroup>
                 <PackageVersion Include="ForgeTrust.AppSurface.Durable.CloudTasks" Version="$(AppSurfacePackageVersion)" />
                 <PackageVersion Include="ForgeTrust.AppSurface.Durable" Version="$(AppSurfacePackageVersion)" />
-                <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
+                <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
               </ItemGroup>
             </Project>
             """);
