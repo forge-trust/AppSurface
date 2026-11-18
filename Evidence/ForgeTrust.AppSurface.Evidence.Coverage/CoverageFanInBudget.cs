@@ -3,7 +3,7 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// <summary>One v3 invocation's checked, thread-safe logical admission accounting.</summary>
 /// <remarks>Byte and record counters describe admitted work; staged counters describe admitted output files and bytes.
 /// They do not measure decoded DOM heap or process working set. V2 continues using its original IO accounting.</remarks>
-internal sealed class CoverageFanInBudget(long maximumBytes)
+internal sealed class CoverageFanInBudget(long maximumBytes, int maximumRecords = int.MaxValue)
 {
     private readonly object _gate = new();
     private readonly Dictionary<GeneratedOutputKey, long> _generatedOutputBytes = [];
@@ -17,6 +17,8 @@ internal sealed class CoverageFanInBudget(long maximumBytes)
 
     /// <summary>Gets the remaining admitted logical bytes, including concurrent pipe charges.</summary>
     internal long Remaining { get { lock (_gate) return maximumBytes - _used; } }
+    /// <summary>Gets the fixed total structural-record limit for this invocation.</summary>
+    internal int MaximumRecords => maximumRecords;
     /// <summary>Snapshots actual charged logical bytes and the fixed limit for current-invocation proof tooling.</summary>
     internal CoverageFanInBudgetSnapshot Snapshot()
     {
@@ -37,7 +39,7 @@ internal sealed class CoverageFanInBudget(long maximumBytes)
         }
     }
 
-    /// <summary>Records structural XML records once, after the document passes admission.</summary>
+    /// <summary>Atomically admits structural XML records before DOM materialization.</summary>
     internal void AdmitXmlRecords(long lineRecords, long branchRecords)
     {
         lock (_gate)
@@ -45,10 +47,16 @@ internal sealed class CoverageFanInBudget(long maximumBytes)
             if (lineRecords < 0 || branchRecords < 0) throw new ArgumentOutOfRangeException(nameof(lineRecords));
             var lines = checked(_lineRecords + lineRecords);
             var branches = checked(_branchRecords + branchRecords);
+            if (checked(lines + branches) > maximumRecords)
+                throw RecordLimitExceeded();
             _lineRecords = lines;
             _branchRecords = branches;
         }
     }
+
+    /// <summary>Returns the same safe v3 limit cause for cumulative and streaming record admission.</summary>
+    internal static CoverageFanInEvidenceException RecordLimitExceeded() => new("limit-exceeded", "budget",
+        "Preserve the fixed operation limits; reduce supported input work or correct the implementation before a fresh retry.");
 
     /// <summary>Admits one staged payload or metadata file to the shared byte budget and staged counters.</summary>
     internal void AdmitStagedFile(long bytes)

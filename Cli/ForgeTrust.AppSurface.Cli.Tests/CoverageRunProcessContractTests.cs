@@ -9,6 +9,35 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageRunProcessContractTests
 {
     [Fact]
+    public async Task StandardInputWriteFailureRetainsItsIdentityBeforeInternalCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var expected = new IOException("stdin write failed");
+        using var destination = new FailingInputStream(expected);
+        long charged = 0;
+        var budget = new CliWrapCoverageRunProcessRunner.CoverageRunProcessBudgetCharge(
+            bytes => charged += bytes, cancellation);
+        var request = CreateProbeRequest(Directory.GetCurrentDirectory(), "replacement") with
+        {
+            StandardInputBytes = "input"u8.ToArray(),
+        };
+        var command = CliWrapCoverageRunProcessRunner.CreateCommand(request, budget, cancellation);
+
+        Assert.Same(expected, await Assert.ThrowsAsync<IOException>(() =>
+            command.StandardInputPipe.CopyToAsync(destination, CancellationToken.None)));
+
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Equal(5, charged);
+        Assert.Same(expected, Assert.Throws<IOException>(budget.ThrowIfFailed));
+    }
+
+    private sealed class FailingInputStream(IOException exception) : MemoryStream
+    {
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            => ValueTask.FromException(exception);
+    }
+
+    [Fact]
     public async Task OptionalMemoryObservation_ShouldNotFailWhenTheChildHasExited()
     {
         var request = CreateProbeRequest(Directory.GetCurrentDirectory(), "replacement");
@@ -209,6 +238,58 @@ public sealed class CoverageRunProcessContractTests
         var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None);
 
         Assert.Equal("\uFFFD", result.StandardOutput);
+    }
+
+    [Theory]
+    [InlineData(false, "é")]
+    [InlineData(true, "é")]
+    [InlineData(false, "€")]
+    [InlineData(true, "€")]
+    [InlineData(false, "😀")]
+    [InlineData(true, "😀")]
+    public async Task StrictPipeCopiesAcceptMultibyteCharactersSplitAtEveryByte(bool streamed, string text)
+    {
+        var bytes = Encoding.UTF8.GetBytes(text);
+        using var source = new SingleByteReadStream(bytes);
+        using var destination = new MemoryStream();
+        using var gate = new SemaphoreSlim(1);
+        using var cancellation = new CancellationTokenSource();
+        long charged = 0;
+        var budget = new CliWrapCoverageRunProcessRunner.CoverageRunProcessBudgetCharge(
+            count => charged += count, cancellation);
+        if (streamed)
+            await CliWrapCoverageRunProcessRunner.CopyPipeToFileAsync(source, destination, gate, null,
+                128, cancellation.Token, null, budget, strictUtf8: true);
+        else
+            await CliWrapCoverageRunProcessRunner.CopyPipeToBufferAsync(source, destination,
+                128, cancellation.Token, null, budget, strictUtf8: true);
+
+        Assert.Equal(bytes, destination.ToArray());
+        Assert.Equal(bytes.Length, charged);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StrictPipeCopiesRejectIncompleteMultibyteCharactersAtEof(bool streamed)
+    {
+        using var source = new SingleByteReadStream([0xC3]);
+        using var destination = new MemoryStream();
+        using var gate = new SemaphoreSlim(1);
+        using var cancellation = new CancellationTokenSource();
+        var budget = new CliWrapCoverageRunProcessRunner.CoverageRunProcessBudgetCharge(_ => { }, cancellation);
+
+        await Assert.ThrowsAsync<DecoderFallbackException>(() => streamed
+            ? CliWrapCoverageRunProcessRunner.CopyPipeToFileAsync(source, destination, gate, null,
+                128, cancellation.Token, null, budget, strictUtf8: true)
+            : CliWrapCoverageRunProcessRunner.CopyPipeToBufferAsync(source, destination,
+                128, cancellation.Token, null, budget, strictUtf8: true));
+    }
+
+    private sealed class SingleByteReadStream(byte[] bytes) : MemoryStream(bytes, writable: false)
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => base.ReadAsync(buffer[..Math.Min(1, buffer.Length)], cancellationToken);
     }
 
     [Fact]

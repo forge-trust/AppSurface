@@ -16,6 +16,39 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageRunTests
 {
     [Fact]
+    public async Task RunAsync_ShouldRejectUnverifiedRestoredCollectorBeforeCreatingArtifacts()
+    {
+        using var repo = TempDirectory.Create("appsurface-collector-restored-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = """
+                {"Properties":{"TargetFramework":"net10.0"},"Items":{"PackageReference":[{"Identity":"coverlet.collector","Version":"10.0.1"}]}}
+                """,
+        };
+        var factoryCalled = false;
+        var request = CreateRequest(TestProjects: [project], CoverageDriver: CoverageRunDriver.Collector) with
+        {
+            RequiredCollectorVersion = "10.0.1",
+            ArtifactSessionFactory = _ =>
+            {
+                factoryCalled = true;
+                throw new InvalidOperationException("Unverified collector reached artifact creation.");
+            },
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() =>
+            CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("restored coverlet.collector", exception.Message, StringComparison.Ordinal);
+        Assert.False(factoryCalled);
+        Assert.DoesNotContain(runner.Commands, command => command.Arguments[0] is "build" or "test");
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(repo.Path, "TestResults")));
+    }
+
+    [Fact]
     public async Task RunAsync_InspectionFailure_ShouldKeepTestFailureAndReportUnreadableDiagnostics()
     {
         using var repo = TempDirectory.Create("appsurface-hang-inspection-failure-");

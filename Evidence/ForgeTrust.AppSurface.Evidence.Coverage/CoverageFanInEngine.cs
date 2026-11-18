@@ -38,7 +38,7 @@ internal static partial class CoverageFanInEngine
             ValidateRequest(operation, request);
             if (request.Expected.ContractVersion == 3)
             {
-                var budget = new CoverageFanInBudget(request.Expected.Bounds.TotalBytes);
+                var budget = new CoverageFanInBudget(request.Expected.Bounds.TotalBytes, request.Expected.Bounds.TotalRecords);
                 state.Budget = budget;
                 request = request with { Budget = budget };
                 request = request with { DiffContext = new CoverageFanInDiffContext(request, budget) };
@@ -319,7 +319,17 @@ internal static partial class CoverageFanInEngine
                     var tab = entry.IndexOf('\t');
                     if (tab < 0) throw new InvalidDataException("Pinned source index entry is invalid.");
                     var path = checkout.Prefix + entry[(tab + 1)..];
-                    _ = CoverageFanInDiffParser.Path(path);
+                    try
+                    {
+                        _ = CoverageFanInDiffParser.Path(path);
+                    }
+                    catch (CoverageFanInEvidenceException exception) when (exception.Cause == "unsupported-diff")
+                    {
+                        // Inventory names may contain controls or private data. Identify the source boundary
+                        // without copying an untrusted path into a public recovery message.
+                        throw new CoverageFanInEvidenceException("unsupported-diff", "source",
+                            "The pinned tracked-file inventory, including submodules, contains unsupported portable path data; ask the maintainer to resolve the source inventory before fresh evidence, even if the path is outside the patch.");
+                    }
                     if (!trackedPaths!.Add(path)) throw new InvalidDataException("Source index contains duplicate paths.");
                 }
             }

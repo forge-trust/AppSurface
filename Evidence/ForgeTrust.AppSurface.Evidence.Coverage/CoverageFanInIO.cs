@@ -104,7 +104,9 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
         catch { stream.Dispose(); throw; }
     }
 
-    /// <summary>Admits XML structure before DOM materialization. V2 wire XML forbids DTDs/entities.</summary>
+    /// <summary>Streams and admits XML structure before DOM materialization; shared v3 budgets cap all retained DOMs.
+    /// Without a shared budget, the legacy per-instance total remains in force. A cached document in this IO is not
+    /// admitted again; a distinct IO materializes and counts its own DOM even when given identical bytes.</summary>
     internal XDocument Xml(byte[] bytes, bool allowInertGeneratorDoctype = false)
     {
         if (bytes.LongLength > bounds.XmlBytes) throw new InvalidDataException("Fan-in XML exceeds byte budget.");
@@ -123,6 +125,8 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
         };
         var lines = 0;
         var branches = 0;
+        var records = 0;
+        var recordLimit = invocationBudget?.MaximumRecords ?? bounds.TotalRecords;
         using (var stream = new MemoryStream(bytes, writable: false))
         using (var reader = XmlReader.Create(stream, settings))
         {
@@ -142,19 +146,26 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
                     throw new InvalidDataException("Fan-in XML exceeds structure budget.");
                 if (reader.Name == "line")
                 {
-                    if (checked(++lines) > bounds.Lines || checked(++_records) > bounds.TotalRecords)
-                        throw new InvalidDataException("Fan-in XML exceeds record budget.");
+                    if (checked(++lines) > bounds.Lines || checked(++records) > recordLimit
+                        || invocationBudget is null && checked(_records + records) > bounds.TotalRecords)
+                        throw invocationBudget is null ? new InvalidDataException("Fan-in XML exceeds record budget.")
+                            : CoverageFanInBudget.RecordLimitExceeded();
                 }
                 if (reader.Name == "condition")
                 {
-                    if (checked(++branches) > bounds.Branches || checked(++_records) > bounds.TotalRecords)
-                        throw new InvalidDataException("Fan-in XML exceeds record budget.");
+                    if (checked(++branches) > bounds.Branches || checked(++records) > recordLimit
+                        || invocationBudget is null && checked(_records + records) > bounds.TotalRecords)
+                        throw invocationBudget is null ? new InvalidDataException("Fan-in XML exceeds record budget.")
+                            : CoverageFanInBudget.RecordLimitExceeded();
                 }
                 while (reader.MoveToNextAttribute())
                     if (reader.Value.Length > bounds.TokenCharacters) throw new InvalidDataException("Fan-in XML token exceeds budget.");
                 reader.MoveToElement();
             }
         }
+        // The shared lock arbitrates concurrent readers. Rejecting this document leaves both shared counters
+        // unchanged, and successful admission happens before XDocument.Load can allocate a DOM.
+        invocationBudget?.AdmitXmlRecords(lines, branches);
         using var input = new MemoryStream(bytes, writable: false);
         using var load = XmlReader.Create(input, settings);
         var result = XDocument.Load(load);
@@ -165,7 +176,7 @@ internal sealed class CoverageFanInIO(CoverageFanInBounds bounds, CancellationTo
             || !string.IsNullOrWhiteSpace(declaration.InternalSubset)))
             throw new InvalidDataException("Only the known inert normalizer declaration is supported.");
         result.DocumentType?.Remove();
-        invocationBudget?.AdmitXmlRecords(lines, branches);
+        if (invocationBudget is null) _records = checked(_records + records);
         _documents.Add(bytes, new(result, hadDoctype));
         return result;
     }

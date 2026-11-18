@@ -14,6 +14,18 @@ public sealed class CoverageFanInV3SemanticTests
     public void HandAuthoredMeasuredClaimsPassIndependentReplay() => new Oracle().Verify();
 
     [Fact]
+    public void FailedLineThresholdCannotSkipBranchRecordValidation()
+    {
+        var oracle = new Oracle();
+        oracle.Primary.Root!.SetAttributeValue("lines-covered", 0);
+        oracle.PrimaryGate["line"]!["covered"] = 0;
+        oracle.PrimaryGate["line"]!["percent"] = 0;
+        oracle.PrimaryGate["branch"]!["valid"] = 3;
+
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Fact]
     public void IndependentReplayAcceptsQuotedEscapedPathAndNoNewlineHunkMarker()
     {
         const string path = "F space.cs";
@@ -409,6 +421,36 @@ public sealed class CoverageFanInV3SemanticTests
         Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
     }
 
+    [Fact]
+    public void IndependentReplayRejectsLostChangedRecordWithConsistentNonemptyComposedEvidence()
+    {
+        var oracle = new Oracle();
+        oracle.UseContextAndDisjointHunks();
+        oracle.RebindReports();
+        oracle.Verify();
+
+        oracle.Composed.Descendants("line").Single(line => (string?)line.Attribute("number") == "2").Remove();
+        oracle.Composed.Root!.SetAttributeValue("lines-valid", 3);
+        oracle.Composed.Root.SetAttributeValue("lines-covered", 3);
+        oracle.Composed.Root.SetAttributeValue("branches-valid", 6);
+        oracle.Composed.Root.SetAttributeValue("branches-covered", 6);
+        oracle.ComposedGate["line"]!["valid"] = 3;
+        oracle.ComposedGate["line"]!["covered"] = 3;
+        oracle.ComposedGate["branch"]!["valid"] = 6;
+        oracle.ComposedGate["branch"]!["covered"] = 6;
+        foreach (var metric in new[] { oracle.ComposedGate["patchLine"]!, oracle.Claim["composed"]!["line"]! })
+        { metric["measurable"] = 2; metric["covered"] = 2; }
+        foreach (var metric in new[] { oracle.ComposedGate["patchBranch"]!, oracle.Claim["composed"]!["branch"]! })
+        { metric["measurable"] = 4; metric["covered"] = 4; }
+        oracle.RebindReports();
+        oracle.RehashDiffEvidence();
+
+        Assert.Equal(3, oracle.Composed.Descendants("line").Count());
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+        Assert.Throws<InvalidDataException>(() => CoverageFanInIndependentVerifier.VerifyComposition(
+            [(oracle.Primary, "/source")], oracle.Composed, oracle.Primary));
+    }
+
     [Theory]
     [InlineData("raw-header")]
     [InlineData("raw-prefix")]
@@ -606,8 +648,8 @@ public sealed class CoverageFanInV3SemanticTests
         internal JsonNode ComposedGate { get; }
         internal XDocument Primary { get; } = XDocument.Parse("""<coverage lines-valid="1" lines-covered="1" branches-valid="2" branches-covered="2"><packages><package name="P"><classes><class name="F" filename="F.cs"><lines><line number="1" hits="1" branch="true" condition-coverage="100% (2/2)"/></lines></class></classes></package></packages></coverage>""");
         internal XDocument Composed { get; }
-        private readonly string _primaryHash = new('1', 64);
-        private readonly string _composedHash = new('2', 64);
+        private string _primaryHash = new('1', 64);
+        private string _composedHash = new('2', 64);
         private readonly string[] _captures = [new('3', 64)];
 
         internal Oracle()
@@ -769,6 +811,14 @@ public sealed class CoverageFanInV3SemanticTests
             var absent = JsonSerializer.SerializeToNode(new { outcome = "notApplicable", reason = "no-reported-patch-points", changedLines = 1, measurable = 0, covered = 0, percent = (decimal?)null })!;
             Claim["primary"]!["line"] = absent.DeepClone(); Claim["primary"]!["branch"] = absent.DeepClone();
             PrimaryGate["patchLine"] = absent.DeepClone(); PrimaryGate["patchBranch"] = absent.DeepClone();
+        }
+
+        internal void RebindReports()
+        {
+            _primaryHash = CoverageFanInIO.Hash(Encoding.UTF8.GetBytes(Primary.ToString(SaveOptions.DisableFormatting)));
+            _composedHash = CoverageFanInIO.Hash(Encoding.UTF8.GetBytes(Composed.ToString(SaveOptions.DisableFormatting)));
+            Claim["primaryReportSha256"] = _primaryHash;
+            Claim["composedReportSha256"] = _composedHash;
         }
 
         internal void RehashMetadata() => Claim["diffMetadataSha256"] = CoverageFanInIO.Hash(CoverageFanInV3Encoding.Canonical(JsonSerializer.SerializeToElement(Metadata)));

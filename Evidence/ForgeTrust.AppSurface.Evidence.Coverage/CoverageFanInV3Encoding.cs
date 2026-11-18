@@ -30,7 +30,7 @@ internal static class CoverageFanInV3Encoding
         private void Admit(int count)
         {
             if (count > CoverageFanInDiffContext.StreamLimit - Position)
-                throw new CoverageFanInEvidenceException("limit-exceeded", "json", "The v3 artifact exceeds the existing1MiB wire limit; preserve fixed budgets and ask the maintainer to resolve supported input scope.");
+                throw new CoverageFanInEvidenceException("limit-exceeded", "json", "The v3 artifact exceeds the existing 1 MiB wire limit; preserve fixed budgets and ask the maintainer to resolve supported input scope.");
         }
         public override void Write(byte[] buffer, int offset, int count) { Admit(count); base.Write(buffer, offset, count); }
         public override void Write(ReadOnlySpan<byte> buffer) { Admit(buffer.Length); base.Write(buffer); }

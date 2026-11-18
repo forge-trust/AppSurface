@@ -28,6 +28,103 @@ public sealed class CoverageFanInIOTests
     }
 
     [Fact]
+    public void XmlRecordAdmissionEnforcesCombinedLimitAndLeavesCountersUnchangedOnRejection()
+    {
+        var budget = new CoverageFanInBudget(10, maximumRecords: 4);
+        budget.AdmitXmlRecords(1, 1);
+        var beforeRejectedAdmission = budget.Snapshot();
+
+        var failure = Assert.Throws<CoverageFanInEvidenceException>(() => budget.AdmitXmlRecords(1, 2));
+        Assert.Equal("limit-exceeded", failure.Cause);
+        Assert.Equal("budget", failure.Role);
+        Assert.Equal(beforeRejectedAdmission, budget.Snapshot());
+
+        budget.AdmitXmlRecords(1, 1);
+        Assert.Equal(4, budget.Snapshot().LineRecords + budget.Snapshot().BranchRecords);
+        Assert.Throws<CoverageFanInEvidenceException>(() => budget.AdmitXmlRecords(0, 1));
+        Assert.Equal(4, budget.Snapshot().LineRecords + budget.Snapshot().BranchRecords);
+    }
+
+    [Fact]
+    public void XmlRecordLimitSpansIoInstancesButSameInstanceCacheDoesNotReadmit()
+    {
+        var lineBytes = Encoding.UTF8.GetBytes("<coverage><line /></coverage>");
+        var conditionBytes = Encoding.UTF8.GetBytes("<coverage><condition /></coverage>");
+        var budget = new CoverageFanInBudget(1000, maximumRecords: 3);
+        var bounds = Bounds(records: 3);
+        using var firstIo = new CoverageFanInIO(bounds, CancellationToken.None, budget);
+        var firstDocument = firstIo.Xml(lineBytes);
+        Assert.Same(firstDocument, firstIo.Xml(lineBytes));
+        Assert.Equal(1, budget.Snapshot().LineRecords + budget.Snapshot().BranchRecords);
+
+        using var secondIo = new CoverageFanInIO(bounds, CancellationToken.None, budget);
+        var secondDocument = secondIo.Xml(lineBytes);
+        Assert.NotSame(firstDocument, secondDocument);
+        Assert.Same(secondDocument, secondIo.Xml(lineBytes));
+        var conditionDocument = secondIo.Xml(conditionBytes);
+        Assert.Same(conditionDocument, secondIo.Xml(conditionBytes));
+        var atLimit = budget.Snapshot();
+        Assert.Equal(3, atLimit.LineRecords + atLimit.BranchRecords);
+
+        using var thirdIo = new CoverageFanInIO(bounds, CancellationToken.None, budget);
+        Assert.Equal("limit-exceeded", Assert.Throws<CoverageFanInEvidenceException>(() => thirdIo.Xml(conditionBytes)).Cause);
+        Assert.Equal(atLimit, budget.Snapshot());
+
+        // No shared budget retains the legacy per-instance accounting: each IO gets its own configured allowance.
+        using var legacyFirstIo = new CoverageFanInIO(Bounds(records: 1), CancellationToken.None);
+        using var legacySecondIo = new CoverageFanInIO(Bounds(records: 1), CancellationToken.None);
+        _ = legacyFirstIo.Xml(lineBytes);
+        _ = legacySecondIo.Xml(lineBytes);
+    }
+
+    [Fact]
+    public async Task ConcurrentXmlAdmissionsCannotExceedTheSharedRecordLimit()
+    {
+        var budget = new CoverageFanInBudget(1000, maximumRecords: 1);
+        var bounds = Bounds(records: 1);
+        using var firstIo = new CoverageFanInIO(bounds, CancellationToken.None, budget);
+        using var secondIo = new CoverageFanInIO(bounds, CancellationToken.None, budget);
+        var firstBytes = Encoding.UTF8.GetBytes("<coverage><line /></coverage>");
+        var secondBytes = Encoding.UTF8.GetBytes("<coverage><condition /></coverage>");
+        using var ready = new CountdownEvent(2);
+        using var start = new ManualResetEventSlim();
+
+        Task<bool> Admit(CoverageFanInIO io, byte[] bytes) => Task.Factory.StartNew(() =>
+        {
+            ready.Signal();
+            start.Wait();
+            try { _ = io.Xml(bytes); return true; }
+            catch (CoverageFanInEvidenceException exception) when (exception.Cause == "limit-exceeded") { return false; }
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+        var first = Admit(firstIo, firstBytes);
+        var second = Admit(secondIo, secondBytes);
+        ready.Wait();
+        start.Set();
+        var admitted = await Task.WhenAll(first, second);
+
+        Assert.NotEqual(admitted[0], admitted[1]);
+        var snapshot = budget.Snapshot();
+        Assert.Equal(1, snapshot.LineRecords + snapshot.BranchRecords);
+    }
+
+    [Theory]
+    [InlineData("<coverage><line/><line/></coverage>", 1, 20, 40)]
+    [InlineData("<coverage><condition/><condition/></coverage>", 20, 1, 40)]
+    [InlineData("<coverage><line/><condition/></coverage>", 20, 20, 1)]
+    public void V3XmlRecordBoundsReportTheBudgetCause(string xml, int lines, int branches, int records)
+    {
+        var budget = new CoverageFanInBudget(1000, maximumRecords: records);
+        using var io = new CoverageFanInIO(Bounds(lines: lines, branches: branches, records: records), CancellationToken.None, budget);
+
+        var failure = Assert.Throws<CoverageFanInEvidenceException>(() => io.Xml(Encoding.UTF8.GetBytes(xml)));
+
+        Assert.Equal("limit-exceeded", failure.Cause);
+        Assert.Equal("budget", failure.Role);
+        Assert.Equal(0, budget.Snapshot().LineRecords + budget.Snapshot().BranchRecords);
+    }
+
+    [Fact]
     public void GeneratedOutputReadbackRequiresExactPathAndIdentityAndConsumesCreditOnce()
     {
         var budget = new CoverageFanInBudget(20);

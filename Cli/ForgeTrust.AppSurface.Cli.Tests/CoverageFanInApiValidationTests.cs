@@ -298,6 +298,35 @@ public sealed class CoverageFanInApiValidationTests
     }
 
     [Theory]
+    [InlineData("aux.md")]
+    [InlineData("private-name \n.md")]
+    [InlineData("submodule/name\u200B.md")]
+    public async Task V3EngineIdentifiesUnsupportedSourceInventoryWithoutDisclosingTheTrackedName(string trackedPath)
+    {
+        using var temp = TestDirectory.Create();
+        Directory.CreateDirectory(Path.Join(temp.Path, ".git"));
+        var index = $"H 100644 0123456789abcdef0123456789abcdef01234567 0\t{trackedPath}\0";
+        var runner = new IdentityRunner((command, _) => Task.FromResult(IdentityResult(command, temp.Path, index)));
+        var request = new CoverageFanInEngineRequest(ExpectedV3(), temp.Path, Path.Join(temp.Path, "output"),
+            CoveragePath: Path.Join(temp.Path, "coverage.xml"), TimingsPath: Path.Join(temp.Path, "timings.json"))
+        { IdentityRunner = runner };
+
+        var result = await CoverageFanInEngine.ExecuteAsync("capture", request,
+            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+
+        Assert.Equal("Rejected", result.Outcome);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("unsupported-diff", diagnostic.Cause);
+        Assert.Equal("source", diagnostic.Field);
+        Assert.Contains("tracked-file inventory", diagnostic.Recovery, StringComparison.Ordinal);
+        Assert.Contains("outside the patch", diagnostic.Recovery, StringComparison.Ordinal);
+        Assert.DoesNotContain(trackedPath, diagnostic.Recovery, StringComparison.Ordinal);
+        Assert.False(result.Created);
+        Assert.False(result.Committed);
+        Assert.False(Directory.Exists(Path.Join(temp.Path, "output")));
+    }
+
+    [Theory]
     [InlineData("compose-inventory")]
     [InlineData("accept-composition")]
     [InlineData("verify-accepted")]

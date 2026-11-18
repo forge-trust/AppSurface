@@ -556,8 +556,10 @@ internal sealed record CoverageRunRequest(
     internal CoverageArtifactSession? ArtifactSession { get; init; }
 
     /// <summary>
-    /// Requires the evaluated direct <c>coverlet.collector</c> package reference to resolve to this exact
-    /// version during supervised collection preflight. Null preserves legacy coverage-run behavior.
+    /// Requires both the evaluated direct <c>coverlet.collector</c> reference and the restored framework
+    /// graphs to contain this exact version before artifact creation. Exact-version runs restore during
+    /// supervised preflight unless <see cref="NoRestore"/> is set, then suppress implicit restore for collection.
+    /// Null preserves legacy coverage-run behavior.
     /// </summary>
     internal string? RequiredCollectorVersion { get; init; }
 
@@ -646,6 +648,66 @@ internal static class CoverageRunCollectorVersionPreflight
                 && string.Equals(centralVersion?.Trim(), requiredVersion, StringComparison.Ordinal);
         }
         catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Checks the restored collector in every graph for the selected framework using bounded, link-free assets.</summary>
+    /// <remarks>The evaluated assets location and restored project identity must match this project. Outer multi-target
+    /// evaluations defer to their framework evaluations. Callers restore before this check when allowed and suppress
+    /// implicit restore afterward so collection consumes the checked graph.</remarks>
+    internal static bool HasRestoredVersion(string capabilityJson, string? framework, string requiredVersion, string projectPath)
+    {
+        try
+        {
+            using var capability = JsonDocument.Parse(capabilityJson, new JsonDocumentOptions { MaxDepth = 32 });
+            if (!TryGetUniqueProperty(capability.RootElement, "Properties", out var properties)) return false;
+            if (framework is null && TryReadOptionalString(properties, "TargetFrameworks", out var frameworks)
+                && !string.IsNullOrWhiteSpace(frameworks)) return true;
+            if (framework is null && !TryReadOptionalString(properties, "TargetFramework", out framework)) return false;
+            if (string.IsNullOrWhiteSpace(framework)
+                || !TryReadOptionalString(properties, "ProjectAssetsFile", out var assetsPath) || string.IsNullOrWhiteSpace(assetsPath)
+                || !TryReadOptionalString(properties, "MSBuildProjectExtensionsPath", out var extensionsPath) || string.IsNullOrWhiteSpace(extensionsPath)
+                || !TryReadOptionalString(properties, "MSBuildProjectFullPath", out var evaluatedProject) || string.IsNullOrWhiteSpace(evaluatedProject)) return false;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var project = Path.GetFullPath(projectPath);
+            if (!string.Equals(Path.GetFullPath(evaluatedProject), project, comparison)) return false;
+            var assets = Path.GetFullPath(assetsPath, Path.GetDirectoryName(project)!);
+            var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(extensionsPath, Path.GetDirectoryName(project)!));
+            if (!string.Equals(Path.GetDirectoryName(assets), directory, comparison)
+                || !string.Equals(Path.GetFileName(assets), "project.assets.json", StringComparison.Ordinal)) return false;
+            using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(directory, false, false);
+            if (parent is null) return false;
+            using var stream = parent.OpenArtifactFile("project.assets.json", false, false);
+            if (stream.Length is <= 0 or > 1024 * 1024) return false;
+            var bytes = new byte[(int)stream.Length];
+            stream.ReadExactly(bytes);
+            parent.VerifyArtifactBinding();
+            using var restored = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 32 });
+            var root = restored.RootElement;
+            if (!TryGetUniqueProperty(root, "project", out var projectNode)
+                || !TryGetUniqueProperty(projectNode, "restore", out var restore)
+                || !TryReadOptionalString(restore, "projectPath", out var restoredProject) || string.IsNullOrWhiteSpace(restoredProject)
+                || !string.Equals(Path.GetFullPath(restoredProject), project, comparison)
+                || !TryGetUniqueProperty(root, "targets", out var targets) || targets.ValueKind != JsonValueKind.Object
+                || !TryGetUniqueProperty(root, "libraries", out var libraries) || libraries.ValueKind != JsonValueKind.Object) return false;
+            var identity = CollectorPackageId + "/" + requiredVersion;
+            var matches = targets.EnumerateObject().Where(target => target.Name == framework
+                || target.Name.StartsWith(framework + "/", StringComparison.Ordinal)).ToArray();
+            if (matches.Length == 0 || matches.Select(target => target.Name).Distinct(StringComparer.Ordinal).Count() != matches.Length) return false;
+            return HasCollector(libraries) && matches.All(target => target.Value.ValueKind == JsonValueKind.Object && HasCollector(target.Value));
+
+            bool HasCollector(JsonElement packages)
+            {
+                var collectors = packages.EnumerateObject().Where(package => package.Name.StartsWith(CollectorPackageId + "/", StringComparison.OrdinalIgnoreCase)).ToArray();
+                return collectors.Length == 1 && string.Equals(collectors[0].Name, identity, StringComparison.OrdinalIgnoreCase)
+                    && collectors[0].Value.ValueKind == JsonValueKind.Object
+                    && TryReadOptionalString(collectors[0].Value, "type", out var type) && type == "package";
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException
+            or ArgumentException or InvalidOperationException or NotSupportedException)
         {
             return false;
         }
@@ -1034,7 +1096,9 @@ internal sealed class CoverageRunWorkflow
                 {
                     collectorObservations.Add(
                         CoverageArtifactSettings.Observe(project, framework, json, request.Configuration, request.TestArguments));
-                }, requiredCollectorVersion: request.RequiredCollectorVersion);
+                }, requiredCollectorVersion: request.RequiredCollectorVersion, noRestore: request.NoRestore);
+            if (request.RequiredCollectorVersion is not null)
+                request = request with { NoRestore = true };
             await PrintDiscoveryAsync(runConsole, request, resolution, outputDirectory, schedulePlan);
             if (request.DryRun)
             {
@@ -3985,7 +4049,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         };
     }
 
-    private static Command CreateCommand(
+    /// <summary>Creates the child command and its guarded stdin pipe; exposed internally for deterministic pipe-fault tests.</summary>
+    internal static Command CreateCommand(
         CoverageRunProcessRequest request,
         CoverageRunProcessBudgetCharge budgetCharge,
         CancellationTokenSource executionCancellation)
@@ -4009,8 +4074,9 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     budgetCharge.Charge(standardInputBytes.Length);
                     await destination.WriteAsync(standardInputBytes, cancellationToken);
                 }
-                catch
+                catch (Exception exception)
                 {
+                    budgetCharge.RecordPipeFailure(exception);
                     CancelExecution(executionCancellation);
                     throw;
                 }
@@ -4063,7 +4129,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         }
     }
 
-    private static async Task CopyPipeToBufferAsync(
+    /// <summary>Copies buffered process bytes with stateful UTF-8 validation; exposed internally for deterministic read-boundary tests.</summary>
+    internal static async Task CopyPipeToBufferAsync(
         Stream source,
         MemoryStream target,
         long maximumBytes,
@@ -4074,6 +4141,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
     {
         var buffer = ArrayPool<byte>.Shared.Rent(PipeBufferSize);
         var decoder = strictUtf8 ? StrictUtf8Encoding.GetDecoder() : null;
+        var characters = strictUtf8 ? ArrayPool<char>.Shared.Rent(StrictUtf8Encoding.GetMaxCharCount(buffer.Length)) : null;
         try
         {
             while (true)
@@ -4081,13 +4149,13 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                 var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
                 if (read == 0)
                 {
-                    FlushStrictDecoder(decoder);
+                    if (decoder is not null) decoder.GetChars(ReadOnlySpan<byte>.Empty, characters, flush: true);
                     return;
                 }
 
                 budgetCharge.Charge(read);
                 ObserveOutput(outputObserver, read);
-                decoder?.GetCharCount(buffer.AsSpan(0, read), flush: false);
+                if (decoder is not null) decoder.GetChars(buffer.AsSpan(0, read), characters, flush: false);
                 var bytesBeforeRead = target.Length;
                 var exceedsLimit = bytesBeforeRead + read > maximumBytes;
                 var storageLimit = strictUtf8 ? maximumBytes : maximumBytes + 1;
@@ -4106,6 +4174,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+            if (characters is not null) ArrayPool<char>.Shared.Return(characters);
         }
     }
 
@@ -4120,7 +4189,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             : text;
     }
 
-    private static async Task CopyPipeToFileAsync(
+    /// <summary>Copies streamed process bytes with the same stateful decoder and EOF validation as buffered output.</summary>
+    internal static async Task CopyPipeToFileAsync(
         Stream source,
         Stream target,
         SemaphoreSlim writeGate,
@@ -4133,6 +4203,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
     {
         var buffer = ArrayPool<byte>.Shared.Rent(PipeBufferSize);
         var decoder = strictUtf8 ? StrictUtf8Encoding.GetDecoder() : null;
+        var characters = strictUtf8 ? ArrayPool<char>.Shared.Rent(StrictUtf8Encoding.GetMaxCharCount(buffer.Length)) : null;
         long bytesRead = 0;
         try
         {
@@ -4141,13 +4212,13 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                 var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
                 if (read == 0)
                 {
-                    FlushStrictDecoder(decoder);
+                    if (decoder is not null) decoder.GetChars(ReadOnlySpan<byte>.Empty, characters, flush: true);
                     return;
                 }
 
                 budgetCharge.Charge(read);
                 ObserveOutput(outputObserver, read);
-                decoder?.GetCharCount(buffer.AsSpan(0, read), flush: false);
+                if (decoder is not null) decoder.GetChars(buffer.AsSpan(0, read), characters, flush: false);
 
                 var exceedsLimit = strictUtf8 && bytesRead + read > maximumBytes;
                 var bytesToWrite = strictUtf8
@@ -4187,6 +4258,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+            if (characters is not null) ArrayPool<char>.Shared.Return(characters);
         }
     }
 
@@ -4202,11 +4274,6 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         {
             await target.WriteAsync(bytes[..(int)Math.Min(bytes.Length, remaining)], cancellationToken);
         }
-    }
-
-    private static void FlushStrictDecoder(Decoder? decoder)
-    {
-        decoder?.GetCharCount(ReadOnlySpan<byte>.Empty, flush: true);
     }
 
     private static void ObserveOutput(Action<int>? observer, int count)
@@ -4239,7 +4306,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             or InvalidOperationException;
     }
 
-    private sealed class CoverageRunProcessBudgetCharge
+    /// <summary>Shares mandatory pipe charging and failure identity across the process runner's output copies.</summary>
+    internal sealed class CoverageRunProcessBudgetCharge
     {
         private readonly Action<long> _charge;
         private readonly CancellationTokenSource _executionCancellation;

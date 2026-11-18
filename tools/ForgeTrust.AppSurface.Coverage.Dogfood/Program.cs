@@ -145,11 +145,13 @@ internal static class CoverageDogfood
                 await Invoke("compose", new CoverageComposeRequest(policy, root, primary, imported, composed), "compose");
                 await Invoke("accept", new CoverageAcceptRequest(policy, root, primary, imported, composed, accepted), "accept");
                 if (contractVersion == 3)
-                    RequireV3AcceptedApplicability(Path.Join(output, "accept-result.json"), "accept");
+                    CoverageDogfoodResultValidation.RequireV3AcceptedResult(
+                        Path.Join(output, "accept-result.json"), "accept", policy.Gate.Mode);
                 await Invoke("verify", new CoverageVerifyRequest(policy, root, primary, imported, composed, accepted), "verify");
                 if (contractVersion == 3)
                 {
-                    RequireV3AcceptedApplicability(Path.Join(output, "verify-result.json"), "verify");
+                    CoverageDogfoodResultValidation.RequireV3AcceptedResult(
+                        Path.Join(output, "verify-result.json"), "verify", policy.Gate.Mode);
                     await WriteShadowProofAsync(output, "fanin", policy, gitVersion, measurements, accounting,
                         expectedPatchSha256, policy.Limits!.TotalBytes);
                 }
@@ -354,23 +356,6 @@ internal static class CoverageDogfood
             || record.LineRecords + record.BranchRecords > 4_000_000 || record.StagedFiles > 10_000)
             throw new InvalidDataException("V3 proof counters exceed unchanged admission limits.");
         return record;
-    }
-
-    private static void RequireV3AcceptedApplicability(string path, string operation)
-    {
-        using var document = JsonDocument.Parse(File.ReadAllBytes(path), new JsonDocumentOptions { MaxDepth = 64 });
-        var root = document.RootElement;
-        var result = root.GetProperty("result");
-        if (root.GetProperty("schemaVersion").GetInt32() != 3 || root.GetProperty("operation").GetString() != operation
-            || root.GetProperty("status").GetString() != "succeeded"
-            || result.GetProperty("outcome").GetString() != "succeeded"
-            || result.GetProperty("verified").GetBoolean() != true
-            || operation == "accept" && result.GetProperty("accepted").GetBoolean() != true
-            || result.GetProperty("patchOutcome").GetString() != "PatchAccepted")
-            throw new InvalidDataException("V3 PatchAccepted did not include a successful, verified current result.");
-        var applicability = result.GetProperty("patchApplicability");
-        if (applicability.ValueKind != JsonValueKind.Object)
-            throw new InvalidDataException("The v3 CLI accepted result omitted its typed patch applicability claim.");
     }
 
     private static async Task WriteShadowProofAsync(string output, string operation, CoverageFanInPolicy policy,

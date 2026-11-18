@@ -94,8 +94,10 @@ internal static partial class CoverageFanInIndependentVerifier
             && NullableDecimal(thresholds, "patchLine") == patchLine && NullableDecimal(thresholds, "patchBranch") == patchBranch, GateError);
         CheckEffective(effective, "line", lineThreshold, policy.Tolerance); CheckEffective(effective, "branch", branchThreshold, policy.Tolerance);
         CheckEffective(effective, "patchLine", patchLine, policy.Tolerance); CheckEffective(effective, "patchBranch", patchBranch, policy.Tolerance);
-        var passed = V3Aggregate(Property(report, "line"), document, "lines", lineThreshold, policy.Tolerance)
-            & V3Aggregate(Property(report, "branch"), document, "branches", branchThreshold, policy.Tolerance);
+        // Both records must be validated even when one threshold fails.
+        var linePassed = V3Aggregate(Property(report, "line"), document, "lines", lineThreshold, policy.Tolerance);
+        var branchPassed = V3Aggregate(Property(report, "branch"), document, "branches", branchThreshold, policy.Tolerance);
+        var passed = linePassed && branchPassed;
         V3Exact(Property(report, "patchDiffSource"), "kind", "label", "strictness", "diffBase", "path", "bytes", "sha256", "empty");
         CheckDiffSource(Property(report, "patchDiffSource"), input.RequestedBase, new UTF8Encoding(false, true).GetString(input.Patch));
         passed &= V3Metric(Property(report, "patchLine"), changed, metrics.LineCovered, metrics.LineMeasurable, patchLine, policy.Tolerance);
