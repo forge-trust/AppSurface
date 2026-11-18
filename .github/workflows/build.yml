@@ -743,7 +743,8 @@ jobs:
   coverage-collection:
     needs: [coverage-evidence-plan, coverage-cli-candidate]
     if: ${{ !cancelled() && needs.coverage-evidence-plan.result == 'success' && ((needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && needs.coverage-cli-candidate.result == 'success') || (needs.coverage-evidence-plan.outputs.requires_coverage != 'true' && needs.coverage-cli-candidate.result == 'skipped')) }}
-    runs-on: ubuntu-latest
+    # Microsoft.Playwright 1.60.0 supports this image; ubuntu-latest may advance beyond its host table.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read

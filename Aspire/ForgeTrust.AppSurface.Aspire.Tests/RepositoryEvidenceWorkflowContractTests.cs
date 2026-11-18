@@ -381,6 +381,16 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
+    public void FullSolutionCollectionUsesTheSupportedPlaywrightUbuntuImage()
+    {
+        // Protects real browser execution when ubuntu-latest advances beyond the pinned Playwright host table.
+        // The native security matrix still exercises its declared platforms; no test or gate is omitted.
+        var collection = _buildWorkflow["jobs"].AsMapping()["coverage-collection"].AsMapping();
+
+        Assert.Equal("ubuntu-24.04", collection["runs-on"].AsScalar());
+    }
+
+    [Fact]
     public void DocsExportOverlapsBuildButDeploymentWaitsForAllPreviouslyRequiredAcceptance()
     {
         var jobs = _buildWorkflow["jobs"].AsMapping();
