@@ -17,6 +17,45 @@ internal static class BoundedProcessRunner
         "APPSURFACE_DURABLE_MIGRATION_CONNECTION",
     };
 
+    /// <summary>Requires a response from the Docker daemon within the existing probe budget.</summary>
+    /// <remarks>The server-version request avoids client plugin discovery performed by docker info.</remarks>
+    /// <exception cref="InvalidOperationException">The daemon query fails, expires or returns incomplete output.</exception>
+    internal static Task RequireDockerAsync() => RequireDockerAsync((arguments, budget) =>
+        RunAsync("docker", arguments, environment: null, budget));
+
+    /// <summary>Checks the daemon response through an explicitly supplied bounded command runner.</summary>
+    /// <param name="run">Runs the daemon query once; the overload is also the fixture's internal test seam.</param>
+    /// <returns>A completed task only for a successful, nonempty, untruncated daemon response.</returns>
+    /// <remarks>Known launch and deadline failures are sanitized. Other runner faults propagate unchanged.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The daemon query fails, expires or returns incomplete output.</exception>
+    internal static async Task RequireDockerAsync(
+        Func<IReadOnlyList<string>, TimeSpan, Task<BoundedProcessResult>> run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        BoundedProcessResult result;
+        try
+        {
+            result = await run(["version", "--format", "{{.Server.Version}}"],
+                FixtureBudgets.DockerProbe).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or TimeoutException)
+        {
+            throw DockerPrerequisiteFailure(exception.GetType().Name);
+        }
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput)
+            || result.StandardOutputTruncated || result.StandardErrorTruncated)
+        {
+            throw DockerPrerequisiteFailure("daemon-unavailable");
+        }
+    }
+
+    private static InvalidOperationException DockerPrerequisiteFailure(string cause) => new(
+        $"Docker is required for FirstDurableWork; availability is checked for at most five seconds ({cause}). "
+        + "Start Docker and rerun: dotnet test --filter FullyQualifiedName~FirstDurableWork. "
+        + "Read https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md#three-command-first-proof.");
+
     internal static async Task<BoundedProcessResult> RunAsync(
         string executable,
         IEnumerable<string> arguments,

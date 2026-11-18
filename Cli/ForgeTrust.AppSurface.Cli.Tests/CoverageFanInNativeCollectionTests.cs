@@ -380,7 +380,7 @@ public sealed class CoverageFanInNativeCollectionTests
             new(new string('a', 40), new string('b', 40), "10.0.402", "Release"),
             new("local", "native-discovery", "run", 1), [Fixture.Projects[0]], [], new(CoverageGateMode.AggregateOnly),
             Limits: new(XmlBytes: xmlBytes, TotalBytes: totalBytes, Depth: depth)));
-        return new(JsonSerializer.SerializeToElement(policy, CoveragePolicyEncoding.Json), CoveragePolicyEncoding.Digest(policy));
+        return new(CoveragePolicyEncoding.ToElement(policy), CoveragePolicyEncoding.Digest(policy));
     }
 
     [Theory]

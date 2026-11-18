@@ -48,9 +48,9 @@ internal sealed class EvidenceCoverageProcessRunner : ICoverageRunProcessRunner
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!IsDotnet(request.FileName)) return _inner.RunAsync(request, cancellationToken);
-        var environment = request.Environment is { } original
-            ? new Dictionary<string, string>(original, EnvironmentComparer)
-            : new Dictionary<string, string>(EnvironmentComparer);
+        var environment = request.EnvironmentOverrides is { } original
+            ? new Dictionary<string, string?>(original, EnvironmentComparer)
+            : new Dictionary<string, string?>(EnvironmentComparer);
         foreach (var variable in _environment) environment[variable.Key] = variable.Value;
         environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
         environment["MSBUILDDISABLENODEREUSE"] = "1";
@@ -69,7 +69,7 @@ internal sealed class EvidenceCoverageProcessRunner : ICoverageRunProcessRunner
         return _inner.RunAsync(request with
         {
             Arguments = arguments.AsReadOnly(),
-            Environment = new ReadOnlyDictionary<string, string>(environment)
+            EnvironmentOverrides = new ReadOnlyDictionary<string, string?>(environment)
         }, cancellationToken);
     }
 

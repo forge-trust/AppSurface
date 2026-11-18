@@ -105,6 +105,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var capture = FindStep(job["steps"].AsSequence(), "Attest successful native coverage evidence")["run"].AsScalar();
         Assert.Contains("'--raw-index', $indexPath, '--timings', $timingsPath", capture);
         Assert.Contains("$reports.Count -ne 2", capture);
+        var shadow = FindStep(job["steps"].AsSequence(), "Capture fresh v3 shadow native evidence")["run"].AsScalar();
+        Assert.Contains("'--raw-index', $indexPath, '--timings', $timingsPath", shadow);
+        Assert.Contains("$reports.Count -ne 2", shadow);
+        Assert.Contains("'--contract-version', $env:COVERAGE_V3_SHADOW_CONTRACT_VERSION", shadow);
     }
 
     [Fact]

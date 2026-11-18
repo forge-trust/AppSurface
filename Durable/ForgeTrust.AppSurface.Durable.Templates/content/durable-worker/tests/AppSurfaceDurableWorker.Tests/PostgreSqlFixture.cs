@@ -848,24 +848,18 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
 
     private static async Task RequireDockerAsync()
     {
-        BoundedProcessResult result;
         try
         {
-            result = await BoundedProcessRunner.RunAsync(
-                "docker",
-                ["info", "--format", "{{.ServerVersion}}"],
-                environment: null,
-                FixtureBudgets.DockerProbe).ConfigureAwait(false);
+            await BoundedProcessRunner.RequireDockerAsync().ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or TimeoutException)
+        catch (InvalidOperationException exception)
         {
-            throw DockerPrerequisiteFailure(exception.GetType().Name);
-        }
-
-        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput)
-            || result.StandardOutputTruncated || result.StandardErrorTruncated)
-        {
-            throw DockerPrerequisiteFailure("daemon-unavailable");
+            var cause = exception.Message.Contains("daemon-unavailable", StringComparison.Ordinal)
+                ? "daemon-unavailable"
+                : exception.Message.Contains(nameof(TimeoutException), StringComparison.Ordinal)
+                    ? nameof(TimeoutException)
+                    : nameof(InvalidOperationException);
+            throw DockerPrerequisiteFailure(cause);
         }
     }
 

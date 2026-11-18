@@ -38,6 +38,35 @@ git --no-pager --no-replace-objects diff --unified=0 --no-ext-diff --no-textconv
 
 Choose a patch output path outside the checkout so the source remains clean. Pass the file's exact bytes to `ResolvePatch` or `--diff-file`.
 
+## Canonical v3 ResolvePatch recipe
+
+Use this recipe only for a v3 report-based patch obligation. The shell example above is the existing planner workflow; it does not implement the stricter `appsurface-git-patch-v1` policy. Follow the [canonical v3 Git policy, environment, caps and recovery rules](../../guides/coverage-fan-in.md#deterministic-git-policy-appsurface-git-patch-v1). The trusted adapter resolves the requested base once to a full lowercase commit ID, confirms source/head identity and complete local history, and requires `merge-base --all` to return exactly one base. Git 2.46 or later is required. No fetch, rebase, shell interpolation, alternate diff, or post-capture byte normalization is allowed.
+
+The patch command is an argument vector run from the validated repository root with the exact isolated environment and common Git prefix in the guide. Its fixed diff arguments are:
+
+```text
+diff --no-color --no-ext-diff --no-textconv --no-relative
+--no-renames --find-renames=50% --no-rename-empty -l1000
+--diff-algorithm=myers --no-indent-heuristic
+--ignore-submodules=none --submodule=short
+--patch --unified=0 --inter-hunk-context=0 --full-index
+--src-prefix=a/ --dst-prefix=b/
+--output-indicator-new=+ --output-indicator-old=-
+--output-indicator-context=<one literal space>
+<merge-base> <head> --
+```
+
+The last option's value is one literal space in one argv item. Retain the exact stdout bytes (including any final newline), enforce the 20 MiB patch cap, and pass that unchanged snapshot to `ResolvePatch`. Strict UTF-8 decoding and exact-byte SHA-256 binding happen inside the planner:
+
+```csharp
+var plan = planner.ResolvePatch(policy, patchBytes, additionalPaths);
+var expectedPatchSha256 = plan.PatchSha256;
+```
+
+Pass `plan.PatchSha256` as the v3 Coverage request's `ExpectedPatchSha256`; the Evidence coverage producer obtains that value from the selected plan. The acceptance request also pins `ContractVersion = 3` and `ReportProfileId = "coverlet-collector-cobertura-v1"`. Use fresh homogeneous v3 captures and keep the complete four-metric applicability result with the expected contract version. Valid N/A is accepted by v3 without another flag.
+
+`ResolvePatch` rejects an empty patch or a patch with no normalized changed path (`ASEVD101`); the path-only `Resolve` overload likewise cannot bind patch bytes. Exact-empty v3 diff acceptance is a separate Coverage API case that requires the SHA-256 of the exact empty byte sequence and independently verified empty Git metadata. The Evidence planner does not manufacture an obligation for that case: do not add a synthetic path or edit a digest to make one.
+
 Set `EvidencePolicy.CombineProfiles = true` to union distinct profiles selected by matched rules. The planner sorts source profile ids, declaration ids, paths, and matched rule ids before producing a stable `combined-<digest>` profile. Repeated resource, producer, or obligation ids must have identical canonical declarations; a conflict fails closed with `ASEVD133`. Profiles must share one scope or resolution fails with `ASEVD134`. An empty profile contributes no declarations. Paths with no matching rule still select the configured conservative profile. With the default `false`, any multi-profile selection keeps the existing conservative fallback behavior. The option is serialized only when true, preserving the canonical bytes of existing policies.
 
 ## Policy design

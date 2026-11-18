@@ -30,30 +30,43 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
     public async Task SupportedSdkOperationsReceiveIsolationBeforeApplicationArguments(string operation, bool disableServers)
     {
         var inner = new CaptureRunner();
-        var originalEnvironment = new Dictionary<string, string> { ["retained"] = "value", ["channel"] = "original" };
+        var originalEnvironment = new Dictionary<string, string?> { ["retained"] = "value", ["channel"] = "original", ["removed"] = null };
         var channel = new Dictionary<string, string> { ["channel"] = "invocation" };
         var wrapper = new EvidenceCoverageProcessRunner(inner, channel);
         channel["channel"] = "mutated after construction";
-        var request = Request("dotnet", [operation, "project.csproj", "--", "application-token"]) with { Environment = originalEnvironment };
+        var request = Request("dotnet", [operation, "project.csproj", "--", "application-token"]) with
+        {
+            EnvironmentOverrides = originalEnvironment,
+            StandardOutputLimitBytes = 12345,
+            StrictUtf8 = true,
+            StandardInputBytes = [1, 2, 3],
+            BudgetCharge = static _ => { },
+        };
         using var cancellation = new CancellationTokenSource();
         await wrapper.RunAsync(request, cancellation.Token);
         var actual = Assert.Single(inner.Requests);
         Assert.Equal(cancellation.Token, Assert.Single(inner.Tokens));
-        Assert.Equal("invocation", actual.Environment!["channel"]);
-        Assert.Equal("value", actual.Environment["retained"]);
-        Assert.Equal("0", actual.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"]);
-        Assert.Equal("1", actual.Environment["MSBUILDDISABLENODEREUSE"]);
+        Assert.Equal("invocation", actual.EnvironmentOverrides!["channel"]);
+        Assert.Equal("value", actual.EnvironmentOverrides["retained"]);
+        Assert.True(actual.EnvironmentOverrides.ContainsKey("removed"));
+        Assert.Null(actual.EnvironmentOverrides["removed"]);
+        Assert.Equal("0", actual.EnvironmentOverrides["DOTNET_CLI_USE_MSBUILD_SERVER"]);
+        Assert.Equal("1", actual.EnvironmentOverrides["MSBUILDDISABLENODEREUSE"]);
         Assert.Equal(disableServers, actual.Arguments.Contains("--disable-build-servers"));
         Assert.Contains("-nodeReuse:false", actual.Arguments);
         Assert.Contains("-p:UseSharedCompilation=false", actual.Arguments);
         Assert.Equal(new[] { "--", "application-token" }, actual.Arguments.TakeLast(2));
         Assert.Same(request.Lease, actual.Lease);
+        Assert.Equal(request.StandardOutputLimitBytes, actual.StandardOutputLimitBytes);
+        Assert.Equal(request.StrictUtf8, actual.StrictUtf8);
+        Assert.Equal(request.StandardInputBytes, actual.StandardInputBytes);
+        Assert.Same(request.BudgetCharge, actual.BudgetCharge);
         Assert.Same(request.OutputObserver, actual.OutputObserver);
         Assert.Equal(request.WorkingDirectory, actual.WorkingDirectory);
         Assert.Equal(request.OutputFile, actual.OutputFile);
         Assert.Equal(new[] { operation, "project.csproj", "--", "application-token" }, request.Arguments);
         Assert.Equal("original", originalEnvironment["channel"]);
-        Assert.Equal(2, originalEnvironment.Count);
+        Assert.Equal(3, originalEnvironment.Count);
     }
 
     [Theory]
@@ -68,8 +81,8 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         await wrapper.RunAsync(request, CancellationToken.None);
         var actual = Assert.Single(inner.Requests);
         Assert.Equal(request.Arguments, actual.Arguments);
-        Assert.Equal("one", actual.Environment!["channel"]);
-        Assert.Null(request.Environment);
+        Assert.Equal("one", actual.EnvironmentOverrides!["channel"]);
+        Assert.Null(request.EnvironmentOverrides);
     }
 
     [Fact]
@@ -93,10 +106,10 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         var original = Request("dotnet.exe", ["test"]);
         await Task.WhenAll(Enumerable.Range(0, 32).Select(index => Task.Run(() =>
             (index % 2 == 0 ? first : second).RunAsync(original, CancellationToken.None))));
-        Assert.Equal(16, inner.Requests.Count(request => request.Environment![key] == "first"));
-        Assert.Equal(16, inner.Requests.Count(request => request.Environment![key] == "second"));
+        Assert.Equal(16, inner.Requests.Count(request => request.EnvironmentOverrides![key] == "first"));
+        Assert.Equal(16, inner.Requests.Count(request => request.EnvironmentOverrides![key] == "second"));
         Assert.Equal(before, Environment.GetEnvironmentVariable(key));
-        Assert.Null(original.Environment);
+        Assert.Null(original.EnvironmentOverrides);
         Assert.Equal(new[] { "test" }, original.Arguments);
         Assert.DoesNotContain(EvidenceCoverageProcessRunner.EffectiveArgumentIdentity, token => token.Contains(key, StringComparison.Ordinal));
         Assert.Contains("child-lifetime:cooperative-v1", EvidenceCoverageProcessRunner.EffectiveArgumentIdentity);
@@ -120,7 +133,7 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         {
             WorkingDirectory = directory.Path,
             OutputFile = output,
-            Environment = new Dictionary<string, string> { [key] = nonce }
+            EnvironmentOverrides = new Dictionary<string, string?> { [key] = nonce }
         };
         var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None);
         Assert.Equal(0, result.ExitCode);
@@ -173,14 +186,14 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         {
             if (cooperative && withSession)
             {
-                foreach (var pair in session.Environment) Assert.Equal(pair.Value, request.Environment![pair.Key]);
-                Assert.Equal("1", request.Environment!["MSBUILDDISABLENODEREUSE"]);
+                foreach (var pair in session.Environment) Assert.Equal(pair.Value, request.EnvironmentOverrides![pair.Key]);
+                Assert.Equal("1", request.EnvironmentOverrides!["MSBUILDDISABLENODEREUSE"]);
                 if (request.Arguments[0] is "msbuild" or "build" or "test")
                     Assert.Contains("-p:UseSharedCompilation=false", request.Arguments);
             }
             else
             {
-                Assert.Null(request.Environment);
+                Assert.Null(request.EnvironmentOverrides);
                 Assert.DoesNotContain("-nodeReuse:false", request.Arguments);
             }
         }
@@ -191,7 +204,7 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         var legacy = await adapter.RunAsync(Declaration(), solution, Path.Join(directory.Path, "legacy-run"), null,
             CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Passed, legacy.Outcome);
-        Assert.All(runner.Requests.Skip(previouslyRecorded), request => Assert.Null(request.Environment));
+        Assert.All(runner.Requests.Skip(previouslyRecorded), request => Assert.Null(request.EnvironmentOverrides));
         Assert.False(session.IsSettled);
         // The adapter does not close enrollment per command or producer; the coordinator owns this transition.
         session.CloseEnrollment();

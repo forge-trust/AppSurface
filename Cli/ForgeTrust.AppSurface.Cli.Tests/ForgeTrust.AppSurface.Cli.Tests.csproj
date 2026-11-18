@@ -44,4 +44,8 @@
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.CoverageLeaseProbe\ForgeTrust.AppSurface.CoverageLeaseProbe.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../tools/ForgeTrust.AppSurface.Coverage.Dogfood/CoverageDogfoodResultValidation.cs" Link="CoverageDogfoodResultValidation.cs" />
+  </ItemGroup>
+
 </Project>

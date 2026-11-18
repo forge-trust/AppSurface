@@ -19,7 +19,7 @@ public static class CoverageFanIn
             DeadlineSeconds: request.DeadlineSeconds, Parallelism: request.Parallelism,
             NoRestore: request.NoRestore, NoBuild: request.NoBuild), cancellationToken, progress, diagnostics);
     }
-    /// <summary>Validates a successful producer or explicitly imports a portable v2 capture into fresh local custody.</summary>
+    /// <summary>Validates a successful producer or imports a homogeneous v2 or v3 portable capture into fresh local custody.</summary>
     public static ValueTask<CoverageFanInResult> CaptureAsync(CoverageCaptureRequest request,
         CancellationToken cancellationToken = default, TextWriter? progress = null, TextWriter? diagnostics = null)
     {
@@ -44,6 +44,9 @@ public static class CoverageFanIn
             HistoricalReplay: request.EvaluationIntent == CoverageEvaluationIntent.HistoricalReplay), cancellationToken, progress, diagnostics);
     }
     /// <summary>Runs primary aggregate and explicit patch gates, then independently verifies before committing acceptance.</summary>
+    /// <remarks>V3 requires an expected canonical patch SHA-256 for patch evaluation. A valid N/A dimension means
+    /// no changed measurements were reported under the selected collector profile; source completeness is not proved.
+    /// Every required capture and primary aggregate gate remains mandatory.</remarks>
     public static ValueTask<CoverageFanInResult> AcceptAsync(CoverageAcceptRequest request,
         CancellationToken cancellationToken = default, TextWriter? progress = null, TextWriter? diagnostics = null)
     {
@@ -51,7 +54,8 @@ public static class CoverageFanIn
         ValidateModes(request.OutputMode, request.EvaluationIntent);
         var expected = Expected(request.Policy);
         var patchHash = request.ExpectedPatchSha256;
-        if (patchHash is not null && (request.Policy.Gate.Mode != CoverageGateMode.AggregateAndPatch
+        if (expected.ContractVersion == 3 && request.Policy.Gate.Mode == CoverageGateMode.AggregateAndPatch && patchHash is null
+            || patchHash is not null && (request.Policy.Gate.Mode != CoverageGateMode.AggregateAndPatch
             || patchHash.Length != 64 || !patchHash.All(char.IsAsciiHexDigit)))
             throw CoveragePolicyEncoding.Invalid("expectedPatchSha256");
         return Execute("accept", new(expected, request.RepositoryRoot, request.OutputDirectory,
@@ -63,6 +67,8 @@ public static class CoverageFanIn
         { ExpectedPatchSha256 = patchHash?.ToLowerInvariant() }, cancellationToken, progress, diagnostics);
     }
     /// <summary>Verifies existing accepted evidence read-only; cannot create custody or upgrade historical evidence.</summary>
+    /// <remarks>V3 requires the matching clean source checkout, complete pinned Git history, supported Git and SDK.
+    /// Retaining a diff alone is insufficient to replay applicability; rejected generations cannot be promoted.</remarks>
     public static ValueTask<CoverageFanInResult> VerifyAsync(CoverageVerifyRequest request,
         CancellationToken cancellationToken = default, TextWriter? progress = null, TextWriter? diagnostics = null)
     {
@@ -84,7 +90,7 @@ public static class CoverageFanIn
     private static CoverageFanInExpected Expected(CoverageFanInPolicy policy)
     {
         var frozen = CoveragePolicyEncoding.Freeze(policy);
-        return new(JsonSerializer.SerializeToElement(frozen, CoveragePolicyEncoding.Json), CoveragePolicyEncoding.Digest(frozen));
+        return new(CoveragePolicyEncoding.ToElement(frozen), CoveragePolicyEncoding.Digest(frozen));
     }
     private static async ValueTask<CoverageFanInResult> Execute(string operation, CoverageFanInEngineRequest request,
         CancellationToken token, TextWriter? progress, TextWriter? diagnostics)
@@ -94,10 +100,20 @@ public static class CoverageFanIn
         return new(result.Operation, Enum.Parse<CoverageOperationOutcome>(result.Outcome), result.OperationId, result.Digest,
             new(result.Created, result.Committed, result.CleanupComplete, result.Imported, result.Generation),
             result.Artifacts.Select(x => new CoverageArtifactReference(x.Role, x.Path, x.Length, x.Sha256)).ToArray(),
-            result.Diagnostics.Select(x => new CoverageDiagnostic(x.Code, x.Stage, x.Field, x.Recovery)).ToArray(),
+            result.Diagnostics.Select(x => new CoverageDiagnostic(x.Code, x.Stage, x.Field, x.Recovery)
+            {
+                Cause = x.Cause,
+                Context = x.Context is null ? null : new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(new Dictionary<string, string>(x.Context, StringComparer.Ordinal)),
+                Trace = x.Trace is null ? null : Array.AsReadOnly(x.Trace.ToArray())
+            }).ToArray(),
             result.Accepted, result.Verified, result.PatchOutcome,
             result.Observation is null ? null : Enum.Parse<CoverageObservation>(result.Observation),
             result.HistoricalReplay ? CoverageEvaluationIntent.HistoricalReplay : CoverageEvaluationIntent.CurrentTrustedRun,
-            result.PrimaryImported);
+            result.PrimaryImported, result.PatchApplicability is { } applicability
+                ? applicability.Deserialize<CoveragePatchApplicability>(CoveragePolicyEncoding.Json) : null,
+            result.Accounting is { } accounting
+                ? new(accounting.UsedBytes, accounting.LimitBytes, accounting.XmlBytes, accounting.JsonBytes,
+                    accounting.LineRecords, accounting.BranchRecords, accounting.StagedBytes, accounting.StagedFiles)
+                : null);
     }
 }

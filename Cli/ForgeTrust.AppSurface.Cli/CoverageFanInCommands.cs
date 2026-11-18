@@ -1,4 +1,4 @@
-using System.Reflection;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CliFx;
@@ -19,11 +19,11 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
     private readonly ICoverageFanInResultDeliveryFactory _deliveryFactory = deliveryFactory ?? SafeCoverageFanInResultDeliveryFactory.Instance;
 
     /// <summary>Gets or sets the required strict schema-version 2 request document.</summary>
-    [CommandOption("request", Description = "Required UTF-8 JSON envelope: {schemaVersion:2,operation,request}. Request members use exact camelCase names, string enums, and the typed operation request schema; unknown, duplicate, missing required, wrongly typed, or over-limit input is rejected before execution. The file and its ancestors must be regular, link-free filesystem objects.")]
+    [CommandOption("request", Description = "Required UTF-8 JSON envelope: schemaVersion:2 (legacy) or schemaVersion:3 (report applicability). The schema version must match policy.contractVersion; v2 omits that policy field, while v3 requires contractVersion=3 and reportProfileId=coverlet-collector-cobertura-v1. Exact camelCase fields, string enums, duplicate/unknown rejection, lossless values, and the 1 MiB bound apply. The file and its ancestors must be regular, link-free filesystem objects.")]
     public string? Request { get; set; }
 
     /// <summary>Gets or sets the new result-file destination for this operation.</summary>
-    [CommandOption("result", Description = "Write the bounded schema-version 2 terminal result atomically to this new file in an existing link-free directory. Existing files are never replaced or adopted. Required for capture, compose, and accept; optional for read-only verify.")]
+    [CommandOption("result", Description = "Write the bounded terminal result using the request's matching schema version (2 or 3) atomically to this new file in an existing link-free directory. Existing files are never replaced or adopted. Required for capture, compose, and accept; optional for read-only verify.")]
     public string? Result { get; set; }
 
     /// <summary>Gets or sets whether one terminal JSON document is written to standard output.</summary>
@@ -42,6 +42,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
         ArgumentNullException.ThrowIfNull(console);
 
         ParsedCoverageFanInRequest parsed;
+        var requestContractVersion = 2;
         ICoverageFanInResultDelivery? delivery = null;
         try
         {
@@ -49,7 +50,9 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
             if (requiresResult && string.IsNullOrWhiteSpace(Result)) throw new CoverageFanInCliInputException();
 
             var bytes = ReadBoundedRequest(Request);
+            requestContractVersion = CoverageFanInRequestReader.TryReadEnvelopeVersion(bytes);
             parsed = CoverageFanInRequestReader.Parse(bytes);
+            requestContractVersion = parsed.ContractVersion;
             var selectedOperation = CollectRequested ? "collect" : operation;
             if (!string.Equals(parsed.Operation, selectedOperation, StringComparison.Ordinal)
                 || (operation == "capture" && (CollectRequested != (parsed.Operation == "collect"))))
@@ -59,16 +62,16 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
 
             if (!string.IsNullOrWhiteSpace(Result)) delivery = _deliveryFactory.Prepare(Result);
         }
-        catch (CoverageFanInCliInputException)
+        catch (CoverageFanInCliInputException exception)
         {
-            await WriteInputFailureAsync(console, "ASCOVF001", "request",
-                "Supply a valid schemaVersion 2 request and a fresh result path in an existing link-free directory.").ConfigureAwait(false);
+            await WriteInputFailureAsync(console, requestContractVersion, exception.Code, exception.Cause,
+                exception.Field, exception.Recovery ?? InputRecovery(requestContractVersion)).ConfigureAwait(false);
             throw new CommandException("Coverage fan-in input is invalid; see the bounded diagnostic output.", 2);
         }
         catch (Exception exception) when (IsInputFailure(exception))
         {
-            await WriteInputFailureAsync(console, "ASCOVF001", "request",
-                "Supply a valid schemaVersion 2 request and a fresh result path in an existing link-free directory.").ConfigureAwait(false);
+            await WriteInputFailureAsync(console, requestContractVersion, "ASCOVF001", "invalid-policy", "request",
+                InputRecovery(requestContractVersion)).ConfigureAwait(false);
             throw new CommandException("Coverage fan-in input is invalid; see the bounded diagnostic output.", 2);
         }
 
@@ -83,6 +86,8 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
             var exitCode = 0;
             var diagnostics = new List<CoverageFanInCliDiagnostic>();
             var deliveryFailed = false;
+            var suppressResult = false;
+            var requestContext = CoverageFanInCliCodec.ContextFor(parsed);
 
             if (cancellationToken.IsCancellationRequested)
             {
@@ -90,7 +95,8 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
                 operationOutcome = CoverageOperationOutcome.Cancelled;
                 effectsKnown = true;
                 exitCode = 130;
-                diagnostics.Add(new("ASCOVF004", "cancelled", "operation", "Retry once after confirming that no operation output was created."));
+                diagnostics.Add(CoverageFanInCliCodec.Diagnostic(parsed.ContractVersion, "ASCOVF004", "cancelled", "operation",
+                    "Retry once after confirming that no operation output was created.", "cancelled", requestContext));
             }
             else
             {
@@ -101,7 +107,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
                 }
                 catch (Exception exception) when (IsInputFailure(exception))
                 {
-                    await WriteInputFailureAsync(console, "ASCOVF001", "request",
+                    await WriteInputFailureAsync(console, parsed.ContractVersion, "ASCOVF001", "invalid-policy", "request",
                         "Correct the typed policy or operation selectors; validation failed before fan-in execution.").ConfigureAwait(false);
                     throw new CommandException("Coverage fan-in input is invalid; see the bounded diagnostic output.", 2);
                 }
@@ -113,41 +119,62 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
                     operationOutcome = result.Outcome;
                     effects = result.Effects;
                     effectsKnown = true;
-                    status = StatusFor(result.Outcome);
-                    exitCode = ExitCodeFor(result.Outcome);
+                    if (parsed.ContractVersion == 3 && !CoverageFanInCliResult.IsValidForV3(result))
+                    {
+                        status = "failed";
+                        exitCode = 1;
+                        suppressResult = true;
+                        diagnostics.Add(CoverageFanInCliCodec.Diagnostic(parsed.ContractVersion, "ASCOVF003", "applicability",
+                            "result", "Do not consume this result. Recompute applicability from the retained reports and pinned diff, then report the operation ID to the maintainer.",
+                            "applicability-mismatch", requestContext));
+                    }
+                    else
+                    {
+                        status = StatusFor(result.Outcome);
+                        exitCode = ExitCodeFor(result.Outcome);
+                    }
                 }
                 catch (OperationCanceledException)
                 {
                     status = "cancelled";
                     operationOutcome = CoverageOperationOutcome.Cancelled;
                     exitCode = 130;
-                    diagnostics.Add(new("ASCOVF004", "cancelled", "operation", "Inspect the destination and reconcile any committed generation before retrying."));
+                    diagnostics.Add(CoverageFanInCliCodec.Diagnostic(parsed.ContractVersion, "ASCOVF004", "cancelled", "operation",
+                        "Inspect the destination and reconcile any committed generation before retrying.", "cancelled", requestContext));
                 }
                 catch (TimeoutException)
                 {
                     status = "timedOut";
                     operationOutcome = CoverageOperationOutcome.TimedOut;
                     exitCode = 124;
-                    diagnostics.Add(new("ASCOVF005", "timedOut", "operation", "Inspect the destination and reconcile any committed generation before retrying."));
+                    diagnostics.Add(CoverageFanInCliCodec.Diagnostic(parsed.ContractVersion, "ASCOVF005", "timedOut", "operation",
+                        "Inspect the destination and reconcile any committed generation before retrying.", "deadline-exceeded", requestContext));
                 }
-                catch (Exception)
+                catch (Exception exception)
                 {
                     status = "failed";
                     exitCode = 1;
-                    diagnostics.Add(new("ASCOVF003", "execution", "operation", "Inspect the destination and reconcile possible partial effects before retrying."));
+                    diagnostics.Add(CoverageFanInCliCodec.Diagnostic(parsed.ContractVersion, "ASCOVF003", "execution", "operation",
+                        "Preserve any retained generation, reconcile possible partial effects, and report the operation to the maintainer before one corrected retry.",
+                        "unexpected-failure", CoverageFanInCliCodec.ContextFor(parsed, exception.GetType()),
+                        CoverageFanInCliCodec.TraceFor(exception)));
                 }
             }
 
             var deliveryInfo = DeliveryInfo(delivery, delivery is null ? "notRequested" : "committed", predictCommit: true);
-            var envelope = CreateEnvelope(status, operationId, operationOutcome, effects, effectsKnown, result, deliveryInfo, diagnostics);
+            var envelope = CreateEnvelope(status, operationId, operationOutcome, effects, effectsKnown,
+                suppressResult ? null : result, deliveryInfo, diagnostics, parsed.ContractVersion);
             var document = SerializeBounded(envelope, out var compacted);
             if (compacted)
             {
                 status = "incomplete";
                 if (exitCode == 0) exitCode = 1;
-                diagnostics.Add(new("ASCOVF006", "result", "result", "The result exceeded the 1 MiB terminal limit; inspect the retained operation artifacts directly."));
+                diagnostics.Add(CoverageFanInCliCodec.Diagnostic(parsed.ContractVersion, "ASCOVF006", "result", "result",
+                    "The result exceeded the 1 MiB terminal limit; inspect the retained operation artifacts directly.",
+                    "limit-exceeded", requestContext));
                 envelope = CreateEnvelope(status, operationId, operationOutcome, effects, effectsKnown, null,
-                    DeliveryInfo(delivery, delivery is null ? "notRequested" : "committed", predictCommit: true), diagnostics);
+                    DeliveryInfo(delivery, delivery is null ? "notRequested" : "committed", predictCommit: true), diagnostics,
+                    parsed.ContractVersion);
                 document = SerializeBounded(envelope, out _);
             }
 
@@ -162,14 +189,16 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
                     deliveryFailed = true;
                     status = "deliveryFailed";
                     if (exitCode == 0) exitCode = 1;
-                    diagnostics.Add(new("ASCOVF002", "delivery", "result", "Reconcile the operation using its operation ID and committed-generation status before retrying result delivery."));
-                    envelope = CreateEnvelope(status, operationId, operationOutcome, effects, effectsKnown, result,
-                        DeliveryInfo(delivery, "failed"), diagnostics);
+                    diagnostics.Add(CoverageFanInCliCodec.Diagnostic(parsed.ContractVersion, "ASCOVF002", "delivery", "result",
+                        "Reconcile the operation using its operation ID and committed-generation status before retrying result delivery.",
+                        "delivery-failed", requestContext));
+                    envelope = CreateEnvelope(status, operationId, operationOutcome, effects, effectsKnown,
+                        suppressResult ? null : result, DeliveryInfo(delivery, "failed"), diagnostics, parsed.ContractVersion);
                     document = SerializeBounded(envelope, out var deliveryCompacted);
                     if (deliveryCompacted)
                     {
                         envelope = CreateEnvelope(status, operationId, operationOutcome, effects, effectsKnown, null,
-                            DeliveryInfo(delivery, "failed"), diagnostics);
+                            DeliveryInfo(delivery, "failed"), diagnostics, parsed.ContractVersion);
                         document = SerializeBounded(envelope, out _);
                     }
                 }
@@ -177,9 +206,9 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
 
             if (result is not null)
                 foreach (var diagnostic in result.Diagnostics.Take(16))
-                    await console.Error.WriteLineAsync($"{diagnostic.Code}: {diagnostic.Recovery}").ConfigureAwait(false);
+                    await console.Error.WriteLineAsync(CoverageFanInCliCodec.FormatDiagnostic(diagnostic, parsed.ContractVersion)).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
-                await console.Error.WriteLineAsync($"{diagnostic.Code}: {diagnostic.Recovery}").ConfigureAwait(false);
+                await console.Error.WriteLineAsync(CoverageFanInCliCodec.FormatDiagnostic(diagnostic, parsed.ContractVersion)).ConfigureAwait(false);
 
             if (Json)
             {
@@ -243,6 +272,10 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
     private static bool IsInputFailure(Exception exception) => exception is ArgumentException or IOException
         or UnauthorizedAccessException or JsonException or InvalidDataException or InvalidOperationException;
 
+    private static string InputRecovery(int contractVersion) => contractVersion == 3
+        ? "Use schemaVersion=3 with policy.contractVersion=3 and reportProfileId=coverlet-collector-cobertura-v1; correct the request before execution."
+        : "Supply a valid schemaVersion 2 request and a fresh result path in an existing link-free directory.";
+
     private static string StatusFor(CoverageOperationOutcome outcome) => outcome switch
     {
         CoverageOperationOutcome.Succeeded => "succeeded",
@@ -261,11 +294,13 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
         _ => 1,
     };
 
-    private async ValueTask WriteInputFailureAsync(IConsole console, string code, string field, string recovery)
+    private async ValueTask WriteInputFailureAsync(IConsole console, int contractVersion, string code, string cause,
+        string field, string recovery)
     {
-        var diagnostic = new CoverageFanInCliDiagnostic(code, "input", field, recovery);
+        var diagnostic = CoverageFanInCliCodec.Diagnostic(contractVersion, code, "input", field, recovery,
+            cause, CoverageFanInCliCodec.ContextFor(contractVersion));
         var envelope = CreateEnvelope("invalidInput", null, null, null, true, null,
-            new(false, "notStarted", false, false), [diagnostic]);
+            new(false, "notStarted", false, false), [diagnostic], contractVersion);
         if (Json)
         {
             var bytes = SerializeBounded(envelope, out _);
@@ -274,7 +309,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
         else
         {
             await console.Output.WriteLineAsync($"coverage fan-in {operation}: invalid input").ConfigureAwait(false);
-            await console.Error.WriteLineAsync($"{code}: {recovery}").ConfigureAwait(false);
+            await console.Error.WriteLineAsync(CoverageFanInCliCodec.FormatDiagnostic(diagnostic, contractVersion)).ConfigureAwait(false);
         }
     }
 
@@ -288,15 +323,44 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
         }
         if (envelope.Result?.Accepted == true)
             await console.Output.WriteLineAsync("  accepted generation: independently verified").ConfigureAwait(false);
+        if (envelope.SchemaVersion == 3 && envelope.Result?.PatchApplicability is { } applicability)
+        {
+            await WriteMetricAsync(console, "primary line", applicability.Primary.Line).ConfigureAwait(false);
+            await WriteMetricAsync(console, "primary branch", applicability.Primary.Branch).ConfigureAwait(false);
+            await WriteMetricAsync(console, "composed line", applicability.Composed.Line).ConfigureAwait(false);
+            await WriteMetricAsync(console, "composed branch", applicability.Composed.Branch).ConfigureAwait(false);
+            if (applicability.Primary.Line.Outcome == CoveragePatchApplicabilityOutcome.NotApplicable
+                || applicability.Primary.Branch.Outcome == CoveragePatchApplicabilityOutcome.NotApplicable
+                || applicability.Composed.Line.Outcome == CoveragePatchApplicabilityOutcome.NotApplicable
+                || applicability.Composed.Branch.Outcome == CoveragePatchApplicabilityOutcome.NotApplicable)
+                await console.Output.WriteLineAsync("  trust: no changed measurements were reported for an N/A dimension under the accepted collector and policy; this does not establish source completeness.").ConfigureAwait(false);
+        }
         if (deliveryFailed)
             await console.Error.WriteLineAsync("  result delivery failed; reconcile the operation before retrying.").ConfigureAwait(false);
     }
 
+    private static async ValueTask WriteMetricAsync(IConsole console, string label, CoveragePatchMetricResult metric)
+    {
+        if (metric.Outcome == CoveragePatchApplicabilityOutcome.NotApplicable)
+        {
+            await console.Output.WriteLineAsync($"  {label}: N/A (no reported patch points; changed lines {metric.ChangedLines})").ConfigureAwait(false);
+            return;
+        }
+        if (metric.Outcome == CoveragePatchApplicabilityOutcome.Unverified)
+        {
+            await console.Output.WriteLineAsync($"  {label}: unverified ({metric.Reason})").ConfigureAwait(false);
+            return;
+        }
+        var percent = metric.Percent is { } value ? value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "%" : "unknown";
+        await console.Output.WriteLineAsync($"  {label}: measured {metric.Covered}/{metric.Measurable} reported points; changed lines {metric.ChangedLines}; {percent}").ConfigureAwait(false);
+    }
+
     private CoverageFanInCliEnvelope CreateEnvelope(string status, string? operationId,
         CoverageOperationOutcome? operationOutcome, CoverageOperationEffects? effects, bool effectsKnown,
-        CoverageFanInResult? result, CoverageFanInCliDelivery delivery, IReadOnlyList<CoverageFanInCliDiagnostic> diagnostics)
-        => new(2, result?.Operation ?? operation, status, operationId, operationOutcome, effects, effectsKnown,
-            result is null ? null : CoverageFanInCliResult.From(result), delivery, diagnostics.Take(16).ToArray());
+        CoverageFanInResult? result, CoverageFanInCliDelivery delivery, IReadOnlyList<CoverageFanInCliDiagnostic> diagnostics,
+        int contractVersion)
+        => new(contractVersion, result?.Operation ?? operation, status, operationId, operationOutcome, effects, effectsKnown,
+            result is null ? null : CoverageFanInCliResult.From(result, contractVersion), delivery, diagnostics.Take(16).ToArray());
 
     private static CoverageFanInCliDelivery DeliveryInfo(ICoverageFanInResultDelivery? delivery, string status, bool predictCommit = false)
         => delivery is null ? new(false, status, false, null)
@@ -305,7 +369,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
 
     private static byte[] SerializeBounded(CoverageFanInCliEnvelope envelope, out bool compacted)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOptions);
+        var bytes = CoverageFanInCliCodec.Serialize(envelope, JsonOptions);
         if (bytes.Length <= MaximumJsonBytes)
         {
             compacted = false;
@@ -316,7 +380,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
         var diagnostic = new CoverageFanInCliDiagnostic("ASCOVF006", "result", "result",
             "The result exceeded the 1 MiB terminal limit; inspect the retained operation artifacts directly.");
         var summary = envelope with { Result = null, Diagnostics = [diagnostic] };
-        bytes = JsonSerializer.SerializeToUtf8Bytes(summary, JsonOptions);
+        bytes = CoverageFanInCliCodec.Serialize(summary, JsonOptions);
         if (bytes.Length > MaximumJsonBytes)
             throw new InvalidOperationException("Bounded coverage fan-in result could not be encoded.");
         return bytes;
@@ -338,7 +402,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
     }
 }
 
-[Command("coverage fan-in capture", Description = "Capture validated producer evidence (fresh output is the default); requires a clean Git source and complete primary or declared supplementary producer artifacts. Next run compose with the exact policy supplement set. --collect runs the complete declared inventory and requires the .NET SDK, test projects, and collector prerequisites; it defaults to one worker with restore and build enabled.")]
+[Command("coverage fan-in capture", Description = "Capture validated producer evidence (fresh output is the default); requires a clean Git source and complete primary or declared supplementary producer artifacts. Use homogeneous schemaVersion/policy contractVersion 2 for legacy behavior or 3 with reportProfileId=coverlet-collector-cobertura-v1 for report-based applicability. Next run compose with the exact policy supplement set. --collect runs the complete declared inventory and requires the .NET SDK, test projects, and collector prerequisites; it defaults to one worker with restore and build enabled.")]
 internal sealed partial class CoverageFanInCaptureCommand : CoverageFanInCommandBase
 {
     public CoverageFanInCaptureCommand() : base("capture", requiresResult: true) { }
@@ -352,7 +416,7 @@ internal sealed partial class CoverageFanInCaptureCommand : CoverageFanInCommand
     protected override bool CollectRequested => Collect;
 }
 
-[Command("coverage fan-in compose", Description = "Compose one primary capture and the exact declared supplementary captures using the requested fresh output mode. Requires complete v2 captures, matching source/run identity, and a clean Git source. Next run accept; composition alone does not accept coverage.")]
+[Command("coverage fan-in compose", Description = "Compose one primary capture and the exact declared supplementary captures using the requested fresh output mode. Requires complete v2 captures for legacy policies or complete v3 captures for report-applicability policies; versions cannot be mixed. Source/run identity and a clean Git source must match. Next run accept; composition alone does not accept coverage.")]
 internal sealed partial class CoverageFanInComposeCommand : CoverageFanInCommandBase
 {
     public CoverageFanInComposeCommand() : base("compose", requiresResult: true) { }
@@ -360,7 +424,7 @@ internal sealed partial class CoverageFanInComposeCommand : CoverageFanInCommand
         : base("compose", requiresResult: true, deliveryFactory) { }
 }
 
-[Command("coverage fan-in accept", Description = "Run the declared aggregate gate, requested patch gate, and independent verification before accepting a generation. Requires primary and supplementary captures, a composed report, explicit thresholds and diff policy, and a clean Git source. Next run verify against the accepted generation.")]
+[Command("coverage fan-in accept", Description = "Run the declared aggregate gate, requested patch gate, and independent verification before accepting a generation. Requires primary and supplementary captures, a composed report, explicit thresholds and diff policy, and a clean Git source. V3 PatchAccepted includes valid notApplicable dimensions; inspect all four patch applicability outcomes and the report-based trust boundary instead of inferring measured coverage from PatchAccepted. Next run verify against the accepted generation.")]
 internal sealed partial class CoverageFanInAcceptCommand : CoverageFanInCommandBase
 {
     public CoverageFanInAcceptCommand() : base("accept", requiresResult: true) { }
@@ -368,7 +432,7 @@ internal sealed partial class CoverageFanInAcceptCommand : CoverageFanInCommandB
         : base("accept", requiresResult: true, deliveryFactory) { }
 }
 
-[Command("coverage fan-in verify", Description = "Read-only verification of an existing accepted generation; requires the matching primary/supplementary captures, composed output, policy, source identity, and acceptance directory. Creates no coordination or report files. Next consume the generation only when verified=true; --result is optional and must be fresh if supplied.")]
+[Command("coverage fan-in verify", Description = "Read-only verification of an existing accepted generation; requires the matching primary/supplementary captures, composed output, same-version policy, source identity, and acceptance directory. V3 verification preserves all four measured/notApplicable/unverified dimensions; PatchAccepted alone does not imply measured coverage. Creates no coordination or report files. Next consume the generation only when verified=true and its applicability matches your requirement; --result is optional and must be fresh if supplied.")]
 internal sealed partial class CoverageFanInVerifyCommand : CoverageFanInCommandBase
 {
     public CoverageFanInVerifyCommand() : base("verify", requiresResult: false) { }
@@ -376,7 +440,10 @@ internal sealed partial class CoverageFanInVerifyCommand : CoverageFanInCommandB
         : base("verify", requiresResult: false, deliveryFactory) { }
 }
 
-internal sealed record ParsedCoverageFanInRequest(string Operation, object Request);
+internal sealed record ParsedCoverageFanInRequest(string Operation, object Request)
+{
+    internal int ContractVersion { get; init; } = 2;
+}
 
 internal sealed record CoverageFanInCliEnvelope(int SchemaVersion, string Operation, string Status,
     string? OperationId, CoverageOperationOutcome? OperationOutcome, CoverageOperationEffects? Effects,
@@ -387,14 +454,70 @@ internal sealed record CoverageFanInCliEnvelope(int SchemaVersion, string Operat
 internal sealed record CoverageFanInCliResult(string Operation, CoverageOperationOutcome Outcome, string OperationId,
     string? PolicyDigest, CoverageOperationEffects Effects, IReadOnlyList<CoverageFanInCliArtifact> Artifacts,
     IReadOnlyList<CoverageDiagnostic> Diagnostics, bool Accepted, bool Verified, string PatchOutcome,
-    CoverageObservation? Observation, CoverageEvaluationIntent EvaluationIntent, bool PrimaryImported)
+    CoverageObservation? Observation, CoverageEvaluationIntent EvaluationIntent, bool PrimaryImported,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CoveragePatchApplicability? PatchApplicability = null,
+    CoverageFanInAccounting? Accounting = null)
 {
-    internal static CoverageFanInCliResult From(CoverageFanInResult result) => new(
+    internal static CoverageFanInCliResult From(CoverageFanInResult result) => From(result, 2);
+
+    internal static CoverageFanInCliResult From(CoverageFanInResult result, int contractVersion) => new(
         result.Operation, result.Outcome, result.OperationId, result.PolicyDigest, result.Effects,
         result.Artifacts.Select(artifact => new CoverageFanInCliArtifact(
             SafeRole(artifact.Role), artifact.Length, artifact.Sha256)).ToArray(),
         result.Diagnostics, result.Accepted, result.Verified, result.PatchOutcome, result.Observation,
-        result.EvaluationIntent, result.PrimaryImported);
+        result.EvaluationIntent, result.PrimaryImported,
+        contractVersion == 3 ? result.PatchApplicability : null,
+        contractVersion == 3 ? result.Accounting : null);
+
+    internal static bool IsValidForV3(CoverageFanInResult result)
+    {
+        if (result.Operation is ("capture" or "compose") && result.PatchApplicability is not null) return false;
+        if (result.PatchApplicability is { } applicability && !IsValid(applicability)) return false;
+        return !string.Equals(result.PatchOutcome, "PatchAccepted", StringComparison.Ordinal)
+            || result.PatchApplicability is { } accepted && IsCompleteAcceptedApplicability(accepted);
+    }
+
+    private static bool IsValid(CoveragePatchApplicability applicability)
+    {
+        if (applicability.Primary is null || applicability.Composed is null
+            || !IsValidLine(applicability.Primary.Line) || !IsValid(applicability.Primary.Branch)
+            || !IsValidLine(applicability.Composed.Line) || !IsValid(applicability.Composed.Branch)) return false;
+        var changedLineCounts = new[] { applicability.Primary.Line, applicability.Primary.Branch,
+            applicability.Composed.Line, applicability.Composed.Branch }
+            .Where(metric => metric.Outcome != CoveragePatchApplicabilityOutcome.Unverified)
+            .Select(metric => metric.ChangedLines).Distinct().ToArray();
+        return changedLineCounts.Length <= 1;
+    }
+
+    private static bool IsCompleteAcceptedApplicability(CoveragePatchApplicability applicability)
+        => IsValid(applicability)
+            && applicability.Primary.Line.Outcome != CoveragePatchApplicabilityOutcome.Unverified
+            && applicability.Primary.Branch.Outcome != CoveragePatchApplicabilityOutcome.Unverified
+            && applicability.Composed.Line.Outcome != CoveragePatchApplicabilityOutcome.Unverified
+            && applicability.Composed.Branch.Outcome != CoveragePatchApplicabilityOutcome.Unverified;
+
+    private static bool IsValid(CoveragePatchMetricResult metric)
+    {
+        if (metric is null) return false;
+        return metric.Outcome switch
+        {
+            CoveragePatchApplicabilityOutcome.Measured => metric.Reason == "reported-points"
+                && metric.ChangedLines is >= 0 && metric.Measurable is > 0 && metric.Covered is >= 0
+                && metric.Covered <= metric.Measurable && metric.Percent is >= 0 and <= 100,
+            CoveragePatchApplicabilityOutcome.NotApplicable => metric.Reason == "no-reported-patch-points"
+                && metric.ChangedLines is >= 0 && metric.Measurable == 0 && metric.Covered == 0 && metric.Percent is null,
+            CoveragePatchApplicabilityOutcome.Unverified => metric.Reason == "invalid-evidence"
+                && metric.ChangedLines is null && metric.Measurable is null && metric.Covered is null && metric.Percent is null,
+            _ => false,
+        };
+    }
+
+    private static bool IsValidLine(CoveragePatchMetricResult metric)
+    {
+        if (!IsValid(metric)) return false;
+        return metric.Outcome != CoveragePatchApplicabilityOutcome.Measured
+            || metric.Measurable is { } measurable && metric.ChangedLines is { } changedLines && measurable <= changedLines;
+    }
 
     private static string SafeRole(string role) => role switch
     {
@@ -423,38 +546,361 @@ internal sealed record CoverageFanInCliArtifact(string Role, long Length, string
 internal sealed record CoverageFanInCliDelivery(bool Requested, string Status, bool ResultFileCreated,
     bool? ResultFileCommitted);
 
-internal sealed record CoverageFanInCliDiagnostic(string Code, string Stage, string Field, string Recovery);
+internal sealed record CoverageFanInCliDiagnostic(string Code, string Stage, string Field, string Recovery)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal string? Cause { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal IReadOnlyDictionary<string, string>? Context { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal IReadOnlyList<string>? Trace { get; init; }
+}
 
-internal sealed class CoverageFanInCliInputException : Exception { }
+internal sealed class CoverageFanInCliInputException(string field = "request", string cause = "invalid-policy",
+    string? recovery = null, string code = "ASCOVF001") : ArgumentException
+{
+    internal string Field { get; } = field;
+    internal string Cause { get; } = cause;
+    internal string? Recovery { get; } = recovery;
+    internal string Code { get; } = code;
+}
+
+internal static class CoverageFanInCliCodec
+{
+    private const string ReportProfileId = "coverlet-collector-cobertura-v1";
+    private const string Documentation = "https://appsurface.dev/guides/coverage-fan-in#diagnostics";
+    private static readonly string[] ContextKeys =
+    ["baseCommit", "contractVersion", "diffPolicyId", "exceptionType", "gitExitCode", "gitVersion", "headCommit", "reportProfileId"];
+    private static readonly string[] TraceNamespaces =
+    ["ForgeTrust.AppSurface.Coverage", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Cli"];
+    private static readonly HashSet<string> Causes = new(StringComparer.Ordinal)
+    {
+        "unsupported-version", "unsupported-profile", "invalid-policy", "missing-diff", "malformed-diff",
+        "truncated-diff", "unsupported-diff", "merge-base-unavailable", "identity-mismatch", "report-invalid",
+        "reported-record-loss", "applicability-mismatch", "limit-exceeded", "threshold-failed", "cancelled",
+        "deadline-exceeded", "unexpected-failure", "delivery-failed", "unsupported-git-version"
+    };
+
+    internal static byte[] Serialize(CoverageFanInCliEnvelope envelope, JsonSerializerOptions options)
+        => envelope.SchemaVersion switch
+        {
+            2 => JsonSerializer.SerializeToUtf8Bytes(ToV2(envelope), options),
+            3 => JsonSerializer.SerializeToUtf8Bytes(ToV3(envelope), options),
+            _ => throw new InvalidOperationException("Unsupported coverage fan-in result contract version.")
+        };
+
+    internal static CoverageFanInCliDiagnostic Diagnostic(int version, string code, string stage, string field,
+        string recovery, string? cause = null, IReadOnlyDictionary<string, string>? context = null,
+        IReadOnlyList<string>? trace = null)
+        => new(SafeToken(code, 32), SafeToken(stage, 64), SafeToken(field, 64), SafeText(recovery, 512))
+        {
+            Cause = version == 3 ? SafeCause(cause) : null,
+            Context = version == 3 ? SafeContext(context) : null,
+            Trace = version == 3 ? SafeTrace(trace) : null
+        };
+
+    internal static IReadOnlyDictionary<string, string>? ContextFor(int version)
+        => version == 3 ? new Dictionary<string, string>(StringComparer.Ordinal) { ["contractVersion"] = "3" } : null;
+
+    internal static IReadOnlyDictionary<string, string>? ContextFor(ParsedCoverageFanInRequest request, Type? exceptionType = null)
+    {
+        if (request.ContractVersion != 3) return null;
+        var policy = PolicyFor(request);
+        var context = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["contractVersion"] = "3",
+            ["reportProfileId"] = policy.ReportProfileId ?? ReportProfileId,
+            ["headCommit"] = policy.Source.Commit
+        };
+        if (policy.Gate.DiffBase is not null) context["baseCommit"] = policy.Gate.DiffBase;
+        if (exceptionType is not null) context["exceptionType"] = exceptionType.Name;
+        return SafeContext(context);
+    }
+
+    internal static IReadOnlyList<string> TraceFor(Exception exception)
+    {
+        var frames = new StackTrace(exception, fNeedFileInfo: false).GetFrames() ?? [];
+        var safe = new List<string>(8);
+        foreach (var frame in frames)
+        {
+            var method = frame.GetMethod();
+            var type = method?.DeclaringType;
+            var fullName = type?.FullName;
+            if (method is null || fullName is null || !IsAllowedTypeName(fullName)) continue;
+            var candidate = $"{fullName}.{method.Name}";
+            if (!IsSafeFrame(candidate)) continue;
+            safe.Add(candidate);
+            if (safe.Count == 8) break;
+        }
+        return safe.Count == 0
+            ? ["handled-at:ForgeTrust.AppSurface.Cli.CoverageFanInCommandBase.ExecuteAsync"]
+            : safe;
+    }
+
+    internal static string FormatDiagnostic(CoverageDiagnostic diagnostic, int version)
+    {
+        if (version == 2) return $"{diagnostic.Code}: {diagnostic.Recovery}";
+        var projected = ToV3(diagnostic);
+        return FormatDiagnostic(projected.Code, projected.Stage, projected.Field, projected.Recovery,
+            projected.Cause, projected.Context, projected.Trace);
+    }
+
+    internal static string FormatDiagnostic(CoverageFanInCliDiagnostic diagnostic, int version)
+        => version == 2
+            ? $"{diagnostic.Code}: {diagnostic.Recovery}"
+            : FormatDiagnostic(diagnostic.Code, diagnostic.Stage, diagnostic.Field, diagnostic.Recovery,
+                SafeCause(diagnostic.Cause), SafeContext(diagnostic.Context), SafeTrace(diagnostic.Trace));
+
+    internal static IReadOnlyList<string>? SafeTrace(IReadOnlyList<string>? trace)
+    {
+        if (trace is null) return null;
+        return trace.Where(IsSafeFrame).Take(8).Select(value => SafeText(value, 256)).ToArray();
+    }
+
+    private static object ToV2(CoverageFanInCliEnvelope envelope)
+        => new CoverageFanInCliEnvelopeV2(envelope.SchemaVersion, envelope.Operation, envelope.Status,
+            envelope.OperationId, envelope.OperationOutcome, ToEffects(envelope.Effects), envelope.EffectsKnown,
+            envelope.Result is null ? null : ToV2(envelope.Result), ToDelivery(envelope.Delivery),
+            envelope.Diagnostics.Select(ToV2).ToArray());
+
+    private static object ToV3(CoverageFanInCliEnvelope envelope)
+        => new CoverageFanInCliEnvelopeV3(envelope.SchemaVersion, envelope.Operation, envelope.Status,
+            envelope.OperationId, envelope.OperationOutcome, ToEffects(envelope.Effects), envelope.EffectsKnown,
+            envelope.Result is null ? null : ToV3(envelope.Result), ToDelivery(envelope.Delivery),
+            envelope.Diagnostics.Select(ToV3).ToArray());
+
+    private static CoverageFanInCliResultV2 ToV2(CoverageFanInCliResult result)
+        => new(result.Operation, result.Outcome, result.OperationId, result.PolicyDigest, ToRequiredEffects(result.Effects),
+            result.Artifacts.Select(ToArtifact).ToArray(), result.Diagnostics.Select(ToV2).ToArray(),
+            result.Accepted, result.Verified, result.PatchOutcome, result.Observation, result.EvaluationIntent,
+            result.PrimaryImported);
+
+    private static CoverageFanInCliResultV3 ToV3(CoverageFanInCliResult result)
+        => new(result.Operation, result.Outcome, result.OperationId, result.PolicyDigest, ToRequiredEffects(result.Effects),
+            result.Artifacts.Select(ToArtifact).ToArray(), result.Diagnostics.Select(ToV3).ToArray(),
+            result.Accepted, result.Verified, result.PatchOutcome, result.Observation, result.EvaluationIntent,
+            result.PrimaryImported, result.PatchApplicability is null ? null : ToV3(result.PatchApplicability),
+            result.Accounting is null ? null : new CoverageFanInCliAccounting(result.Accounting.UsedBytes, result.Accounting.LimitBytes,
+                result.Accounting.XmlBytes, result.Accounting.JsonBytes, result.Accounting.LineRecords,
+                result.Accounting.BranchRecords, result.Accounting.StagedBytes, result.Accounting.StagedFiles));
+
+    private static CoverageFanInCliDiagnosticV2 ToV2(CoverageFanInCliDiagnostic diagnostic)
+        => new(diagnostic.Code, diagnostic.Stage, diagnostic.Field, diagnostic.Recovery);
+
+    private static CoverageFanInCliDiagnosticV3 ToV3(CoverageFanInCliDiagnostic diagnostic)
+        => new(diagnostic.Code, diagnostic.Stage, diagnostic.Field, diagnostic.Recovery,
+            SafeCause(diagnostic.Cause), SafeContext(diagnostic.Context), SafeTrace(diagnostic.Trace));
+
+    private static CoverageFanInCliOperationDiagnosticV2 ToV2(CoverageDiagnostic diagnostic)
+        => new(SafeToken(diagnostic.Code, 32), SafeToken(diagnostic.Stage, 64), SafeToken(diagnostic.Field, 64),
+            SafeText(diagnostic.Recovery, 512), diagnostic.Documentation);
+
+    private static CoverageFanInCliOperationDiagnosticV3 ToV3(CoverageDiagnostic diagnostic)
+        => new(SafeToken(diagnostic.Code, 32), SafeToken(diagnostic.Stage, 64), SafeToken(diagnostic.Field, 64),
+            SafeText(diagnostic.Recovery, 512), Documentation, SafeCause(diagnostic.Cause),
+            SafeContext(diagnostic.Context), SafeTrace(diagnostic.Trace));
+
+    private static CoverageFanInCliPatchApplicability ToV3(CoveragePatchApplicability applicability)
+        => new(ToV3(applicability.Primary), ToV3(applicability.Composed));
+
+    private static CoverageFanInCliPatchMetricSet ToV3(CoveragePatchMetricSet metrics)
+        => new(ToV3(metrics.Line), ToV3(metrics.Branch));
+
+    private static CoverageFanInCliPatchMetric ToV3(CoveragePatchMetricResult metric)
+        => new(metric.Outcome switch
+        {
+            CoveragePatchApplicabilityOutcome.Measured => "measured",
+            CoveragePatchApplicabilityOutcome.NotApplicable => "notApplicable",
+            CoveragePatchApplicabilityOutcome.Unverified => "unverified",
+            _ => throw new InvalidOperationException("Unknown patch applicability outcome.")
+        }, metric.Reason, metric.ChangedLines, metric.Measurable, metric.Covered, metric.Percent);
+
+    private static CoverageFanInCliEffects? ToEffects(CoverageOperationEffects? effects)
+        => effects is null ? null : new(effects.OutputCreated, effects.GenerationCommitted, effects.CleanupComplete,
+            effects.Imported, effects.Generation);
+
+    private static CoverageFanInCliEffects ToRequiredEffects(CoverageOperationEffects effects)
+        => new(effects.OutputCreated, effects.GenerationCommitted, effects.CleanupComplete,
+            effects.Imported, effects.Generation);
+
+    private static CoverageFanInCliArtifact ToArtifact(CoverageFanInCliArtifact artifact)
+        => new(artifact.Role, artifact.Length, artifact.Sha256);
+
+    private static CoverageFanInCliDelivery ToDelivery(CoverageFanInCliDelivery delivery)
+        => new(delivery.Requested, delivery.Status, delivery.ResultFileCreated, delivery.ResultFileCommitted);
+
+    private static string? SafeCause(string? value) => value is not null && Causes.Contains(value) ? value : null;
+
+    private static IReadOnlyDictionary<string, string>? SafeContext(IReadOnlyDictionary<string, string>? context)
+    {
+        if (context is null) return null;
+        var safe = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pair in context)
+        {
+            if (Array.BinarySearch(ContextKeys, pair.Key, StringComparer.Ordinal) < 0 || !IsSafeContextValue(pair.Key, pair.Value)) continue;
+            safe[pair.Key] = pair.Value;
+        }
+        return safe.Count == 0 ? null : safe;
+    }
+
+    private static bool IsSafeContextValue(string key, string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 128 || value.Any(char.IsControl)) return false;
+        return key switch
+        {
+            "contractVersion" => value == "3",
+            "reportProfileId" => value == ReportProfileId,
+            "baseCommit" or "headCommit" => (value.Length is 40 or 64) && value.All(Uri.IsHexDigit),
+            "gitExitCode" => int.TryParse(value, System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture, out _),
+            "exceptionType" => IsIdentifier(value),
+            "diffPolicyId" or "gitVersion" => value.All(character => char.IsAsciiLetterOrDigit(character)
+                || character is '.' or '-' or '_'),
+            _ => false
+        };
+    }
+
+    private static bool IsAllowedTypeName(string name)
+        => TraceNamespaces.Any(prefix => name.StartsWith(prefix + ".", StringComparison.Ordinal));
+
+    private static bool IsSafeFrame(string frame)
+    {
+        if (frame.StartsWith("handled-at:", StringComparison.Ordinal))
+            frame = frame["handled-at:".Length..];
+        if (frame.Length is 0 or > 256 || !IsAllowedTypeName(frame)) return false;
+        return frame.All(character => char.IsAsciiLetterOrDigit(character)
+            || character is '.' or '_' or '+' or '`' or '<' or '>' or '-');
+    }
+
+    private static bool IsIdentifier(string value)
+        => value.Length is > 0 and <= 128 && (char.IsAsciiLetter(value[0]) || value[0] == '_')
+            && value.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
+
+    private static string SafeToken(string value, int maximum)
+        => string.IsNullOrEmpty(value) ? "unknown"
+            : new string(value.Take(maximum).Select(character => char.IsAsciiLetterOrDigit(character)
+                || character is '.' or '_' or '-' ? character : '_').ToArray());
+
+    private static string SafeText(string value, int maximum)
+    {
+        var safe = new System.Text.StringBuilder(Math.Min(value.Length, maximum));
+        foreach (var character in value)
+        {
+            if (safe.Length >= maximum) break;
+            safe.Append(char.IsControl(character) ? ' ' : character);
+        }
+        return safe.ToString();
+    }
+
+    private static string FormatDiagnostic(string code, string stage, string field, string recovery, string? cause,
+        IReadOnlyDictionary<string, string>? context, IReadOnlyList<string>? trace)
+    {
+        var contextText = context is null ? string.Empty
+            : "; context=" + string.Join(',', context.Select(pair => $"{pair.Key}={pair.Value}"));
+        var traceText = trace is null ? string.Empty : "; trace=" + string.Join(" <- ", trace);
+        return SafeText($"{SafeToken(code, 32)} {SafeToken(stage, 64)} {SafeToken(field, 64)}: {cause ?? "invalid-policy"}{contextText}{traceText}. Fix: {SafeText(recovery, 512)}", 2048);
+    }
+
+    private static CoverageFanInPolicy PolicyFor(ParsedCoverageFanInRequest request) => request.Request switch
+    {
+        CoverageCaptureRequest capture => capture.Policy,
+        CoverageCollectRequest collect => collect.Policy,
+        CoverageComposeRequest compose => compose.Policy,
+        CoverageAcceptRequest accept => accept.Policy,
+        CoverageVerifyRequest verify => verify.Policy,
+        _ => throw new InvalidOperationException("Unknown coverage fan-in request.")
+    };
+
+    private sealed record CoverageFanInCliEnvelopeV2(int SchemaVersion, string Operation, string Status,
+        string? OperationId, CoverageOperationOutcome? OperationOutcome, CoverageFanInCliEffects? Effects,
+        bool EffectsKnown, CoverageFanInCliResultV2? Result, CoverageFanInCliDelivery Delivery,
+        IReadOnlyList<CoverageFanInCliDiagnosticV2> Diagnostics);
+
+    private sealed record CoverageFanInCliEnvelopeV3(int SchemaVersion, string Operation, string Status,
+        string? OperationId, CoverageOperationOutcome? OperationOutcome, CoverageFanInCliEffects? Effects,
+        bool EffectsKnown, CoverageFanInCliResultV3? Result, CoverageFanInCliDelivery Delivery,
+        IReadOnlyList<CoverageFanInCliDiagnosticV3> Diagnostics);
+
+    private sealed record CoverageFanInCliResultV2(string Operation, CoverageOperationOutcome Outcome, string OperationId,
+        string? PolicyDigest, CoverageFanInCliEffects Effects, IReadOnlyList<CoverageFanInCliArtifact> Artifacts,
+        IReadOnlyList<CoverageFanInCliOperationDiagnosticV2> Diagnostics, bool Accepted, bool Verified,
+        string PatchOutcome, CoverageObservation? Observation, CoverageEvaluationIntent EvaluationIntent, bool PrimaryImported);
+
+    private sealed record CoverageFanInCliResultV3(string Operation, CoverageOperationOutcome Outcome, string OperationId,
+        string? PolicyDigest, CoverageFanInCliEffects Effects, IReadOnlyList<CoverageFanInCliArtifact> Artifacts,
+        IReadOnlyList<CoverageFanInCliOperationDiagnosticV3> Diagnostics, bool Accepted, bool Verified,
+        string PatchOutcome, CoverageObservation? Observation, CoverageEvaluationIntent EvaluationIntent, bool PrimaryImported,
+        CoverageFanInCliPatchApplicability? PatchApplicability, CoverageFanInCliAccounting? Accounting);
+
+    private sealed record CoverageFanInCliAccounting(long UsedBytes, long LimitBytes, long XmlBytes, long JsonBytes,
+        long LineRecords, long BranchRecords, long StagedBytes, long StagedFiles);
+
+    private sealed record CoverageFanInCliEffects(bool OutputCreated, bool GenerationCommitted, bool CleanupComplete,
+        bool Imported, string? Generation);
+    private sealed record CoverageFanInCliDiagnosticV2(string Code, string Stage, string Field, string Recovery);
+    private sealed record CoverageFanInCliDiagnosticV3(string Code, string Stage, string Field, string Recovery,
+        string? Cause, IReadOnlyDictionary<string, string>? Context, IReadOnlyList<string>? Trace);
+    private sealed record CoverageFanInCliOperationDiagnosticV2(string Code, string Stage, string Field, string Recovery,
+        string Documentation);
+    private sealed record CoverageFanInCliOperationDiagnosticV3(string Code, string Stage, string Field, string Recovery,
+        string Documentation, string? Cause, IReadOnlyDictionary<string, string>? Context, IReadOnlyList<string>? Trace);
+    private sealed record CoverageFanInCliPatchApplicability(CoverageFanInCliPatchMetricSet Primary,
+        CoverageFanInCliPatchMetricSet Composed);
+    private sealed record CoverageFanInCliPatchMetricSet(CoverageFanInCliPatchMetric Line,
+        CoverageFanInCliPatchMetric Branch);
+    private sealed record CoverageFanInCliPatchMetric(string Outcome, string Reason, int? ChangedLines,
+        int? Measurable, int? Covered, decimal? Percent);
+}
 
 internal static class CoverageFanInRequestReader
 {
     internal static ParsedCoverageFanInRequest Parse(ReadOnlyMemory<byte> json)
     {
-        using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 64, CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false });
-        var root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object) throw new CoverageFanInCliInputException();
-        CoveragePolicyEncoding.CheckSyntax(root);
-        var rootFields = ReadExactObject(root, "schemaVersion", "operation", "request");
-        if (!rootFields["schemaVersion"].TryGetInt32(out var version) || version != 2
-            || rootFields["operation"].ValueKind != JsonValueKind.String)
-            throw new CoverageFanInCliInputException();
-        var operation = rootFields["operation"].GetString();
-        var requestElement = rootFields["request"];
-        var (type, requiredMembers) = operation switch
+        try
         {
-            "capture" => (typeof(CoverageCaptureRequest), new[] { "policy", "repositoryRoot", "outputDirectory", "producerId" }),
-            "collect" => (typeof(CoverageCollectRequest), new[] { "policy", "repositoryRoot", "outputDirectory", "collectionDirectory", "producerId", "deadlineSeconds" }),
-            "compose" => (typeof(CoverageComposeRequest), new[] { "policy", "repositoryRoot", "primaryCaptureDirectory", "supplementaryCaptureDirectories", "outputDirectory" }),
-            "accept" => (typeof(CoverageAcceptRequest), new[] { "policy", "repositoryRoot", "primaryCaptureDirectory", "supplementaryCaptureDirectories", "composedOutputDirectory", "outputDirectory" }),
-            "verify" => (typeof(CoverageVerifyRequest), new[] { "policy", "repositoryRoot", "primaryCaptureDirectory", "supplementaryCaptureDirectories", "composedOutputDirectory", "acceptedOutputDirectory" }),
-            _ => throw new CoverageFanInCliInputException(),
-        };
-        ValidateRequired(requestElement, requiredMembers);
-        ValidateRequestShape(type, requestElement);
-        var request = JsonSerializer.Deserialize(requestElement, type, CoveragePolicyEncoding.Json)
-            ?? throw new CoverageFanInCliInputException();
-        return new(operation!, request);
+            using var document = JsonDocument.Parse(json, new JsonDocumentOptions
+            {
+                MaxDepth = 64,
+                CommentHandling = JsonCommentHandling.Disallow,
+                AllowTrailingCommas = false
+            });
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) throw new CoverageFanInCliInputException();
+            CoveragePolicyEncoding.CheckSyntax(root);
+            var rootFields = ReadObject(root, ["schemaVersion", "operation", "request"]);
+            var version = ReadInt32(rootFields["schemaVersion"]);
+            if (version is not (2 or 3))
+                throw new CoverageFanInCliInputException("schemaVersion", "unsupported-version",
+                    "Select supported schemaVersion 2 or 3 before creating a result destination.");
+            var operation = ReadString(rootFields["operation"]);
+            var requestElement = rootFields["request"];
+            var request = ReadOperation(operation, requestElement, version);
+            var policy = PolicyOf(request);
+            if (policy.ContractVersion != version)
+                throw new CoverageFanInCliInputException("policy", "unsupported-version",
+                    "Use one contract version consistently in schemaVersion and policy.contractVersion.");
+            return new(operation, request) { ContractVersion = version };
+        }
+        catch (CoverageFanInCliInputException) { throw; }
+        catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException
+            or FormatException or OverflowException)
+        {
+            throw new CoverageFanInCliInputException();
+        }
+    }
+
+    internal static int TryReadEnvelopeVersion(ReadOnlyMemory<byte> json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 64 });
+            var root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("schemaVersion", out var value)
+                && value.ValueKind == JsonValueKind.Number
+                && TryReadInt32(value, out var version) && version == 3 ? 3 : 2;
+        }
+        catch (JsonException) { return 2; }
     }
 
     internal static void ValidateCanonicalPolicy(ParsedCoverageFanInRequest parsed)
@@ -517,6 +963,10 @@ internal static class CoverageFanInRequestReader
                 RequireCaptureInventory(accept.Policy, accept.PrimaryCaptureDirectory, accept.SupplementaryCaptureDirectories);
                 if (!HasText(accept.ComposedOutputDirectory) || !HasText(accept.OutputDirectory))
                     throw new CoverageFanInCliInputException();
+                if (parsed.ContractVersion == 3 && accept.Policy.Gate.Mode == CoverageGateMode.AggregateAndPatch
+                    && !IsSha256(accept.ExpectedPatchSha256))
+                    throw new CoverageFanInCliInputException("expectedPatchSha256", "invalid-policy",
+                        "Set expectedPatchSha256 to the exact pinned patch digest before v3 patch acceptance.");
                 break;
             case CoverageVerifyRequest verify:
                 RequireCaptureInventory(verify.Policy, verify.PrimaryCaptureDirectory, verify.SupplementaryCaptureDirectories);
@@ -535,114 +985,297 @@ internal static class CoverageFanInRequestReader
         }
     }
 
-    private static Dictionary<string, JsonElement> ReadExactObject(JsonElement element, params string[] expectedNames)
+    private static object ReadOperation(string operation, JsonElement element, int version)
     {
-        var expected = expectedNames.ToHashSet(StringComparer.Ordinal);
+        switch (operation)
+        {
+            case "capture":
+                {
+                    var fields = ReadObject(element,
+                        ["policy", "repositoryRoot", "outputDirectory", "producerId"],
+                        ["coveragePath", "timingsPath", "rawCoveragePath", "importDirectory", "originalSourceRoot", "outputMode", "rawCoveragePaths"]);
+                    return new CoverageCaptureRequest(ReadPolicy(fields["policy"], version), ReadString(fields["repositoryRoot"]),
+                        ReadString(fields["outputDirectory"]), ReadString(fields["producerId"]),
+                        ReadOptionalString(fields, "coveragePath"), ReadOptionalString(fields, "timingsPath"),
+                        ReadOptionalString(fields, "rawCoveragePath"), ReadOptionalString(fields, "importDirectory"),
+                        ReadOptionalString(fields, "originalSourceRoot"), ReadOptionalEnum(fields, "outputMode", CoverageOutputMode.Fresh),
+                        ReadOptionalStringDictionary(fields, "rawCoveragePaths"));
+                }
+            case "collect":
+                {
+                    var fields = ReadObject(element,
+                        ["policy", "repositoryRoot", "outputDirectory", "collectionDirectory", "producerId", "deadlineSeconds"],
+                        ["solutionPath", "parallelism", "noRestore", "noBuild"]);
+                    return new CoverageCollectRequest(ReadPolicy(fields["policy"], version), ReadString(fields["repositoryRoot"]),
+                        ReadString(fields["outputDirectory"]), ReadString(fields["collectionDirectory"]),
+                        ReadString(fields["producerId"]), ReadInt32(fields["deadlineSeconds"]),
+                        ReadOptionalString(fields, "solutionPath"), ReadOptionalInt32(fields, "parallelism", 1),
+                        ReadOptionalBoolean(fields, "noRestore", false), ReadOptionalBoolean(fields, "noBuild", false));
+                }
+            case "compose":
+                {
+                    var fields = ReadObject(element,
+                        ["policy", "repositoryRoot", "primaryCaptureDirectory", "supplementaryCaptureDirectories", "outputDirectory"],
+                        ["outputMode", "evaluationIntent"]);
+                    return new CoverageComposeRequest(ReadPolicy(fields["policy"], version), ReadString(fields["repositoryRoot"]),
+                        ReadString(fields["primaryCaptureDirectory"]), ReadStringArray(fields["supplementaryCaptureDirectories"]),
+                        ReadString(fields["outputDirectory"]), ReadOptionalEnum(fields, "outputMode", CoverageOutputMode.Fresh),
+                        ReadOptionalEnum(fields, "evaluationIntent", CoverageEvaluationIntent.CurrentTrustedRun));
+                }
+            case "accept":
+                {
+                    var fields = ReadObject(element,
+                        ["policy", "repositoryRoot", "primaryCaptureDirectory", "supplementaryCaptureDirectories", "composedOutputDirectory", "outputDirectory"],
+                        ["outputMode", "evaluationIntent", "expectedPatchSha256"]);
+                    return new CoverageAcceptRequest(ReadPolicy(fields["policy"], version), ReadString(fields["repositoryRoot"]),
+                        ReadString(fields["primaryCaptureDirectory"]), ReadStringArray(fields["supplementaryCaptureDirectories"]),
+                        ReadString(fields["composedOutputDirectory"]), ReadString(fields["outputDirectory"]),
+                        ReadOptionalEnum(fields, "outputMode", CoverageOutputMode.Fresh),
+                        ReadOptionalEnum(fields, "evaluationIntent", CoverageEvaluationIntent.CurrentTrustedRun))
+                    { ExpectedPatchSha256 = ReadOptionalString(fields, "expectedPatchSha256") };
+                }
+            case "verify":
+                {
+                    var fields = ReadObject(element,
+                        ["policy", "repositoryRoot", "primaryCaptureDirectory", "supplementaryCaptureDirectories", "composedOutputDirectory", "acceptedOutputDirectory"],
+                        ["evaluationIntent"]);
+                    return new CoverageVerifyRequest(ReadPolicy(fields["policy"], version), ReadString(fields["repositoryRoot"]),
+                        ReadString(fields["primaryCaptureDirectory"]), ReadStringArray(fields["supplementaryCaptureDirectories"]),
+                        ReadString(fields["composedOutputDirectory"]), ReadString(fields["acceptedOutputDirectory"]),
+                        ReadOptionalEnum(fields, "evaluationIntent", CoverageEvaluationIntent.CurrentTrustedRun));
+                }
+            default:
+                throw new CoverageFanInCliInputException("operation", "invalid-policy",
+                    "Use one registered operation: capture, collect, compose, accept, or verify.");
+        }
+    }
+
+    private static CoverageFanInPolicy ReadPolicy(JsonElement element, int version)
+    {
+        var required = version == 3
+            ? new[] { "contractVersion", "reportProfileId", "source", "run", "testProjects", "supplements", "gate" }
+            : ["source", "run", "testProjects", "supplements", "gate"];
+        var fields = ReadObject(element, required, ["instrumentation", "limits"]);
+        if (version == 3)
+        {
+            var selected = ReadInt32(fields["contractVersion"]);
+            if (selected != 3)
+                throw new CoverageFanInCliInputException("policy", "unsupported-version",
+                    "Use contractVersion=3 when schemaVersion=3.");
+            var profile = ReadString(fields["reportProfileId"]);
+            if (profile != "coverlet-collector-cobertura-v1")
+                throw new CoverageFanInCliInputException("policy", "unsupported-profile",
+                    "Set reportProfileId to the supported coverlet-collector-cobertura-v1 profile.");
+        }
+
+        var policy = new CoverageFanInPolicy(ReadSource(fields["source"]), ReadRun(fields["run"]),
+            ReadStringArray(fields["testProjects"]), ReadSupplements(fields["supplements"]), ReadGate(fields["gate"]),
+            ReadInstrumentation(fields), ReadLimits(fields))
+        {
+            ContractVersion = version,
+            ReportProfileId = version == 3 ? ReadString(fields["reportProfileId"]) : null
+        };
+        return policy;
+    }
+
+    private static CoverageSourceIdentity ReadSource(JsonElement element)
+    {
+        var fields = ReadObject(element, ["commit", "tree", "sdk", "configuration"]);
+        return new(ReadString(fields["commit"]), ReadString(fields["tree"]), ReadString(fields["sdk"]),
+            ReadString(fields["configuration"]));
+    }
+
+    private static CoverageRunIdentity ReadRun(JsonElement element)
+    {
+        var fields = ReadObject(element, ["producerSystem", "runScope", "runId", "attempt"]);
+        return new(ReadString(fields["producerSystem"]), ReadString(fields["runScope"]), ReadString(fields["runId"]),
+            ReadInt32(fields["attempt"]));
+    }
+
+    private static CoverageGatePolicy ReadGate(JsonElement element)
+    {
+        var fields = ReadObject(element, ["mode"], ["minLine", "minBranch", "minPatchLine", "minPatchBranch", "tolerance", "patchLineMode", "diffBase"]);
+        return new(ReadEnum<CoverageGateMode>(fields["mode"]), ReadOptionalDecimal(fields, "minLine", 95m),
+            ReadOptionalDecimal(fields, "minBranch", 85m), ReadOptionalDecimal(fields, "minPatchLine", 95m),
+            ReadOptionalDecimal(fields, "minPatchBranch", 85m), ReadOptionalDecimal(fields, "tolerance", 0.5m),
+            ReadOptionalNonNullString(fields, "patchLineMode", "codecov"), ReadOptionalString(fields, "diffBase"));
+    }
+
+    private static CoverageInstrumentation? ReadInstrumentation(IReadOnlyDictionary<string, JsonElement> fields)
+    {
+        if (!fields.TryGetValue("instrumentation", out var element)) return null;
+        if (element.ValueKind == JsonValueKind.Null) return null;
+        var values = ReadObject(element, [], ["driver", "format", "include", "exclude", "normalization"]);
+        return new(ReadOptionalNonNullString(values, "driver", "collector"), ReadOptionalNonNullString(values, "format", "cobertura"),
+            ReadOptionalString(values, "include"), ReadOptionalNonNullString(values, "exclude", "[*.Tests]*,[*.IntegrationTests]*"),
+            ReadOptionalNonNullString(values, "normalization", "appsurface-coverage-merge"));
+    }
+
+    private static CoverageOperationLimits? ReadLimits(IReadOnlyDictionary<string, JsonElement> fields)
+    {
+        if (!fields.TryGetValue("limits", out var element)) return null;
+        if (element.ValueKind == JsonValueKind.Null) return null;
+        var values = ReadObject(element, [], ["xmlBytes", "jsonBytes", "totalBytes", "depth", "lineRecordsPerReport",
+            "inputBundles", "xmlElementsPerReport", "attributesPerElement", "tokenCharacters", "branchRecordsPerReport",
+            "totalRecords", "operationSeconds", "identitySeconds"]);
+        return new(ReadOptionalInt64(values, "xmlBytes", 536870912), ReadOptionalInt64(values, "jsonBytes", 1048576),
+            ReadOptionalInt64(values, "totalBytes", 4294967296), ReadOptionalInt32(values, "depth", 64),
+            ReadOptionalInt32(values, "lineRecordsPerReport", 1000000), ReadOptionalInt32(values, "inputBundles", 32),
+            ReadOptionalInt32(values, "xmlElementsPerReport", 8000000), ReadOptionalInt32(values, "attributesPerElement", 32),
+            ReadOptionalInt32(values, "tokenCharacters", 65536), ReadOptionalInt32(values, "branchRecordsPerReport", 2000000),
+            ReadOptionalInt32(values, "totalRecords", 2000000), ReadOptionalInt32(values, "operationSeconds", 300),
+            ReadOptionalInt32(values, "identitySeconds", 30));
+    }
+
+    private static IReadOnlyList<CoverageSupplement> ReadSupplements(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw new CoverageFanInCliInputException();
+        var supplements = new List<CoverageSupplement>();
+        foreach (var item in element.EnumerateArray())
+        {
+            var fields = ReadObject(item, ["id", "platform", "filter"], ["testProjects"]);
+            supplements.Add(new(ReadString(fields["id"]), ReadString(fields["platform"]), ReadString(fields["filter"]),
+                ReadOptionalStringArray(fields, "testProjects")));
+        }
+        return supplements;
+    }
+
+    private static Dictionary<string, string>? ReadOptionalStringDictionary(IReadOnlyDictionary<string, JsonElement> fields, string name)
+    {
+        if (!fields.TryGetValue(name, out var element)) return null;
+        if (element.ValueKind == JsonValueKind.Null) return null;
+        if (element.ValueKind != JsonValueKind.Object) throw new CoverageFanInCliInputException();
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.IsNullOrWhiteSpace(property.Name) || !values.TryAdd(property.Name, ReadString(property.Value)))
+                throw new CoverageFanInCliInputException();
+        }
+        return values;
+    }
+
+    private static string[] ReadStringArray(JsonElement element)
+        => ReadStringArrayCore(element);
+
+    private static string[]? ReadOptionalStringArray(IReadOnlyDictionary<string, JsonElement> fields, string name)
+    {
+        if (!fields.TryGetValue(name, out var element)) return null;
+        if (element.ValueKind == JsonValueKind.Null) return null;
+        return ReadStringArrayCore(element);
+    }
+
+    private static string[] ReadStringArrayCore(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw new CoverageFanInCliInputException();
+        return element.EnumerateArray().Select(ReadString).ToArray();
+    }
+
+    private static Dictionary<string, JsonElement> ReadObject(JsonElement element, string[] required,
+        string[]? optional = null)
+    {
+        optional ??= [];
+        var allowed = required.Concat(optional).ToHashSet(StringComparer.Ordinal);
         var result = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         if (element.ValueKind != JsonValueKind.Object) throw new CoverageFanInCliInputException();
         foreach (var property in element.EnumerateObject())
-        {
-            if (!expected.Contains(property.Name) || !result.TryAdd(property.Name, property.Value))
+            if (!allowed.Contains(property.Name) || !result.TryAdd(property.Name, property.Value))
                 throw new CoverageFanInCliInputException();
-        }
-        if (expected.Any(name => !result.ContainsKey(name))) throw new CoverageFanInCliInputException();
+        if (required.Any(name => !result.ContainsKey(name))) throw new CoverageFanInCliInputException();
         return result;
     }
 
-    private static void ValidateRequired(JsonElement request, IReadOnlyList<string> required)
+    private static string ReadString(JsonElement element)
     {
-        if (request.ValueKind != JsonValueKind.Object) throw new CoverageFanInCliInputException();
-        var members = request.EnumerateObject().ToDictionary(property => property.Name, property => property.Value, StringComparer.Ordinal);
-        if (required.Any(name => !members.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null))
+        if (element.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(element.GetString()))
             throw new CoverageFanInCliInputException();
+        return element.GetString()!;
     }
 
-    private static void ValidateRequestShape(Type type, JsonElement element)
+    private static string? ReadOptionalString(IReadOnlyDictionary<string, JsonElement> fields, string name)
     {
-        if (element.ValueKind != JsonValueKind.Object) throw new CoverageFanInCliInputException();
-        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.GetMethod is not null)
-            .ToDictionary(property => JsonNamingPolicy.CamelCase.ConvertName(property.Name), property => property, StringComparer.Ordinal);
-        var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-        foreach (var member in element.EnumerateObject())
-        {
-            if (!properties.TryGetValue(member.Name, out var property) || !values.TryAdd(member.Name, member.Value))
-                throw new CoverageFanInCliInputException();
-            ValidateValue(property.PropertyType, member.Value, new NullabilityInfoContext().Create(property));
-        }
-
-        var constructor = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
-            .OrderByDescending(candidate => candidate.GetParameters().Length).FirstOrDefault()
-            ?? throw new CoverageFanInCliInputException();
-        foreach (var parameter in constructor.GetParameters().Where(parameter => !parameter.IsOptional))
-        {
-            var memberName = JsonNamingPolicy.CamelCase.ConvertName(parameter.Name ?? string.Empty);
-            if (!values.ContainsKey(memberName)) throw new CoverageFanInCliInputException();
-        }
+        if (!fields.TryGetValue(name, out var element) || element.ValueKind == JsonValueKind.Null) return null;
+        return ReadString(element);
     }
 
-    private static void ValidateValue(Type type, JsonElement value, NullabilityInfo? nullability)
+    private static string ReadOptionalNonNullString(IReadOnlyDictionary<string, JsonElement> fields, string name, string fallback)
+        => fields.TryGetValue(name, out var element) ? ReadString(element) : fallback;
+
+    private static int ReadInt32(JsonElement element)
     {
-        var nullableUnderlying = Nullable.GetUnderlyingType(type);
-        if (value.ValueKind == JsonValueKind.Null)
-        {
-            if (nullableUnderlying is not null || (!type.IsValueType && nullability?.ReadState == NullabilityState.Nullable)) return;
+        if (!TryReadInt32(element, out var value)) throw new CoverageFanInCliInputException();
+        return value;
+    }
+
+    private static bool TryReadInt32(JsonElement element, out int value)
+    {
+        value = default;
+        if (element.ValueKind != JsonValueKind.Number || !element.TryGetDecimal(out var number)
+            || number != decimal.Truncate(number) || number < int.MinValue || number > int.MaxValue) return false;
+        value = decimal.ToInt32(number);
+        return true;
+    }
+
+    private static long ReadInt64(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Number || !element.TryGetDecimal(out var number)
+            || number != decimal.Truncate(number) || number < long.MinValue || number > long.MaxValue)
             throw new CoverageFanInCliInputException();
-        }
-        if (nullableUnderlying is not null) type = nullableUnderlying;
-
-        if (type == typeof(string))
-        {
-            if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
-                throw new CoverageFanInCliInputException();
-            return;
-        }
-        if (type == typeof(bool))
-        {
-            if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new CoverageFanInCliInputException();
-            return;
-        }
-        if (type == typeof(int))
-        {
-            _ = value.Deserialize<int>(CoveragePolicyEncoding.Json);
-            return;
-        }
-        if (type == typeof(long))
-        {
-            _ = value.Deserialize<long>(CoveragePolicyEncoding.Json);
-            return;
-        }
-        if (type == typeof(decimal))
-        {
-            if (!value.TryGetDecimal(out _)) throw new CoverageFanInCliInputException();
-            return;
-        }
-        if (type.IsEnum)
-        {
-            if (value.ValueKind != JsonValueKind.String || !StrictCoverageEnumConverterFactory.IsToken(type, value.GetString()))
-                throw new CoverageFanInCliInputException();
-            return;
-        }
-        if (type == typeof(IReadOnlyDictionary<string, string>))
-        {
-            if (value.ValueKind != JsonValueKind.Object) throw new CoverageFanInCliInputException();
-            foreach (var member in value.EnumerateObject())
-            {
-                if (string.IsNullOrWhiteSpace(member.Name)) throw new CoverageFanInCliInputException();
-                ValidateValue(typeof(string), member.Value, null);
-            }
-            return;
-        }
-        if (type.IsArray || type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>))
-        {
-            if (value.ValueKind != JsonValueKind.Array) throw new CoverageFanInCliInputException();
-            var elementType = type.IsArray ? type.GetElementType()! : type.GetGenericArguments()[0];
-            var elementNullability = nullability?.GenericTypeArguments.FirstOrDefault();
-            foreach (var item in value.EnumerateArray()) ValidateValue(elementType, item, elementNullability);
-            return;
-        }
-        ValidateRequestShape(type, value);
+        return decimal.ToInt64(number);
     }
+
+    private static decimal ReadDecimal(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Number || !element.TryGetDecimal(out var value))
+            throw new CoverageFanInCliInputException();
+        return value;
+    }
+
+    private static bool ReadBoolean(JsonElement element)
+        => element.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => throw new CoverageFanInCliInputException()
+        };
+
+    private static TEnum ReadEnum<TEnum>(JsonElement element) where TEnum : struct, Enum
+    {
+        if (element.ValueKind != JsonValueKind.String) throw new CoverageFanInCliInputException();
+        var token = element.GetString();
+        foreach (var value in Enum.GetValues<TEnum>())
+            if (string.Equals(JsonNamingPolicy.CamelCase.ConvertName(value.ToString()), token, StringComparison.Ordinal)) return value;
+        throw new CoverageFanInCliInputException();
+    }
+
+    private static TEnum ReadOptionalEnum<TEnum>(IReadOnlyDictionary<string, JsonElement> fields, string name, TEnum fallback)
+        where TEnum : struct, Enum
+        => fields.TryGetValue(name, out var element) ? ReadEnum<TEnum>(element) : fallback;
+
+    private static int ReadOptionalInt32(IReadOnlyDictionary<string, JsonElement> fields, string name, int fallback)
+        => fields.TryGetValue(name, out var element) ? ReadInt32(element) : fallback;
+
+    private static long ReadOptionalInt64(IReadOnlyDictionary<string, JsonElement> fields, string name, long fallback)
+        => fields.TryGetValue(name, out var element) ? ReadInt64(element) : fallback;
+
+    private static decimal ReadOptionalDecimal(IReadOnlyDictionary<string, JsonElement> fields, string name, decimal fallback)
+        => fields.TryGetValue(name, out var element) ? ReadDecimal(element) : fallback;
+
+    private static bool ReadOptionalBoolean(IReadOnlyDictionary<string, JsonElement> fields, string name, bool fallback)
+        => fields.TryGetValue(name, out var element) ? ReadBoolean(element) : fallback;
+
+    private static bool IsSha256(string? value)
+        => value is { Length: 64 } && value.All(Uri.IsHexDigit);
+
+    private static CoverageFanInPolicy PolicyOf(object request) => request switch
+    {
+        CoverageCaptureRequest capture => capture.Policy,
+        CoverageCollectRequest collect => collect.Policy,
+        CoverageComposeRequest compose => compose.Policy,
+        CoverageAcceptRequest accept => accept.Policy,
+        CoverageVerifyRequest verify => verify.Policy,
+        _ => throw new CoverageFanInCliInputException()
+    };
+
 }
 
 internal sealed class StrictCoverageEnumConverterFactory : JsonConverterFactory

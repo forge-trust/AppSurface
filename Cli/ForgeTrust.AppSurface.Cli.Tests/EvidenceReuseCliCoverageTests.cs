@@ -979,7 +979,7 @@ public sealed class EvidenceReuseCliCoverageTests
             if (request.Arguments.FirstOrDefault() != "test")
                 return await Inner.RunAsync(request, cancellationToken);
 
-            var environment = request.Environment;
+            var environment = request.EnvironmentOverrides;
             var pipeName = string.Empty;
             var executionId = string.Empty;
             var nonce = string.Empty;
