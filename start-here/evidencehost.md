@@ -1,5 +1,7 @@
 # EvidenceHost: risk-mediated CI without coverage theater
 
+For local producer reuse, complete public API reference, prepared-host recipe, recovery decisions, and pitfalls, continue to the [Evidence producer reuse guide](../guides/evidence-reuse.md). Reuse is opt-in and never upgrades local restored results into gate-eligible claims.
+
 EvidenceHost is AppSurface's contract-first approach to CI evidence. Its purpose is simple: make a meaningful change visibly prove the risk it introduces, while allowing an explicitly low-risk change to pass without someone inventing tests for incidental lines.
 
 It is not a replacement for a test framework, coverage collector, GitHub Actions, Aspire AppHost, Docker, or a hosted coverage dashboard. It starts no infrastructure by default and has no outbound telemetry.
@@ -29,7 +31,7 @@ That is the desired “quiet when right, obvious when wrong” interaction: a do
 
 ## What a claim means
 
-EvidenceHost has four honest outcomes:
+EvidenceHost has five honest outcomes:
 
 | Claim | May gate? | Meaning |
 | --- | --- | --- |
@@ -37,6 +39,7 @@ EvidenceHost has four honest outcomes:
 | `ReleaseComplete` | Release only | The release profile completed and an explicit CI envelope verifier accepted the run. v1 is still not independently attested. |
 | `NoEvidenceRequired` | Pull request | A checked-in, explicit empty profile matched the changed paths. It never means “tests were skipped.” |
 | `ObservationOnly` | No | A useful diagnostic run that cannot satisfy a gate. |
+| `LocalReusedComplete` | No | A successful local run restored at least one producer result. Its eligibility is `Informational`; it cannot satisfy a protected gate. See the [producer reuse guide](../guides/evidence-reuse.md). |
 
 Anything else has `ClaimKind.None`: a filtered test suite, missing browser runtime, unavailable Docker dependency, timed-out producer, or unsatisfied assertion is incomplete evidence—not a partial pass. This is intentional. A repository-wide gate on an incomplete test profile is a configuration error, and EvidenceHost makes that condition visible instead of encouraging a misleading green badge.
 

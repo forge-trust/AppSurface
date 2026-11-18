@@ -4,6 +4,8 @@
 
 Start with the [EvidenceHost guide](../../start-here/evidencehost.md). The workflow reads only explicit policy and diff inputs; it does not scan consumer assemblies, discover tests, provision third-party services, or report outbound usage telemetry.
 
+See the canonical [producer reuse guide](../../guides/evidence-reuse.md) for complete input declarations, optional multi-file report custody, cooperative child lifetime, reuse/audit CLI behavior, and candidate 1.1 constraints.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
@@ -35,6 +37,8 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 An intentionally selected `no-evidence` profile may close a gate. A skipped test project, filtered test suite, unavailable browser, missing Docker runtime, or unsupported producer cannot. `run` returns a failing command and a manifest with `ClaimKind.None` for those cases, preserving the diagnostic and next action in `evidence-summary.json`.
 
 The built-in coverage producer is an in-process adapter over the private [`ForgeTrust.AppSurface.Evidence.Coverage`](../ForgeTrust.AppSurface.Evidence.Coverage/README.md) engine shared with `appsurface coverage run` and `appsurface coverage gate`. Its policy declaration carries the exact overall and optional patch thresholds, tolerance, and patch-line mode; the resolved plan binds those values before collection begins. When a patch gate is selected, `evidence run` captures the bounded `--diff-file` bytes during planning and reuses that immutable snapshot for gate evaluation, so replacing the file mid-run cannot change the measured input. It does not silently convert a partial test selection into a full-profile claim.
+
+The CLI reuse resolver has an internal per-instance `sdkExecutableForTests` seam for deterministic SDK-version-query tests. A supplied path must be fully qualified; it affects only SDK version queries. Production omits it and resolves `dotnet` normally. It does not replace the coverage engine process runner or add a user-facing executable override.
 
 Coverage declarations may also set `coverageExecution` with a simple `configuration` identifier, `parallelism` from 1 through 32, and `testResults` of `none` or `junit`. The defaults preserve the legacy Debug, serial, no-managed-results run. These options select the build and test envelope only; the built-in producer keeps its collector, AppSurface test exclusions, coverage gates, and source scope unchanged. See the [`EvidenceCoverageExecutionOptions` contract](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceCoverageExecutionOptions.cs) for the public shape and validation limits.
 

@@ -63,14 +63,27 @@ internal sealed class CoverageExecutionException : Exception
 /// </summary>
 internal sealed class CoverageEvidenceExecutionWorkflow(CoverageRunWorkflow runWorkflow)
 {
+    /// <summary>Clones the private run engine while preserving its injected generator, clock and test seams.</summary>
+    /// <remarks>The decorator applies only to this execution workflow; other invocations keep their original runner.</remarks>
+    internal CoverageEvidenceExecutionWorkflow WithProcessRunner(Func<ICoverageRunProcessRunner, ICoverageRunProcessRunner> decorate) =>
+        new(runWorkflow.WithProcessRunner(decorate));
+
     /// <summary>
     /// Runs collection, then evaluates and writes the supplied gate only after a successful collection.
     /// </summary>
+    /// <param name="runRequest">Existing managed collection settings.</param>
+    /// <param name="gateRequest">Gate to evaluate after collection.</param>
+    /// <param name="writers">Caller-owned diagnostic streams.</param>
+    /// <param name="cancellationToken">Invocation cancellation.</param>
+    /// <param name="captureInventory">Opt in to complete receipt inventory; false preserves the fresh workflow.</param>
+    /// <param name="captureOrdinaryPublications">Capture the managed session's closed publications for ordinary report promotion independently of receipt custody limits.</param>
     public async Task<CoverageEvidenceExecutionResult> RunAndGateAsync(
         CoverageRunRequest runRequest,
         CoverageGateRequest gateRequest,
         CoverageTextWriters writers,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool captureInventory = false,
+        bool captureOrdinaryPublications = false)
     {
         ArgumentNullException.ThrowIfNull(runRequest);
         ArgumentNullException.ThrowIfNull(gateRequest);
@@ -80,6 +93,7 @@ internal sealed class CoverageEvidenceExecutionWorkflow(CoverageRunWorkflow runW
             ?? Directory.GetCurrentDirectory();
         var session = runRequest.ArtifactSession;
         var ownsSession = session is null;
+        if (captureOrdinaryPublications) session?.Inventory.EnableOrdinaryCapture();
         async Task<CoverageArtifactSession> CreateSessionAsync(CancellationToken token)
         {
             if (session is null)
@@ -87,6 +101,7 @@ internal sealed class CoverageEvidenceExecutionWorkflow(CoverageRunWorkflow runW
                 session = await CoverageArtifactSession.BeginAsync(Path.GetFullPath(runRequest.OutputDirectory), root,
                     runRequest.Clean, writers, TimeProvider.System, token).ConfigureAwait(false);
             }
+            if (captureOrdinaryPublications) session.Inventory.EnableOrdinaryCapture();
             return session;
         }
 
@@ -110,7 +125,51 @@ internal sealed class CoverageEvidenceExecutionWorkflow(CoverageRunWorkflow runW
                     runRequest.CoverageDriver.ToString(), runRequest.Configuration, runRequest.TestProjects,
                     runRequest.IncludeFilter, runRequest.ExcludeFilter)).ConfigureAwait(false);
             }
-            return new CoverageEvidenceExecutionResult(runResult, gateResult);
+            var result = new CoverageEvidenceExecutionResult(runResult, gateResult);
+            if ((!captureInventory && !captureOrdinaryPublications) || (!gateResult.Passed && !captureOrdinaryPublications)) return result;
+
+            IReadOnlyList<CoverageArtifactInventoryEntry> publications;
+            try
+            {
+                session.VerifyBinding();
+                publications = captureOrdinaryPublications
+                    ? session.Inventory.CaptureOrdinary(cancellationToken)
+                    : session.Inventory.Capture(cancellationToken);
+            }
+            catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception)
+                || exception is System.Collections.Generic.KeyNotFoundException or OverflowException or CoverageEvidenceInventoryException)
+            {
+                var reason = exception is CoverageEvidenceInventoryException failure
+                    ? failure.Reason : "inventory-unavailable";
+                return result with
+                {
+                    InventoryIneligibilityReason = captureInventory ? reason : null,
+                    OrdinaryPublicationIneligibilityReason = captureOrdinaryPublications ? reason : null,
+                };
+            }
+
+            var withPublications = captureOrdinaryPublications
+                ? result with { OrdinaryPublications = publications }
+                : result;
+            if (!captureInventory || !gateResult.Passed) return withPublications;
+            try
+            {
+                return withPublications with
+                {
+                    Inventory = CoverageEvidenceInventory.Capture(
+                        Path.GetDirectoryName(Path.GetFullPath(runRequest.OutputDirectory))!, result,
+                        publications, cancellationToken)
+                };
+            }
+            catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception)
+                || exception is System.Collections.Generic.KeyNotFoundException or OverflowException or CoverageEvidenceInventoryException)
+            {
+                return withPublications with
+                {
+                    InventoryIneligibilityReason = exception is CoverageEvidenceInventoryException failure
+                        ? failure.Reason : "inventory-unavailable"
+                };
+            }
         }
         finally
         {
@@ -151,4 +210,17 @@ internal sealed record CoverageEvidenceExecutionResult
     /// value before accessing gate details.
     /// </remarks>
     public CoverageGateResult? Gate { get; }
+
+    /// <summary>Gets the complete versioned report set when explicitly requested and safe to retain.</summary>
+    /// <remarks>Null by default; legacy fresh runs do no additional receipt work.</remarks>
+    internal CoverageEvidenceInventory? Inventory { get; init; }
+
+    /// <summary>Gets the managed session's closed publications for ordinary report promotion, without receipt limits.</summary>
+    internal IReadOnlyList<CoverageArtifactInventoryEntry>? OrdinaryPublications { get; init; }
+
+    /// <summary>Gets a bounded reason when the managed session could not close its ordinary publication set.</summary>
+    internal string? OrdinaryPublicationIneligibilityReason { get; init; }
+
+    /// <summary>Gets a bounded eligibility reason without changing the ordinary run or gate outcome.</summary>
+    internal string? InventoryIneligibilityReason { get; init; }
 }

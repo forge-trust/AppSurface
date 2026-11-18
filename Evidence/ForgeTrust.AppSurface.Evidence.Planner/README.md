@@ -71,3 +71,13 @@ The planner does not classify C# semantics or infer that a getter, constructor, 
 | `ASEVD136` | The exact patch snapshot contains malformed UTF-8 anywhere in its bytes. | Supply a valid UTF-8 unified patch; the planner rejects it before policy selection. |
 
 Read next: [contracts](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), [CLI workflow](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md), and the [policy cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).
+
+## Declared producer inputs
+
+Set the nullable init-only `EvidenceProducerDeclaration.Inputs` to `new EvidenceProducerInputs(include, exclude)` to declare complete reusable file inputs; use an empty exclude list when nothing is excluded. Omission leaves the producer ineligible for reuse. See the [reuse contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#local-producer-reuse-contract-candidate-11) for invocation opt-in, callback lifetime, claims and compatibility limits.
+
+Patterns are repository-relative forward-slash paths: exact names, `*` within a segment, and `**` as a whole segment across zero or more segments. For example, `src/**/*.cs` includes C# files below `src`, and `src/**/Generated/**` can exclude generated trees. Includes must be nonempty; both lists must be non-null. Absolute/drive paths, backslashes, empty segments, `.`/`..`, control characters, embedded `**` and unsupported `?`, bracket or brace syntax fail planning with `ASEVD137`. Literal filename whitespace is preserved. No filesystem is consulted: a syntactically valid declaration may match no files, which preparation must reject later. Declare build inputs, configuration, tools and fixtures explicitly; matching source files alone does not establish a complete execution identity.
+
+Any policy profile containing `Inputs`, an explicit artifact `MaximumFiles`, or `CooperativeChildLifetime=true` makes the resolved contract version `1.1`, even if that profile is unselected or execution will be fresh. Omission of all three preserves `1.0` bytes and digests. `MaximumFiles` must be omitted or 1 through 128; invalid values report `ASEVD126`. Slot byte limits are aggregate across files, and the producer-wide limit remains 256 MiB. See [multi-file slot semantics](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#multi-file-slots-and-versioning).
+
+These additions remain candidates pending the [released-reader and artifact feasibility proofs](../../docs/designs/issue-917-producer-reuse.md#contract-and-compatibility); current-source validation does not freeze compatibility with released packages.

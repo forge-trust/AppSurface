@@ -93,10 +93,27 @@ public sealed class RepositoryEvidenceWorkflowContractTests
             .Trim().TrimEnd(';'));
         var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
         var collector = FindStep(job["steps"].AsSequence(), "Run coverage security contracts")["run"].AsScalar();
-        var filter = Assert.Single(Regex.Matches(collector, "--filter\\s+\"([^\"]+)\"").Cast<Match>());
+        var filter = Assert.Single(Regex.Matches(collector, "\\$filter\\s*=\\s*\"([^\"]+)\"").Cast<Match>());
 
         Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
         Assert.Equal(declaredFilter, filter.Groups[1].Value);
+        Assert.Contains("'--test-argument', '--filter', '--test-argument', $filter", collector);
+        Assert.Contains("'--test-project', 'Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj'", collector);
+        Assert.Contains("'--test-project', 'Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj'", collector);
+        Assert.Contains("'--artifact-retention', 'full'", collector);
+        Assert.Contains("'--test-argument', '--blame-hang-timeout', '--test-argument', '2m'", collector);
+        var capture = FindStep(job["steps"].AsSequence(), "Attest successful native coverage evidence")["run"].AsScalar();
+        Assert.Contains("'--raw-index', $indexPath, '--timings', $timingsPath", capture);
+        Assert.Contains("$reports.Count -ne 2", capture);
+    }
+
+    [Fact]
+    public void NativeWindowsLaneRetainsBothSuitesWithItsBoundedExecutionAllowance()
+    {
+        Assert.Equal("${{ matrix.os == 'windows-latest' && 45 || 25 }}", NativeJob["timeout-minutes"].AsScalar());
+        var command = FindStep(NativeJob["steps"].AsSequence(), "Test native lifecycle contracts for selected producers")["run"].AsScalar();
+        Assert.Contains("dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj", command);
+        Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", command);
     }
 
     [Fact]
@@ -152,7 +169,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
         Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
         Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", testCommand);
-        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests'", testCommand);
+        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence|FullyQualifiedName~CoverageArtifactMetadataDurabilityTests|FullyQualifiedName~CoverageArtifactEnumerationDecisionTests'", testCommand);
         Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
         Assert.Contains("SolutionCoverageHandoffTests", testCommand);
 
@@ -332,6 +349,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("--package-proof", proof["run"].AsScalar());
         Assert.Contains("/p:RepositoryCommit=$env:SOURCE_COMMIT", proof["run"].AsScalar());
         Assert.Contains("$LASTEXITCODE -eq 0 -or (Test-Path $output)", rejection["run"].AsScalar());
+        Assert.Contains("<repository type='git' commit='$candidateCommit'/>", rejection["run"].AsScalar());
+        Assert.Contains("coverage.private-dependency-invalid", rejection["run"].AsScalar());
+        var lifecycle = FindStep(steps, "Test native lifecycle contracts for selected producers")["run"].AsScalar();
+        Assert.Contains("FullyQualifiedName~EvidenceReusePackageProofTests", lifecycle);
         var upload = FindStep(steps, "Preserve evidence inputs, plan, proof, and artifacts")["with"].AsMapping()["path"].AsScalar();
         Assert.Contains("native-coverage-library-proof/proof.json", upload);
         Assert.Contains("native-coverage-library-proof/published-proof/runs/**", upload);

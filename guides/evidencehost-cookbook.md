@@ -1,5 +1,7 @@
 # EvidenceHost Cookbook
 
+The [local producer reuse recipe](./evidence-reuse.md) covers explicit input promises, cooperative child lifetime, fresh/reuse CLI commands, prepared-host composition, store recovery, and versioned contracts. Treat its version matrix as a candidate until the released-reader matrix is recorded.
+
 For a checked-in executable example, see [native EvidenceHost acceptance](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). AppSurface uses that recipe to validate its packed storage CLI and installed-package consumer through the same explicit producer contracts available to applications.
 
 Its [shared local and CI policy recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development)

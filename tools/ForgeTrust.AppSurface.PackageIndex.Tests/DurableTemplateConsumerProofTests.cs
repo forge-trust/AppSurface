@@ -357,7 +357,9 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
     [Theory]
     [InlineData("first-work")]
     [InlineData("replacement-first-work")]
-    public async Task First_work_failure_retains_closed_diagnostic_without_retaining_raw_results_or_authorizing_success(string operation)
+    [InlineData("first-work", true)]
+    [InlineData("replacement-first-work", true)]
+    public async Task First_work_failure_retains_closed_diagnostic_without_retaining_raw_results_or_authorizing_success(string operation, bool dockerCause = false)
     {
         string? rawPath = null;
         var runner = new DeterministicRunner(_stagedTemplate, _providerArchive, failOperation: operation,
@@ -367,10 +369,13 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
                 var arguments = command.Arguments.ToList();
                 var results = arguments[arguments.IndexOf("--results-directory") + 1];
                 rawPath = Path.Join(results, "proof.trx");
+                var marker = dockerCause
+                    ? $"[FirstDurableWork] failure phase=postgresql-fixture-setup code=InvalidOperationException at=<RequireDockerAsync>d__49.MoveNext cause=docker-probe-timeout; cleanup=none; retry={SecretSentinel}"
+                    : $"[FirstDurableWork] failure phase=initial-readiness code=TimeoutException at={SecretSentinel} cause={SecretSentinel}; cleanup=none; retry={SecretSentinel}";
                 File.WriteAllText(rawPath, $"""
                     <TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
                       <Results><UnitTestResult testId="failed" outcome="Failed">
-                        <Output><StdOut>[FirstDurableWork] failure phase=initial-readiness code=TimeoutException at={SecretSentinel} cause={SecretSentinel}; cleanup=none; retry={SecretSentinel}</StdOut></Output>
+                        <Output><StdOut>{System.Security.SecurityElement.Escape(marker)}</StdOut></Output>
                       </UnitTestResult></Results>
                       <TestDefinitions><UnitTest id="failed"><TestMethod className="DurableWorkerTemplate.Tests.FirstDurableWorkTests" name="FirstDurableWork_persists_typed_terminal_result_and_exports_the_real_activation" /></UnitTest></TestDefinitions>
                       <ResultSummary><Counters total="1" executed="1" passed="0" failed="1" /></ResultSummary>
@@ -388,7 +393,11 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
         var observation = Assert.IsType<DurableTemplateTestObservation>(Assert.Single(receipt.Phases, item => item.Id == operation).TestRun);
         Assert.Equal(0, observation.Passed);
         Assert.Equal(1, observation.Failed);
-        Assert.Equal(new DurableTemplateFirstWorkDiagnostic("initial-readiness", "TimeoutException", "none"), Assert.Single(observation.FirstWorkFailures!));
+        var diagnostic = Assert.Single(observation.FirstWorkFailures!);
+        Assert.Equal(dockerCause
+            ? new DurableTemplateFirstWorkDiagnostic("postgresql-fixture-setup", "InvalidOperationException", "none")
+            { SetupOperation = "docker-prerequisite", DockerPrerequisiteCause = "docker-probe-timeout" }
+            : new DurableTemplateFirstWorkDiagnostic("initial-readiness", "TimeoutException", "none"), diagnostic);
         Assert.NotNull(rawPath);
         Assert.False(File.Exists(rawPath));
         Assert.False(Directory.Exists(runner.ProofRoot));

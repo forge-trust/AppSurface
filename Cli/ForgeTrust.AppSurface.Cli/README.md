@@ -624,6 +624,8 @@ that resolves a local namespace other than `Development`, `Local`, or `Dev` must
 
 ### `appsurface evidence`
 
+For the local reuse procedure and its current 1.1 compatibility limits, see the [producer reuse guide](../../guides/evidence-reuse.md).
+
 Use EvidenceHost when a CI gate must explain why evidence is required for a changed path and must never promote a skipped or incomplete test profile into a full-coverage claim. Start with the [EvidenceHost guide](../../start-here/evidencehost.md). A selected coverage producer carries its exact `coverageGate` thresholds in the checked-in policy and `run` evaluates the existing gate in-process against that resolved policy.
 
 ```bash

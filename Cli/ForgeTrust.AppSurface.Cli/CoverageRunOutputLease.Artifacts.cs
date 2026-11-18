@@ -108,16 +108,25 @@ internal sealed partial class CoverageRunOutputLease
     /// <param name="createMissing">Whether missing components may be privately created.</param>
     /// <param name="requirePrivate">Whether current-user private permissions are required.</param>
     /// <returns>A retained directory, or null when an existing-only path is missing.</returns>
-    /// <remarks>Existing permissions are validated, never repaired. Callers separately validate store/schema authority.</remarks>
     /// <param name="allowWindowsRenameSharing">Whether a cooperative lease needs compatible writer sharing rather than restore-parent exclusion.</param>
     /// <param name="unixFChmod">Optional per-lease native permission operation for failure tests; defaults to fchmod.</param>
     /// <param name="beforeWindowsCreate">Optional race seam immediately before creating a missing Windows component; production omits it.</param>
+    /// <param name="durableDirectoryPath">Whether to flush the retained path's directories on Unix before returning; defaults off.</param>
+    /// <param name="unixDirectoryFsync">Optional Unix directory-sync seam for failure and ordering tests; production omits it.</param>
+    /// <remarks>
+    /// Existing permissions are validated, never repaired. Callers separately validate store/schema authority.
+    /// Windows fails closed when path durability is requested because this helper has no documented parent-directory flush primitive.
+    /// </remarks>
     internal static CoverageRunOutputLease? AcquireArtifactDirectory(string path, bool createMissing, bool requirePrivate, bool allowWindowsRenameSharing = false,
-        Func<int, uint, int>? unixFChmod = null, Action<string>? beforeWindowsCreate = null)
+        Func<int, uint, int>? unixFChmod = null, Action<string>? beforeWindowsCreate = null,
+        bool durableDirectoryPath = false, Func<int, int>? unixDirectoryFsync = null)
     {
         var lease = new CoverageRunOutputLease(NormalizePlatformPath(Path.GetFullPath(path)), unixFChmod);
         try
         {
+            if (durableDirectoryPath && OperatingSystem.IsWindows())
+                throw new PlatformNotSupportedException(
+                    "Durable directory-path publication is unavailable on Windows through the documented native path-creation and flush APIs.");
             if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
                 throw new PlatformNotSupportedException("Private artifact directories require supported native filesystem primitives.");
             var acquired = OperatingSystem.IsWindows()
@@ -130,6 +139,7 @@ internal sealed partial class CoverageRunOutputLease
             }
             if (requirePrivate) lease.ValidateArtifactPrivateAccess(lease._outputHandle!, directory: true);
             lease.VerifyBinding();
+            if (durableDirectoryPath) lease.FlushUnixArtifactDirectoryPath(unixDirectoryFsync);
             return lease;
         }
         catch
@@ -326,21 +336,31 @@ internal sealed partial class CoverageRunOutputLease
 
     /// <summary>Enumerates at most a caller-supplied number of immediate entries without following links.</summary>
     /// <param name="maximumEntries">Strict positive allocation and traversal bound.</param>
-    /// <returns>Validated regular-file and directory names.</returns>
-    internal IReadOnlyList<CoverageArtifactDirectoryEntry> EnumerateArtifactEntries(int maximumEntries)
+    /// <param name="cancellationToken">Optional cancellation observed before name enumeration and during entry inspection.</param>
+    /// <param name="enumerationCalls">Optional per-call name enumeration operations; null uses the native host paths.</param>
+    /// <returns>Validated regular-file and directory names, in the underlying filesystem's enumeration order.</returns>
+    /// <remarks>
+    /// The token is checked before enumeration, while collecting names, and before inspecting each name. Cancellation
+    /// stops the operation and disposes any enumeration resources it owns; the retained directory remains caller-owned.
+    /// </remarks>
+    internal IReadOnlyList<CoverageArtifactDirectoryEntry> EnumerateArtifactEntries(int maximumEntries,
+        CancellationToken cancellationToken = default, CoverageArtifactEnumerationCalls? enumerationCalls = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumEntries);
         VerifyBinding();
         var names = OperatingSystem.IsWindows()
-            ? ReadArtifactWindowsNames(_outputHandle!, maximumEntries)
-            : ReadArtifactUnixNames(_outputHandle!, maximumEntries);
+            ? ReadArtifactWindowsNames(_outputHandle!, maximumEntries, enumerationCalls?.EnumerateWindowsNames, cancellationToken)
+            : ReadArtifactUnixNames(_outputHandle!, maximumEntries, enumerationCalls, cancellationToken);
         var entries = new List<CoverageArtifactDirectoryEntry>(names.Count);
         foreach (var name in names)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ValidateArtifactComponent(name);
             var inspected = InspectEntry(_outputHandle!, name);
             entries.Add(new(name, inspected.IsDirectory, inspected.Identity.ToString()));
         }
+        cancellationToken.ThrowIfCancellationRequested();
         VerifyBinding();
         return entries;
     }
@@ -351,16 +371,27 @@ internal sealed partial class CoverageRunOutputLease
     /// <param name="destinationName">New immediate entry name.</param>
     /// <param name="replaceFile">Whether one already-validated regular file may be replaced.</param>
     /// <param name="expectedSourceIdentity">Previously verified source identity, required for staged-directory publication.</param>
-    internal void MoveArtifactEntry(string sourceName, CoverageRunOutputLease destination, string destinationName, bool replaceFile = false, string? expectedSourceIdentity = null)
+    /// <param name="durableDirectoryEntry">Whether the rename must flush its directory-entry metadata before returning.</param>
+    /// <param name="unixDirectoryFsync">Optional Unix directory-sync seam for failure and ordering tests.</param>
+    /// <remarks>Windows durable publication requires NTFS; Unix durable publication propagates directory fsync failures.</remarks>
+    internal void MoveArtifactEntry(string sourceName, CoverageRunOutputLease destination, string destinationName,
+        bool replaceFile = false, string? expectedSourceIdentity = null, bool durableDirectoryEntry = false,
+        Func<int, int>? unixDirectoryFsync = null)
     {
         ValidateArtifactComponent(sourceName);
         ValidateArtifactComponent(destinationName);
+        if (durableDirectoryEntry && OperatingSystem.IsWindows() && unixDirectoryFsync is not null)
+            throw new ArgumentException("A Unix directory-sync seam cannot be used for Windows publication.", nameof(unixDirectoryFsync));
+        if (durableDirectoryEntry && !OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+            throw new PlatformNotSupportedException("Durable artifact publication requires a supported native filesystem operation.");
         VerifyBinding();
         destination.VerifyBinding();
         var source = InspectEntry(_outputHandle!, sourceName);
         if (expectedSourceIdentity is not null && !string.Equals(expectedSourceIdentity, source.Identity.ToString(), StringComparison.Ordinal))
             throw new IOException("Artifact source changed after verification.");
         if (replaceFile && source.IsDirectory) throw new IOException("Directory replacement is forbidden.");
+        if (durableDirectoryEntry && source.IsDirectory)
+            throw new IOException("Durable metadata publication requires a regular-file source.");
         if (replaceFile) destination.ValidateOwnedGateArtifact(destinationName);
         if (OperatingSystem.IsWindows())
         {
@@ -368,8 +399,15 @@ internal sealed partial class CoverageRunOutputLease
                 ? OpenWindowsFile(Path.Join(_outputPath, sourceName), WindowsGenericRead | WindowsDelete,
                     flags: WindowsBackupSemantics | WindowsOpenReparsePoint, shareMode: WindowsShareRead | WindowsShareWrite | WindowsShareDelete)
                 : OpenWindowsFile(Path.Join(_outputPath, sourceName), WindowsGenericRead | WindowsDelete,
+                    flags: WindowsOpenReparsePoint | (durableDirectoryEntry ? WindowsWriteThrough : 0),
                     shareMode: WindowsShareRead | WindowsShareDelete);
             VerifyEntryIdentity(handle, source, sourceName);
+            if (durableDirectoryEntry)
+            {
+                if (source.Identity.DeviceOrVolume != GetWindowsIdentity(destination._outputHandle!).DeviceOrVolume)
+                    throw new IOException("Durable artifact publication requires source and destination on the same volume.");
+                EnsureWindowsWriteThroughDurabilitySupported(GetWindowsFileSystemName(handle));
+            }
             RenameArtifactWindows(handle, destination._outputHandle!, destinationName, replaceFile);
         }
         else
@@ -381,8 +419,64 @@ internal sealed partial class CoverageRunOutputLease
                 : RenameArtifactLinux(from, sourceName, to, destinationName, 1);
             if (rc != 0) throw NativeIOException("Unable to atomically publish artifact entry.");
         }
+        if (durableDirectoryEntry && !OperatingSystem.IsWindows())
+        {
+            FlushUnixArtifactDirectory(destination, unixDirectoryFsync);
+            if (!ReferenceEquals(this, destination)) FlushUnixArtifactDirectory(this, unixDirectoryFsync);
+        }
         VerifyBinding();
         destination.VerifyBinding();
+    }
+
+    /// <summary>Rejects Windows filesystems without the documented write-through rename metadata guarantee.</summary>
+    /// <param name="fileSystemName">Filesystem name reported for the opened source handle.</param>
+    internal static void EnsureWindowsWriteThroughDurabilitySupported(string fileSystemName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileSystemName);
+        if (!string.Equals(fileSystemName, "NTFS", StringComparison.OrdinalIgnoreCase))
+            throw new PlatformNotSupportedException(
+                $"Durable artifact metadata publication on Windows requires NTFS; the opened file is on '{fileSystemName}'.");
+    }
+
+    private static unsafe string GetWindowsFileSystemName(SafeFileHandle handle)
+    {
+        const int bufferLength = 64;
+        char* fileSystemBuffer = stackalloc char[bufferLength];
+        new Span<char>(fileSystemBuffer, bufferLength).Clear();
+        if (!WindowsGetVolumeInformationByHandle(handle, null, 0, null, null, null,
+                fileSystemBuffer, bufferLength))
+            throw NativeIOException("Unable to verify the filesystem durability contract for artifact publication.");
+        var nameSpan = new ReadOnlySpan<char>(fileSystemBuffer, bufferLength);
+        var terminator = nameSpan.IndexOf('\0');
+        if (terminator <= 0) throw new IOException("The filesystem name for artifact publication is incomplete.");
+        return new string(fileSystemBuffer, 0, terminator);
+    }
+
+    private static void FlushUnixArtifactDirectory(CoverageRunOutputLease directory, Func<int, int>? fsync)
+        => FlushUnixDirectoryHandle(directory._outputHandle!, fsync);
+
+    private void FlushUnixArtifactDirectoryPath(Func<int, int>? fsync)
+    {
+        VerifyBinding();
+        // The retained path handles are recorded root-to-leaf; persist each parent entry before its descendants.
+        foreach (var handle in _unixHandles) FlushUnixDirectoryHandle(handle, fsync);
+        VerifyBinding();
+    }
+
+    private static void FlushUnixDirectoryHandle(SafeFileHandle handle, Func<int, int>? fsync)
+    {
+        var addedReference = false;
+        try
+        {
+            handle.DangerousAddRef(ref addedReference);
+            var descriptor = handle.DangerousGetHandle().ToInt32();
+            if ((fsync ?? ArtifactFsync)(descriptor) != 0)
+                throw NativeIOException("Unable to durably publish artifact directory metadata.");
+        }
+        finally
+        {
+            if (addedReference) handle.DangerousRelease();
+        }
     }
 
     /// <summary>Deletes only a previously authorized immediate entry through the retained directory.</summary>
@@ -638,16 +732,24 @@ internal sealed partial class CoverageRunOutputLease
     /// <param name="directory">Retained directory handle.</param>
     /// <param name="maximumEntries">Strict bound, checked before retaining another name.</param>
     /// <param name="enumerate">Optional per-call name observation for iterator failure tests; defaults to the native bound path.</param>
-    /// <remarks>Injected names verify the count and iterator decisions; they do not prove Windows enumeration.</remarks>
+    /// <param name="cancellationToken">Optional cancellation observed before starting and after each yielded path.</param>
+    /// <returns>Collected immediate child names, without their parent directory path.</returns>
+    /// <remarks>
+    /// Cancellation disposes the managed enumerator and does not dispose the retained directory. Injected names verify
+    /// cancellation, count and iterator decisions; they do not prove Windows enumeration.
+    /// </remarks>
     internal static IReadOnlyList<string> ReadArtifactWindowsNames(SafeFileHandle directory, int maximumEntries,
-        Func<SafeFileHandle, IEnumerable<string>>? enumerate = null)
+        Func<SafeFileHandle, IEnumerable<string>>? enumerate = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var result = new List<string>();
         foreach (var path in enumerate is null ? Directory.EnumerateFileSystemEntries(GetStableDirectoryPath(directory)) : enumerate(directory))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (result.Count >= maximumEntries) throw new IOException("Artifact entry inspection limit reached.");
             result.Add(Path.GetFileName(path));
         }
+        cancellationToken.ThrowIfCancellationRequested();
         return result;
     }
 
@@ -655,10 +757,17 @@ internal sealed partial class CoverageRunOutputLease
     /// <param name="directory">Retained source directory handle, never disposed by this method.</param>
     /// <param name="maximumEntries">Strict entry count bound, excluding dot entries.</param>
     /// <param name="nativeCalls">Optional per-call native enumeration operations for failure/cleanup tests.</param>
-    /// <remarks>Omission uses the host APIs; fake results exercise orchestration, not the kernel ABI.</remarks>
+    /// <param name="cancellationToken">Optional cancellation observed before setup, before each native read, and after it returns.</param>
+    /// <returns>Collected immediate child names, excluding the Unix dot entries.</returns>
+    /// <remarks>
+    /// Once the native directory stream owns the duplicated descriptor, cancellation closes that stream in the same
+    /// cleanup path as other failures. The caller's retained directory is never disposed. Omission uses the host APIs;
+    /// fake results exercise orchestration, not the kernel ABI.
+    /// </remarks>
     internal static IReadOnlyList<string> ReadArtifactUnixNames(SafeFileHandle directory, int maximumEntries,
-        CoverageArtifactEnumerationCalls? nativeCalls = null)
+        CoverageArtifactEnumerationCalls? nativeCalls = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var calls = nativeCalls ?? CoverageArtifactEnumerationCalls.Default;
         var fd = calls.Duplicate(directory.DangerousGetHandle().ToInt32());
         if (fd < 0) throw NativeIOException("Unable to duplicate artifact directory descriptor.");
@@ -670,8 +779,10 @@ internal sealed partial class CoverageRunOutputLease
             var names = new List<string>();
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 Marshal.SetLastPInvokeError(0);
                 var entry = calls.ReadDirectory(stream);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (entry == 0)
                 {
                     if (Marshal.GetLastPInvokeError() != 0) throw NativeIOException("Artifact enumeration failed.");
@@ -687,12 +798,14 @@ internal sealed partial class CoverageRunOutputLease
         finally { _ = calls.CloseDirectory(stream); }
     }
 
-    /// <summary>Per-call native Unix enumeration results with production descriptor ownership defaults.</summary>
+    /// <summary>Per-call native enumeration operations with production ownership defaults.</summary>
     /// <remarks>Fake results must describe their own descriptors and pointers; they do not establish filesystem support.</remarks>
     internal sealed class CoverageArtifactEnumerationCalls
     {
         /// <summary>Gets the immutable default call set.</summary>
         internal static CoverageArtifactEnumerationCalls Default { get; } = new();
+        /// <summary>Gets an optional Windows name source; null uses the retained directory's native path.</summary>
+        internal Func<SafeFileHandle, IEnumerable<string>>? EnumerateWindowsNames { get; init; }
         /// <summary>Gets a fresh close-on-exec descriptor for the same directory.</summary>
         internal Func<int, int> Duplicate { get; init; } = DuplicateCloseOnExec;
         /// <summary>Gets the rewind operation on the fresh descriptor.</summary>
@@ -766,6 +879,24 @@ internal sealed partial class CoverageRunOutputLease
 
     [LibraryImport("libc", EntryPoint = "renameat2", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int RenameArtifactLinux(int fromDirectory, string from, int toDirectory, string to, uint flags);
+
+    private const uint WindowsWriteThrough = 0x80000000;
+
+    [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
+    private static partial int ArtifactFsync(int descriptor);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GetVolumeInformationByHandleW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static unsafe partial bool WindowsGetVolumeInformationByHandle(
+        SafeFileHandle handle,
+        char* volumeNameBuffer,
+        uint volumeNameSize,
+        uint* volumeSerialNumber,
+        uint* maximumComponentLength,
+        uint* fileSystemFlags,
+        char* fileSystemNameBuffer,
+        uint fileSystemNameSize);
 }
 
 /// <summary>Describes a bounded, no-follow directory observation; it does not grant deletion authority.</summary>

@@ -29,8 +29,11 @@ public sealed class EvidenceCommandRunnerTests
             Assert.True(int.TryParse(await File.ReadAllTextAsync(pidPath), out var pid));
             Assert.True(pid > 0);
             Assert.False(File.Exists(pidPath + ".pending"));
+            using var child = Process.GetProcessById(pid);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+            await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.True(child.HasExited);
         }
         finally
         {

@@ -822,6 +822,19 @@ internal sealed class CoverageRunWorkflow
         _getEnvironmentVariable = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
     }
 
+    /// <summary>Clones this engine with a per-invocation runner decorator and preserves every injected collaborator.</summary>
+    /// <param name="decorate">Wraps the existing runner; must return a nonnull invocation-local runner.</param>
+    /// <returns>An independent workflow sharing the report generator, clock and all existing test seams.</returns>
+    /// <remarks>No singleton runner or process environment is mutated. Use this seam for supported adapter policy.</remarks>
+    internal CoverageRunWorkflow WithProcessRunner(Func<ICoverageRunProcessRunner, ICoverageRunProcessRunner> decorate)
+    {
+        ArgumentNullException.ThrowIfNull(decorate);
+        return new CoverageRunWorkflow(decorate(_processRunner), _reportGenerator, _timeProvider,
+            _beforeSlowTestDiagnostics, _summaryStaged, _timingsStaged, _deleteStagedCoverageFile,
+            _appendCleanupDiagnostic, _slowTestDiagnosticsStaged, _beforeSlowTestDiagnosticsPromotion,
+            _writeProjectManifest, _getEnvironmentVariable, _inspectHangDiagnostics);
+    }
+
     /// <summary>
     /// Runs the coverage workflow.
     /// </summary>
@@ -3558,7 +3571,12 @@ internal sealed record CoverageRunProcessRequest(
     string WorkingDirectory,
     string? OutputFile,
     Action<int>? OutputObserver,
-    CoverageRunProcessLease Lease);
+    CoverageRunProcessLease Lease)
+{
+    /// <summary>Gets optional environment overrides applied only to this process launch.</summary>
+    /// <remarks>Null preserves inherited ordinary execution. Never mutate the host environment to inject lifetime credentials.</remarks>
+    internal IReadOnlyDictionary<string, string>? Environment { get; init; }
+}
 
 /// <summary>
 /// Result of running a coverage workflow process.
@@ -3633,10 +3651,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
     {
         using var standardOutput = new MemoryStream();
         using var standardError = new MemoryStream();
-        var result = await CliCommand.Wrap(request.FileName)
-            .WithArguments(request.Arguments)
-            .WithWorkingDirectory(request.WorkingDirectory)
-            .WithValidation(CommandResultValidation.None)
+        var result = await CreateCommand(request)
             .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardOutput, token, request.OutputObserver)))
             .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardError, token, request.OutputObserver)))
             .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
@@ -3667,15 +3682,21 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             useAsync: true);
         using var writeGate = new SemaphoreSlim(1, 1);
 
-        var result = await CliCommand.Wrap(request.FileName)
-            .WithArguments(request.Arguments)
-            .WithWorkingDirectory(request.WorkingDirectory)
-            .WithValidation(CommandResultValidation.None)
+        var result = await CreateCommand(request)
             .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver)))
             .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver)))
             .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
 
         return new CoverageRunProcessResult(result.ExitCode, string.Empty);
+    }
+
+    private static Command CreateCommand(CoverageRunProcessRequest request)
+    {
+        var command = CliCommand.Wrap(request.FileName)
+            .WithArguments(request.Arguments)
+            .WithWorkingDirectory(request.WorkingDirectory)
+            .WithValidation(CommandResultValidation.None);
+        return request.Environment is { } environment ? command.WithEnvironmentVariables(environment.ToDictionary(static pair => pair.Key, static pair => (string?)pair.Value)) : command;
     }
 
     private static async Task CopyPipeToBufferAsync(

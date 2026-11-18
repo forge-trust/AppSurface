@@ -10,7 +10,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="README.md" Pack="true" PackagePath="" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Coverage" />
+    <None Update="README.md" Pack="true" PackagePath="" />
+    <None Include="schemas/*.json" Pack="true" PackagePath="schemas/%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

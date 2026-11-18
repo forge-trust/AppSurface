@@ -59,6 +59,10 @@ internal static class Program
                 Collection alone never closes coverage obligations.
                 verify: --manifest <proof/evidence-manifest.json> --artifact-root <proof/artifacts>
 
+                Packed local-reuse proof: --operation reuse-package-proof --feed <candidate-feed>
+                --version <exact-version> --source-commit <sha> --dotnet <absolute-host> --output <fresh-directory>
+                This installs the candidate main tool and an independent package-only prepared-host consumer.
+
                 Native coverage capture: --operation capture-native --repository <checkout>
                 --report <normalized.xml> --raw-report <collector.xml>
                 --output <fresh-capture> --dotnet <absolute-host>
@@ -76,6 +80,14 @@ internal static class Program
             var options = Parse(args);
             if (options.TryGetValue("--operation", out var operation))
             {
+                if (operation == "reuse-package-proof")
+                {
+                    string[] allowed = ["--operation", "--feed", "--version", "--source-commit", "--dotnet", "--output"];
+                    if (options.Keys.Except(allowed, StringComparer.Ordinal).Any()) throw new ArgumentException("Unsupported reuse package proof option.");
+                    return await EvidenceReusePackageProof.RunAsync(Path.GetFullPath(Required(options, "--feed")), Required(options, "--version"),
+                        Path.GetFullPath(Required(options, "--output")), Path.GetFullPath(Required(options, "--dotnet")),
+                        Required(options, "--source-commit"), cancellationToken);
+                }
                 if (operation is "local" or "local-plan") return await new LocalEvidenceWorkflow().RunAsync(options, cancellationToken);
                 if (operation == "collect-coverage") return await CollectCoverageAsync(options, cancellationToken, collectCoverage);
                 if (operation == "collect") return await CollectChangesAsync(options, cancellationToken);
@@ -163,7 +175,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
+        string[] allowed = ["--package", "--feed", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)
