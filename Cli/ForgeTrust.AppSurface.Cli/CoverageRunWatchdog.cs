@@ -182,7 +182,7 @@ internal sealed class CoverageRunConsoleSink : IDisposable
                         return;
                     }
 
-                    await WriteBlockAsync(_console.Error, text, appendNewLine);
+                    await WriteBlockAsync(_console.Error, text, appendNewLine).ConfigureAwait(false);
                 },
                 CancellationToken.None,
                 TaskContinuationOptions.None,
@@ -193,7 +193,7 @@ internal sealed class CoverageRunConsoleSink : IDisposable
         ObserveFault(queuedWrite);
         try
         {
-            await queuedWrite.WaitAsync(_writeTimeout, cancellationToken);
+            await queuedWrite.WaitAsync(_writeTimeout, cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (TimeoutException)
@@ -217,7 +217,7 @@ internal sealed class CoverageRunConsoleSink : IDisposable
 
         var directWrite = Task.Run(() => WriteBlockAsync(_console.Error, text, appendNewLine));
         ObserveFault(directWrite);
-        await AwaitBoundedAsync(directWrite, cancellationToken);
+        await AwaitBoundedAsync(directWrite, cancellationToken).ConfigureAwait(false);
     }
 
     private Task WriteAsync(
@@ -251,11 +251,11 @@ internal sealed class CoverageRunConsoleSink : IDisposable
     {
         if (appendNewLine)
         {
-            await writer.WriteLineAsync(text);
+            await writer.WriteLineAsync(text).ConfigureAwait(false);
         }
         else
         {
-            await writer.WriteAsync(text);
+            await writer.WriteAsync(text).ConfigureAwait(false);
         }
     }
 
@@ -270,7 +270,7 @@ internal sealed class CoverageRunConsoleSink : IDisposable
     {
         try
         {
-            await write.WaitAsync(_writeTimeout, cancellationToken);
+            await write.WaitAsync(_writeTimeout, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException ex)
         {
@@ -431,7 +431,7 @@ internal sealed class CoverageRunProcessLease
 
         if (process is null)
         {
-            process = await _resolution.Task;
+            process = await _resolution.Task.ConfigureAwait(false);
             if (process is null)
             {
                 _owner?.ReleaseProcess(this);
@@ -439,10 +439,10 @@ internal sealed class CoverageRunProcessLease
             }
         }
 
-        await Task.Run(() => KillProcess(process));
+        await Task.Run(() => KillProcess(process)).ConfigureAwait(false);
         try
         {
-            await process.WaitForExitAsync();
+            await process.WaitForExitAsync().ConfigureAwait(false);
             lock (_sync)
             {
                 _process = null;
@@ -874,7 +874,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
             while (true)
             {
                 var delay = ComputeDelay(nextHeartbeat);
-                await WaitForStateChangeOrDeadlineAsync(delay, cancellationToken);
+                await WaitForStateChangeOrDeadlineAsync(delay, cancellationToken).ConfigureAwait(false);
 
                 var nowUtc = _timeProvider.GetUtcNow();
                 var snapshot = Snapshot();
@@ -882,7 +882,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
                 if (nowUtc >= nextHeartbeat)
                 {
-                    await WriteHeartbeatBoundedAsync(snapshot, cancellationToken);
+                    await WriteHeartbeatBoundedAsync(snapshot, cancellationToken).ConfigureAwait(false);
                     nextHeartbeat = nowUtc + _heartbeatInterval;
                 }
 
@@ -907,14 +907,14 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
                     try
                     {
                         RequestWatchdogCancellation();
-                        var cleanup = await CleanupProcessesAsync();
+                        var cleanup = await CleanupProcessesAsync().ConfigureAwait(false);
                         incident = incident with { CleanupStatus = cleanup };
                         lock (_sync)
                         {
                             _terminalIncident = incident;
                         }
 
-                        await WriteIncidentBoundedAsync(incident);
+                        await WriteIncidentBoundedAsync(incident).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -924,7 +924,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
                     return;
                 }
 
-                await WriteIncidentBoundedAsync(incident);
+                await WriteIncidentBoundedAsync(incident).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -958,7 +958,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         using var deadline = new CancellationTokenSource(_artifactWriteTimeout);
         try
         {
-            await write.WaitAsync(_artifactWriteTimeout, deadline.Token);
+            await write.WaitAsync(_artifactWriteTimeout, deadline.Token).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
@@ -1028,7 +1028,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
         try
         {
-            await active.WaitAsync(_artifactWriteTimeout);
+            await active.WaitAsync(_artifactWriteTimeout).ConfigureAwait(false);
             return true;
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
@@ -1047,7 +1047,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         deadline.CancelAfter(TimeSpan.FromSeconds(2));
         try
         {
-            await WriteHeartbeatAsync(snapshot, deadline.Token).WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            await WriteHeartbeatAsync(snapshot, deadline.Token).WaitAsync(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
@@ -1058,7 +1058,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
     private async Task<string> CleanupProcessesAsync()
     {
-        var result = await TerminateAndDrainProcessesAsync();
+        var result = await TerminateAndDrainProcessesAsync().ConfigureAwait(false);
         return result.Status;
     }
 
@@ -1074,7 +1074,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
         try
         {
-            var completed = await Task.WhenAll(leases.Select(lease => lease.TerminateAsync())).WaitAsync(_processCleanupTimeout);
+            var completed = await Task.WhenAll(leases.Select(lease => lease.TerminateAsync())).WaitAsync(_processCleanupTimeout).ConfigureAwait(false);
             return new CoverageRunProcessDrainResult(completed.All(static drained => drained), completed.All(static drained => drained) ? "complete" : "failed");
         }
         catch (TimeoutException)
@@ -1126,9 +1126,9 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var deadline = Task.Delay(delay, _timeProvider, waitCancellation.Token);
         var stateChange = _stateChanged.WaitAsync(waitCancellation.Token);
-        var completed = await Task.WhenAny(deadline, stateChange);
+        var completed = await Task.WhenAny(deadline, stateChange).ConfigureAwait(false);
         waitCancellation.Cancel();
-        await completed;
+        await completed.ConfigureAwait(false);
     }
 
     private void SignalStateChanged()
@@ -1222,7 +1222,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         await _console.WriteOutputAsync(
             string.Join(Environment.NewLine, lines),
             cancellationToken,
-            coalesceIfWritePending: true);
+            coalesceIfWritePending: true).ConfigureAwait(false);
     }
 
     private async Task WriteIncidentAsync(CoverageRunIncident incident, CancellationToken cancellationToken)
@@ -1234,7 +1234,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         var gateHeld = false;
         try
         {
-            await _artifactCommitGate.WaitAsync(cancellationToken);
+            await _artifactCommitGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             gateHeld = true;
             Directory.CreateDirectory(directory);
             var concurrent = incident.Concurrent.Take(MaximumConcurrentArtifactOperations).ToArray();
@@ -1278,7 +1278,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
             }
 
             staged = Path.Join(directory, $".{ArtifactName}.{Guid.NewGuid():N}.tmp");
-            await File.WriteAllTextAsync(staged, json, cancellationToken);
+            await File.WriteAllTextAsync(staged, json, cancellationToken).ConfigureAwait(false);
             _artifactStaged?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
             var destination = ResolveArtifactPath();
@@ -1299,13 +1299,13 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         {
             await _console.WriteCriticalErrorAsync(
                 "ASCOV122 Coverage watchdog artifact unavailable. Cause: artifact-write-failed. Fix: Use a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog",
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             await _console.WriteCriticalErrorAsync(
                 "ASCOV122 Coverage watchdog artifact unavailable. Cause: artifact-write-cancelled. Fix: Inspect the coverage run terminal diagnostic and rerun with a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog",
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -1336,7 +1336,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         if (!cancellationToken.IsCancellationRequested)
         {
             await _console.WriteCriticalErrorAsync(FormattableString.Invariant(
-                $"{prefix}: {subject}; no-progress={(long)primary.NoProgress.TotalSeconds}s; concurrent-stalls={incident.Concurrent.Count}; artifact={JsonSerializer.Serialize(DisplayArtifactPath(reportedArtifactPath))}"), cancellationToken);
+                $"{prefix}: {subject}; no-progress={(long)primary.NoProgress.TotalSeconds}s; concurrent-stalls={incident.Concurrent.Count}; artifact={JsonSerializer.Serialize(DisplayArtifactPath(reportedArtifactPath))}"), cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -1421,20 +1421,29 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         _ => 6,
     };
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Joins in-flight monitor work and drains an incident writer without depending on the caller's synchronization context.
+    /// </summary>
+    /// <remarks>
+    /// Monitor work retains its existing bounds, including sequential process cleanup and incident writing in fail mode and bounded fault diagnostics.
+    /// The subsequent artifact drain has its own configured bound.
+    /// A writer still running after that drain retains its commit gate, console, and bootstrap directory until its observed completion.
+    /// Disposal cancels publication first; callers must not treat a delayed writer as a committed artifact.
+    /// </remarks>
+    /// <returns>Completion of monitor shutdown and bounded artifact draining; deferred cleanup may still be pending.</returns>
     public async ValueTask DisposeAsync()
     {
         _stop.Cancel();
         try
         {
-            await _monitor;
+            await _monitor.ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await _console.WriteCriticalErrorAsync(
-                $"ASCOV122 Coverage watchdog monitor fault was suppressed during cleanup. Cause: {ex.GetType().Name}. Fix: Inspect the coverage run diagnostic output and rerun with a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog");
+                $"ASCOV122 Coverage watchdog monitor fault was suppressed during cleanup. Cause: {ex.GetType().Name}. Fix: Inspect the coverage run diagnostic output and rerun with a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog").ConfigureAwait(false);
         }
-        var artifactWriteDrained = await DrainArtifactWriteAsync();
+        var artifactWriteDrained = await DrainArtifactWriteAsync().ConfigureAwait(false);
         _linkedCancellation.Dispose();
         _watchdogCancellation.Dispose();
         _stop.Dispose();
