@@ -188,6 +188,35 @@ public sealed class CoverageRunCollectorVersionPreflightTests
     }
 
     [Fact]
+    public async Task DriverPreflight_ShouldStopAfterRestoreFailureAndReportTheProject()
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console);
+        var project = new CoverageRunProject(
+            "Sample.Tests.csproj",
+            Path.Join(directory.Path, "Sample.Tests.csproj"),
+            "sample-tests",
+            false);
+        var resolution = new CoverageProjectResolution(null, directory.Path, [project], []);
+        var runner = new CapabilityProcessRunner(_ => CapabilityJson("net10.0", version: "10.0.1"), restoreExitCode: 1);
+
+        var exception = await Assert.ThrowsAsync<CoverageExecutionException>(() => CoverageRunDriverPreflight.ValidateAsync(
+            CoverageRunDriver.Collector,
+            "Release",
+            resolution,
+            runner,
+            supervisor,
+            CancellationToken.None,
+            requiredCollectorVersion: "10.0.1"));
+
+        Assert.Contains("Sample.Tests.csproj: collector restore failed before artifact creation", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("ASCOV113", exception.Code);
+        Assert.Single(runner.Requests);
+        Assert.Equal("restore", runner.Requests[0].Arguments[0]);
+    }
+
+    [Fact]
     public async Task DriverPreflight_ShouldRejectAnIncorrectSingleFrameworkCollectorVersion()
     {
         using var directory = TestDirectory.Create();
@@ -256,6 +285,13 @@ public sealed class CoverageRunCollectorVersionPreflightTests
     [InlineData("oversize")]
     [InlineData("missing-assets")]
     [InlineData("linked-assets")]
+    [InlineData("empty-assets")]
+    [InlineData("wrong-framework")]
+    [InlineData("wrong-assets-location")]
+    [InlineData("wrong-extensions-location")]
+    [InlineData("wrong-library-version")]
+    [InlineData("wrong-library-type")]
+    [InlineData("invalid-target-shape")]
     public void RestoredCollectorProof_ShouldValidateAllSelectedGraphsAndBoundTheRead(string mutation)
     {
         using var directory = TestDirectory.Create();
@@ -277,6 +313,13 @@ public sealed class CoverageRunCollectorVersionPreflightTests
             case "oversize":
             case "missing-assets":
             case "linked-assets": break;
+            case "empty-assets":
+            case "wrong-framework":
+            case "wrong-assets-location":
+            case "wrong-extensions-location":
+            case "wrong-library-version":
+            case "wrong-library-type":
+            case "invalid-target-shape": break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation));
         }
 
@@ -293,10 +336,81 @@ public sealed class CoverageRunCollectorVersionPreflightTests
             File.Delete(assetsPath);
             TestFileSystem.CreateFileLinkOrSkip(assetsPath, outside);
         }
+        if (mutation == "empty-assets") File.WriteAllText(assetsPath, string.Empty);
+        if (mutation == "wrong-library-version")
+        {
+            graph["libraries"]!.AsObject().Remove("coverlet.collector/10.0.1");
+            graph["libraries"]!["coverlet.collector/10.0.2"] = new JsonObject { ["type"] = "package" };
+        }
+        if (mutation == "wrong-library-type") graph["libraries"]!["coverlet.collector/10.0.1"]!["type"] = "project";
+        if (mutation == "invalid-target-shape") targets["net10.0"] = JsonValue.Create("not-a-package-map");
+        if (mutation is "wrong-library-version" or "wrong-library-type" or "invalid-target-shape")
+            File.WriteAllText(assetsPath, graph.ToJsonString());
         var capability = CapabilityJson("net10.0", version: "10.0.1", projectAssetsFile: assetsPath, projectPath: projectPath);
+        if (mutation is "wrong-framework" or "wrong-assets-location")
+        {
+            var capabilityNode = JsonNode.Parse(capability)!;
+            capabilityNode["Properties"]![mutation == "wrong-framework" ? "TargetFramework" : "ProjectAssetsFile"] =
+                mutation == "wrong-framework" ? "net8.0" : TestPathUtils.PathUnder(directory.Path, "other/project.assets.json");
+            capability = capabilityNode.ToJsonString();
+        }
+        if (mutation == "wrong-extensions-location")
+        {
+            var capabilityNode = JsonNode.Parse(capability)!;
+            capabilityNode["Properties"]!["MSBuildProjectExtensionsPath"] = TestPathUtils.PathUnder(directory.Path, "other-obj");
+            capability = capabilityNode.ToJsonString();
+        }
 
         Assert.Equal(mutation is "valid" or "valid-rid",
-            CoverageRunCollectorVersionPreflight.HasRestoredVersion(capability, "net10.0", "10.0.1", projectPath));
+            CoverageRunCollectorVersionPreflight.HasRestoredVersion(
+                capability,
+                mutation == "wrong-framework" ? null : "net10.0",
+                "10.0.1",
+                projectPath));
+    }
+
+    [Theory]
+    [InlineData("missing-properties")]
+    [InlineData("invalid-properties")]
+    [InlineData("duplicate-properties")]
+    [InlineData("invalid-json")]
+    [InlineData("missing-framework")]
+    [InlineData("missing-assets-location")]
+    [InlineData("missing-extensions-location")]
+    [InlineData("missing-project-identity")]
+    [InlineData("wrong-project-identity")]
+    [InlineData("wrong-assets-filename")]
+    public void RestoredCollectorProofRejectsUnboundCapabilityMetadata(string mutation)
+    {
+        using var directory = TestDirectory.Create();
+        var projectPath = directory.WriteFile("Sample.Tests.csproj", "<Project />");
+        var assetsPath = directory.WriteFile("obj/project.assets.json", RestoredAssetsJson(projectPath, ("net10.0", "10.0.1")));
+        var valid = CapabilityJson("net10.0", version: "10.0.1", projectAssetsFile: assetsPath, projectPath: projectPath);
+        Assert.True(CoverageRunCollectorVersionPreflight.HasRestoredVersion(valid, null, "10.0.1", projectPath));
+        var capability = JsonNode.Parse(valid)!;
+        var properties = capability["Properties"]!.AsObject();
+        switch (mutation)
+        {
+            case "missing-properties": capability.AsObject().Remove("Properties"); break;
+            case "invalid-properties": capability["Properties"] = "not-an-object"; break;
+            case "duplicate-properties":
+            case "invalid-json": break;
+            case "missing-framework": properties.Remove("TargetFramework"); break;
+            case "missing-assets-location": properties.Remove("ProjectAssetsFile"); break;
+            case "missing-extensions-location": properties.Remove("MSBuildProjectExtensionsPath"); break;
+            case "missing-project-identity": properties.Remove("MSBuildProjectFullPath"); break;
+            case "wrong-project-identity": properties["MSBuildProjectFullPath"] = TestPathUtils.PathUnder(directory.Path, "Other.csproj"); break;
+            case "wrong-assets-filename": properties["ProjectAssetsFile"] = TestPathUtils.PathUnder(directory.Path, "obj/other.json"); break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        var json = mutation switch
+        {
+            "invalid-json" => "{",
+            "duplicate-properties" => valid.Insert(1, "\"Properties\":{},"),
+            _ => capability.ToJsonString(),
+        };
+
+        Assert.False(CoverageRunCollectorVersionPreflight.HasRestoredVersion(json, null, "10.0.1", projectPath));
     }
 
     [Theory]
@@ -405,7 +519,9 @@ public sealed class CoverageRunCollectorVersionPreflightTests
             TimeProvider.System,
             CancellationToken.None);
 
-    private sealed class CapabilityProcessRunner(Func<CoverageRunProcessRequest, string> outputFactory) : ICoverageRunProcessRunner
+    private sealed class CapabilityProcessRunner(
+        Func<CoverageRunProcessRequest, string> outputFactory,
+        int restoreExitCode = 0) : ICoverageRunProcessRunner
     {
         public List<CoverageRunProcessRequest> Requests { get; } = [];
 
@@ -414,7 +530,8 @@ public sealed class CoverageRunCollectorVersionPreflightTests
             Requests.Add(request);
             request.Lease.Complete(processExited: true);
             var output = outputFactory(request);
-            return Task.FromResult(new CoverageRunProcessResult(0, output, StandardOutput: output));
+            var exitCode = request.Arguments.FirstOrDefault() == "restore" ? restoreExitCode : 0;
+            return Task.FromResult(new CoverageRunProcessResult(exitCode, output, StandardOutput: output));
         }
     }
 }

@@ -15,6 +15,62 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageRunTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_ShouldConsumeTheVerifiedCollectorGraphWithoutImplicitRestore(bool noRestore)
+    {
+        using var repo = TempDirectory.Create("appsurface-collector-verified-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        var assetsPath = repo.WriteFile("tests/Sample.Tests/obj/project.assets.json", JsonSerializer.Serialize(new
+        {
+            targets = new Dictionary<string, object?>
+            {
+                ["net10.0"] = new Dictionary<string, object?>
+                {
+                    ["coverlet.collector/10.0.1"] = new { type = "package" },
+                },
+            },
+            libraries = new Dictionary<string, object?>
+            {
+                ["coverlet.collector/10.0.1"] = new { type = "package" },
+            },
+            project = new { restore = new { projectPath = project } },
+        }));
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = JsonSerializer.Serialize(new
+            {
+                Properties = new
+                {
+                    TargetFramework = "net10.0",
+                    ProjectAssetsFile = assetsPath,
+                    MSBuildProjectExtensionsPath = Path.GetDirectoryName(assetsPath),
+                    MSBuildProjectFullPath = project,
+                },
+                Items = new
+                {
+                    PackageReference = new[] { new { Identity = "coverlet.collector", Version = "10.0.1" } },
+                },
+            }),
+        };
+        var request = CreateRequest(TestProjects: [project], Build: true, NoRestore: noRestore,
+            CoverageDriver: CoverageRunDriver.Collector) with
+        { RequiredCollectorVersion = "10.0.1" };
+        using var console = new FakeInMemoryConsole();
+
+        var result = await CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(noRestore ? 0 : 1, runner.Commands.Count(command => command.Arguments[0] == "restore"));
+        var build = Assert.Single(runner.Commands, command => command.Arguments[0] == "build");
+        var test = Assert.Single(runner.Commands, command => command.Arguments[0] == "test");
+        Assert.Contains("--no-restore", build.Arguments);
+        Assert.Contains("--no-restore", test.Arguments);
+        Assert.True(runner.Commands.ToList().IndexOf(build) < runner.Commands.ToList().IndexOf(test));
+    }
+
     [Fact]
     public async Task RunAsync_ShouldRejectUnverifiedRestoredCollectorBeforeCreatingArtifacts()
     {

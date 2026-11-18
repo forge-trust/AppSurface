@@ -9,6 +9,29 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageRunProcessContractTests
 {
     [Fact]
+    public void PipeBudgetPreservesTheOriginalFaultWhenCancellationCallbacksThrow()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var callback = cancellation.Token.Register(() => throw new InvalidOperationException("cleanup callback failed"));
+        var expected = new IOException("pipe admission failed");
+        var charges = 0;
+        var budget = new CliWrapCoverageRunProcessRunner.CoverageRunProcessBudgetCharge(_ =>
+        {
+            charges++;
+            throw expected;
+        }, cancellation);
+
+        budget.Charge(0);
+        budget.Charge(-1);
+        Assert.Equal(0, charges);
+        Assert.Same(expected, Assert.Throws<IOException>(() => budget.Charge(1)));
+
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Equal(1, charges);
+        Assert.Same(expected, Assert.Throws<IOException>(budget.ThrowIfFailed));
+    }
+
+    [Fact]
     public async Task StandardInputWriteFailureRetainsItsIdentityBeforeInternalCancellation()
     {
         using var cancellation = new CancellationTokenSource();
@@ -166,6 +189,14 @@ public sealed class CoverageRunProcessContractTests
         Assert.Equal(input.Length + Encoding.UTF8.GetByteCount(expected), charged);
         Assert.Equal(parentPath, Environment.GetEnvironmentVariable("PATH"));
         Assert.Equal(parentChildValue, Environment.GetEnvironmentVariable(childKey));
+
+        // Clearing a populated override snapshot must restore normal child inheritance.
+        var inherited = await new CliWrapCoverageRunProcessRunner().RunAsync(
+            request with { EnvironmentOverrides = null, Lease = CoverageRunProcessLease.Detached() }, CancellationToken.None);
+        Assert.Equal(0, inherited.ExitCode);
+        Assert.Equal($"{parentChildValue ?? "unset"}|{Environment.GetEnvironmentVariable(removedKey) ?? "unset"}|{Encoding.UTF8.GetString(input)}",
+            inherited.StandardOutput);
+        Assert.Equal("child-only-value", request.EnvironmentOverrides![childKey]);
     }
 
     [Fact]
