@@ -35,6 +35,7 @@ internal static class CoverageDogfood
             Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--contract-version 2|3 (default 2)] [--native-platform Linux|Windows|Darwin --report <normalized> --raw <collector>] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
             return 0;
         }
+        var stage = "options";
         try
         {
             if (args.Length % 2 != 0) throw new ArgumentException();
@@ -53,6 +54,7 @@ internal static class CoverageDogfood
                 ? parsedVersion : versionText is null ? 2 : throw new ArgumentException();
             if (contractVersion is not (2 or 3)) throw new ArgumentException();
             if (configuration is not ("Debug" or "Release") || Directory.Exists(output) || File.Exists(output)) throw new ArgumentException();
+            stage = "source-inventory";
             var solution = XDocument.Load(Path.Join(root, "ForgeTrust.AppSurface.slnx"));
             // Repository-specific inventory is intentionally supplied by this adapter, never inferred by the reusable API.
             var projects = solution.Descendants("Project").Select(x => x.Attribute("Path")?.Value)
@@ -63,6 +65,7 @@ internal static class CoverageDogfood
             string gitVersion = "not-checked-v2";
             string commit;
             string tree;
+            stage = "source-identity";
             if (contractVersion == 3)
             {
                 gitVersion = (await RunGitAsync(root, "HEAD", ["--version"], measurements, "git-version")).Trim();
@@ -77,12 +80,14 @@ internal static class CoverageDogfood
             }
             var sdk = await Command(root, "dotnet", ["--version"], measurements, "sdk-version");
             string? diffBase = null;
+            stage = "diff-base";
             if (options.TryGetValue("diff-base", out var requestedDiffBase) && !string.IsNullOrWhiteSpace(requestedDiffBase))
             {
                 diffBase = contractVersion == 3
                     ? await ResolveDiffBaseAsync(root, commit, requestedDiffBase, measurements)
                     : requestedDiffBase;
             }
+            stage = "collector-policy";
             var policy = new CoverageFanInPolicy(new(commit, tree, sdk.Trim(), configuration),
                 new("github-actions", Required("run-scope"), Required("run-id"), int.Parse(Required("attempt"), System.Globalization.CultureInfo.InvariantCulture)),
                 projects, new[] { "Linux", "Windows", "Darwin" }.Select(x => new CoverageSupplement(x.ToLowerInvariant(), x, NativeFilter, nativeProjects)).ToArray(),
@@ -97,15 +102,19 @@ internal static class CoverageDogfood
                 await ValidateCollectorVersionsAsync(root, (operationName == "native" ? nativeProjects : projects).Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal).ToArray(), configuration, measurements);
             var policyElement = ToVersionedPolicyElement(policy, contractVersion);
+            stage = "pinned-patch";
             var expectedPatchSha256 = contractVersion == 3 && policy.Gate.Mode == CoverageGateMode.AggregateAndPatch
                 ? await DeriveExpectedPatchSha256Async(root, policyElement, policy.Limits!, measurements)
                 : null;
+            stage = "native-inputs";
             var nativeInputs = operationName == "fanin"
                 ? CoverageFanInNativeInputs.Discover(Required("native-inputs"), policy.Supplements.Select(x => x.Id)) : null;
+            stage = "prepare-output";
             Directory.CreateDirectory(output);
             var accounting = new List<OperationAccounting>();
             async Task Invoke(string operation, object request, string suffix, bool collect = false)
             {
+                stage = "command-" + suffix;
                 var requestFile = Path.Join(output, suffix + "-request.json");
                 var resultFile = Path.Join(output, suffix + "-result.json");
                 var requestProjection = RequestProjection(request, policyElement, contractVersion,
@@ -120,10 +129,12 @@ internal static class CoverageDogfood
             }
             if (operationName == "native")
             {
+                stage = "native-arguments";
                 var platform = Required("native-platform");
                 if (platform is not ("Linux" or "Windows" or "Darwin")) throw new ArgumentException();
                 await Invoke("capture", new CoverageCaptureRequest(policy, root, Path.Join(output, "capture"), platform.ToLowerInvariant(),
                     Required("report"), RawCoveragePath: Required("raw")), "native");
+                stage = "native-proof";
                 if (contractVersion == 3)
                     await WriteShadowProofAsync(output, "native", policy, gitVersion, measurements, accounting,
                         expectedPatchSha256, policy.Limits!.TotalBytes);
@@ -152,6 +163,7 @@ internal static class CoverageDogfood
                 {
                     CoverageDogfoodResultValidation.RequireV3AcceptedResult(
                         Path.Join(output, "verify-result.json"), "verify", policy.Gate.Mode);
+                    stage = "fan-in-proof";
                     await WriteShadowProofAsync(output, "fanin", policy, gitVersion, measurements, accounting,
                         expectedPatchSha256, policy.Limits!.TotalBytes);
                 }
@@ -162,7 +174,11 @@ internal static class CoverageDogfood
         catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or JsonException
             or InvalidOperationException or FormatException or OverflowException or KeyNotFoundException or UnauthorizedAccessException
             or CoverageExecutionException or OperationCanceledException)
-        { Console.Error.WriteLine("ASCOV311 Dogfood failed. Inspect retained native command result files and correct the explicit repository policy/configuration; preserve partial output."); return 1; }
+        {
+            var reason = exception is CoverageFanInEvidenceException evidence ? evidence.Cause : exception.GetType().Name;
+            Console.Error.WriteLine($"ASCOV311 Dogfood failed at {stage} ({reason}). Inspect retained native command result files and correct the explicit repository policy/configuration; preserve partial output.");
+            return 1;
+        }
     }
     /// <summary>Qualifies the source-bound collector package for every project/framework before labeling fresh reports.</summary>
     private static async Task ValidateCollectorVersionsAsync(string root, IReadOnlyList<string> projects,

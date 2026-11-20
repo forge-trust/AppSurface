@@ -372,6 +372,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Upload failed native capture result
+        if: ${{ !cancelled() && steps.capture-native-coverage.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-capture-failure-${{ matrix.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coverage-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}/native-result.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload coverage security diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
