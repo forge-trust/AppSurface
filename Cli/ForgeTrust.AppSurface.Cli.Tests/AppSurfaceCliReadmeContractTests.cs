@@ -296,6 +296,7 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("BUILD_CONFIGURATION=Release", readme, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_PARALLELISM=2", readme, StringComparison.Ordinal);
         Assert.Contains("`coverage run --dry-run` or `--list-projects`", readme, StringComparison.Ordinal);
+        Assert.Matches(@"they do not produce a\s+baseline sample", readme);
         Assert.Contains("artifacts/issue-728-test-efficiency", readme, StringComparison.Ordinal);
     }
 
