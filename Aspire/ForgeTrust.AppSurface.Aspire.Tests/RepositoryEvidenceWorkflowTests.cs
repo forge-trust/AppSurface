@@ -541,6 +541,25 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("3", false)]
+    [InlineData("2", false)]
+    [InlineData("4", true)]
+    [InlineData("03", true)]
+    public async Task CoverageRunPreflight_RejectsUnpairedOrUnknownNativeContract(string version, bool withCaptures)
+    {
+        var planned = await PlanAsync(["tests/Coverage.Tests/ExampleTests.cs"]);
+        var output = NewPath("native-contract-output");
+        var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
+            ("--plan", Path.Join(planned.Output, "evidence-plan.json")), ("--output", output),
+            ("--dotnet", ExistingProcessPath()), ("--coverage-cli", ExistingProcessPath()),
+            ("--native-coverage-contract-version", version));
+        if (withCaptures) options["--native-coverage-directory"] = NewPath("native");
+
+        await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
+        Assert.False(Directory.Exists(output));
+    }
+
     private async Task<PlannedEvidence> PlanAsync(string[] pathValues, string? policyPath = null, string? scope = null)
     {
         var paths = await WritePathsAsync(pathValues.Select(path => new NormalizedDiffPath(path)).ToArray());

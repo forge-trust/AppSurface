@@ -11,6 +11,9 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed record RepositoryCheckSettings(string RepositoryRoot, string DotnetPath, string OutputDirectory,
     string? DiffBase = null, string? NativeCoverageDirectory = null, string? DiffFile = null, string? CoverageCliPath = null)
 {
+    /// <summary>Native fan-in contract to require for both captures and acceptance. Defaults to v2 for explicit compatibility callers.</summary>
+    internal int NativeCoverageContractVersion { get; init; } = 2;
+
     /// <summary>Optional same-run CI collection to verify and gate instead of collecting again. Never used for local patches.</summary>
     internal string? CoverageCollectionDirectory { get; init; }
 

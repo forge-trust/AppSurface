@@ -71,6 +71,16 @@ public sealed class NativeEvidenceProgramTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("AppSurface EvidenceHost acceptance", result.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("--scope all|native|coverage|packages", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("--native-coverage-contract-version 2|3 (default 2)", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NativeContractVersion_IsRejectedOutsideRepositoryEvidenceRun()
+    {
+        var result = await InvokeAsync(["--native-coverage-contract-version", "3"]);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Native validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
     }
 
     [Theory]
