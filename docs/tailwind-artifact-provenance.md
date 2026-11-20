@@ -2,6 +2,142 @@
 
 This is the operator and private-tool reference for the approved [#798 design](designs/issue-798-tailwind-artifact-provenance.md) and [implementation plan](plans/issue-798-tailwind-artifact-provenance.md). The flags, records and workflow behavior below describe the release provenance implementation. There is no consumer-facing package API change.
 
+## Exact GitHub Actions artifact transport (#910)
+
+The internal `artifact-transport` mode is a maintainer-only, nonpublishing transport gate in the protected manual Tailwind rehearsal. It verifies one artifact by exact ID and current run attempt before passing the extracted bundle to the existing producer-binding validator. It adds no public package API or dependency. This feature and its internal contract are documented in the [PackageIndex maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#exact-artifact-transport-910) and wired only by the protected [Package Artifacts workflow](https://github.com/forge-trust/AppSurface/blob/3d1a69e1db4dfea8eacf4927e34e6440f9dde6f1/.github/workflows/package-artifacts.yml).
+
+### Receipt and authority
+
+The protected `package-artifacts` job emits exactly this v1 JSON object after successful upload and the existing `validate-producer-binding` step. The eleven properties are required, strings, duplicate-free and exact; IDs are canonical positive decimal strings, source is a full lowercase 40-character SHA, and `archiveSha256` is `sha256:` plus 64 lowercase hex characters.
+
+```json
+{
+  "schema": "appsurface-github-actions-producer-receipt-v1",
+  "repository": "owner/repository",
+  "repositoryId": "123456",
+  "workflowPath": ".github/workflows/package-artifacts.yml",
+  "event": "workflow_dispatch",
+  "producerJob": "package-artifacts",
+  "runId": "123456789",
+  "runAttempt": "1",
+  "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "artifactId": "987654321",
+  "archiveSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+}
+```
+
+The named successful producer's protected job output is the receipt authority; independent repository, run, current attempt, source and exact artifact ID come from the consumer's guarded workflow context/output. The upload action supplies the artifact ID and archive digest. Missing or malformed upload outputs prevent receipt creation. The receipt is unsigned: its agreement with API metadata and a recomputed downloaded-byte digest is consistency within the trusted producer/workflow boundary, not an independent signature, attestation, or producer authentication. GitHub's artifact metadata does not contain a producing attempt; the exact-attempt run endpoint corroborates run context but does not independently bind the artifact to that attempt. A compromised authorized producer remains inside the trust boundary.
+
+### Command and internal boundary
+
+The protected caller supplies all twelve options explicitly; normal tool defaults cannot manufacture identity or paths for this mode:
+
+```text
+verify-tailwind-evidence --mode artifact-transport
+  --repo-root <source checkout>
+  --repository <owner/repository>
+  --repository-id <expected numeric repository ID>
+  --producer-run-id <current run ID>
+  --producer-attempt <current attempt>
+  --source-commit <expected source SHA>
+  --producer-artifact-id <exact artifact ID>
+  --producer-receipt <trusted receipt JSON file>
+  --expected-subject-sha256 <protected subject SHA-256>
+  --work-directory <fresh scratch directory>
+  --artifacts-output <new verified bundle directory>
+  --report-directory <fresh report directory>
+```
+
+`GH_TOKEN` is read once by the CLI boundary, must contain no whitespace or control characters, and is sent only on validated GitHub API requests. The internal `ArtifactExpectedContext` carries repository, repository ID, run ID, run attempt, source commit and artifact ID. `ProducerArtifactReceipt` carries the exact eleven fields above. `GitHubActionsArtifactVerifier.VerifyAsync(expected, receiptPath, token, scratchDirectory, cancellationToken)` validates the receipt before HTTP, calls only the direct artifact, exact-attempt and ZIP endpoints, and returns an owned `VerifiedArtifactArchive` only after streaming and hashing the bytes. The adapter takes ownership on success, checks the ZIP envelope and portable entry names/types, extracts within the entry/expanded-byte limits, and calls the existing `TailwindEvidenceWorkflow.ValidateProducerBindingAsync` for the actual subject, manifest and package checks. The validated subject attempt must independently equal the current attempt. The internal `ArtifactTransportException` exposes a stable code/operation and allowlisted context; its message is fixed and never copies caught exception text. Test seams are the injected `HttpMessageHandler`, `TimeProvider`, source-identity delegate and narrow filesystem operations. The internal budget-test constructor also accepts `Func<string, Stream>? archiveOutputFactory = null` for deterministic archive write/flush failures: it must create the supplied fresh owned ZIP path, write supplied bytes verbatim, and return a writable stream whose disposal belongs to the verifier. The default remains an exclusive asynchronous `FileStream` opened with `FileMode.CreateNew`; successful verification transfers the completed file path to the caller. Production defaults still use the real source stamp, validators, HTTP handler and filesystem; injected seams do not establish OS or hosted behavior.
+
+The adapter request shape is `TailwindArtifactTransportRequest(RepositoryRoot, Expected, ReceiptPath, ExpectedSubjectSha256, WorkDirectory, ArtifactsOutput, ReportDirectory, Token)`. Its result is `ArtifactTransportResult(Succeeded, Status, Code, NextAction, ReportWritten)`; it writes no console output, leaving the CLI to emit the fixed safe line. Success writes `verified-artifact.json` with schema `appsurface-github-actions-verified-artifact-v1`, all eleven receipt identity fields, verified `archiveSha256`, numeric `archiveBytes`, `status: succeeded` and `releaseEligible: false`. The core checks the artifact metadata digest against the receipt, then hashes the streamed raw archive and requires equality with both before handing off the ZIP. API calls are pinned to `X-GitHub-Api-Version: 2026-03-10`; metadata responses tolerate additive properties but require every contract field. A 403 with any `Retry-After` header, zero remaining quota, or a recognized bounded primary/secondary-limit response is rate-limited before generic permission classification. Storage redirects are manual, HTTPS-only, bounded, and receive no authorization, cookies or ambient credentials. The core defaults to a five-minute deadline and 30-second header/body-inactivity bounds; the adapter's outer five-minute deadline also covers extraction, source/content validation and installation, and distinguishes caller cancellation from elapsed budget.
+
+### Limits, output eligibility and recovery
+
+The mode uses a 16 MiB JSON limit and depth 64, a 1 GiB archive limit, at most 100,000 ZIP entries and 4 GiB expanded bytes, one five-minute overall deadline, 30-second response-header and stream-inactivity limits, six total HTTP sends and at most three HTTPS storage redirects. No list/search, retry, fallback candidate, receipt-provided URL or credential-bearing storage redirect is allowed. Archive digest verification precedes ZIP extraction. ZIP paths must be NFC portable relative names, at most 4,096 characters and 128 segments; traversal, rooted/backslash/colon paths, links, collisions, unsupported entries and corrupt archives are refused. Work, report and bundle paths must be fresh, disjoint, outside watched source inputs and free of link/reparse ancestors. The final bundle install uses same-volume `Directory.Move`, with no copy fallback. Configure work and output on the same volume before invocation; a cross-volume move fails as `artifact-output-failed`.
+
+Reports use the existing `diagnostics.json` and `summary.md` shape with `stage: artifact-transport`, `releaseEligible: false`, a stable code, safe context, next action and this reference's code anchor. The adapter removes the invocation-owned scratch (including the ZIP) before atomically writing `verified-artifact.json` last. Eligibility requires both process exit 0 and a valid final marker; a leftover directory or report after a crash is not success. Cleanup is limited to paths created by this invocation, and a later cleanup/report error cannot replace the first typed failure. A failed-jobs-only rerun can retain the previous producer receipt, whose attempt then differs from the independent current attempt: stop and, only when separately authorized, **re-run all jobs so the producer emits a receipt for the current attempt**. Never substitute a candidate or silently retry. The first protected hosted rehearsal remains necessary to establish real `GITHUB_TOKEN` REST access, service/storage behavior, resource fit and downstream consumption. The retained historical evidence/card and local fixtures do not establish those facts; one successful rehearsal is a minimum evidence requirement, not a diagnosis of the earlier incident.
+
+The credential-free acceptance card is a focused fixture test from a prepared .NET 10 checkout. It must report exactly three passing test cases: matching same-attempt evidence succeeds with a marker; an attempt-1 receipt under simulated current attempt 2 exits 1 with zero HTTP; and one changed archive byte exits 1 before extraction. These fixtures exercise the real adapter and binding validator through approved internal seams, but do not prove protected producer authority or hosted token capability.
+
+```bash
+dotnet restore tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj --locked-mode
+dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj -c Release --no-restore --filter 'FullyQualifiedName~TailwindArtifactTransportTests.AcceptanceCard'
+```
+
+### Refusal codes and recovery anchors
+
+Every emitted code links to its corresponding section below. Correct only the named input or environment condition; preserve reports and original producer identity. Never copy raw exception text, response bodies, headers, signed URLs or query strings into reports or console output.
+
+#### `artifact-input-invalid`
+Correct the explicitly named option or provide missing authority; verify fresh, disjoint, unlinked paths before retry.
+
+#### `artifact-receipt-invalid`
+Obtain the exact receipt from the successful protected producer output; do not reconstruct or edit it.
+
+#### `artifact-receipt-binding-mismatch`
+Stop and reconcile the named receipt field against independent current workflow context; do not choose a different artifact.
+
+#### `artifact-attempt-mismatch`
+The receipt, API attempt or validated subject belongs to another attempt. For an authorized retry, re-run all jobs so the producer emits a receipt for the current attempt.
+
+#### `artifact-repository-mismatch`
+Stop if artifact/run repository or head repository differs from the guarded repository.
+
+#### `artifact-run-mismatch`
+Stop if returned run identity differs; retain the exact producer and investigate workflow output provenance.
+
+#### `artifact-workflow-mismatch`
+Stop if workflow path or event differs from the fixed protected rehearsal policy.
+
+#### `artifact-source-mismatch`
+Restore a clean source-stamped checkout matching the independently supplied commit; do not rewrite the receipt.
+
+#### `artifact-not-found-or-inaccessible`
+404 is intentionally ambiguous between missing and inaccessible. Check exact ID and retention/permissions without trying a name or substitute.
+
+#### `artifact-expired`
+The artifact is expired or API reports 410; same-identity recovery is unavailable. Follow separately reviewed fix-forward policy.
+
+#### `artifact-permission-denied`
+Check the protected workflow's read-only token permissions and exact repository scope; do not broaden credentials as an automatic retry.
+
+#### `artifact-rate-limited`
+Stop and follow the authorized run policy after rate-limit recovery; do not add verifier retries. Any `Retry-After` on 403 is rate-limit evidence.
+
+#### `artifact-api-unavailable`
+Preserve safe reports and investigate service/network availability before a separately authorized fresh full run.
+
+#### `artifact-api-response-invalid`
+Treat missing, malformed or unsupported required metadata as a refusal; preserve the response only through sanitized diagnostics.
+
+#### `artifact-metadata-digest-mismatch`
+API digest conflicts with the trusted upload output. Stop; do not repack or accept either value by preference.
+
+#### `artifact-bytes-digest-mismatch`
+Downloaded bytes differ from the expected archive digest. No extraction is eligible; preserve the receipt and report.
+
+#### `artifact-download-failed`
+Transfer was incomplete or failed. Do not resume or splice bytes; any retry requires a separately authorized full workflow attempt.
+
+#### `artifact-redirect-invalid`
+The redirect/status/destination or hop bound violates policy. Do not expose or manually reuse its URL.
+
+#### `artifact-budget-exceeded`
+A documented time, request, JSON, archive, entry or expansion limit was reached. Do not raise a production limit ad hoc.
+
+#### `artifact-archive-unsafe`
+Archive envelope, portable path, entry type, collision or decompression checks failed. Do not extract manually into the candidate output.
+
+#### `artifact-producer-binding-invalid`
+The existing subject/manifest/package validator refused the bundle. Follow its safe underlying code and preserve the original producer.
+
+#### `artifact-output-failed`
+Check fresh output ownership, disk space and same-volume configuration. Reconcile partial owned output before an authorized new invocation; never delete pre-existing paths.
+
+#### `artifact-cancelled`
+Respect caller cancellation, reconcile owned output eligibility and request maintainer authorization before a new full rehearsal; there is no automatic restart.
+
 ## Trust chain and authorities
 
 The validated tag checkout, repository identity, full source commit and coordinated package plan are the source authority. The producer runs `pack-and-verify` once, performs the existing local Linux consumer proof, and emits a package inventory (`package-artifact-manifest.unapproved.json` v1 for release publishing, `package-artifact-manifest.json` for manual rehearsal) plus `tailwind-proof-subject.json` (`appsurface-tailwind-proof-subject-v1`). The subject freezes package version, producer run and attempt, source/repository, exact manifest SHA-256, Tailwind package ID/file/raw SHA-512, exact internal Tailwind release-manifest SHA-256, `net10.0` consumer framework, payload projection version 1, and sorted first-party closure (at the reviewed base, Core and Tailwind), each with ID/version/file/raw SHA-512.

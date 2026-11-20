@@ -39,6 +39,12 @@ internal static class Program
           verify-tailwind-consumer
                       Verify a local-only Tailwind consumer or run a producer-bound native release proof.
           verify-tailwind-evidence
+                                artifact-transport: exact-ID, current-attempt nonpublishing rehearsal.
+                                Requires --repo-root --repository --repository-id --producer-run-id
+                                --producer-attempt --source-commit --producer-artifact-id --producer-receipt
+                                --expected-subject-sha256 --work-directory --artifacts-output --report-directory.
+                                GH_TOKEN is environment-only. All output directories must be fresh/disjoint,
+                                without link ancestors; work and bundle must be on the same volume.
                       Validate producer-binding, aggregate five native receipts, prepare publication inputs, or validate an uploaded publication-start receipt before credentials.
           verify-durable-template-evidence
                       Validate the trusted three-OS receipts against --preflight-source-commit and the exact producer manifest before credentials.
@@ -76,7 +82,7 @@ internal static class Program
                                 Required stable or prerelease package version without SemVer build metadata for verify-packages.
           --repository-id <id> --producer-run-id <id> --producer-attempt <n> --source-commit <sha>
                                 Optional verify-packages producer identity; all four are required together. Build verifier with /p:SourceRevisionId=<sha>.
-          Tailwind commands accept --mode local|release|producer-binding|aggregate|publish-preflight|validate-publication-start and the explicit producer, invocation, aggregate, receipt, and directory bindings in docs/tailwind-artifact-provenance.md.
+          Tailwind commands accept --mode local|release|producer-binding|aggregate|publish-preflight|validate-publication-start|artifact-transport and the explicit producer, invocation, aggregate, receipt, and directory bindings in docs/tailwind-artifact-provenance.md.
           --cloudtasks-baseline-ref <ref>
                                 Optional historical Cloud Tasks acceptance baseline: unique merge-base of this ref and candidate commit.
                                 Omit for ordinary verification against the candidate committed source snapshot; missing history fails.
@@ -141,6 +147,8 @@ internal static class Program
     /// Optional external-command runner used by the exact-bundle runtime-preflight carrier. When omitted, the carrier
     /// launches its production consumer command through <see cref="CliWrapCommandRunner"/>.
     /// </param>
+    /// <param name="artifactTransportAsync">Optional dispatch-only transport override; real adapter/content verification is tested separately.</param>
+    /// <param name="artifactTransportToken">Optional credential reader for dispatch tests; production reads GH_TOKEN once and never prints it.</param>
     /// <returns><c>0</c> when the command succeeds; otherwise a non-zero exit code.</returns>
     internal static async Task<int> RunAsync(
         string[] args,
@@ -153,7 +161,9 @@ internal static class Program
         Func<PackagePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishStableAsync = null,
         Func<PackageSmokeInstallRequest, CancellationToken, Task<PackageSmokeInstallReport>>? smokeInstallAsync = null,
         Func<PythonParserCandidateProofRequest, CancellationToken, Task<PythonParserCandidateProofReport>>? inspectPythonParserCandidateAsync = null,
-        IExternalCommandRunner? preflightCommandRunner = null)
+        IExternalCommandRunner? preflightCommandRunner = null,
+        Func<TailwindArtifactTransportRequest, CancellationToken, Task<ArtifactTransportResult>>? artifactTransportAsync = null,
+        Func<string?>? artifactTransportToken = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(standardOut);
@@ -297,7 +307,18 @@ internal static class Program
                 return 0;
             }
 
+            // Select the new mode before legacy parsing can echo raw arguments or apply authority defaults.
+            if (normalizedCommand == VerifyTailwindEvidenceCommand
+                && args.Skip(1).Select((value, index) => (value, index))
+                    .Any(item => item.value == "--mode" && item.index + 2 < args.Length && args[item.index + 2] == "artifact-transport"))
+            {
+                return await RunArtifactTransportAsync(args.Skip(1).ToArray(), currentDirectory, standardOut, standardError,
+                    artifactTransportAsync, artifactTransportToken, cancellationToken);
+            }
+
             var tailwindOptions = TailwindCommandOptions.Extract(args.Skip(1).ToArray());
+            if (tailwindOptions.Repository is not null || tailwindOptions.ProducerReceipt is not null)
+                throw new PackageIndexException("--repository and --producer-receipt apply only to artifact-transport.");
             if (normalizedCommand == VerifyTailwindConsumerCommand)
             {
                 var general = CommandLineOptions.Parse(tailwindOptions.RemainingArguments, currentDirectory);
@@ -355,7 +376,7 @@ internal static class Program
                     await standardOut.WriteLineAsync($"Validated uploaded Tailwind publication-start artifact {request.PublicationStartArtifactId} and {validated.Packages.Count} prepared packages before credentials.");
                     return 0;
                 }
-                throw new PackageIndexException("verify-tailwind-evidence --mode must be producer-binding, aggregate, publish-preflight, or validate-publication-start.");
+                throw new PackageIndexException("verify-tailwind-evidence --mode must be producer-binding, aggregate, publish-preflight, validate-publication-start, or artifact-transport.");
             }
 
             var baseArguments = normalizedCommand is VerifyPackagesCommand or PublishPrereleaseCommand or PublishStableCommand
@@ -459,6 +480,92 @@ internal static class Program
         catch (PackageIndexException ex)
         {
             await standardError.WriteLineAsync(ex.Message);
+            return 1;
+        }
+    }
+
+    private static readonly string[] ArtifactTransportRequiredOptions =
+    [
+        "--repo-root", "--repository", "--repository-id", "--producer-run-id", "--producer-attempt",
+        "--source-commit", "--producer-artifact-id", "--producer-receipt", "--expected-subject-sha256",
+        "--work-directory", "--artifacts-output", "--report-directory"
+    ];
+
+    private static async Task<int> RunArtifactTransportAsync(string[] arguments, string currentDirectory,
+        TextWriter standardOut, TextWriter standardError,
+        Func<TailwindArtifactTransportRequest, CancellationToken, Task<ArtifactTransportResult>>? run,
+        Func<string?>? readToken, CancellationToken token)
+    {
+        try
+        {
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            var known = ArtifactTransportRequiredOptions.Append("--mode").ToHashSet(StringComparer.Ordinal);
+            var rejected = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "--artifacts-input", "--artifact-manifest", "--producer-subject", "--aggregate-input",
+                "--publication-directory", "--resolved-binding-output", "--evidence-input", "--host-artifacts-map"
+            };
+            for (var i = 0; i < arguments.Length; i++)
+            {
+                var option = arguments[i];
+                if (!known.Contains(option))
+                    throw new ArtifactTransportException("artifact-input-invalid", "arguments", rejected.Contains(option) ? option : "unknown-option");
+                if (i + 1 >= arguments.Length || string.IsNullOrWhiteSpace(arguments[i + 1]) || arguments[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    throw new ArtifactTransportException("artifact-input-invalid", "arguments", option);
+                if (!values.TryAdd(option, arguments[++i]))
+                    throw new ArtifactTransportException("artifact-input-invalid", "arguments", option);
+            }
+            foreach (var option in ArtifactTransportRequiredOptions)
+                if (!values.ContainsKey(option)) throw new ArtifactTransportException("artifact-input-invalid", "arguments", option);
+            if (values.GetValueOrDefault("--mode") != "artifact-transport")
+                throw new ArtifactTransportException("artifact-input-invalid", "arguments", "--mode");
+            var credential = (readToken ?? (() => Environment.GetEnvironmentVariable("GH_TOKEN")))();
+            if (string.IsNullOrWhiteSpace(credential) || credential.Any(char.IsWhiteSpace) || credential.Any(char.IsControl))
+                throw new ArtifactTransportException("artifact-input-invalid", "arguments", "GH_TOKEN");
+            var root = Path.GetFullPath(values["--repo-root"], currentDirectory);
+            string Resolve(string name) => Path.GetFullPath(values[name], root);
+            var expected = new ArtifactExpectedContext(values["--repository"], values["--repository-id"], values["--producer-run-id"],
+                values["--producer-attempt"], values["--source-commit"], values["--producer-artifact-id"]);
+            GitHubActionsArtifactVerifier.ValidateExpected(expected);
+            var request = new TailwindArtifactTransportRequest(root, expected, Resolve("--producer-receipt"),
+                values["--expected-subject-sha256"], Resolve("--work-directory"), Resolve("--artifacts-output"), Resolve("--report-directory"), credential);
+            ArtifactTransportResult result;
+            if (run is not null) result = await run(request, token);
+            else
+            {
+                using var workflow = new TailwindArtifactTransportWorkflow();
+                result = await workflow.RunAsync(request, token);
+            }
+            if (result.Succeeded)
+            {
+                await standardOut.WriteLineAsync("Tailwind artifact transport succeeded; inspect the verified record before consumption.");
+                return 0;
+            }
+            await standardError.WriteLineAsync($"artifact-transport failed: {result.Code}");
+            if (result.ReportWritten && result.NextAction is not null) await standardError.WriteLineAsync(result.NextAction);
+            return 1;
+        }
+        catch (ArtifactTransportException failure)
+        {
+            await standardError.WriteLineAsync($"artifact-transport failed: {failure.Code}");
+            if (failure.Operation == "arguments" && failure.Field is not null)
+                await standardError.WriteLineAsync($"Correct the required option or binding: {failure.Field}.");
+            return 1;
+        }
+        catch (OperationCanceledException)
+        {
+            await standardError.WriteLineAsync("artifact-transport failed: artifact-cancelled");
+            return 1;
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            await standardError.WriteLineAsync("artifact-transport failed: artifact-input-invalid");
+            return 1;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // New-mode failures never escape into the legacy raw exception formatter.
+            await standardError.WriteLineAsync("artifact-transport failed: artifact-output-failed");
             return 1;
         }
     }

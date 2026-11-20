@@ -1,0 +1,3 @@
+<!-- appsurface:unreleased-entry section="taking-shape" -->
+
+- Release maintainers can verify one Tailwind rehearsal producer bundle by exact GitHub Actions artifact ID, with distinct refusal reasons for identity, access, expiry, digest, transport, archive, and content failures. The [internal verification mode](../../docs/tailwind-artifact-provenance.md#exact-github-actions-artifact-transport-910) binds the protected receipt to the current run and attempt, hashes the downloaded ZIP before extraction, and lets the nonpublishing rehearsal consume only the verified bundle. Stable/prerelease policy, cross-attempt recovery, and Skoolit adoption remain deferred; protected hosted acceptance is still pending.
