@@ -22,8 +22,6 @@ The artifact layout under `TestResults/coverage-evidence/` is:
 
 The workflow uploads these outputs as coverage diagnostics and gate reports. The full-solution aggregate gate remains independently required; the composed report's aggregate percentage is informational. Codecov receives the composed report on PRs selecting native coverage, otherwise the full-solution report. Main runs without a patch baseline also report the full-solution report.
 
-<a id="opt-in-schema-v3-report-based-patch-applicability"></a>
-
 ## Opt-in schema-v3 report-based patch applicability
 
 > **Interpretation pitfall:** In v3, `PatchOutcome == "PatchAccepted"` means the requested patch evaluation was accepted, including when one or more dimensions are valid `notApplicable`. Pin the expected `contractVersion: 3` and preserve the complete primary/composed line/branch applicability results. V3 accepts valid N/A without an additional measured-only switch; `PatchAccepted` alone does not include the four metric details.
@@ -117,7 +115,7 @@ Invalid public API policy remains a pre-effect `ArgumentException`/`ASCOV301`; m
 
 The rollout requires fresh actual-source, installed-consumer, native-platform, selected-Evidence-producer and decoded/staged/retained-budget proof. Missing infrastructure or a failed lane blocks qualification. Preserve its diagnostics for the maintainer. Rollback coordinates writer, verifier, adapters and repository policy back to explicit v2 while preserving artifacts and the #903 mitigation. Use v3-capable coordinated tooling to inspect retained v3 history after rollback.
 
-## Schema-v2 workflow and compatibility
+## Native schema-v2 workflow
 
 The neutral [Coverage package](../Coverage/ForgeTrust.AppSurface.Coverage/README.md) supplies asynchronous collection/capture, composition, acceptance and independent read-only verification. The [AppSurface CLI](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-fan-in) exposes the same operations. V2 remains the default for the reusable policy/API, installed CLI requests that omit a contract version, and standalone Dogfood invocations. The checked-in `build.yml` PR-native repository path opts into v3 explicitly with `--native-coverage-contract-version 3`. The [EvidenceHost adapter](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#coverage-fan-in-producer) requires independently accepted current-run evidence and successful result delivery before it returns an assertion. Capture/compose success is never an acceptance result.
 
@@ -167,7 +165,7 @@ The request, request-file and result-file paths must pass the CLI's regular, lin
 
 Requests use the exact v2 envelope `{ "schemaVersion": 2, "operation": "capture", "request": { ... } }`, with camelCase request members and string enums. V3 uses `schemaVersion: 3` and requires `policy.contractVersion: 3` plus `policy.reportProfileId: "coverlet-collector-cobertura-v1"`; standalone Dogfood callers may select it with the adapter's documented `--contract-version 3` option, whose default remains 2. The repository PR-native validator setting is `--native-coverage-contract-version 3` and requires paired native captures plus a full pinned diff base. Collection uses `operation: "collect"` together with `capture --collect`. Unknown, duplicate, missing required, wrongly typed or contradictory fields fail before execution. API/package versions, CLI request schema, capture schema, local coordination and policy encoding are separate version domains; `coverage-policy-c14n-1` identifies canonical policy bytes, not an execution claim.
 
-An `accept` request may set `expectedPatchSha256` to bind patch acceptance to the exact unified Git diff used during planning. It must be a 64-digit SHA-256 and is invalid for aggregate-only requests. Patch coverage requires measurable changed lines; when the patch contains no measurable branch conditions, the branch gate uses its existing 0/0 convention. Composition still cannot drop measurable branch points from the primary report.
+V2 `accept` requests may set `expectedPatchSha256` to bind patch acceptance to the exact unified Git diff used during planning. V3 requires it for patch acceptance. It must be a 64-digit SHA-256 and is invalid for aggregate-only requests. V2 patch coverage requires measurable changed lines and uses its 0/0 convention when the patch contains no measurable branch conditions. Both versions preserve measurable branch points from the primary report during composition.
 
 Exit 0 means the requested operation succeeded; 1 means rejection, failed/incomplete work or delivery failure; 2 means invalid input; 130 means cancellation; 124 preserves the terminal watchdog/deadline result. Inspect both the requested operation/outcome and delivery status. A composed capture may succeed while no accepted coverage exists. A committed accepted generation may survive failed adapter delivery; reconcile that exact generation before retrying delivery. Never blindly rerun or reuse the previous invocation's success.
 
