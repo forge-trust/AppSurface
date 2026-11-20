@@ -277,30 +277,38 @@ public sealed class AppSurfaceCliReadmeContractTests
     }
 
     [Fact]
-    public void RepositoryReadme_ShouldDocumentCoverageDriverPrerequisites()
+    public void RepositoryReadme_ShouldLinkToCoverageSetupAndHistoricalTimingGuidance()
     {
         var readme = File.ReadAllText(GetRepositoryReadmePath());
 
-        Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.collector", readme, StringComparison.Ordinal);
-        Assert.Contains("[coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection)", readme, StringComparison.Ordinal);
-        Assert.Contains("native Microsoft Testing Platform projects are rejected", readme, StringComparison.Ordinal);
-        Assert.Contains("--coverage-driver msbuild", readme, StringComparison.Ordinal);
-        Assert.Contains("### Coverage efficiency evidence for issue #728", readme, StringComparison.Ordinal);
-        Assert.Contains("BUILD_CONFIGURATION=Release", readme, StringComparison.Ordinal);
-        Assert.Contains("COVERAGE_PARALLELISM=2", readme, StringComparison.Ordinal);
-        Assert.Contains("coverage-efficiency-evidence", readme, StringComparison.Ordinal);
-        Assert.Contains("`appsurface coverage run --dry-run` only to inspect discovery", readme, StringComparison.Ordinal);
-        Assert.Contains("./artifacts/issue-728-test-efficiency/", readme, StringComparison.Ordinal);
+        Assert.Contains("](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)", readme, StringComparison.Ordinal);
+        Assert.Contains("id=\"coverage-efficiency-evidence-for-issue-728\"", readme, StringComparison.Ordinal);
+        Assert.Contains("](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-efficiency-evidence-workflow)", readme, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RepositoryReadme_ShouldDocumentBoundedTestResultDiagnostics()
+    public void CliReadme_ShouldDocumentCoveragePrerequisitesAndTimingEvidence()
     {
-        var readme = File.ReadAllText(GetRepositoryReadmePath());
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
 
-        Assert.Contains("bounded, failure-first test-result and slow-test diagnostics", readme, StringComparison.Ordinal);
+        Assert.Contains("rejects MTP", readme, StringComparison.Ordinal);
+        Assert.Contains("--coverage-driver msbuild", readme, StringComparison.Ordinal);
+        Assert.Contains("BUILD_CONFIGURATION=Release", readme, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_PARALLELISM=2", readme, StringComparison.Ordinal);
+        Assert.Contains("`coverage run --dry-run` or `--list-projects`", readme, StringComparison.Ordinal);
+        Assert.Contains("artifacts/issue-728-test-efficiency", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CoverageDocumentation_ShouldExplainTheSummaryAndWhereToFindFullResults()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+        var contributorGuide = File.ReadAllText(Path.Join(GetRepositoryRoot(), "CONTRIBUTING.md"));
+
+        Assert.Contains("bounded, failure-first test summary", readme, StringComparison.Ordinal);
         Assert.Contains("safely truncated failure evidence", readme, StringComparison.Ordinal);
-        Assert.Contains("managed JUnit XML and per-project logs retain the complete details", readme, StringComparison.Ordinal);
+        Assert.Contains("slow-test-diagnostics.md", readme, StringComparison.Ordinal);
+        Assert.Contains("complete JUnit XML and per-project `dotnet test` logs", contributorGuide, StringComparison.Ordinal);
     }
 
     private static bool HasDirectMsbuildCoverageReference(string path)
