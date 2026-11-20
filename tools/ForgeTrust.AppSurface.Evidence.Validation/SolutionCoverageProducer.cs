@@ -57,8 +57,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             if (expected.Count == 0) throw new InvalidDataException("The solution contains no test projects.");
             var nativeFanIn = !string.IsNullOrWhiteSpace(_settings.NativeCoverageDirectory);
             var nativeContract = _settings.NativeCoverageContractVersion;
-            if (nativeContract is not (2 or 3) || (nativeContract == 3 && (!nativeFanIn || !IsFullCommit(_settings.DiffBase))))
-                throw new InvalidDataException("Native v3 requires native captures and a full pinned Git commit ID.");
+            if (nativeContract is not (2 or 3) || (nativeContract == 3 && (!nativeFanIn || !IsRepositoryCommit(_settings.DiffBase))))
+                throw new InvalidDataException("Native v3 requires native captures and a full pinned SHA-1 Git commit ID.");
             if (_settings.CoverageCliPath is { } coverageCli
                 && (!Path.IsPathFullyQualified(coverageCli) || !File.Exists(coverageCli)))
                 throw new InvalidOperationException("The installed coverage CLI must be an existing absolute executable.");
@@ -402,7 +402,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         if (metadata.RootElement.GetProperty("schemaVersion").GetInt32() != 3
             || metadata.RootElement.GetProperty("requestedBaseCommit").GetString() != diffBase
             || metadata.RootElement.GetProperty("headCommit").GetString() != commit
-            || !IsFullCommit(metadata.RootElement.GetProperty("mergeBaseCommit").GetString()))
+            || !IsRepositoryCommit(metadata.RootElement.GetProperty("mergeBaseCommit").GetString()))
             throw new InvalidDataException("Native v3 patch proof is not bound to the requested base and head.");
 
         using var applicability = ReadJson(Path.Join(accepted, "patch-applicability.json"), MaxJson);
@@ -466,7 +466,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         };
     }
 
-    private static bool IsFullCommit(string? value) => value is { Length: 40 or 64 }
+    private static bool IsRepositoryCommit(string? value) => value is { Length: 40 }
         && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static async Task WriteJsonAsync(EvidenceArtifactWriter writer, string name, string path, string source, CancellationToken ct)

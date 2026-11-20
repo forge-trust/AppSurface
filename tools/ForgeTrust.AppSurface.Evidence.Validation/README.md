@@ -108,7 +108,8 @@ documents that a direct patch metric with no measurable changed lines or branche
 untracked content, so uncommitted code participates. CI PRs whose root policy selection includes coverage
 and another producer retain native Linux/Windows/macOS supplementation and independent aggregate acceptance.
 The checked-in `build.yml` PR-native path explicitly selects v3 with
-`--native-coverage-contract-version 3`, paired with the full pinned event PR base and exactly three Linux,
+`--native-coverage-contract-version 3`, paired with the full pinned event PR base in AppSurface's 40-digit
+lowercase SHA-1 format and exactly three Linux,
 Windows and macOS captures from the current workflow attempt. The installed CLI must accept the fan-in and
 then verify it independently in read-only mode. The validator checks and retains the typed primary and
 composed patch applicability with its bound diff and acceptance proof under the producer evidence. V3

@@ -1059,6 +1059,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData(null)]
     [InlineData("main")]
     [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
     [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
     public async Task ProduceAsync_RejectsMissingOrInvalidNativeV3PinnedDiffBase(string? diffBase)
     {

@@ -226,7 +226,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("$env:GITHUB_PULL_REQUEST_BASE_SHA", preflightRun);
         Assert.Contains("\"v3_diff_base=$v3DiffBase\"", preflightRun);
         Assert.Equal(1, preflightRun.Split("v3_diff_base=", StringSplitOptions.None).Length - 1);
-        Assert.Contains("^(?:[0-9a-f]{40}|[0-9a-f]{64})$", preflightRun);
+        Assert.Contains("$v3DiffBase -cnotmatch '^[0-9a-f]{40}$'", preflightRun);
         Assert.Contains("ForgeTrust.AppSurface.Evidence.Validation.dll", preflightRun);
         Assert.DoesNotContain("python", preflightRun, StringComparison.OrdinalIgnoreCase);
 
@@ -244,6 +244,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("$contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }", capture);
         Assert.Contains("'--contract-version', $contractVersion", capture);
         Assert.Contains("$diffBase = if ($contractVersion -eq '3') { $env:COVERAGE_V3_DIFF_BASE } else { $env:COVERAGE_GATE_DIFF_BASE }", capture);
+        Assert.Contains("$diffBase -cnotmatch '^[0-9a-f]{40}$'", capture);
         Assert.Equal(1, capture.Split("$env:COVERAGE_V3_DIFF_BASE", StringSplitOptions.None).Length - 1);
         Assert.Equal(1, capture.Split("'--diff-base'", StringSplitOptions.None).Length - 1);
         Assert.Contains("/usr/bin/time -l dotnet @command", capture);

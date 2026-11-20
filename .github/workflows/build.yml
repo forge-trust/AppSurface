@@ -121,8 +121,8 @@ jobs:
           $v3DiffBase = ''
           if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
             $v3DiffBase = [string]$env:GITHUB_PULL_REQUEST_BASE_SHA
-            if ($v3DiffBase -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') {
-              throw 'Native v3 coverage requires the full immutable pull-request base commit ID.'
+            if ($v3DiffBase -cnotmatch '^[0-9a-f]{40}$') {
+              throw 'Native v3 coverage requires the full immutable pull-request base SHA-1 commit ID.'
             }
           }
           "v3_diff_base=$v3DiffBase" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
@@ -335,8 +335,8 @@ jobs:
           $platform = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "Darwin" } else { "Linux" }
           $contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }
           $diffBase = if ($contractVersion -eq '3') { $env:COVERAGE_V3_DIFF_BASE } else { $env:COVERAGE_GATE_DIFF_BASE }
-          if ($contractVersion -eq '3' -and $diffBase -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') {
-            throw "Native v3 coverage requires the full immutable pull-request base commit ID."
+          if ($contractVersion -eq '3' -and $diffBase -cnotmatch '^[0-9a-f]{40}$') {
+            throw "Native v3 coverage requires the full immutable pull-request base SHA-1 commit ID."
           }
           $adapter = @('--operation', 'native', '--contract-version', $contractVersion,
             '--repository', $PWD.Path, '--cli', $env:COVERAGE_CLI_PATH,
