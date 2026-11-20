@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -554,8 +555,214 @@ internal sealed record CoverageRunRequest(
     /// <summary>Gets the explicitly scoped output context shared by nested first-party Evidence operations.</summary>
     internal CoverageArtifactSession? ArtifactSession { get; init; }
 
+    /// <summary>
+    /// Requires both the evaluated direct <c>coverlet.collector</c> reference and the restored framework
+    /// graphs to contain this exact version before artifact creation. Exact-version runs restore during
+    /// supervised preflight unless <see cref="NoRestore"/> is set, then suppress implicit restore for collection.
+    /// Null preserves legacy coverage-run behavior.
+    /// </summary>
+    internal string? RequiredCollectorVersion { get; init; }
+
     /// <summary>Gets an Evidence-owned session factory invoked only after project and collector preflight succeeds.</summary>
     internal Func<CancellationToken, Task<CoverageArtifactSession>>? ArtifactSessionFactory { get; init; }
+}
+
+/// <summary>Checks the exact collector package version from source-bound MSBuild capability output.</summary>
+internal static class CoverageRunCollectorVersionPreflight
+{
+    private const string CollectorPackageId = "coverlet.collector";
+
+    /// <summary>Returns true only when the evaluated direct collector version equals the required version.</summary>
+    internal static bool HasExactVersion(string capabilityJson, string? framework, string requiredVersion)
+    {
+        if (string.IsNullOrWhiteSpace(requiredVersion) || requiredVersion.Length > 128)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(capabilityJson, new JsonDocumentOptions { MaxDepth = 32 });
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !TryGetUniqueProperty(root, "Properties", out var properties)
+                || properties.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (framework is null
+                && TryGetUniqueProperty(properties, "TargetFrameworks", out var targetFrameworks)
+                && targetFrameworks.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(targetFrameworks.GetString()))
+            {
+                // The outer evaluation is not the selected package graph for a multi-target project.
+                return true;
+            }
+
+            if (framework is not null
+                && (!TryGetUniqueProperty(properties, "TargetFramework", out var evaluatedFramework)
+                    || evaluatedFramework.ValueKind != JsonValueKind.String
+                    || !string.Equals(evaluatedFramework.GetString(), framework, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            if (!TryGetUniqueProperty(root, "Items", out var items)
+                || items.ValueKind != JsonValueKind.Object
+                || !TryGetUniqueProperty(items, "PackageReference", out var packageReferences)
+                || packageReferences.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var directReferences = packageReferences.EnumerateArray()
+                .Where(item => IsPackage(item, CollectorPackageId))
+                .ToArray();
+            if (directReferences.Length != 1
+                || !TryReadOptionalString(directReferences[0], "VersionOverride", out var versionOverride)
+                || !TryReadOptionalString(directReferences[0], "Version", out var version))
+            {
+                return false;
+            }
+
+            var evaluatedVersion = !string.IsNullOrWhiteSpace(versionOverride)
+                ? versionOverride
+                : version;
+            if (!string.IsNullOrWhiteSpace(evaluatedVersion))
+            {
+                return string.Equals(evaluatedVersion.Trim(), requiredVersion, StringComparison.Ordinal);
+            }
+
+            if (!TryGetUniqueProperty(items, "PackageVersion", out var packageVersions)
+                || packageVersions.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var centralVersions = packageVersions.EnumerateArray()
+                .Where(item => IsPackage(item, CollectorPackageId))
+                .ToArray();
+            return centralVersions.Length == 1
+                && TryReadOptionalString(centralVersions[0], "Version", out var centralVersion)
+                && string.Equals(centralVersion?.Trim(), requiredVersion, StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Checks the restored collector in every graph for the selected framework using bounded, link-free assets.</summary>
+    /// <remarks>The evaluated assets location and restored project identity must match this project. Outer multi-target
+    /// evaluations defer to their framework evaluations. Callers restore before this check when allowed and suppress
+    /// implicit restore afterward so collection consumes the checked graph.</remarks>
+    internal static bool HasRestoredVersion(string capabilityJson, string? framework, string requiredVersion, string projectPath)
+    {
+        try
+        {
+            using var capability = JsonDocument.Parse(capabilityJson, new JsonDocumentOptions { MaxDepth = 32 });
+            if (!TryGetUniqueProperty(capability.RootElement, "Properties", out var properties)) return false;
+            if (framework is null && TryReadOptionalString(properties, "TargetFrameworks", out var frameworks)
+                && !string.IsNullOrWhiteSpace(frameworks)) return true;
+            if (framework is null && !TryReadOptionalString(properties, "TargetFramework", out framework)) return false;
+            if (string.IsNullOrWhiteSpace(framework)
+                || !TryReadOptionalString(properties, "ProjectAssetsFile", out var assetsPath) || string.IsNullOrWhiteSpace(assetsPath)
+                || !TryReadOptionalString(properties, "MSBuildProjectExtensionsPath", out var extensionsPath) || string.IsNullOrWhiteSpace(extensionsPath)
+                || !TryReadOptionalString(properties, "MSBuildProjectFullPath", out var evaluatedProject) || string.IsNullOrWhiteSpace(evaluatedProject)) return false;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var project = Path.GetFullPath(projectPath);
+            if (!string.Equals(Path.GetFullPath(evaluatedProject), project, comparison)) return false;
+            var assets = Path.GetFullPath(assetsPath, Path.GetDirectoryName(project)!);
+            var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(extensionsPath, Path.GetDirectoryName(project)!));
+            if (!string.Equals(Path.GetDirectoryName(assets), directory, comparison)
+                || !string.Equals(Path.GetFileName(assets), "project.assets.json", StringComparison.Ordinal)) return false;
+            using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(directory, false, false);
+            if (parent is null) return false;
+            using var stream = parent.OpenArtifactFile("project.assets.json", false, false);
+            if (stream.Length is <= 0 or > 1024 * 1024) return false;
+            var bytes = new byte[(int)stream.Length];
+            stream.ReadExactly(bytes);
+            parent.VerifyArtifactBinding();
+            using var restored = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 32 });
+            var root = restored.RootElement;
+            if (!TryGetUniqueProperty(root, "project", out var projectNode)
+                || !TryGetUniqueProperty(projectNode, "restore", out var restore)
+                || !TryReadOptionalString(restore, "projectPath", out var restoredProject) || string.IsNullOrWhiteSpace(restoredProject)
+                || !string.Equals(Path.GetFullPath(restoredProject), project, comparison)
+                || !TryGetUniqueProperty(root, "targets", out var targets) || targets.ValueKind != JsonValueKind.Object
+                || !TryGetUniqueProperty(root, "libraries", out var libraries) || libraries.ValueKind != JsonValueKind.Object) return false;
+            var identity = CollectorPackageId + "/" + requiredVersion;
+            var matches = targets.EnumerateObject().Where(target => target.Name == framework
+                || target.Name.StartsWith(framework + "/", StringComparison.Ordinal)).ToArray();
+            if (matches.Length == 0 || matches.Select(target => target.Name).Distinct(StringComparer.Ordinal).Count() != matches.Length) return false;
+            return HasCollector(libraries) && matches.All(target => target.Value.ValueKind == JsonValueKind.Object && HasCollector(target.Value));
+
+            bool HasCollector(JsonElement packages)
+            {
+                var collectors = packages.EnumerateObject().Where(package => package.Name.StartsWith(CollectorPackageId + "/", StringComparison.OrdinalIgnoreCase)).ToArray();
+                return collectors.Length == 1 && string.Equals(collectors[0].Name, identity, StringComparison.OrdinalIgnoreCase)
+                    && collectors[0].Value.ValueKind == JsonValueKind.Object
+                    && TryReadOptionalString(collectors[0].Value, "type", out var type) && type == "package";
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException
+            or ArgumentException or InvalidOperationException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPackage(JsonElement item, string packageId)
+        => item.ValueKind == JsonValueKind.Object
+            && TryGetUniqueProperty(item, "Identity", out var identity)
+            && identity.ValueKind == JsonValueKind.String
+            && string.Equals(identity.GetString(), packageId, StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryReadOptionalString(JsonElement item, string name, out string? value)
+    {
+        value = null;
+        if (!TryGetUniqueProperty(item, name, out var property, required: false))
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.Undefined)
+        {
+            return true;
+        }
+
+        if (property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString();
+        return true;
+    }
+
+    private static bool TryGetUniqueProperty(JsonElement item, string name, out JsonElement value, bool required = true)
+    {
+        value = default;
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var count = 0;
+        foreach (var property in item.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, name, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            value = property.Value;
+            count++;
+        }
+
+        return count == 1 || !required && count == 0;
+    }
 }
 
 /// <summary>
@@ -885,8 +1092,13 @@ internal sealed class CoverageRunWorkflow
             CoverageRunOutputGuard.Validate(outputDirectory, resolution.SolutionDirectory, resolution.Projects);
             var collectorObservations = new List<CoverageArtifactSettingsResult>();
             await CoverageRunDriverPreflight.ValidateAsync(request.CoverageDriver, request.Configuration, resolution, _processRunner, supervisor, supervisedCancellationToken,
-                request.TestArguments, (project, framework, json) => collectorObservations.Add(
-                    CoverageArtifactSettings.Observe(project, framework, json, request.Configuration, request.TestArguments)));
+                request.TestArguments, (project, framework, json) =>
+                {
+                    collectorObservations.Add(
+                        CoverageArtifactSettings.Observe(project, framework, json, request.Configuration, request.TestArguments));
+                }, requiredCollectorVersion: request.RequiredCollectorVersion, noRestore: request.NoRestore);
+            if (request.RequiredCollectorVersion is not null)
+                request = request with { NoRestore = true };
             await PrintDiscoveryAsync(runConsole, request, resolution, outputDirectory, schedulePlan);
             if (request.DryRun)
             {
@@ -3558,7 +3770,64 @@ internal sealed record CoverageRunProcessRequest(
     string WorkingDirectory,
     string? OutputFile,
     Action<int>? OutputObserver,
-    CoverageRunProcessLease Lease);
+    CoverageRunProcessLease Lease)
+{
+    internal const long DefaultStandardOutputLimitBytes = 1024 * 1024;
+    internal const int MaximumStandardInputBytes = 1024 * 1024;
+
+    private IReadOnlyDictionary<string, string?>? _environmentOverrides;
+    private byte[]? _standardInputBytes;
+
+    /// <summary>
+    /// Child-only environment overrides. A null value removes that variable from the child environment.
+    /// The supplied dictionary is snapshotted when the request is initialized.
+    /// </summary>
+    public IReadOnlyDictionary<string, string?>? EnvironmentOverrides
+    {
+        get => _environmentOverrides;
+        init => _environmentOverrides = value is null
+            ? null
+            : new ReadOnlyDictionary<string, string?>(new Dictionary<string, string?>(value));
+    }
+
+    /// <summary>
+    /// Maximum standard-output bytes retained by the buffered runner before its truncation marker is added.
+    /// Strict callers stop and reap the child on this limit; legacy non-strict streaming continues to write
+    /// the full log, preserving existing coverage-run behavior.
+    /// </summary>
+    public long StandardOutputLimitBytes { get; init; } = DefaultStandardOutputLimitBytes;
+
+    /// <summary>
+    /// Whether standard output and standard error must be valid UTF-8. Valid U+FFFD is accepted.
+    /// </summary>
+    public bool StrictUtf8 { get; init; }
+
+    /// <summary>
+    /// Optional standard-input bytes. The request snapshots up to one MiB so callers cannot mutate
+    /// the bytes while the child is consuming them.
+    /// </summary>
+    public byte[]? StandardInputBytes
+    {
+        get => _standardInputBytes?.ToArray();
+        init
+        {
+            if (value is { Length: > MaximumStandardInputBytes })
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(value),
+                    $"Standard input is limited to {MaximumStandardInputBytes} bytes.");
+            }
+
+            _standardInputBytes = value?.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Mandatory per-byte accounting hook. Legacy callers use the no-op default; bounded operations
+    /// supply their invocation-local cumulative budget owner. Exceptions cancel and drain the child.
+    /// </summary>
+    public Action<long> BudgetCharge { get; init; } = static _ => { };
+}
 
 /// <summary>
 /// Result of running a coverage workflow process.
@@ -3571,7 +3840,13 @@ internal sealed record CoverageRunProcessResult(
     int ExitCode,
     string Output,
     bool OutputTruncated = false,
-    string? StandardOutput = null);
+    string? StandardOutput = null)
+{
+    /// <summary>
+    /// Bounded standard-error text, kept separate from <see cref="Output"/> for role-specific parsing.
+    /// </summary>
+    public string StandardError { get; init; } = string.Empty;
+}
 
 /// <summary>
 /// Default process runner used by the public coverage command.
@@ -3584,7 +3859,9 @@ internal sealed record CoverageRunProcessResult(
 internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunner
 {
     private const int MaximumBufferedBytesPerStream = 1024 * 1024;
-    private const string TruncatedOutputMarker = "[output truncated after 1048576 bytes]";
+    private const string TruncatedOutputMarker = "[output truncated after {0} bytes]";
+    private const int PipeBufferSize = 81920;
+    private static readonly UTF8Encoding StrictUtf8Encoding = new(false, true);
 
     /// <inheritdoc />
     public async Task<CoverageRunProcessResult> RunAsync(
@@ -3592,20 +3869,27 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CancellationToken cancellationToken)
     {
         var processExited = false;
+        using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var budgetCharge = new CoverageRunProcessBudgetCharge(request.BudgetCharge, executionCancellation);
         try
         {
+            ValidateRequest(request);
             var result = request.OutputFile is null
-                ? await RunBufferedAsync(request, cancellationToken)
-                : await RunStreamingAsync(request, cancellationToken);
+                ? await RunBufferedAsync(request, budgetCharge, executionCancellation)
+                : await RunStreamingAsync(request, budgetCharge, executionCancellation);
+            // CliWrap completes its cancellation/fault cleanup before the awaited command finishes.
             processExited = true;
             return result;
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (Exception ex) when (IsCommandLaunchFailure(ex))
         {
+            processExited = true;
+            budgetCharge.ThrowIfFailed();
+            if (ex is OperationCanceledException)
+            {
+                throw;
+            }
+
             if (request.OutputFile is not null)
             {
                 await TryAppendFailureLogAsync(
@@ -3621,6 +3905,12 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                 "Verify the .NET SDK is installed and available on PATH.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
+        catch
+        {
+            processExited = true;
+            budgetCharge.ThrowIfFailed();
+            throw;
+        }
         finally
         {
             request.Lease.Complete(processExited);
@@ -3629,28 +3919,66 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
 
     private static async Task<CoverageRunProcessResult> RunBufferedAsync(
         CoverageRunProcessRequest request,
-        CancellationToken cancellationToken)
+        CoverageRunProcessBudgetCharge budgetCharge,
+        CancellationTokenSource executionCancellation)
     {
         using var standardOutput = new MemoryStream();
         using var standardError = new MemoryStream();
-        var result = await CliCommand.Wrap(request.FileName)
-            .WithArguments(request.Arguments)
-            .WithWorkingDirectory(request.WorkingDirectory)
-            .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardOutput, token, request.OutputObserver)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardError, token, request.OutputObserver)))
-            .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
-        var outputTruncated = standardOutput.Length > MaximumBufferedBytesPerStream
-            || standardError.Length > MaximumBufferedBytesPerStream;
-        var stdout = DecodeBufferedOutput(standardOutput);
-        var output = stdout + DecodeBufferedOutput(standardError);
+        var standardOutputLimitBytes = request.StandardOutputLimitBytes;
+        var command = CreateCommand(request, budgetCharge, executionCancellation);
+        command = command
+            .WithStandardOutputPipe(CreateFaultTerminatingTarget(
+                (source, token) => CopyPipeToBufferAsync(
+                    source,
+                    standardOutput,
+                    standardOutputLimitBytes,
+                    token,
+                    request.OutputObserver,
+                    budgetCharge,
+                    request.StrictUtf8),
+                executionCancellation,
+                budgetCharge))
+            .WithStandardErrorPipe(CreateFaultTerminatingTarget(
+                (source, token) => CopyPipeToBufferAsync(
+                    source,
+                    standardError,
+                    MaximumBufferedBytesPerStream,
+                    token,
+                    request.OutputObserver,
+                    budgetCharge,
+                    request.StrictUtf8),
+                executionCancellation,
+                budgetCharge));
 
-        return new CoverageRunProcessResult(result.ExitCode, output, outputTruncated, stdout);
+        var exitCode = -1;
+        try
+        {
+            var result = await command.ExecuteAsync(_ => { }, request.Lease.Attach, executionCancellation.Token);
+            exitCode = result.ExitCode;
+        }
+        catch (Exception) when (budgetCharge.OutputLimitExceeded)
+        {
+            budgetCharge.ThrowIfFailed();
+        }
+
+        var outputTruncated = budgetCharge.OutputLimitExceeded
+            || standardOutput.Length > standardOutputLimitBytes
+            || standardError.Length > MaximumBufferedBytesPerStream;
+        var strictDecode = request.StrictUtf8 && !budgetCharge.OutputLimitExceeded;
+        var stdout = DecodeBufferedOutput(standardOutput, standardOutputLimitBytes, strictDecode);
+        var stderr = DecodeBufferedOutput(standardError, MaximumBufferedBytesPerStream, strictDecode);
+        var output = stdout + stderr;
+
+        return new CoverageRunProcessResult(exitCode, output, outputTruncated, stdout)
+        {
+            StandardError = stderr,
+        };
     }
 
     private static async Task<CoverageRunProcessResult> RunStreamingAsync(
         CoverageRunProcessRequest request,
-        CancellationToken cancellationToken)
+        CoverageRunProcessBudgetCharge budgetCharge,
+        CancellationTokenSource executionCancellation)
     {
         var directory = Path.GetDirectoryName(request.OutputFile!);
         if (!string.IsNullOrEmpty(directory))
@@ -3665,26 +3993,166 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             FileShare.Read,
             bufferSize: 81920,
             useAsync: true);
+        using var standardError = new MemoryStream();
         using var writeGate = new SemaphoreSlim(1, 1);
 
-        var result = await CliCommand.Wrap(request.FileName)
-            .WithArguments(request.Arguments)
-            .WithWorkingDirectory(request.WorkingDirectory)
-            .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver)))
-            .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
+        var command = CreateCommand(request, budgetCharge, executionCancellation)
+            .WithStandardOutputPipe(CreateFaultTerminatingTarget(
+                (source, token) => CopyPipeToFileAsync(
+                    source,
+                    stream,
+                    writeGate,
+                    null,
+                    request.StandardOutputLimitBytes,
+                    token,
+                    request.OutputObserver,
+                    budgetCharge,
+                    request.StrictUtf8),
+                executionCancellation,
+                budgetCharge))
+            .WithStandardErrorPipe(CreateFaultTerminatingTarget(
+                (source, token) => CopyPipeToFileAsync(
+                    source,
+                    stream,
+                    writeGate,
+                    standardError,
+                    MaximumBufferedBytesPerStream,
+                    token,
+                    request.OutputObserver,
+                    budgetCharge,
+                    request.StrictUtf8),
+                executionCancellation,
+                budgetCharge));
 
-        return new CoverageRunProcessResult(result.ExitCode, string.Empty);
+        var exitCode = -1;
+        try
+        {
+            var result = await command.ExecuteAsync(_ => { }, request.Lease.Attach, executionCancellation.Token);
+            exitCode = result.ExitCode;
+        }
+        catch (Exception) when (budgetCharge.OutputLimitExceeded)
+        {
+            budgetCharge.ThrowIfFailed();
+        }
+
+        var stderr = DecodeBufferedOutput(
+            standardError,
+            MaximumBufferedBytesPerStream,
+            request.StrictUtf8 && !budgetCharge.OutputLimitExceeded);
+
+        return new CoverageRunProcessResult(
+            exitCode,
+            string.Empty,
+            budgetCharge.OutputLimitExceeded)
+        {
+            StandardError = stderr,
+        };
     }
 
-    private static async Task CopyPipeToBufferAsync(
+    /// <summary>Creates the child command and its guarded stdin pipe; exposed internally for deterministic pipe-fault tests.</summary>
+    internal static Command CreateCommand(
+        CoverageRunProcessRequest request,
+        CoverageRunProcessBudgetCharge budgetCharge,
+        CancellationTokenSource executionCancellation)
+    {
+        var command = CliCommand.Wrap(request.FileName)
+            .WithArguments(request.Arguments)
+            .WithWorkingDirectory(request.WorkingDirectory)
+            .WithValidation(CommandResultValidation.None);
+
+        if (request.EnvironmentOverrides is { } environmentOverrides)
+        {
+            command = command.WithEnvironmentVariables(environmentOverrides);
+        }
+
+        if (request.StandardInputBytes is { } standardInputBytes)
+        {
+            command = command.WithStandardInputPipe(PipeSource.Create(async (destination, cancellationToken) =>
+            {
+                try
+                {
+                    budgetCharge.Charge(standardInputBytes.Length);
+                    await destination.WriteAsync(standardInputBytes, cancellationToken);
+                }
+                catch (Exception exception)
+                {
+                    budgetCharge.RecordPipeFailure(exception);
+                    CancelExecution(executionCancellation);
+                    throw;
+                }
+            }));
+        }
+
+        return command;
+    }
+
+    /// <summary>Creates an output pipe that retains its original failure and cancels the owning command.</summary>
+    /// <param name="copy">Copies one stream, including its mandatory byte accounting and optional observation.</param>
+    /// <param name="executionCancellation">The command-owned cancellation source; this method does not dispose it.</param>
+    /// <param name="budgetCharge">The command's shared accounting and original-failure owner.</param>
+    /// <returns>A pipe target; exposed internally for deterministic prebuffered-stream and fault tests.</returns>
+    /// <remarks>
+    /// Copying starts on the default scheduler even when the source already has buffered bytes, allowing both
+    /// output pipes to start before either invokes caller accounting. No caller synchronization context is required.
+    /// Copy failures retain their identity and cancel the command under the existing drain and output limits.
+    /// </remarks>
+    internal static PipeTarget CreateFaultTerminatingTarget(
+        Func<Stream, CancellationToken, Task> copy,
+        CancellationTokenSource executionCancellation,
+        CoverageRunProcessBudgetCharge budgetCharge)
+        => PipeTarget.Create(async (source, cancellationToken) =>
+        {
+            try
+            {
+                await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+                await copy(source, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                budgetCharge.RecordPipeFailure(exception);
+                CancelExecution(executionCancellation);
+                throw;
+            }
+        });
+
+    private static void ValidateRequest(CoverageRunProcessRequest request)
+    {
+        if (request.StandardOutputLimitBytes is < 0 or > int.MaxValue - 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request.StandardOutputLimitBytes),
+                request.StandardOutputLimitBytes,
+                $"The buffered standard-output limit must be between 0 and {int.MaxValue - 1} bytes.");
+        }
+
+        ArgumentNullException.ThrowIfNull(request.BudgetCharge);
+    }
+
+    private static void CancelExecution(CancellationTokenSource executionCancellation)
+    {
+        try
+        {
+            executionCancellation.Cancel();
+        }
+        catch (AggregateException)
+        {
+            // Cancellation has already been signaled; the original pipe/budget fault remains primary.
+        }
+    }
+
+    /// <summary>Copies buffered process bytes with stateful UTF-8 validation; exposed internally for deterministic read-boundary tests.</summary>
+    internal static async Task CopyPipeToBufferAsync(
         Stream source,
         MemoryStream target,
+        long maximumBytes,
         CancellationToken cancellationToken,
-        Action<int>? outputObserver)
+        Action<int>? outputObserver,
+        CoverageRunProcessBudgetCharge budgetCharge,
+        bool strictUtf8)
     {
-        var buffer = ArrayPool<byte>.Shared.Rent(81920);
+        var buffer = ArrayPool<byte>.Shared.Rent(PipeBufferSize);
+        var decoder = strictUtf8 ? StrictUtf8Encoding.GetDecoder() : null;
+        var characters = strictUtf8 ? ArrayPool<char>.Shared.Rent(StrictUtf8Encoding.GetMaxCharCount(buffer.Length)) : null;
         try
         {
             while (true)
@@ -3692,41 +4160,62 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                 var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
                 if (read == 0)
                 {
+                    if (decoder is not null) decoder.GetChars(ReadOnlySpan<byte>.Empty, characters, flush: true);
                     return;
                 }
 
+                budgetCharge.Charge(read);
                 ObserveOutput(outputObserver, read);
-                var remaining = MaximumBufferedBytesPerStream + 1 - target.Length;
+                if (decoder is not null) decoder.GetChars(buffer.AsSpan(0, read), characters, flush: false);
+                var bytesBeforeRead = target.Length;
+                var exceedsLimit = bytesBeforeRead + read > maximumBytes;
+                var storageLimit = strictUtf8 ? maximumBytes : maximumBytes + 1;
+                var remaining = storageLimit - bytesBeforeRead;
                 if (remaining > 0)
                 {
                     await target.WriteAsync(buffer.AsMemory(0, (int)Math.Min(read, remaining)), cancellationToken);
                 }
+
+                if (strictUtf8 && exceedsLimit)
+                {
+                    budgetCharge.RejectOutputLimit(maximumBytes);
+                }
             }
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+            if (characters is not null) ArrayPool<char>.Shared.Return(characters);
         }
     }
 
-    private static string DecodeBufferedOutput(MemoryStream stream)
+    private static string DecodeBufferedOutput(MemoryStream stream, long maximumBytes, bool strictUtf8)
     {
         var buffer = stream.GetBuffer();
-        var length = (int)Math.Min(stream.Length, MaximumBufferedBytesPerStream);
-        var text = Encoding.UTF8.GetString(buffer, 0, length);
-        return stream.Length > MaximumBufferedBytesPerStream
-            ? text + Environment.NewLine + TruncatedOutputMarker + Environment.NewLine
+        var length = (int)Math.Min(stream.Length, maximumBytes);
+        var encoding = strictUtf8 && stream.Length <= maximumBytes ? StrictUtf8Encoding : Encoding.UTF8;
+        var text = encoding.GetString(buffer, 0, length);
+        return stream.Length > maximumBytes
+            ? text + Environment.NewLine + string.Format(CultureInfo.InvariantCulture, TruncatedOutputMarker, maximumBytes) + Environment.NewLine
             : text;
     }
 
-    private static async Task CopyPipeToFileAsync(
+    /// <summary>Copies streamed process bytes with the same stateful decoder and EOF validation as buffered output.</summary>
+    internal static async Task CopyPipeToFileAsync(
         Stream source,
         Stream target,
         SemaphoreSlim writeGate,
+        MemoryStream? capture,
+        long maximumBytes,
         CancellationToken cancellationToken,
-        Action<int>? outputObserver)
+        Action<int>? outputObserver,
+        CoverageRunProcessBudgetCharge budgetCharge,
+        bool strictUtf8)
     {
-        var buffer = ArrayPool<byte>.Shared.Rent(81920);
+        var buffer = ArrayPool<byte>.Shared.Rent(PipeBufferSize);
+        var decoder = strictUtf8 ? StrictUtf8Encoding.GetDecoder() : null;
+        var characters = strictUtf8 ? ArrayPool<char>.Shared.Rent(StrictUtf8Encoding.GetMaxCharCount(buffer.Length)) : null;
+        long bytesRead = 0;
         try
         {
             while (true)
@@ -3734,25 +4223,67 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                 var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
                 if (read == 0)
                 {
+                    if (decoder is not null) decoder.GetChars(ReadOnlySpan<byte>.Empty, characters, flush: true);
                     return;
                 }
 
+                budgetCharge.Charge(read);
                 ObserveOutput(outputObserver, read);
+                if (decoder is not null) decoder.GetChars(buffer.AsSpan(0, read), characters, flush: false);
 
-                await writeGate.WaitAsync(cancellationToken);
-                try
+                var exceedsLimit = strictUtf8 && bytesRead + read > maximumBytes;
+                var bytesToWrite = strictUtf8
+                    ? (int)Math.Min(read, Math.Max(0, maximumBytes - bytesRead))
+                    : read;
+
+                if (bytesToWrite > 0)
                 {
-                    await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    await writeGate.WaitAsync(cancellationToken);
+                    try
+                    {
+                        await target.WriteAsync(buffer.AsMemory(0, bytesToWrite), cancellationToken);
+                    }
+                    finally
+                    {
+                        writeGate.Release();
+                    }
                 }
-                finally
+
+                if (capture is not null)
                 {
-                    writeGate.Release();
+                    await WriteBoundedCaptureAsync(
+                        capture,
+                        buffer.AsMemory(0, strictUtf8 ? bytesToWrite : read),
+                        maximumBytes,
+                        cancellationToken,
+                        strictUtf8);
+                }
+
+                bytesRead += read;
+                if (strictUtf8 && exceedsLimit)
+                {
+                    budgetCharge.RejectOutputLimit(maximumBytes);
                 }
             }
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+            if (characters is not null) ArrayPool<char>.Shared.Return(characters);
+        }
+    }
+
+    private static async Task WriteBoundedCaptureAsync(
+        MemoryStream target,
+        ReadOnlyMemory<byte> bytes,
+        long maximumBytes,
+        CancellationToken cancellationToken,
+        bool strictUtf8)
+    {
+        var remaining = (strictUtf8 ? maximumBytes : maximumBytes + 1) - target.Length;
+        if (remaining > 0)
+        {
+            await target.WriteAsync(bytes[..(int)Math.Min(bytes.Length, remaining)], cancellationToken);
         }
     }
 
@@ -3785,6 +4316,68 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             or IOException
             or InvalidOperationException;
     }
+
+    /// <summary>Shares mandatory pipe charging and failure identity across the process runner's output copies.</summary>
+    internal sealed class CoverageRunProcessBudgetCharge
+    {
+        private readonly Action<long> _charge;
+        private readonly CancellationTokenSource _executionCancellation;
+        private ExceptionDispatchInfo? _failure;
+        private int _outputLimitExceeded;
+
+        public CoverageRunProcessBudgetCharge(Action<long> charge, CancellationTokenSource executionCancellation)
+        {
+            _charge = charge;
+            _executionCancellation = executionCancellation;
+        }
+
+        public bool OutputLimitExceeded => Volatile.Read(ref _outputLimitExceeded) != 0;
+
+        public void Charge(long bytes)
+        {
+            if (bytes <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                _charge(bytes);
+            }
+            catch (Exception exception)
+            {
+                Interlocked.CompareExchange(ref _failure, ExceptionDispatchInfo.Capture(exception), null);
+                CancelExecution(_executionCancellation);
+                throw;
+            }
+        }
+
+        public void ThrowIfFailed()
+        {
+            Volatile.Read(ref _failure)?.Throw();
+        }
+
+        public void RejectOutputLimit(long limit)
+        {
+            Interlocked.Exchange(ref _outputLimitExceeded, 1);
+            CancelExecution(_executionCancellation);
+            throw new CoverageRunProcessOutputLimitException(limit);
+        }
+
+        public void RecordPipeFailure(Exception exception)
+        {
+            if (exception is CoverageRunProcessOutputLimitException
+                || exception is OperationCanceledException && _executionCancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
+            Interlocked.CompareExchange(ref _failure, ExceptionDispatchInfo.Capture(exception), null);
+        }
+    }
+
+    private sealed class CoverageRunProcessOutputLimitException(long limit)
+        : Exception($"Process output exceeded the {limit}-byte stream limit.");
 
     private static async Task TryAppendFailureLogAsync(
         string outputFile,

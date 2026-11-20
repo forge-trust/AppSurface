@@ -136,6 +136,7 @@ public static class CoverageFanInApiExample
             cancellationToken);
 
     /// <summary>Runs the primary aggregate gate, requested patch gate, and independent acceptance checks.</summary>
+    /// <remarks>Supply the exact canonical patch SHA-256 for a v3 patch policy; see the fan-in guide's pinned Git recipe.</remarks>
     public static ValueTask<CoverageFanInResult> AcceptAsync(
         CoverageFanInPolicy policy,
         string repositoryRoot,
@@ -143,7 +144,8 @@ public static class CoverageFanInApiExample
         IReadOnlyList<string> supplementaryCaptureDirectories,
         string composedOutputDirectory,
         string freshAcceptedOutputDirectory,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default,
+        string? expectedPatchSha256 = null) =>
         CoverageFanIn.AcceptAsync(
             new CoverageAcceptRequest(
                 policy,
@@ -151,7 +153,7 @@ public static class CoverageFanInApiExample
                 primaryCaptureDirectory,
                 supplementaryCaptureDirectories,
                 composedOutputDirectory,
-                freshAcceptedOutputDirectory),
+                freshAcceptedOutputDirectory) { ExpectedPatchSha256 = expectedPatchSha256 },
             cancellationToken);
 
     /// <summary>Read-only verification of the existing accepted generation.</summary>

@@ -6,6 +6,8 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// <summary>Frozen facade-to-private-engine transport. JSON is a schema snapshot, never an execution instruction.</summary>
 internal sealed record CoverageFanInExpected(JsonElement Policy, string Digest)
 {
+    /// <summary>Explicit report contract version; policies without the additive selector retain legacy v2.</summary>
+    internal int ContractVersion => Policy.TryGetProperty("contractVersion", out var version) ? version.GetInt32() : 2;
     internal JsonElement Source => Policy.GetProperty("source");
     internal JsonElement Run => Policy.GetProperty("run");
     internal JsonElement Gate => Policy.GetProperty("gate");
@@ -35,9 +37,18 @@ internal sealed record CoverageFanInEngineRequest(CoverageFanInExpected Expected
     internal IReadOnlyDictionary<string, string>? RawCoveragePaths { get; init; }
     /// <summary>Optional lowercase SHA-256 that the exact patch used by acceptance must match.</summary>
     internal string? ExpectedPatchSha256 { get; init; }
+    /// <summary>V3-only invocation budget, created before the first source probe and shared through all IO/process work.</summary>
+    internal CoverageFanInBudget? Budget { get; init; }
+    /// <summary>Isolated v3 Git substrate. Never retained by a facade or shared between invocations.</summary>
+    internal CoverageFanInDiffContext? DiffContext { get; init; }
 }
 /// <summary>Private safe terminal diagnostic, without dependency exception data.</summary>
-internal sealed record CoverageFanInEngineDiagnostic(string Code, string Stage, string Field, string Recovery);
+internal sealed record CoverageFanInEngineDiagnostic(string Code, string Stage, string Field, string Recovery)
+{
+    internal string? Cause { get; init; }
+    internal IReadOnlyDictionary<string, string>? Context { get; init; }
+    internal IReadOnlyList<string>? Trace { get; init; }
+}
 /// <summary>Immutable exact role/hash reference published by this invocation.</summary>
 internal sealed record CoverageFanInEngineArtifact(string Role, string Path, long Length, string Sha256);
 /// <summary>Actual invocation result; no stale-generation success reuse.</summary>
@@ -45,7 +56,12 @@ internal sealed record CoverageFanInEngineResult(string Operation, string Outcom
     bool Created, bool Committed, bool CleanupComplete, bool Imported, string? Generation,
     IReadOnlyList<CoverageFanInEngineArtifact> Artifacts, IReadOnlyList<CoverageFanInEngineDiagnostic> Diagnostics,
     bool Accepted = false, bool Verified = false, string PatchOutcome = "NotEvaluated", string? Observation = null,
-    bool HistoricalReplay = false, bool PrimaryImported = false);
+    bool HistoricalReplay = false, bool PrimaryImported = false)
+{
+    internal JsonElement? PatchApplicability { get; init; }
+    /// <summary>V3 logical invocation accounting for installed proof; null for legacy operations.</summary>
+    internal CoverageFanInBudgetSnapshot? Accounting { get; init; }
+}
 /// <summary>Validated retained capture bytes. No semantic oracle is shared by composer and verifier.</summary>
 internal sealed record CoverageFanInBundle(string Directory, JsonElement Manifest, string ManifestHash,
     XDocument Document, byte[] CoverageBytes, IReadOnlyDictionary<string, byte[]> AuxiliaryFiles);

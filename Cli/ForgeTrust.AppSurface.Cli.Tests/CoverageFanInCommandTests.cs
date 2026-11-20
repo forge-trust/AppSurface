@@ -1179,7 +1179,7 @@ public sealed class CoverageFanInCommandTests
         "collect" => CollectRequest(root),
         "compose" => new
         {
-            policy = ValidPolicy,
+            policy = CoveragePolicyEncoding.ToElement(ValidPolicy),
             repositoryRoot = root,
             primaryCaptureDirectory = Path.Join(root, "primary-capture"),
             supplementaryCaptureDirectories = Array.Empty<string>(),
@@ -1187,7 +1187,7 @@ public sealed class CoverageFanInCommandTests
         },
         "accept" => new
         {
-            policy = ValidPolicy,
+            policy = CoveragePolicyEncoding.ToElement(ValidPolicy),
             repositoryRoot = root,
             primaryCaptureDirectory = Path.Join(root, "primary-capture"),
             supplementaryCaptureDirectories = Array.Empty<string>(),
@@ -1196,7 +1196,7 @@ public sealed class CoverageFanInCommandTests
         },
         "verify" => new
         {
-            policy = ValidPolicy,
+            policy = CoveragePolicyEncoding.ToElement(ValidPolicy),
             repositoryRoot = root,
             primaryCaptureDirectory = Path.Join(root, "primary-capture"),
             supplementaryCaptureDirectories = Array.Empty<string>(),
@@ -1208,7 +1208,7 @@ public sealed class CoverageFanInCommandTests
 
     private static object CaptureRequest(string root) => new
     {
-        policy = ValidPolicy,
+        policy = CoveragePolicyEncoding.ToElement(ValidPolicy),
         repositoryRoot = root,
         outputDirectory = Path.Join(root, "operation-output"),
         producerId = "primary",
@@ -1218,7 +1218,7 @@ public sealed class CoverageFanInCommandTests
 
     private static object CollectRequest(string root) => new
     {
-        policy = ValidPolicy,
+        policy = CoveragePolicyEncoding.ToElement(ValidPolicy),
         repositoryRoot = root,
         outputDirectory = Path.Join(root, "operation-output"),
         collectionDirectory = Path.Join(root, "collection"),
@@ -1343,7 +1343,7 @@ public sealed class CoverageFanInCommandTests
         internal string WriteRequest(string fileName, string outputName = "capture-output") => _temp.WriteFile(
             fileName, Envelope("capture", new
             {
-                policy = Policy,
+                policy = CoveragePolicyEncoding.ToElement(Policy),
                 repositoryRoot = Repository,
                 outputDirectory = TestPathUtils.PathUnder(SecretRoot, outputName),
                 producerId = "primary",

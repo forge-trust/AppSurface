@@ -378,6 +378,8 @@ The [coverage-run watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-r
 
 ### Focused and sharded coverage
 
+For the versioned native coverage fan-in contract, including opt-in v3 patch applicability and the current v2 repository default, see the [coverage fan-in guide](./guides/coverage-fan-in.md).
+
 `scripts/coverage-solution.sh` accepts no arguments and exists only for this
 repository's full run-and-gate policy. It enables VSTest's
 `console;verbosity=normal` logger so completed tests reach the

@@ -848,25 +848,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
 
     private static async Task RequireDockerAsync()
     {
-        BoundedProcessResult result;
-        try
-        {
-            result = await BoundedProcessRunner.RunAsync(
-                "docker",
-                ["info", "--format", "{{.ServerVersion}}"],
-                environment: null,
-                FixtureBudgets.DockerProbe).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or TimeoutException)
-        {
-            throw DockerPrerequisiteFailure(exception.GetType().Name);
-        }
-
-        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput)
-            || result.StandardOutputTruncated || result.StandardErrorTruncated)
-        {
-            throw DockerPrerequisiteFailure("daemon-unavailable");
-        }
+        await BoundedProcessRunner.RequireDockerAsync().ConfigureAwait(false);
     }
 
     private static async Task AcquirePinnedImageAsync()
@@ -897,11 +879,6 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
             throw new InvalidOperationException("The pinned PostgreSQL 16.5 image could not be acquired within the 300-second pull budget.");
         }
     }
-
-    private static InvalidOperationException DockerPrerequisiteFailure(string cause) => new(
-        $"Docker is required for FirstDurableWork; availability is checked for at most five seconds ({cause}). "
-        + "Start Docker and rerun: dotnet test --filter FullyQualifiedName~FirstDurableWork. "
-        + "Read https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md#three-command-first-proof.");
 
     private static string NewPassword() => Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
 
