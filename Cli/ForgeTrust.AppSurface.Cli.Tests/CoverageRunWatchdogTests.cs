@@ -301,6 +301,160 @@ public sealed class CoverageRunWatchdogTests
         Assert.False(File.Exists(Path.Join(output.Path, "coverage-watchdog.json")));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisposeAsync_ShouldNotDependOnTheCallingSynchronizationContext(bool createOnHeldContext)
+    {
+        using var output = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        using var release = new ManualResetEventSlim();
+        var staged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resourcesDisposed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var context = new HoldingSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        CoverageRunWatchdogSupervisor supervisor;
+        try
+        {
+            if (createOnHeldContext) SynchronizationContext.SetSynchronizationContext(context);
+            supervisor = new CoverageRunWatchdogSupervisor(
+                CoverageRunWatchdogMode.Warn,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(10),
+                CoverageTextWriters.Create(console.Output, console.Error),
+                TimeProvider.System,
+                CancellationToken.None,
+                artifactStaged: () =>
+                {
+                    staged.TrySetResult();
+                    release.Wait();
+                },
+                artifactWriteTimeout: TimeSpan.FromMilliseconds(20),
+                artifactResourcesDisposed: () => resourcesDisposed.TrySetResult());
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        supervisor.BindOutputDirectory(output.Path);
+        using var operation = supervisor.Start("project", "tests/HeldContext.Tests/HeldContext.Tests.csproj");
+        Task? disposal = null;
+        try
+        {
+            await staged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            operation.Dispose();
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(context);
+                disposal = supervisor.DisposeAsync().AsTask();
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previousContext);
+            }
+
+            // Keep the caller's continuation queue held until the same one-second disposal contract passes.
+            await disposal.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.False(resourcesDisposed.Task.IsCompleted);
+            Assert.Single(Directory.EnumerateFiles(output.Path, ".coverage-watchdog.json.*.tmp"));
+        }
+        finally
+        {
+            operation.Dispose();
+            release.Set();
+            context.Release();
+            await (disposal ?? supervisor.DisposeAsync().AsTask()).WaitAsync(TimeSpan.FromSeconds(5));
+            await resourcesDisposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+
+        Assert.Empty(Directory.EnumerateFiles(output.Path, ".coverage-watchdog.json.*.tmp"));
+        Assert.False(File.Exists(Path.Join(output.Path, "coverage-watchdog.json")));
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ShouldReportMonitorFaultWithoutCapturingTheCallingContext()
+    {
+        using var error = new GatedCaptureWriteStream();
+        using var console = new FakeConsole(Stream.Null, Stream.Null, error);
+        var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Off,
+            TimeSpan.Zero,
+            TimeSpan.FromSeconds(1),
+            CoverageTextWriters.Create(console.Output, console.Error),
+            new ThrowingUtcTimeProvider(),
+            CancellationToken.None);
+        var context = new HoldingSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        Task disposal;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            disposal = supervisor.DisposeAsync().AsTask();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        try
+        {
+            await error.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(1));
+            error.ReleaseFirstWrite();
+            await disposal.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Contains("monitor fault was suppressed during cleanup", error.ReadString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            error.ReleaseFirstWrite();
+            context.Release();
+            await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task ProcessDrain_ShouldNotCaptureTheCallingContextForItsSharedTask()
+    {
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Off,
+            TimeSpan.Zero,
+            TimeSpan.FromSeconds(1),
+            CoverageTextWriters.Create(console.Output, console.Error),
+            TimeProvider.System,
+            CancellationToken.None);
+        var lease = supervisor.ReserveProcess();
+        var context = new HoldingSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        Task<CoverageRunProcessDrainResult> drain;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            drain = supervisor.TerminateAndDrainProcessesAsync();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        try
+        {
+            Assert.False(drain.IsCompleted);
+            lease.Complete();
+            var result = await drain.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.True(result.Confirmed);
+            Assert.Equal("complete", result.Status);
+            Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
+            Assert.Same(drain, supervisor.TerminateAndDrainProcessesAsync());
+        }
+        finally
+        {
+            lease.Complete();
+            context.Release();
+            await drain.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
     [Fact]
     public async Task DisposeAsync_ShouldTraceBootstrapCleanupFailureWithoutWritingToConsole()
     {
@@ -1156,6 +1310,39 @@ public sealed class CoverageRunWatchdogTests
         }
     }
 
+    private sealed class HoldingSynchronizationContext : SynchronizationContext
+    {
+        private readonly Queue<(SendOrPostCallback Callback, object? State)> _pending = new();
+        private bool _released;
+
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            lock (_pending)
+            {
+                if (!_released)
+                {
+                    _pending.Enqueue((callback, state));
+                    return;
+                }
+            }
+
+            ThreadPool.QueueUserWorkItem(static work => work.Callback(work.State), (Callback: callback, State: state), preferLocal: false);
+        }
+
+        public void Release()
+        {
+            (SendOrPostCallback Callback, object? State)[] pending;
+            lock (_pending)
+            {
+                _released = true;
+                pending = _pending.ToArray();
+                _pending.Clear();
+            }
+
+            foreach (var work in pending) Post(work.Callback, work.State);
+        }
+    }
+
     private sealed class TestDirectory(string path) : IDisposable
     {
         public string Path { get; } = path;
@@ -1168,6 +1355,11 @@ public sealed class CoverageRunWatchdogTests
         }
 
         public void Dispose() => Directory.Delete(Path, recursive: true);
+    }
+
+    private sealed class ThrowingUtcTimeProvider : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => throw new InvalidOperationException("fixture clock failed");
     }
 
     private sealed class CountingTimeProvider : TimeProvider

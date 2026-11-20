@@ -386,6 +386,7 @@ jobs:
         with:
           path: ${{ steps.docs.outputs.pages_staging_root }}
           include-hidden-files: true
+          retention-days: 7
 
   deploy-docs-pages:
     if: ${{ github.repository == 'forge-trust/AppSurface' }}
@@ -393,7 +394,13 @@ jobs:
       - validate-release
       - publish-docs-archive
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Allow public verification to finish after the action's ten-minute deployment bound.
+    timeout-minutes: 15
+    # Use the same Pages deployment lock as build.yml.
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+      queue: max
     permissions:
       pages: write # Required to publish the verified Pages artifact.
       id-token: write # Required by deploy-pages to mint the GitHub Pages deployment token.
@@ -408,27 +415,12 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
-  verify-public-docs:
-    if: ${{ github.repository == 'forge-trust/AppSurface' }}
-    needs:
-      - validate-release
-      - publish-docs-archive
-      - deploy-docs-pages
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write # Required because draft release assets are not downloadable with the workflow token under contents: read.
-
-    steps:
-      - name: Verify deployed docs and uploaded release assets
+      # Keep every public-site read under the shared Pages lock; downstream verification reads private assets only.
+      - name: Verify deployed public docs
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.validate-release.outputs.tag }}
           VERSION: ${{ needs.validate-release.outputs.version }}
-          PAGE_URL: ${{ needs.deploy-docs-pages.outputs.page_url }}
-          EXPECTED_ARCHIVE_SHA256: ${{ needs.publish-docs-archive.outputs.archive_sha256 }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
           EXPECTED_MANIFEST_SHA256: ${{ needs.publish-docs-archive.outputs.release_manifest_sha256 }}
-          ARCHIVE_ASSET_NAME: ${{ needs.publish-docs-archive.outputs.archive_asset_name }}
           EXACT_TREE_PATH: ${{ needs.publish-docs-archive.outputs.exact_tree_path }}
           PRERELEASE: ${{ needs.validate-release.outputs.prerelease }}
           PROMOTE_RECOMMENDED: ${{ inputs.promote-recommended }}
@@ -437,8 +429,6 @@ jobs:
           root="${PAGE_URL%/}"
           catalog="${RUNNER_TEMP}/versions.json"
           manifest="${RUNNER_TEMP}/release-manifest.json"
-          asset_dir="${RUNNER_TEMP}/release-assets"
-          mkdir -p "${asset_dir}"
           case "${PROMOTE_RECOMMENDED}" in
             true|false) ;;
             *)
@@ -465,6 +455,37 @@ jobs:
             echo "Expected manifest ${EXPECTED_MANIFEST_SHA256}; got ${actual_manifest_sha256}." >&2
             exit 1
           fi
+          {
+            echo "## AppSurface Docs deployment proof"
+            echo
+            echo "- Pages catalog: ${root}/versions.json"
+            echo "- Exact tree: ${root}/${EXACT_TREE_PATH}/"
+            echo "- Release manifest SHA-256: ${EXPECTED_MANIFEST_SHA256}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  verify-public-docs:
+    if: ${{ github.repository == 'forge-trust/AppSurface' }}
+    needs:
+      - validate-release
+      - publish-docs-archive
+      - deploy-docs-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Public-site checks already passed while deploy-docs-pages held the Pages lock.
+    permissions:
+      contents: write # Required because draft release assets are not downloadable with the workflow token under contents: read.
+
+    steps:
+      - name: Verify uploaded release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+          EXPECTED_ARCHIVE_SHA256: ${{ needs.publish-docs-archive.outputs.archive_sha256 }}
+          ARCHIVE_ASSET_NAME: ${{ needs.publish-docs-archive.outputs.archive_asset_name }}
+        run: |
+          set -euo pipefail
+          asset_dir="${RUNNER_TEMP}/release-assets"
+          mkdir -p "${asset_dir}"
           gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern "${ARCHIVE_ASSET_NAME}" --dir "${asset_dir}" --clobber
           actual_archive_sha256="$(sha256sum "${asset_dir}/${ARCHIVE_ASSET_NAME}" | awk '{print $1}')"
           if [[ "${actual_archive_sha256}" != "${EXPECTED_ARCHIVE_SHA256}" ]]; then
@@ -474,9 +495,6 @@ jobs:
           {
             echo "## AppSurface Docs publication proof"
             echo
-            echo "- Pages catalog: ${root}/versions.json"
-            echo "- Exact tree: ${root}/${EXACT_TREE_PATH}/"
-            echo "- Release manifest SHA-256: ${EXPECTED_MANIFEST_SHA256}"
             echo "- Release asset: ${ARCHIVE_ASSET_NAME}"
             echo "- Archive SHA-256: ${EXPECTED_ARCHIVE_SHA256}"
             echo "- Resume draft: \`gh release view ${TAG} --repo ${GITHUB_REPOSITORY} --json isDraft,url\`"

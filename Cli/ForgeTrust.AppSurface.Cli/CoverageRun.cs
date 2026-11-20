@@ -4086,7 +4086,17 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         return command;
     }
 
-    private static PipeTarget CreateFaultTerminatingTarget(
+    /// <summary>Creates an output pipe that retains its original failure and cancels the owning command.</summary>
+    /// <param name="copy">Copies one stream, including its mandatory byte accounting and optional observation.</param>
+    /// <param name="executionCancellation">The command-owned cancellation source; this method does not dispose it.</param>
+    /// <param name="budgetCharge">The command's shared accounting and original-failure owner.</param>
+    /// <returns>A pipe target; exposed internally for deterministic prebuffered-stream and fault tests.</returns>
+    /// <remarks>
+    /// Copying starts on the default scheduler even when the source already has buffered bytes, allowing both
+    /// output pipes to start before either invokes caller accounting. No caller synchronization context is required.
+    /// Copy failures retain their identity and cancel the command under the existing drain and output limits.
+    /// </remarks>
+    internal static PipeTarget CreateFaultTerminatingTarget(
         Func<Stream, CancellationToken, Task> copy,
         CancellationTokenSource executionCancellation,
         CoverageRunProcessBudgetCharge budgetCharge)
@@ -4094,7 +4104,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         {
             try
             {
-                await copy(source, cancellationToken);
+                await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+                await copy(source, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
