@@ -138,17 +138,18 @@ public sealed class DockerInspectionTests
     [InlineData("nonzero")]
     public async Task Passing_probe_with_unconfirmed_cleanup_is_rejected_with_unknown_effect(string shape)
     {
+        const string cleanupDetail = "KEYCLOAK_PROBE_CLEANUP_TEST_SENTINEL";
         var removals = 0;
         Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token)
         {
             if (args[0] != "rm") return Task.FromResult(Reply(args, Image, Image.ManifestDigest));
             removals++;
-            if (shape == "nonzero") return Task.FromResult(new ProcessObservation(1, "private output", "private error", TimeSpan.Zero));
+            if (shape == "nonzero") return Task.FromResult(new ProcessObservation(1, cleanupDetail + "_STDOUT", cleanupDetail + "_STDERR", TimeSpan.Zero));
             throw shape switch
             {
-                "io" => new IOException("private cleanup"),
-                "denied" => new UnauthorizedAccessException("private cleanup"),
-                "cancelled" => new OperationCanceledException(token),
+                "io" => new IOException(cleanupDetail),
+                "denied" => new UnauthorizedAccessException(cleanupDetail),
+                "cancelled" => new OperationCanceledException(cleanupDetail, token),
                 _ => new BoundedProcessException(ProcessStopReason.Deadline)
             };
         }
@@ -161,7 +162,8 @@ public sealed class DockerInspectionTests
         Assert.Equal(KeycloakEffectState.Unknown, failure.Effect);
         Assert.Equal(KeycloakRecoveryClass.InspectBeforeRetry, failure.Recovery);
         Assert.True(failure.RetryMetadata.RequiresInspectionFirst);
-        Assert.DoesNotContain("private", failure.ToString(), StringComparison.Ordinal);
+        Assert.Null(failure.InnerException);
+        Assert.DoesNotContain(cleanupDetail, failure.ToString(), StringComparison.Ordinal);
     }
 
     // protects: an uncertain create plus failed removal retains the original failure and safe recovery state.

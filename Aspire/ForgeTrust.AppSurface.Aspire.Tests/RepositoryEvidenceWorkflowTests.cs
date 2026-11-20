@@ -542,13 +542,15 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
     }
 
     [Theory]
-    [InlineData("3", false)]
-    [InlineData("2", false)]
-    [InlineData("4", true)]
-    [InlineData("03", true)]
-    public async Task CoverageRunPreflight_RejectsUnpairedOrUnknownNativeContract(string version, bool withCaptures)
+    [InlineData("3", false, "tests/Coverage.Tests/ExampleTests.cs")]
+    [InlineData("2", false, "tests/Coverage.Tests/ExampleTests.cs")]
+    [InlineData("4", true, "tests/Coverage.Tests/ExampleTests.cs")]
+    [InlineData("03", true, "tests/Coverage.Tests/ExampleTests.cs")]
+    [InlineData("3", true, "docs/README.md")]
+    public async Task CoverageRunPreflight_RejectsNativeContractWithoutSupportedCoverageInputs(
+        string version, bool withCaptures, string changedPath)
     {
-        var planned = await PlanAsync(["tests/Coverage.Tests/ExampleTests.cs"]);
+        var planned = await PlanAsync([changedPath]);
         var output = NewPath("native-contract-output");
         var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
             ("--plan", Path.Join(planned.Output, "evidence-plan.json")), ("--output", output),
@@ -558,6 +560,29 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
 
         await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
         Assert.False(Directory.Exists(output));
+    }
+
+    [Theory]
+    [InlineData("2")]
+    [InlineData("3")]
+    public async Task CoverageRunPreflight_AdmitsSupportedNativeContractForSelectedCoverage(string version)
+    {
+        var planned = await PlanAsync(["tests/Coverage.Tests/ExampleTests.cs"]);
+        var output = NewPath("native-contract-output");
+        var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
+            ("--plan", Path.Join(planned.Output, "evidence-plan.json")), ("--output", output),
+            ("--dotnet", ExistingProcessPath()), ("--coverage-cli", ExistingProcessPath()),
+            ("--repository", NewPath("missing-repository")),
+            ("--native-coverage-directory", NewPath("native")),
+            ("--native-coverage-contract-version", version));
+
+        // Admission succeeds; the producer then rejects the absent checkout before running any commands.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
+        var producer = Assert.Single(manifest.ProducerResults);
+        Assert.Equal("solution-coverage", producer.ProducerId);
+        Assert.Equal(EvidenceProducerOutcome.Failed, producer.Outcome);
     }
 
     private async Task<PlannedEvidence> PlanAsync(string[] pathValues, string? policyPath = null, string? scope = null)

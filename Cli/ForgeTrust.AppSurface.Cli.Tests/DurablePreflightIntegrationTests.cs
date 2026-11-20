@@ -529,11 +529,13 @@ public sealed class DurableSchemaPreflightIntegrationTests
         using var cancellation = new CancellationTokenSource();
         var read = fixture.RunAsync(RuntimeA, applicationName: readerName, cancellationToken: cancellation.Token);
         await fixture.WaitForWaitEventAsync(readerName, "relation");
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
         var cancelElapsed = Stopwatch.StartNew();
         cancellation.Cancel();
         var error = await Record.ExceptionAsync(async () => await read);
-        cancelElapsed.Stop();
         Assert.NotNull(error);
+        await fixture.WaitForSessionExitAsync(readerName, completionDeadline.Token);
+        cancelElapsed.Stop();
         Assert.True(cancelElapsed.Elapsed < DurableSchemaPreflightVerifier.TotalTimeout,
             $"Npgsql cancellation, physical close, and verifier cleanup took {cancelElapsed.Elapsed}.");
         Assert.Equal(0, await fixture.CountSessionsAsync(readerName));
@@ -593,9 +595,12 @@ public sealed class DurableSchemaPreflightIntegrationTests
         var read = fixture.RunAsync(RuntimeA, applicationName: readerName);
         await fixture.WaitForWaitEventAsync(readerName, "relation");
         var pid = await fixture.WaitForBackendAsync(readerName);
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
         var terminateElapsed = Stopwatch.StartNew();
         await fixture.TerminateBackendAsync(pid);
         await Assert.ThrowsAnyAsync<Exception>(async () => await read);
+        // PostgreSQL can close the client socket before removing the backend from pg_stat_activity.
+        await fixture.WaitForSessionExitAsync(readerName, completionDeadline.Token);
         terminateElapsed.Stop();
         Assert.True(terminateElapsed.Elapsed < DurableSchemaPreflightVerifier.TotalTimeout,
             $"Backend termination, socket teardown, and verifier cleanup took {terminateElapsed.Elapsed}.");
@@ -619,9 +624,11 @@ public sealed class DurableSchemaPreflightIntegrationTests
         const string readerName = "issue845-terminated-reader";
         var read = fixture.RunAsync(RuntimeA, applicationName: readerName);
         var pid = await fixture.WaitForBackendAsync(readerName);
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
         var terminateElapsed = Stopwatch.StartNew();
         await fixture.TerminateBackendAsync(pid);
         await Assert.ThrowsAnyAsync<Exception>(async () => await read);
+        await fixture.WaitForSessionExitAsync(readerName, completionDeadline.Token);
         terminateElapsed.Stop();
         Assert.True(terminateElapsed.Elapsed < DurableSchemaPreflightVerifier.TotalTimeout,
             $"Waiting-backend termination, socket teardown, and verifier cleanup took {terminateElapsed.Elapsed}.");

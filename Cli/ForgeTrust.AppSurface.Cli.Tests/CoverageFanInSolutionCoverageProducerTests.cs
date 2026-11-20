@@ -920,6 +920,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData("both-not-applicable")]
     [InlineData("mixed")]
     [InlineData("exact-thresholds")]
+    [InlineData("repeating-ratio")]
     [InlineData("primary-below-threshold")]
     public async Task ProduceAsync_AcceptsVerifiedNativeV3ApplicabilityAndComposedThresholds(string scenario)
     {
@@ -984,6 +985,8 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 Assert.Equal(94.5m, composed.GetProperty("line").GetProperty("percent").GetDecimal());
                 Assert.Equal(84.5m, composed.GetProperty("branch").GetProperty("percent").GetDecimal());
             }
+            if (scenario == "repeating-ratio")
+                Assert.Equal(95.2381m, claim.GetProperty("primary").GetProperty("line").GetProperty("percent").GetDecimal());
             if (scenario == "primary-below-threshold")
             {
                 Assert.True(claim.GetProperty("primary").GetProperty("line").GetProperty("percent").GetDecimal() < 94.5m);
@@ -1028,6 +1031,20 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData("tampered-primary-gate")]
     [InlineData("tampered-composed-gate")]
     [InlineData("tampered-composition-receipt")]
+    [InlineData("metadata-schema-version")]
+    [InlineData("metadata-requested-base")]
+    [InlineData("metadata-head-commit")]
+    [InlineData("metadata-merge-base-short")]
+    [InlineData("metadata-merge-base-invalid-hex")]
+    [InlineData("applicability-schema-version")]
+    [InlineData("applicability-report-profile")]
+    [InlineData("applicability-policy-digest")]
+    [InlineData("applicability-source")]
+    [InlineData("applicability-run")]
+    [InlineData("applicability-diff-sha256")]
+    [InlineData("applicability-diff-metadata-sha256")]
+    [InlineData("negative-changed-lines")]
+    [InlineData("negative-covered-lines")]
     public async Task ProduceAsync_RejectsInvalidOrTamperedNativeV3ApplicabilityEvidence(string defect)
     {
         using var fixture = new Fixture();
@@ -1281,12 +1298,16 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             var measuredBranch = Metric("measured", "reported-points", 1, 100, 90, 90m);
             var lineBelow = Metric("measured", "reported-points", 1, 100, 94, 94m);
             var branchBelow = Metric("measured", "reported-points", 1, 100, 80, 80m);
+            var repeatingRatioLine = Metric("measured", "reported-points", 1, 21, 20, 95.2381m);
             var primaryLine = scenario switch
             {
                 "both-not-applicable" or "mixed" => notApplicable,
                 "invalid-primary-not-applicable" => Metric("notApplicable", "no-reported-patch-points", 1, 0, 1, null),
                 "primary-below-threshold" => Metric("measured", "reported-points", 1, 100, 90, 90m),
                 "invalid-primary-metric" => Metric("measured", "reported-points", 1, 100, 98, 99m),
+                "repeating-ratio" => repeatingRatioLine,
+                "negative-changed-lines" => Metric("measured", "reported-points", -1, 100, 99, 99m),
+                "negative-covered-lines" => Metric("measured", "reported-points", 1, 100, -1, 99m),
                 _ => measuredLine,
             };
             var primaryBranch = scenario switch
@@ -1303,6 +1324,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 "false-not-applicable-measured" => Metric("notApplicable", "no-reported-patch-points", 1, 1, 1, 100m),
                 "unverified" => Metric("unverified", "verification-failed", 1, 0, 0, null),
                 "exact-thresholds" => Metric("measured", "reported-points", 1, 200, 189, 94.5m),
+                "repeating-ratio" => repeatingRatioLine,
                 "invalid-composed-metric" => Metric("measured", "reported-points", 1, 100, 98, 99m),
                 _ => measuredLine,
             };
@@ -1320,10 +1342,15 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             var diffSha256 = Hash(patchBytes);
             var metadataBytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                schemaVersion = 3,
-                requestedBaseCommit = NativeV3DiffBase,
-                mergeBaseCommit = NativeV3DiffBase,
-                headCommit = Commit,
+                schemaVersion = scenario == "metadata-schema-version" ? 2 : 3,
+                requestedBaseCommit = scenario == "metadata-requested-base" ? new string('a', 40) : NativeV3DiffBase,
+                mergeBaseCommit = scenario switch
+                {
+                    "metadata-merge-base-short" => new string('a', 39),
+                    "metadata-merge-base-invalid-hex" => new string('A', 40),
+                    _ => NativeV3DiffBase,
+                },
+                headCommit = scenario == "metadata-head-commit" ? new string('f', 40) : Commit,
                 diffPolicyId = "appsurface-git-patch-v1",
                 diffSha256,
                 empty = false,
@@ -1341,6 +1368,19 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             var diffMetadataSha256 = Hash(metadataBytes);
             var source = new { commit = Commit, tree = new string('b', 40), sdk = "10.0.100", configuration = "Release" };
             var run = new { runScope = "forge-trust/AppSurface", runId = "123", attempt = 1 };
+            var claimSource = new
+            {
+                commit = scenario == "applicability-source" ? new string('f', 40) : Commit,
+                tree = new string('b', 40),
+                sdk = "10.0.100",
+                configuration = "Release",
+            };
+            var claimRun = new
+            {
+                runScope = "forge-trust/AppSurface",
+                runId = scenario == "applicability-run" ? "124" : "123",
+                attempt = 1,
+            };
 
             object primaryReportLine = scenario == "primary-report-mismatch"
                 ? Metric("measured", "reported-points", 1, 100, 98, 98m) : primaryLine;
@@ -1371,13 +1411,13 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             var compositionReceiptBytes = JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 3, outcome = "succeeded" });
             var applicabilityBytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                schemaVersion = 3,
-                reportProfileId = "coverlet-collector-cobertura-v1",
-                policyDigest = "policy",
-                source,
-                run,
-                diffSha256,
-                diffMetadataSha256,
+                schemaVersion = scenario == "applicability-schema-version" ? 2 : 3,
+                reportProfileId = scenario == "applicability-report-profile" ? "another-profile" : "coverlet-collector-cobertura-v1",
+                policyDigest = scenario == "applicability-policy-digest" ? "another-policy" : "policy",
+                source = claimSource,
+                run = claimRun,
+                diffSha256 = scenario == "applicability-diff-sha256" ? new string('a', 64) : diffSha256,
+                diffMetadataSha256 = scenario == "applicability-diff-metadata-sha256" ? new string('a', 64) : diffMetadataSha256,
                 primary,
                 composed = composedMetrics,
             });
