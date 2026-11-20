@@ -132,6 +132,47 @@ public sealed class DocsExportWorkflowContractTests
     }
 
     [Fact]
+    public void Release_Public_Docs_Verification_Should_Remain_Inside_The_Deployment_Lock()
+    {
+        var root = (YamlMappingNode)LoadWorkflow("release-publish.yml").Documents[0].RootNode;
+        var jobs = GetMapping(root, "jobs");
+        var deploy = GetMapping(jobs, "deploy-docs-pages");
+        var steps = GetSequence(deploy, "steps").Cast<YamlMappingNode>().ToArray();
+        var deployment = FindStep(steps, "Deploy verified docs Pages payload");
+        var verify = FindStep(steps, "Verify deployed public docs");
+        Assert.True(Array.IndexOf(steps, verify) > Array.IndexOf(steps, deployment));
+        Assert.Equal("github-pages", GetScalar(GetMapping(deploy, "concurrency"), "group"));
+        Assert.Equal("15", GetScalar(deploy, "timeout-minutes"));
+        Assert.Equal("${{ steps.deployment.outputs.page_url }}", GetScalar(GetMapping(verify, "env"), "PAGE_URL"));
+        Assert.DoesNotContain("GH_TOKEN", ScalarKeys(GetMapping(verify, "env")));
+        Assert.DoesNotContain("contents", ScalarKeys(GetMapping(deploy, "permissions")));
+
+        var publicRun = GetScalar(verify, "run");
+        Assert.Contains("set -euo pipefail", publicRun, StringComparison.Ordinal);
+        Assert.Contains("curl -fsSL \"${root}/versions.json\"", publicRun, StringComparison.Ordinal);
+        Assert.Contains("curl -fsSL \"${root}/docs\"", publicRun, StringComparison.Ordinal);
+        Assert.Contains("curl -fsSL \"${root}/${EXACT_TREE_PATH}/.appsurface-docs-release-manifest.json\"", publicRun, StringComparison.Ordinal);
+        Assert.Contains("curl -fsSL \"${root}/${EXACT_TREE_PATH}/index.html\"", publicRun, StringComparison.Ordinal);
+        Assert.Contains(".recommendedVersion == $version", publicRun, StringComparison.Ordinal);
+        Assert.Contains(".releaseManifestSha256 == $digest", publicRun, StringComparison.Ordinal);
+        Assert.Contains("if [[ \"${actual_manifest_sha256}\" != \"${EXPECTED_MANIFEST_SHA256}\" ]]", publicRun, StringComparison.Ordinal);
+        Assert.DoesNotContain("gh release", publicRun, StringComparison.Ordinal);
+
+        var privateJob = GetMapping(jobs, "verify-public-docs");
+        Assert.Contains("deploy-docs-pages", GetSequence(privateJob, "needs").Select(GetScalar));
+        var privateRun = GetScalar(FindStep(GetSequence(privateJob, "steps").Cast<YamlMappingNode>(),
+            "Verify uploaded release assets"), "run");
+        Assert.DoesNotContain("curl ", privateRun, StringComparison.Ordinal);
+        Assert.Contains("gh release download", privateRun, StringComparison.Ordinal);
+        Assert.Contains("if [[ \"${actual_archive_sha256}\" != \"${EXPECTED_ARCHIVE_SHA256}\" ]]", privateRun, StringComparison.Ordinal);
+        Assert.Equal("write", GetScalar(GetMapping(privateJob, "permissions"), "contents"));
+
+        var publishDependencies = GetSequence(GetMapping(jobs, "publish-github-release"), "needs").Select(GetScalar);
+        Assert.Contains("deploy-docs-pages", publishDependencies);
+        Assert.Contains("verify-public-docs", publishDependencies);
+    }
+
+    [Fact]
     public void BuildWorkflow_Should_Publish_Docs_Outline_Layout_Evidence()
     {
         var workflow = LoadBuildWorkflow();
