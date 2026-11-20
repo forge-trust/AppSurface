@@ -1466,7 +1466,8 @@ public sealed class DurableSchemaPreflightIntegrationTests
         DurablePreflightRequest? request = null)
     {
         var timer = System.Diagnostics.Stopwatch.StartNew();
-        var result = await fixture.RunAsync(role, request: request);
+        // Client disposal cannot acknowledge when PostgreSQL removes the backend from pg_stat_activity.
+        var result = await fixture.RunAndObserveSessionExitAsync(role, request);
         timer.Stop();
         _output.WriteLine(
             $"issue845 stage=preflight pair_count={pairCount} caller={role} elapsed_ms={timer.Elapsed.TotalMilliseconds:F3}");
