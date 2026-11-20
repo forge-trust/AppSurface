@@ -255,6 +255,37 @@ public sealed class CoverageFanInApiValidationTests
     }
 
     [Fact]
+    public async Task V3EngineIdentifiesDirtyCheckoutWithoutDisclosingPaths()
+    {
+        using var temp = TestDirectory.Create();
+        Directory.CreateDirectory(Path.Join(temp.Path, ".git"));
+        const string changedPath = "private-source-name.cs";
+        var runner = new IdentityRunner((command, _) =>
+        {
+            var response = command.Arguments.Contains("status")
+                ? new CoverageRunProcessResult(0, $" M {changedPath}\n", StandardOutput: $" M {changedPath}\n")
+                : IdentityResult(command, temp.Path, index: string.Empty);
+            return Task.FromResult(response);
+        });
+        var output = Path.Join(temp.Path, "output");
+        var request = new CoverageFanInEngineRequest(ExpectedV3(), temp.Path, output,
+            CoveragePath: Path.Join(temp.Path, "coverage.xml"), TimingsPath: Path.Join(temp.Path, "timings.json"))
+        { IdentityRunner = runner };
+
+        var result = await CoverageFanInEngine.ExecuteAsync("capture", request,
+            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+
+        Assert.Equal("Rejected", result.Outcome);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("ASCOV302", diagnostic.Code);
+        Assert.Equal("identity-mismatch", diagnostic.Cause);
+        Assert.Equal("source", diagnostic.Field);
+        Assert.Contains("clean checkout", diagnostic.Recovery, StringComparison.Ordinal);
+        Assert.DoesNotContain(changedPath, diagnostic.Recovery, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
     public async Task V3EngineClassifiesPortableTrackedIndexAliasesAsInvalidEvidence()
     {
         using var temp = TestDirectory.Create();

@@ -236,6 +236,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Equal(["ubuntu-latest", "windows-latest", "macos-latest"],
             coverageSecurity["strategy"].AsMapping()["matrix"].AsMapping()["os"].AsSequence().Select(os => os.AsScalar()));
         var securitySteps = coverageSecurity["steps"].AsSequence();
+        var canonicalCheckout = FindStep(securitySteps, "Preserve committed bytes on Windows");
+        Assert.Equal("${{ runner.os == 'Windows' }}", canonicalCheckout["if"].AsScalar());
+        Assert.Equal("git config --global core.autocrlf false", canonicalCheckout["run"].AsScalar());
+        Assert.True(IndexOf(securitySteps, canonicalCheckout) < IndexOf(securitySteps, FindStep(securitySteps, "Checkout code")));
         var captureStep = FindStep(securitySteps, "Attest successful native coverage evidence");
         Assert.Equal("pwsh", captureStep["shell"].AsScalar());
         var capture = captureStep["run"].AsScalar();
