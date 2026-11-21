@@ -411,6 +411,68 @@ public sealed class CoverageRunProcessContractTests
     }
 
     [Fact]
+    public async Task BinaryCapturePreservesNonUtf8OutputAndReturnsDiagnosticsSeparately()
+    {
+        using var directory = TestDirectory.Create();
+        var runner = new CliWrapCoverageRunProcessRunner();
+        var request = CreateProbeRequest(directory.Path, "invalid-utf8") with
+        {
+            CaptureBinaryStandardOutput = true,
+            StandardOutputLimitBytes = 1
+        };
+        var result = await runner.RunAsync(request, CancellationToken.None);
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(result.OutputTruncated);
+        Assert.Equal(new byte[] { 0xff }, result.BinaryStandardOutput);
+        Assert.Null(result.StandardOutput);
+        Assert.Empty(result.Output);
+
+        var streams = CreateProbeRequest(directory.Path, "streams", "1") with { CaptureBinaryStandardOutput = true };
+        var split = await runner.RunAsync(streams, CancellationToken.None);
+        Assert.Equal("o"u8.ToArray(), split.BinaryStandardOutput);
+        Assert.Equal("e", split.StandardError);
+        Assert.Equal(split.StandardError, split.Output);
+    }
+
+    [Fact]
+    public async Task BinaryCaptureReturnsNoPartialBlobAndReapsAnOversizedChild()
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console);
+        using var operation = supervisor.Start("binary output limit");
+        var request = CreateProbeRequest(directory.Path, "flood") with
+        {
+            Lease = operation.ReserveProcess(),
+            CaptureBinaryStandardOutput = true,
+            StandardOutputLimitBytes = 128
+        };
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(result.OutputTruncated);
+        Assert.Null(result.BinaryStandardOutput);
+        Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task BinaryCaptureRejectsConflictingTextOrLogModes(bool strictUtf8, bool useLog)
+    {
+        using var directory = TestDirectory.Create();
+        var output = Path.Join(directory.Path, "output.log");
+        var request = CreateProbeRequest(directory.Path, "invalid-utf8") with
+        {
+            CaptureBinaryStandardOutput = true,
+            StrictUtf8 = strictUtf8,
+            OutputFile = useLog ? output : null
+        };
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None));
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
     public async Task ProcessRunner_ShouldStopAndReapWhenStrictOutputLimitIsExceeded()
     {
         using var directory = TestDirectory.Create();

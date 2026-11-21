@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Coverage;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -123,6 +124,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                     "--diff-base", _settings.DiffBase!, "--run-scope", run["GITHUB_REPOSITORY"]!,
                     "--run-id", run["GITHUB_RUN_ID"]!, "--attempt", run["GITHUB_RUN_ATTEMPT"]!,
                 };
+                if (nativeContract == 3)
+                    dogfoodArgs.AddRange(["--diff-policy-id", CoverageFanInPolicy.VisualBaselinePngDiffPolicyId]);
                 await ExecuteAsync("coverage-fanin", dogfoodArgs, root, proof, cancellationToken, _settings.DotnetPath).ConfigureAwait(false);
                 nativeProofHash = await ValidateNativeFanInAsync(fanInOutput, nativeContract, _settings.DiffBase!,
                     commit, tree, sdk, run, cancellationToken).ConfigureAwait(false);
@@ -400,10 +403,11 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
 
         using var metadata = ReadJson(Path.Join(accepted, "diff-metadata.json"), MaxJson);
         if (metadata.RootElement.GetProperty("schemaVersion").GetInt32() != 3
+            || metadata.RootElement.GetProperty("diffPolicyId").GetString() != CoverageFanInPolicy.VisualBaselinePngDiffPolicyId
             || metadata.RootElement.GetProperty("requestedBaseCommit").GetString() != diffBase
             || metadata.RootElement.GetProperty("headCommit").GetString() != commit
             || !IsRepositoryCommit(metadata.RootElement.GetProperty("mergeBaseCommit").GetString()))
-            throw new InvalidDataException("Native v3 patch proof is not bound to the requested base and head.");
+            throw new InvalidDataException("Native v3 patch proof differs from the selected diff policy, base or head.");
 
         using var applicability = ReadJson(Path.Join(accepted, "patch-applicability.json"), MaxJson);
         var claim = applicability.RootElement;

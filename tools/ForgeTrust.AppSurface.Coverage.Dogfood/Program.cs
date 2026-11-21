@@ -32,7 +32,7 @@ internal static class CoverageDogfood
     {
         if (args.Length == 1 && args[0] == "--help")
         {
-            Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--contract-version 2|3 (default 2)] [--native-platform Linux|Windows|Darwin --report <normalized> --raw <collector>] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
+            Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--contract-version 2|3 (default 2)] [--diff-policy-id appsurface-visual-baseline-png-v1 (v3 only)] [--native-platform Linux|Windows|Darwin --report <normalized> --raw <collector>] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
             return 0;
         }
         var stage = "options";
@@ -40,7 +40,7 @@ internal static class CoverageDogfood
         {
             if (args.Length % 2 != 0) throw new ArgumentException();
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
-            var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "contract-version", "native-platform", "report", "raw", "primary", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
+            var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "contract-version", "diff-policy-id", "native-platform", "report", "raw", "primary", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
             for (var i = 0; i < args.Length; i += 2)
                 if (!args[i].StartsWith("--", StringComparison.Ordinal) || !allowed.Contains(args[i][2..]) || !options.TryAdd(args[i][2..], args[i + 1])) throw new ArgumentException();
             string Required(string key) => options.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException();
@@ -53,6 +53,9 @@ internal static class CoverageDogfood
                 && int.TryParse(versionText, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedVersion)
                 ? parsedVersion : versionText is null ? 2 : throw new ArgumentException();
             if (contractVersion is not (2 or 3)) throw new ArgumentException();
+            options.TryGetValue("diff-policy-id", out var diffPolicyId);
+            if (diffPolicyId is not null && (contractVersion != 3 || diffPolicyId != CoverageFanInPolicy.VisualBaselinePngDiffPolicyId))
+                throw new ArgumentException("The screenshot diff policy requires fan-in contract version 3.");
             if (configuration is not ("Debug" or "Release") || Directory.Exists(output) || File.Exists(output)) throw new ArgumentException();
             stage = "source-inventory";
             var solution = XDocument.Load(Path.Join(root, "ForgeTrust.AppSurface.slnx"));
@@ -96,7 +99,8 @@ internal static class CoverageDogfood
                 Limits: new CoverageOperationLimits(TotalRecords: 4_000_000))
             {
                 ContractVersion = contractVersion,
-                ReportProfileId = contractVersion == 3 ? ReportProfileId : null
+                ReportProfileId = contractVersion == 3 ? ReportProfileId : null,
+                DiffPolicyId = diffPolicyId
             };
             if (contractVersion == 3)
                 await ValidateCollectorVersionsAsync(root, (operationName == "native" ? nativeProjects : projects).Distinct(StringComparer.Ordinal)
@@ -296,7 +300,7 @@ internal static class CoverageDogfood
     private static JsonElement ToVersionedPolicyElement(CoverageFanInPolicy policy, int contractVersion)
     {
         if (policy.ContractVersion != contractVersion || contractVersion is not (2 or 3)
-            || contractVersion == 2 && policy.ReportProfileId is not null
+            || contractVersion == 2 && (policy.ReportProfileId is not null || policy.DiffPolicyId is not null)
             || contractVersion == 3 && policy.ReportProfileId != ReportProfileId)
             throw new InvalidDataException("The explicit fan-in policy version/profile selection is inconsistent.");
         var supplements = policy.Supplements.OrderBy(x => x.Id, StringComparer.Ordinal)
@@ -316,7 +320,7 @@ internal static class CoverageDogfood
             2 => new PolicyV2Document(sortedPolicy.Gate, sortedPolicy.Instrumentation!, sortedPolicy.Limits!,
                 sortedPolicy.Run, sortedPolicy.Source, sortedPolicy.Supplements, sortedPolicy.TestProjects),
             3 => new PolicyV3Document(3, ReportProfileId, sortedPolicy.Gate, sortedPolicy.Instrumentation!,
-                sortedPolicy.Limits!, sortedPolicy.Run, sortedPolicy.Source, sortedPolicy.Supplements, sortedPolicy.TestProjects),
+                sortedPolicy.Limits!, sortedPolicy.Run, sortedPolicy.Source, sortedPolicy.Supplements, sortedPolicy.TestProjects, sortedPolicy.DiffPolicyId),
             _ => throw new InvalidDataException("Unsupported fan-in contract version.")
         };
         // Keep this explicit v2/v3 whitelist because CoveragePolicyEncoding is internal to
@@ -442,7 +446,8 @@ internal static class CoverageDogfood
         IReadOnlyList<CoverageSupplement> Supplements, IReadOnlyList<string> TestProjects);
     private sealed record PolicyV3Document(int ContractVersion, string ReportProfileId, CoverageGatePolicy Gate,
         CoverageInstrumentation Instrumentation, CoverageOperationLimits Limits, CoverageRunIdentity Run,
-        CoverageSourceIdentity Source, IReadOnlyList<CoverageSupplement> Supplements, IReadOnlyList<string> TestProjects);
+        CoverageSourceIdentity Source, IReadOnlyList<CoverageSupplement> Supplements, IReadOnlyList<string> TestProjects,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DiffPolicyId);
     private sealed record CaptureRequestProjection(JsonElement Policy, string RepositoryRoot, string OutputDirectory,
         string ProducerId, string? CoveragePath, string? TimingsPath, string? RawCoveragePath, string? ImportDirectory,
         string? OriginalSourceRoot, CoverageOutputMode OutputMode, IReadOnlyDictionary<string, string>? RawCoveragePaths);

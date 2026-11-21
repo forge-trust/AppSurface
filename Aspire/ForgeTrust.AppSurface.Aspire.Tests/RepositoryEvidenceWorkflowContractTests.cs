@@ -247,6 +247,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("'--cli', $env:COVERAGE_CLI_PATH", capture);
         Assert.Contains("$contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }", capture);
         Assert.Contains("'--contract-version', $contractVersion", capture);
+        Assert.Contains("if ($contractVersion -eq '3') { $adapter += @('--diff-policy-id', 'appsurface-visual-baseline-png-v1') }", capture);
         Assert.Contains("$diffBase = if ($contractVersion -eq '3') { $env:COVERAGE_V3_DIFF_BASE } else { $env:COVERAGE_GATE_DIFF_BASE }", capture);
         Assert.Contains("$diffBase -cnotmatch '^[0-9a-f]{40}$'", capture);
         Assert.Equal(1, capture.Split("$env:COVERAGE_V3_DIFF_BASE", StringSplitOptions.None).Length - 1);

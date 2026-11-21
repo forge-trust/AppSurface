@@ -15,7 +15,8 @@ internal sealed class CoverageFanInPolicyJsonConverter : JsonConverter<CoverageF
             wire.Instrumentation, wire.Limits)
         {
             ContractVersion = wire.ContractVersion,
-            ReportProfileId = wire.ReportProfileId
+            ReportProfileId = wire.ReportProfileId,
+            DiffPolicyId = wire.DiffPolicyId
         };
     }
 
@@ -32,13 +33,14 @@ internal sealed class CoverageFanInPolicyJsonConverter : JsonConverter<CoverageF
         // unsupported versions and otherwise invalid values can be serialized for diagnostics or transport.
         JsonSerializer.Serialize(writer, new CoverageFanInPolicyV3Json(value.Source, value.Run,
             value.TestProjects, value.Supplements, value.Gate, value.Instrumentation, value.Limits,
-            value.ContractVersion, value.ReportProfileId), options);
+            value.ContractVersion, value.ReportProfileId, value.DiffPolicyId), options);
     }
 
     private sealed record CoverageFanInPolicyV3Json(CoverageSourceIdentity Source, CoverageRunIdentity Run,
         IReadOnlyList<string> TestProjects, IReadOnlyList<CoverageSupplement> Supplements, CoverageGatePolicy Gate,
         CoverageInstrumentation? Instrumentation = null, CoverageOperationLimits? Limits = null,
-        int ContractVersion = 2, string? ReportProfileId = null);
+        int ContractVersion = 2, string? ReportProfileId = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DiffPolicyId = null);
 
     private sealed record CoverageFanInPolicyV2Json(CoverageSourceIdentity Source, CoverageRunIdentity Run,
         IReadOnlyList<string> TestProjects, IReadOnlyList<CoverageSupplement> Supplements, CoverageGatePolicy Gate,
