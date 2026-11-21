@@ -49,6 +49,8 @@ A failed create with an unknown acknowledgement, or a different OID under a reco
 
 ## Compare baseline and candidate
 
+The [five-pair measurement](../../artifacts/issue-931-fixture-benchmark/results.md) produced a measured no-go. The median improvement missed the variability threshold. Fresh is the supported default for these cohorts.
+
 Fresh creation inherits `template1`. A ready candidate uses `CREATE DATABASE … TEMPLATE` with the class-owned source. Both statements omit `STRATEGY`. On PostgreSQL 17 this selects `WAL_LOG`, which copies blocks through the write-ahead log. The template must have no connected sessions when cloning begins. [PostgreSQL 17 CREATE DATABASE reference](https://www.postgresql.org/docs/17/sql-createdatabase.html)
 
 The pinned fresh implementation performs one create, schema apply, epoch initialization, status read and disposal for each of the 33 ready cases. The empty Flow case only creates and disposes its database. Both measured arms now pay for recording the new database OID, checking name and OID before drop, and confirming absence after drop. Clock writes check the connected database identity. When a case installs a clock role, both arms also capture the clock function and role OIDs in the creating transaction and verify cleanup. Catalog round trips and result-file emission are included in wall time.
@@ -84,7 +86,7 @@ python3 scripts/postgresql-fixture-benchmark.py run \
   --acceptance-trx "$scratch/acceptance/acceptance.trx" --results-root "$scratch/pairs"
 ```
 
-The runner verifies the supplied server metadata using a separate, untimed test against the configured connection before warmup. Read `summary.md` for the decision and `index.md` for the associated records. The runner refuses an existing results root. Preserve an invalid attempt and use a new directory for a repeat. Raw TRX, collector output and SDK information can contain local filesystem paths. Inspect the export for private machine or connection details before sharing it.
+The acceptance TRX must include the server metadata test, which records the SHA-256 of its executing test assembly. The runner compares that hash with the Release assembly it measures. A separate, untimed invocation of the metadata test verifies the supplied settings against the measurement server before warmup. Read `summary.md` for the decision and `index.md` for the acceptance, server and process records. The runner refuses an existing results root. Preserve an invalid attempt and use a new directory for a repeat. Raw TRX, collector output and SDK information can contain local filesystem paths. Inspect the export for private machine or connection details before sharing it.
 
 ## Test-project entry points
 

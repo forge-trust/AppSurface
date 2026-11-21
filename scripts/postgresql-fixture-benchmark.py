@@ -384,12 +384,20 @@ def validate_environment(dotnet: str, manifest: dict[str, object]) -> dict[str, 
     }
 
 
-def validate_acceptance_trx(path: Path) -> dict[str, object]:
+def validate_acceptance_trx(
+    path: Path,
+    *,
+    expected_assembly_sha256: str | None = None,
+) -> dict[str, object]:
     try:
         raw = path.read_bytes()
     except OSError as error:
         raise BenchmarkError("cannot read the independent acceptance TRX receipt") from error
-    evidence = parse_trx(path)
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as error:
+        raise BenchmarkError("TRX is unreadable") from error
+    evidence = parse_trx_root(root)
     if evidence["passed"] == 0:
         raise BenchmarkError("acceptance TRX contains no passing test results")
     identities = set(evidence["identities"])
@@ -402,7 +410,7 @@ def validate_acceptance_trx(path: Path) -> dict[str, object]:
     if missing:
         details = "; ".join(f"{family}: {', '.join(names)}" for family, names in missing.items())
         raise BenchmarkError(f"acceptance TRX is missing required fixture witnesses: {details}")
-    return {
+    receipt: dict[str, object] = {
         "status": "PASS",
         "source_sha256": hashlib.sha256(raw).hexdigest(),
         "passed": evidence["passed"],
@@ -410,6 +418,59 @@ def validate_acceptance_trx(path: Path) -> dict[str, object]:
         "skipped": evidence["skipped"],
         "witnesses": witnesses,
     }
+    if expected_assembly_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_assembly_sha256):
+            raise BenchmarkError("measured Release assembly SHA-256 is malformed")
+
+        def local_name(element: ET.Element) -> str:
+            return element.tag.rsplit("}", 1)[-1]
+
+        definitions: dict[str, str] = {}
+        for element in root.iter():
+            if local_name(element) != "UnitTest":
+                continue
+            test_id = element.get("id")
+            method = next((child for child in element if local_name(child) == "TestMethod"), None)
+            class_name = method.get("className") if method is not None else None
+            method_name = method.get("name") if method is not None else None
+            if test_id and class_name and method_name:
+                definitions[test_id] = f"{class_name}.{method_name}"
+
+        metadata_results = [
+            result
+            for result in root.iter()
+            if local_name(result) == "UnitTestResult"
+            and definitions.get(result.get("testId", "")) == SERVER_METADATA_TEST
+        ]
+        if len(metadata_results) != 1:
+            raise BenchmarkError("acceptance TRX must contain exactly one named server metadata result")
+
+        fact_lines = [
+            line.strip()
+            for element in metadata_results[0].iter()
+            if local_name(element) == "StdOut"
+            for line in (element.text or "").splitlines()
+        ]
+        metadata_lines = [line for line in fact_lines if line.startswith(SERVER_METADATA_PREFIX)]
+        assembly_lines = [line for line in fact_lines if line.startswith("FIXTURE_RELEASE_SHA256 ")]
+        if len(metadata_lines) != 1:
+            raise BenchmarkError("acceptance TRX must contain one named server metadata fact")
+        if len(assembly_lines) != 1:
+            raise BenchmarkError("acceptance TRX must contain one named Release assembly SHA-256 fact")
+        try:
+            observed_server = parse_server_info(
+                metadata_lines[0][len(SERVER_METADATA_PREFIX):].encode("utf-8")
+            )
+        except BenchmarkError as error:
+            raise BenchmarkError("acceptance TRX contains invalid named server metadata") from error
+        observed_assembly_sha256 = assembly_lines[0].removeprefix("FIXTURE_RELEASE_SHA256 ")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", observed_assembly_sha256):
+            raise BenchmarkError("acceptance TRX contains a malformed Release assembly SHA-256 fact")
+        if observed_assembly_sha256.casefold() != expected_assembly_sha256.casefold():
+            raise BenchmarkError("acceptance TRX Release assembly SHA-256 does not match the measured binary")
+        receipt["server_metadata"] = observed_server
+        receipt["release_assembly_sha256"] = observed_assembly_sha256.lower()
+    return receipt
 
 
 def machine_details() -> dict[str, object]:
@@ -436,6 +497,16 @@ def parse_trx(
         root = ET.parse(path).getroot()
     except (OSError, ET.ParseError) as error:
         raise BenchmarkError("TRX is unreadable") from error
+
+    return parse_trx_root(root, cohort, server_metadata=server_metadata)
+
+
+def parse_trx_root(
+    root: ET.Element,
+    cohort: str | None = None,
+    *,
+    server_metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
 
     local_name = lambda element: element.tag.rsplit("}", 1)[-1]
     definitions: dict[str, str] = {}
@@ -1110,6 +1181,21 @@ def build_index(root: Path, records: list[dict[str, object]], status: str) -> No
             f"| {record['phase']} | {record['arm']} | {record['cohort']} | {record['status']} | "
             f"{record['wall_seconds']:.3f} | {' · '.join(links)} |"
         )
+    run_evidence = (
+        ("acceptance.trx", "acceptance TRX"),
+        ("server-check/server-check.trx", "server-check TRX"),
+        ("server-check/receipt.json", "server-check receipt"),
+        ("server-info.input.json", "server-info input"),
+        ("environment.json", "environment"),
+    )
+    available_evidence = [
+        f"[{label}]({relative_path})"
+        for relative_path, label in run_evidence
+        if (root / relative_path).is_file()
+    ]
+    if available_evidence:
+        lines.extend(["", "Run evidence", ""])
+        lines.extend(f"- {link}" for link in available_evidence)
     lines.extend(["", "See [summary.md](summary.md) for the redacted decision and paired timings.", ""])
     (root / "index.md").write_text("\n".join(lines), encoding="utf-8")
 
@@ -1137,10 +1223,19 @@ def protocol(args: argparse.Namespace) -> int:
         if not connection_string.strip():
             raise BenchmarkError(f"{CONNECTION_VARIABLE} must be supplied through secure environment injection")
         server_info, declared_server = preserve_server_info_input(args.server_info.expanduser(), root)
-        acceptance = validate_acceptance_trx(args.acceptance_trx.expanduser())
+        acceptance_input = args.acceptance_trx.expanduser()
+        retained_acceptance = root / "acceptance.trx"
+        try:
+            shutil.copyfile(acceptance_input, retained_acceptance)
+        except OSError as error:
+            raise BenchmarkError("cannot retain the independent acceptance TRX receipt") from error
         dotnet = dotnet_executable(args.dotnet)
         environment = validate_environment(dotnet, manifest)
         assembly_sha256 = str(environment["release_assembly_sha256"])
+        acceptance = validate_acceptance_trx(
+            retained_acceptance,
+            expected_assembly_sha256=assembly_sha256,
+        )
         server_check = capture_server_metadata(dotnet, root, server_info, assembly_sha256)
         copy_inventory(root, manifest)
         write_json(root / "environment.json", {

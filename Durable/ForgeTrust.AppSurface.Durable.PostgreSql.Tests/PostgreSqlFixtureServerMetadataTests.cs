@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Xunit.Abstractions;
 
@@ -25,5 +26,7 @@ public sealed class PostgreSqlFixtureServerMetadataTests(ITestOutputHelper outpu
         Assert.True(Version.TryParse(document.RootElement.GetProperty("version").GetString(), out _));
         Assert.Equal(10, document.RootElement.GetProperty("settings").EnumerateObject().Count());
         output.WriteLine($"FIXTURE_SERVER_METADATA {receipt}");
+        using var assembly = File.OpenRead(typeof(PostgreSqlFixtureServerMetadataTests).Assembly.Location);
+        output.WriteLine($"FIXTURE_RELEASE_SHA256 {Convert.ToHexStringLower(SHA256.HashData(assembly))}");
     }
 }

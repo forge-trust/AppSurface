@@ -195,6 +195,27 @@ class TrxEvidenceTests(unittest.TestCase):
             with self.assertRaises(BENCHMARK.BenchmarkError):
                 BENCHMARK.validate_acceptance_trx(path)
 
+    def test_acceptance_build_marker_must_match_the_measured_release(self):
+        digest = "ab" * 32
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "acceptance.trx"
+            identities = [name for family in BENCHMARK.required_acceptance_witnesses().values() for name in family]
+            identities = list(dict.fromkeys([*identities, BENCHMARK.SERVER_METADATA_TEST]))
+            write_trx(path, "matrix", identities=identities, include_collector=False)
+            tree = ET.parse(path)
+            result = next(r for r in tree.findall(".//{*}UnitTestResult")
+                          if r.get("testName") == BENCHMARK.SERVER_METADATA_TEST)
+            output = ET.SubElement(result, "Output")
+            ET.SubElement(output, "StdOut").text = (
+                BENCHMARK.SERVER_METADATA_PREFIX + json.dumps({"version": "17.12", "settings": SERVER_SETTINGS})
+                + f"\nFIXTURE_RELEASE_SHA256 {digest}"
+            )
+            tree.write(path, encoding="utf-8")
+            self.assertEqual(len(identities), BENCHMARK.validate_acceptance_trx(
+                path, expected_assembly_sha256=digest)["passed"])
+            with self.assertRaises(BENCHMARK.BenchmarkError):
+                BENCHMARK.validate_acceptance_trx(path, expected_assembly_sha256="11" * 32)
+
     def test_requires_exact_pass_identity_set_and_xplat_collector(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.trx"
