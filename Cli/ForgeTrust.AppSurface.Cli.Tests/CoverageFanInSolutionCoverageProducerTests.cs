@@ -12,7 +12,7 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageFanInSolutionCoverageProducerTests
 {
-    private const string NativeV3DiffBase = "cccccccccccccccccccccccccccccccccccccccc";
+    private const string NativeV3DiffBase = "0123456789abcdef0123456789abcdef01234567";
 
     [Fact]
     public async Task ProduceAsync_RejectsInvalidProducerContextBeforeRunningCommands()
@@ -1083,15 +1083,23 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("main")]
-    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
-    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
-    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
-    public async Task ProduceAsync_RejectsMissingOrInvalidNativeV3PinnedDiffBase(string? diffBase)
+    [InlineData(3, true, null)]
+    [InlineData(3, true, "main")]
+    [InlineData(3, true, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData(3, true, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData(3, true, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData(3, true, "cccccccccccccccccccccccccccccccccccccccg")]
+    [InlineData(3, false, NativeV3DiffBase)]
+    [InlineData(4, true, NativeV3DiffBase)]
+    public async Task ProduceAsync_RejectsUnsupportedNativeContractOrMissingV3Prerequisites(
+        int contractVersion, bool withCaptures, string? diffBase)
     {
         using var fixture = new Fixture();
-        var settings = fixture.NativeSettings(diffBase) with { NativeCoverageContractVersion = 3 };
+        var settings = fixture.NativeSettings(diffBase) with { NativeCoverageContractVersion = contractVersion };
+        if (withCaptures)
+            fixture.CreateNativeCaptureDirectories(settings);
+        else
+            settings = settings with { NativeCoverageDirectory = null };
         var commands = new List<EvidenceCommandRequest>();
         var producer = fixture.CreateWithSettings(settings, (request, _) =>
         {
