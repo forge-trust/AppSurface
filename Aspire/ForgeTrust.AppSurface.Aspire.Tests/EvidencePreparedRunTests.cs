@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -189,6 +190,167 @@ public sealed class EvidencePreparedRunTests
             if (disposal is not null) await disposal.WaitAsync(TimeSpan.FromSeconds(10));
             else if (producer.ChildTask is { } childTask) await childTask.WaitAsync(TimeSpan.FromSeconds(10));
             if (disposal is null) await prepared.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Disposal_ShouldCancelAndJoinAnActiveResourceFactoryWithoutCallerCancellation()
+    {
+        using var fixture = new Fixture();
+        using var fallback = new CancellationTokenSource();
+        var producer = new Producer("a");
+        var prepared = await fixture.PrepareAsync(fixture.Plan(fixture.Declaration("a", "a.txt", "db-a")), producer);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? disposal = null;
+        var run = prepared.RunAsync(async (_, token) =>
+        {
+            using var emergencyStop = CancellationTokenSource.CreateLinkedTokenSource(token, fallback.Token);
+            entered.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, emergencyStop.Token); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                cancelled.TrySetResult();
+                throw;
+            }
+            throw new InvalidOperationException("The controlled factory must exit through cancellation.");
+        });
+
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            disposal = prepared.DisposeAsync().AsTask();
+            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await disposal.WaitAsync(TimeSpan.FromSeconds(10));
+            var manifest = await run.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(manifest.Metrics.CleanupCompleted);
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.Equal(0, producer.Runs);
+            Assert.Equal(1, producer.Disposals);
+            await prepared.DisposeAsync();
+            Assert.Equal(1, producer.Disposals);
+        }
+        finally
+        {
+            fallback.Cancel();
+            await run.WaitAsync(TimeSpan.FromSeconds(10));
+            if (disposal is not null) await disposal.WaitAsync(TimeSpan.FromSeconds(10));
+            else await prepared.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationWinsFactoryHandoff_ShouldDisposeReturnedScopeWithoutStartingWork(bool disposeRun)
+    {
+        using var fixture = new Fixture();
+        using var caller = new CancellationTokenSource();
+        var producer = new Producer("a");
+        var owner = new Owner();
+        var plan = fixture.Plan(fixture.Declaration("a", "a.txt", "db-a"));
+        var prepared = await fixture.PrepareAsync(plan, producer);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readinessCalls = 0;
+        Task? disposal = null;
+        var run = prepared.RunAsync(async (ids, token) =>
+        {
+            using var registration = token.Register(() => cancellationObserved.TrySetResult());
+            entered.TrySetResult();
+            await release.Task;
+            // Startup can successfully transfer its scope even after cancellation was requested.
+            return new EvidenceHostResourceScope(ids.Select(id => (IEvidenceResourceReadiness)
+                new CountingReadiness(id, () => Interlocked.Increment(ref readinessCalls))).ToArray(), owner);
+        }, cancellationToken: caller.Token);
+
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            if (disposeRun) disposal = prepared.DisposeAsync().AsTask();
+            else caller.Cancel();
+            await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, owner.Disposals);
+            Assert.Equal(0, producer.Disposals);
+            if (disposal is not null) Assert.False(disposal.IsCompleted);
+
+            release.TrySetResult();
+            var manifest = await run.WaitAsync(TimeSpan.FromSeconds(10));
+            await (disposal ?? prepared.DisposeAsync().AsTask()).WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(EvidenceProducerOutcome.Cancelled, Assert.Single(manifest.ProducerResults).Outcome);
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.Equal(0, readinessCalls);
+            Assert.Equal(0, producer.Runs);
+            Assert.Equal(1, producer.Disposals);
+            Assert.Equal(1, owner.Disposals);
+            await prepared.DisposeAsync();
+            Assert.Equal(1, producer.Disposals);
+            Assert.Equal(1, owner.Disposals);
+
+            await using var retry = await fixture.PrepareAsync(plan, new Producer("a"));
+            Assert.Equal(EvidenceReuseStatus.Miss, Assert.Single(retry.Decisions).Status);
+        }
+        finally
+        {
+            release.TrySetResult();
+            caller.Cancel();
+            await run.WaitAsync(TimeSpan.FromSeconds(10));
+            await prepared.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisconnectedChild_ShouldRetainResourceOwnersEvenAfterItsHandlerJoins(bool fatalProducer)
+    {
+        using var fixture = new Fixture();
+        var declaration = fixture.Declaration("a", "a.txt", "db-a") with
+        {
+            Kind = "coverage",
+            CoverageGate = new EvidenceCoverageGateRequirements(95, 85),
+            CoverageExecution = new EvidenceCoverageExecutionOptions { CooperativeChildLifetime = true },
+        };
+        var producer = new DisconnectedChildProducer("a", fatalProducer);
+        var owner = new Owner();
+        var prepared = await fixture.PrepareAsync(fixture.Plan(declaration), producer);
+
+        try
+        {
+            EvidenceManifest? manifest = null;
+            var runFailure = await Record.ExceptionAsync(async () =>
+                manifest = await prepared.RunAsync((ids, _) => ValueTask.FromResult(fixture.Scope(ids, owner))));
+            if (fatalProducer) Assert.Same(producer.Failure, runFailure);
+            else
+            {
+                Assert.Null(runFailure);
+                Assert.False(manifest!.Metrics.CleanupCompleted);
+                Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            }
+
+            var disposalFailure = await Record.ExceptionAsync(() => prepared.DisposeAsync().AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+            if (fatalProducer) Assert.Same(producer.Failure, disposalFailure);
+            else Assert.Null(disposalFailure);
+
+            Assert.False(producer.ChildTask.IsCompleted);
+            Assert.Equal(0, producer.Disposals);
+            Assert.Equal(0, owner.Disposals);
+            var repositoryNamespace = Assert.Single(Directory.GetDirectories(fixture.ReceiptStore)
+                .Select(Path.GetFileName), static name => name is { Length: 64 } && name.All(char.IsAsciiHexDigitLower));
+            Assert.Equal(producer.ExecutionId, EvidenceReceiptQuota.ReadAuthority(fixture.ReceiptStore,
+                repositoryNamespace!, Assert.Single(prepared.Decisions).ProducerKey!)?.InFlightExecutionId);
+        }
+        finally
+        {
+            // The test explicitly stops its synthetic work before releasing the retained owners.
+            producer.ReleaseChild.TrySetResult();
+            await producer.ChildTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await Record.ExceptionAsync(() => prepared.DisposeAsync().AsTask());
+            await producer.DisposeAsync();
+            await owner.DisposeAsync();
         }
     }
 
@@ -419,6 +581,16 @@ public sealed class EvidencePreparedRunTests
         }
         public ValueTask DisposeAsync() { Disposals++; return ValueTask.CompletedTask; }
     }
+    private sealed class CountingReadiness(string id, Action called) : IEvidenceResourceReadiness
+    {
+        public string Id => id;
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken)
+        {
+            called();
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class CooperativeChildProducer(string id) : IEvidenceProducer, IAsyncDisposable
     {
         internal TaskCompletionSource ChildStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -441,6 +613,35 @@ public sealed class EvidencePreparedRunTests
 
         public ValueTask DisposeAsync() { Disposals++; return ValueTask.CompletedTask; }
     }
+    private sealed class DisconnectedChildProducer(string id, bool fatalProducer) : IEvidenceProducer, IAsyncDisposable
+    {
+        internal TaskCompletionSource ReleaseChild { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal Task ChildTask { get; private set; } = Task.CompletedTask;
+        internal Exception Failure { get; } = new OutOfMemoryException("synthetic disconnected-child producer failure");
+        internal string? ExecutionId { get; private set; }
+        internal int Disposals { get; private set; }
+        public string Id => id;
+
+        public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            var environment = context.OwnedChildEnvironment!;
+            ExecutionId = context.ExecutionId;
+            using var pipe = new NamedPipeClientStream(".", environment[EvidenceChildLifetimeSession.PipeEnvironmentName],
+                PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await pipe.ConnectAsync(3000, cancellationToken);
+            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+                $"BEGIN|{ExecutionId}|{environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}", cancellationToken);
+            Assert.StartsWith("ACK|", await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, cancellationToken), StringComparison.Ordinal);
+            ChildTask = Task.Run(() => ReleaseChild.Task);
+            if (fatalProducer) throw Failure;
+            await context.Artifacts!.WriteAsync("report", "reports/result.txt", Encoding.UTF8.GetBytes("bounded report"), cancellationToken);
+            return new(id, EvidenceProducerOutcome.Passed, ["ok"], Artifacts: context.Artifacts.WrittenArtifacts);
+            // Disposing the admitted channel without COMPLETE deliberately leaves live work unknown.
+        }
+
+        public ValueTask DisposeAsync() { Disposals++; return ValueTask.CompletedTask; }
+    }
+
     private sealed class Readiness(string id, bool fail) : IEvidenceResourceReadiness
     {
         public string Id => id;

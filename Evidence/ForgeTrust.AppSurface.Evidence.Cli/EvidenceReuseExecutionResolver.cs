@@ -198,7 +198,8 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         return ToSummaryDecisions(plan, session.Decisions, solutionPath, resolvedSdks);
     }
 
-    private static IReadOnlyList<EvidenceReuseSummaryDecision> ToSummaryDecisions(
+    /// <summary>Projects coordinator decisions without replacing an ownership failure with identity ineligibility.</summary>
+    internal static IReadOnlyList<EvidenceReuseSummaryDecision> ToSummaryDecisions(
         EvidencePlan plan, IReadOnlyList<EvidenceProducerReuseDecision> decisions, string? solutionPath,
         IReadOnlyDictionary<string, string> sdkVersions) => decisions
         .Select(decision =>
@@ -229,7 +230,8 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 _ when decision.Status == EvidenceProducerReuseStatus.Ineligible => "suppressed",
                 _ => decision.Status == EvidenceProducerReuseStatus.Hit ? "restored" : "not-published",
             };
-            return new EvidenceReuseSummaryDecision(decision.ProducerId, missingSolution ? "Ineligible" : decision.Status.ToString(),
+            return new EvidenceReuseSummaryDecision(decision.ProducerId,
+                missingSolution && decision.Status == EvidenceProducerReuseStatus.Ineligible ? "Ineligible" : decision.Status.ToString(),
                 reason, diagnostic, decision.ProducerKey, decision.OriginCompletedAt,
             decision.OriginElapsedMilliseconds, publication);
         }).ToArray();

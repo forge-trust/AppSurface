@@ -346,6 +346,20 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
         }
     }
 
+    [Fact]
+    public async Task HeartbeatPidCanReadACompleteRecordWhileTheAppendWriterRemainsOpen()
+    {
+        using var directory = TestDirectory.Create();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var path = TestPathUtils.PathUnder(directory.Path, "heartbeat.jsonl");
+        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        using var writer = new StreamWriter(stream) { AutoFlush = true };
+        writer.WriteLine(JsonSerializer.Serialize(new { ProcessId = Environment.ProcessId }));
+        writer.Write("{incomplete");
+
+        Assert.Equal(Environment.ProcessId, await HeartbeatPidAsync(path, deadline.Token));
+    }
+
     private static async Task<int> HeartbeatPidAsync(string path, CancellationToken cancellationToken)
     {
         while (true)
@@ -355,10 +369,13 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
             {
                 if (File.Exists(path))
                 {
-                    var line = (await File.ReadAllLinesAsync(path, cancellationToken)).FirstOrDefault();
-                    if (!string.IsNullOrEmpty(line))
+                    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var reader = new StreamReader(stream);
+                    var contents = await reader.ReadToEndAsync(cancellationToken);
+                    var newline = contents.IndexOf('\n');
+                    if (newline > 0)
                     {
-                        using var json = JsonDocument.Parse(line);
+                        using var json = JsonDocument.Parse(contents[..newline]);
                         return json.RootElement.GetProperty("ProcessId").GetInt32();
                     }
                 }

@@ -54,9 +54,9 @@ internal static class EvidenceReusePackageProof
             Directory.CreateDirectory(output);
             admittedOutput = output;
             var runner = new ProofRunner(output, dotnet, stages);
+            await File.WriteAllTextAsync(Path.Join(output, "global.json"), """{"sdk":{"version":"10.0.402","rollForward":"disable","allowPrerelease":false}}""", cancellationToken).ConfigureAwait(false);
             var sdk = await runner.RunAsync("sdk", dotnet, ["--version"], output, false, cancellationToken).ConfigureAwait(false);
             Require(sdk.StandardOutput.Trim() == "10.0.402", "pinned-sdk-10.0.402");
-            await File.WriteAllTextAsync(Path.Join(output, "global.json"), """{"sdk":{"version":"10.0.402","rollForward":"disable","allowPrerelease":false}}""", cancellationToken).ConfigureAwait(false);
             var config = Path.Join(output, "NuGet.Config");
             WriteNuGetConfig(config, Path.GetFullPath(feed));
             stage = "negative-admission";

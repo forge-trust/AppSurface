@@ -486,6 +486,55 @@ public sealed class EvidenceReuseCliCoverageTests
     }
 
     [Fact]
+    public async Task MissingSolutionOnlyOverridesOriginallyIneligibleSummaryDecisions()
+    {
+        using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        var context = SyntheticLocalContext.Capture();
+        try
+        {
+            context.Enter(repository.Root);
+            var producer = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["coverage/assertion@1"],
+                [CoverageEvidenceInventory.CreateSlot()], 30, new EvidenceCoverageGateRequirements(95, 85))
+            {
+                Inputs = new EvidenceProducerInputs(["global.json"], []),
+                CoverageExecution = new EvidenceCoverageExecutionOptions { CooperativeChildLifetime = true },
+            };
+            var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [producer],
+                [new EvidenceObligation("coverage-check", "coverage", "coverage gate", [producer.Id], "coverage/assertion@1")]);
+            var plan = CreatePlan(profile);
+            var origin = new DateTimeOffset(2025, 2, 3, 4, 5, 6, TimeSpan.Zero);
+
+            foreach (var status in Enum.GetValues<EvidenceProducerReuseStatus>())
+            {
+                var decision = new EvidenceProducerReuseDecision("coverage", status, "reuse.original-decision",
+                    "Original decision diagnostic.", "producer-key", origin, 321);
+                var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], null,
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["coverage"] = "10.0.402" }));
+
+                Assert.Equal(status == EvidenceProducerReuseStatus.Ineligible ? "Ineligible" : status.ToString(), summary.Status);
+                Assert.Equal(status == EvidenceProducerReuseStatus.Ineligible ? "reuse.solution_required" : decision.Reason, summary.Reason);
+                if (status == EvidenceProducerReuseStatus.Ineligible)
+                    Assert.Contains("inside this Git worktree", summary.Diagnostic, StringComparison.Ordinal);
+                else
+                    Assert.Equal(decision.Diagnostic, summary.Diagnostic);
+                Assert.Equal(decision.ProducerKey, summary.ProducerKey);
+                Assert.Equal(decision.OriginCompletedAt, summary.OriginCompletedAt);
+                Assert.Equal(decision.OriginElapsedMilliseconds, summary.OriginElapsedMilliseconds);
+                Assert.Equal(status switch
+                {
+                    EvidenceProducerReuseStatus.Hit => "restored",
+                    EvidenceProducerReuseStatus.Ineligible => "suppressed",
+                    _ => "not-published",
+                }, summary.Publication);
+            }
+        }
+        finally
+        {
+            context.Restore();
+        }
+    }
+
+    [Fact]
     public async Task ResolverRunsFreshThenRestoresInformationalReceiptAndSuccessfullyAuditsIt()
     {
         using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();

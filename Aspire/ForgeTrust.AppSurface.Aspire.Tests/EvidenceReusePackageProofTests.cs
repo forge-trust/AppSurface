@@ -129,6 +129,13 @@ public sealed class EvidenceReusePackageProofTests
             Assert.True(IsProbeProcess(process, activeProbe.ExecutablePath), "The recorded PID must belong to the private renamed probe apphost.");
             Assert.False(activeRun.IsCompleted);
 
+            var globalJsonPath = TestPathUtils.PathUnder(output, "global.json");
+            Assert.True(File.Exists(globalJsonPath), "The pinned SDK configuration must exist while the SDK query process is active.");
+            using var globalJson = JsonDocument.Parse(await File.ReadAllBytesAsync(globalJsonPath, deadline.Token));
+            Assert.Equal("10.0.402", globalJson.RootElement.GetProperty("sdk").GetProperty("version").GetString());
+            Assert.Equal("disable", globalJson.RootElement.GetProperty("sdk").GetProperty("rollForward").GetString());
+            Assert.False(globalJson.RootElement.GetProperty("sdk").GetProperty("allowPrerelease").GetBoolean());
+
             cancellation.Cancel();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => activeRun.WaitAsync(deadline.Token));

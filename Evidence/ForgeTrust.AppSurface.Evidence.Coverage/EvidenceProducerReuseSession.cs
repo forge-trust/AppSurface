@@ -82,7 +82,6 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
     private bool _admissionCompleted;
     private bool _postExecutionChecked;
     private bool _childrenSettled = true;
-    private bool _childHandlersJoined;
     private string? _patchSha256;
     private long _preparationMilliseconds;
     private long _restoreMilliseconds;
@@ -116,6 +115,10 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
 
     /// <summary>Gets whether caller cancellation interrupted preparation or admission.</summary>
     internal bool IsCancelled { get; private set; }
+
+    /// <summary>Gets whether every admitted child confirmed completion; a disconnected handler is not settlement.</summary>
+    /// <remarks>Prepared hosts retain producer and resource owners while this is false, even after handlers join.</remarks>
+    internal bool AreChildrenSettled => _children.Values.All(static child => child.IsSettled && !child.IsUnknown);
 
     /// <summary>Prepares content keys and verified receipts before computing fresh resource closure.</summary>
     internal static async Task<EvidenceProducerReuseSession> PrepareAsync(EvidencePlan plan,
@@ -481,7 +484,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             return _keyCallbacks.All(static callback => callback.IsSettled)
                 && _children.Values.All(static child => child.IsSettled && !child.IsUnknown);
         if (_postExecutionChecked) return _keyCallbacks.All(static callback => callback.IsSettled)
-                && (_childHandlersJoined || _children.Values.All(static child => child.IsSettled));
+                && AreChildrenSettled;
         _postExecutionChecked = true;
         foreach (var producer in _plan.Profile.Producers.Where(producer => _admitted.Contains(producer.Id)))
         {
@@ -638,9 +641,8 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             try { await child.DisposeAsync().ConfigureAwait(false); }
             catch (Exception exception) { failure ??= exception; }
         }
-        _childHandlersJoined = true;
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
-        return _children.Values.All(static child => child.IsSettled && !child.IsUnknown);
+        return AreChildrenSettled;
     }
 
     /// <summary>Joins key callbacks before an adapter disposes the producer registrations they can still access.</summary>

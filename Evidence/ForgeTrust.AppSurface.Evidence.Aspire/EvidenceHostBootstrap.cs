@@ -699,9 +699,10 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
             ? reused : new EvidenceProducerResult(producer.Id, outcome, [], diagnostic)).ToArray();
 
     /// <summary>Joins actual callbacks and cleanup before a prepared coordinator can release execution leases.</summary>
+    /// <param name="childSettlementKnown">Whether all admitted children confirmed completion after their handlers joined.</param>
     /// <returns>True only when all actual tasks and owned disposals completed successfully.</returns>
-    /// <remarks>Unlike the bounded RunAsync return, this method never interprets a timeout as task settlement.</remarks>
-    internal async Task<bool> JoinPreparedOwnershipAsync()
+    /// <remarks>Unknown children retain registrations and resources, including when a fatal callback is propagated.</remarks>
+    internal async Task<bool> JoinPreparedOwnershipAsync(bool childSettlementKnown)
     {
         Exception? fatal = null;
         try
@@ -713,6 +714,12 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
             // The terminal result already records a completed nonfatal callback failure.
         }
         catch (Exception exception) { fatal = exception; }
+
+        if (!childSettlementKnown)
+        {
+            if (fatal is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
+            return false;
+        }
 
         await _execution.WaitAsync().ConfigureAwait(false);
         try

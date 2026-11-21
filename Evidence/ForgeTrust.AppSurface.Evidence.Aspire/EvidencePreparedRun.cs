@@ -195,6 +195,10 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     /// <param name="observationOnly">Whether an otherwise fresh completion is informational.</param>
     /// <param name="cancellationToken">Invocation cancellation, forwarded to actual factory and producer work.</param>
     /// <returns>The current digest-bound manifest after bounded execution and cleanup waits.</returns>
+    /// <remarks>
+    /// Host admission and disposal share a handoff: cancellation that wins before admission retains any returned
+    /// scope for cleanup without starting readiness or producers. Disposal after admission joins the owned run.
+    /// </remarks>
     public async Task<EvidenceManifest> RunAsync(
         Func<IReadOnlyList<string>, CancellationToken, ValueTask<EvidenceHostResourceScope>> createResources,
         bool observationOnly = false, CancellationToken cancellationToken = default)
@@ -227,14 +231,20 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             foreach (var producer in _producers.Values) executionRegistration.AddProducer(producer.Producer);
             if (_scope is not null)
                 foreach (var resource in _scope.Resources.Values) executionRegistration.AddResource(resource);
-            _host = EvidenceHostBootstrap.CreatePreparedExecution(_plan, executionRegistration, _options, _clock,
-                _session.ReusedResults, RequiredResourceIds.ToHashSet(StringComparer.Ordinal), _scope,
-                _session.GetWriter, _session.BeforeCleanupAsync, _envelopeStatus, _session.ExecutionId,
-                id => _session.GetChildLifetime(id)?.Environment);
+            lock (_cleanupSync)
+            {
+                // Disposal and host admission share this handoff. A factory may return a scope after cancellation;
+                // retain that scope for cleanup without admitting readiness or producer work when disposal won.
+                _factoryCancellation.Token.ThrowIfCancellationRequested();
+                _host = EvidenceHostBootstrap.CreatePreparedExecution(_plan, executionRegistration, _options, _clock,
+                    _session.ReusedResults, RequiredResourceIds.ToHashSet(StringComparer.Ordinal), _scope,
+                    _session.GetWriter, _session.BeforeCleanupAsync, _envelopeStatus, _session.ExecutionId,
+                    id => _session.GetChildLifetime(id)?.Environment);
+            }
             var manifest = await _host.RunAsync(observationOnly, cancellationToken).ConfigureAwait(false);
             return await _session.CompleteAsync(manifest, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _factoryCancellation.IsCancellationRequested)
         {
             _factoryCancellation.Cancel();
             return FailureManifest(EvidenceProducerOutcome.Cancelled, "reuse.cancelled: The invocation was cancelled; actual factory and cleanup ownership remains retained.", observationOnly);
@@ -288,8 +298,8 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         catch (Exception exception) { primary ??= exception; settled = false; }
         try
         {
-            if (_host is not null) settled &= await _host.JoinPreparedOwnershipAsync().ConfigureAwait(false);
-            else
+            if (_host is not null) settled &= await _host.JoinPreparedOwnershipAsync(_session.AreChildrenSettled).ConfigureAwait(false);
+            else if (_session.AreChildrenSettled)
             {
                 foreach (var owner in _producers.Values.Select(static producer => (object)producer.Producer).Distinct(ReferenceEqualityComparer.Instance))
                 {
@@ -310,23 +320,24 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         return settled;
     }
 
-    /// <summary>Joins the same actual cleanup before releasing execution ownership, including a late resource factory.</summary>
+    /// <summary>Requests factory cancellation and joins actual cleanup before releasing execution ownership.</summary>
     /// <returns>The actual cleanup operation; this does not interpret a grace timeout as termination.</returns>
+    /// <remarks>Cancellation is requested before joining an active run so a token-cooperative factory can stop.</remarks>
     public async ValueTask DisposeAsync()
     {
-        await _execution.WaitAsync().ConfigureAwait(false);
-        try
+        lock (_cleanupSync)
         {
             if (!_disposed)
             {
                 _disposed = true;
                 _factoryCancellation.Cancel();
             }
-            ObserveCleanup();
         }
+        await _execution.WaitAsync().ConfigureAwait(false);
+        try { ObserveCleanup(); }
         finally { _execution.Release(); }
         await _cleanup!.ConfigureAwait(false);
-        _factoryCancellation.Dispose();
+        lock (_cleanupSync) _factoryCancellation.Dispose();
     }
 
     private static void ValidateRegistrations(EvidencePlan plan, EvidenceHostPreparationRegistration registration,

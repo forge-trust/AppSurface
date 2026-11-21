@@ -156,6 +156,22 @@ An edit or commit outside the declared input set should preserve a candidate. A 
 
 The coordinator records the whole fresh key set before exposing a child channel or invoking a resource factory. If admission fails partway through, it joins any admission-only channel and clears only this invocation's execution markers while retaining audit intent and quarantine. Listener creation failure means no new child can enroll; it does not invent an unknown child. A client that was admitted and then lost its completion channel remains unknown and keeps its authority. A store write that cannot confirm compensation remains conservative and reports unavailable.
 
+A prepared host also preserves its producer registrations and transferred application scope when admitted child
+settlement is unknown. A completed or disconnected IPC handler does not prove the child stopped. This holds when
+a producer raises a fatal failure: the exception propagates without disposing resources that live child work may
+still use. Stop and verify the old producer environment before explicitly releasing the retained consumer owners
+and selecting a fresh store/domain; disposal alone cannot clear the old execution authority.
+
+
+`EvidencePreparedRun.DisposeAsync` requests cancellation before joining an active resource factory, including
+when `RunAsync` has no caller cancellation token. Factories must observe their supplied token and clean partial
+construction before throwing. Disposal still waits for the actual factory task and owned cleanup; cancellation
+does not permit early resource release or clear unresolved execution authority.
+
+If a factory returns its scope after cancellation or disposal won the host-admission handoff, the framework
+retains and disposes that scope without starting readiness or producers. Admission and disposal share one
+handoff; disposal after admission joins the already-owned run. The [prepared lifecycle inventory](evidence-prepared-lifecycle.md)
+maps these ownership transitions, failure outcomes, authority-release conditions, and regression tests.
 
 ## Migrating an existing prepared host
 

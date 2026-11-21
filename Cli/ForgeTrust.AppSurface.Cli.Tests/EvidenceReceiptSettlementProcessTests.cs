@@ -128,6 +128,38 @@ public sealed class EvidenceReceiptSettlementProcessTests
         }
     }
 
+    [Fact]
+    public void ReadHeartbeats_ObservesOnlyCompleteRecordsWhileWriterRemainsOpen()
+    {
+        using var tree = SettlementTree.Create();
+        const string nonce = "owned-heartbeat-nonce";
+        using var stream = new FileStream(tree.HeartbeatPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        using var writer = new StreamWriter(stream) { AutoFlush = true };
+        var first = new Heartbeat(Environment.ProcessId, tree.ExecutionId, nonce, 1, DateTimeOffset.UnixEpoch);
+        var second = first with { Sequence = 2 };
+        var serialized = JsonSerializer.Serialize(second);
+
+        writer.WriteLine(JsonSerializer.Serialize(first));
+        writer.Write(serialized[..^1]);
+        Assert.Equal(first, Assert.Single(ReadHeartbeats(tree, tree.ExecutionId, nonce)));
+
+        writer.WriteLine(serialized[^1..]);
+        Assert.Equal(new[] { first, second }, ReadHeartbeats(tree, tree.ExecutionId, nonce));
+        Assert.Empty(ReadHeartbeats(tree, "different-execution", nonce));
+        Assert.Empty(ReadHeartbeats(tree, tree.ExecutionId, "different-nonce"));
+    }
+
+    [Fact]
+    public void ReadHeartbeats_RejectsMalformedCompletedRecords()
+    {
+        using var tree = SettlementTree.Create();
+        using var stream = new FileStream(tree.HeartbeatPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        using var writer = new StreamWriter(stream) { AutoFlush = true };
+        writer.WriteLine("{malformed}");
+
+        Assert.Throws<JsonException>(() => ReadHeartbeats(tree, tree.ExecutionId, "nonce"));
+    }
+
     private static Process StartHolder(SettlementTree tree)
         => StartProbe(true, "settlement-holder", tree.StoreRoot, tree.RepositoryNamespace, tree.Key, tree.ExecutionId, tree.RecordRoot);
 
@@ -149,7 +181,11 @@ public sealed class EvidenceReceiptSettlementProcessTests
     private static IReadOnlyList<Heartbeat> ReadHeartbeats(SettlementTree tree, string executionId, string nonce)
     {
         if (!File.Exists(tree.HeartbeatPath)) return [];
-        return File.ReadAllText(tree.HeartbeatPath).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+        using var stream = new FileStream(tree.HeartbeatPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        var contents = reader.ReadToEnd();
+        var completeRecords = contents[..(contents.LastIndexOf('\n') + 1)];
+        return completeRecords.Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(static line => JsonSerializer.Deserialize<Heartbeat>(line))
             .Where(item => item is not null && item.ExecutionId == executionId && item.Nonce == nonce)
             .Select(static item => item!)
