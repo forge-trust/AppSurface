@@ -268,9 +268,6 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
             "Source",
             "--AppSurfaceDocs:Source:RepositoryRoot",
             repoRoot,
-            // This fixture sets the repository as its content root, outside the standalone host's appsettings.json.
-            "--AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs:0",
-            "scripts/web-pwa/verify.cs",
             "--AppSurfaceDocs:Contributor:Enabled",
             "true",
             "--AppSurfaceDocs:Contributor:DefaultBranch",

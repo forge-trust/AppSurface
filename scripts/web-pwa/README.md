@@ -1,6 +1,6 @@
 # Verify the web PWA from a checkout
 
-From the repository root, check that `dotnet --version` matches [global.json](../../global.json), then run:
+From the repository root, check that `dotnet --version` matches [global.json](https://github.com/forge-trust/AppSurface/blob/main/global.json), then run:
 
 ```sh
 dotnet run --file scripts/web-pwa/verify.cs
@@ -24,7 +24,7 @@ An explicit switch wins, including a value equal to its default. Otherwise the v
 
 The port and evidence environment names carry forward existing automation. The timeout uses Config’s hierarchical spelling. An explicit relative evidence path, including one supplied by a provider, resolves from the caller’s current directory. Parent directories are created when publishing. Use distinct destinations for concurrent runs.
 
-With the verifier’s default Production environment, put the following in `appsettings.json` beside `verify.cs`. When selecting Development for the verifier, use `appsettings.Development.json` in that same directory. The verifier passes Development to the example process independently of its own configuration environment. [Environment selection](../../ForgeTrust.AppSurface.Core/Defaults/DefaultEnvironmentProvider.cs)
+With the verifier’s default Production environment, put the following in `appsettings.json` beside `verify.cs`. When selecting Development for the verifier, use `appsettings.Development.json` in that same directory. The verifier passes Development to the example process independently of its own configuration environment. [Environment selection](https://github.com/forge-trust/AppSurface/blob/main/ForgeTrust.AppSurface.Core/Defaults/DefaultEnvironmentProvider.cs)
 
 ```json
 {

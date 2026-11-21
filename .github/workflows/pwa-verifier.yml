@@ -66,59 +66,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: legacy-baseline
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: pilot
           persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
           dotnet-version: 10.0.402
-      - name: Measure existing wrapper cold and warm
-        shell: pwsh
-        working-directory: legacy-baseline
-        env:
-          APP_SURFACE_WEB_PWA_PORT: 5155
-          APP_SURFACE_WEB_PWA_EVIDENCE: ${{ runner.temp }}/pwa-wrapper-baseline.json
-          NUGET_PACKAGES: ${{ runner.temp }}/pwa-wrapper-nuget
-          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
-          DOTNET_NOLOGO: '1'
-          DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
-        run: |
-          foreach ($sample in @('cold', 'warm')) {
-            $env:APP_SURFACE_WEB_PWA_EVIDENCE = Join-Path $env:RUNNER_TEMP "pwa-wrapper-$sample.json"
-            $clock = [Diagnostics.Stopwatch]::StartNew()
-            if ($IsWindows) {
-              ./examples/web-pwa-install/verify.ps1 -Port 5155 -EvidencePath "$env:APP_SURFACE_WEB_PWA_EVIDENCE"
-            } else {
-              bash ./examples/web-pwa-install/verify.sh
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            }
-            $clock.Stop()
-            "wrapper-baseline runner=$env:RUNNER_NAME os=${{ runner.os }} cache=$sample elapsed-seconds=$([math]::Round($clock.Elapsed.TotalSeconds, 2))"
-          }
-
       - name: Run native protocol contract
-        working-directory: pilot
         run: dotnet run --file tests/web-pwa-verifier/protocol/protocol.cs
       - name: Run configuration matrix
         shell: bash
-        working-directory: pilot
         env:
           DOTNET_EXE: dotnet
         run: python3 tests/web-pwa-verifier/config.py
       - name: Run package-consumer contract
         shell: bash
-        working-directory: pilot
         env:
           DOTNET_EXE: dotnet
         run: python3 tests/web-pwa-verifier/package.py
       - name: Measure file runner cold and warm
         shell: bash
-        working-directory: pilot
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/pwa-file-runner-nuget
           PWA_VERIFY_EVIDENCE_DIR: ${{ runner.temp }}/pwa-verifier-evidence
@@ -129,7 +96,6 @@ jobs:
         run: python3 tests/web-pwa-verifier/run.py --cost-samples
       - name: Run cross-platform process and black-box contracts
         shell: bash
-        working-directory: pilot
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/pwa-file-runner-nuget
           PWA_VERIFY_EVIDENCE_DIR: ${{ runner.temp }}/pwa-verifier-evidence
