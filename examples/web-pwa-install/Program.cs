@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
@@ -121,6 +122,23 @@ internal sealed class WebPwaInstallModule : IAppSurfaceWebModule
     }
 
     /// <inheritdoc />
-    public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints) =>
+    public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+    {
         WebPushProof.MapEndpoints(context, endpoints);
+
+        // The verifier supplies this per-process value only to its Development child.
+        // A manifest at the requested port alone cannot identify the process serving it.
+        var instance = context.EnvironmentProvider.GetEnvironmentVariable("APPSURFACE_PWA_VERIFY_INSTANCE");
+        if (context.IsDevelopment && !string.IsNullOrEmpty(instance))
+        {
+            endpoints.MapGet("/_appsurface/verify/instance", (HttpContext http) =>
+            {
+                http.Response.Headers.CacheControl = "no-store";
+                var peer = http.Connection.RemoteIpAddress;
+                return peer is not null && IPAddress.IsLoopback(peer)
+                    ? Results.Text(instance)
+                    : Results.NotFound();
+            });
+        }
+    }
 }

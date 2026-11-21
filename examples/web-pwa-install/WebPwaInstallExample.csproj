@@ -9,4 +9,7 @@
     <ProjectReference Include="../../Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj" />
     <ProjectReference Include="../../Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WebPwaInstallExample.Tests" />
+  </ItemGroup>
 </Project>
