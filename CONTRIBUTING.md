@@ -134,7 +134,12 @@ Pages service investigation; deployment serialization does not resolve a backend
 
 ### CI test-result diagnostics
 
-The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) resolves the shared evidence policy first. Coverage selections run full solution coverage and a separate packed Durable consumer proof. The native coverage-security matrix and PR fan-in run only when the root policy selection includes coverage plus another producer; test-only selections use the direct patch gate. The consumer
+The [tool-manifest-only exception](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#tool-manifest-coverage-selection)
+uses the direct patch gate for an existing local-tool manifest update with optional new release entries.
+All four evidence producers, their obligations, and the 95/85 aggregate and applicable patch coverage
+thresholds remain required. Mixed implementation or policy changes retain native coverage selection.
+
+The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) resolves the shared evidence policy first. Coverage selections run full solution coverage and a separate packed Durable consumer proof. The native coverage-security matrix and PR fan-in run when the root policy selection includes coverage plus another producer and the tool manifest exception does not apply. Test-only selections and qualifying tool updates use the direct patch gate. The consumer
 job runs the same [packed-consumer verification](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) with the exact
 coverage SDK and locked restore. Its failure blocks the build and downstream documentation export.
 The coverage lane runs the complete solution through the C# repository evidence validation tool and preserves the existing aggregate and patch gates; see the [coverage fan-in guide](./guides/coverage-fan-in.md) for the current workflow and artifact layout.
