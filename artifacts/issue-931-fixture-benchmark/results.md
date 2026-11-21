@@ -16,17 +16,17 @@ Work slowed by at least 5% in 0/5 pairs and Flow in 0/5. The predeclared rule re
 
 Measured commit `b8d5dd5ebf2e6570d2b9643f22b4a08d16277f74` with SDK 10.0.402, Darwin 25.6.0 on arm64, 14 logical processors, PostgreSQL 17.12 and two xUnit workers. Databases used the default WAL_LOG create strategy on the dedicated server. Each arm ran Work then Flow in separate Release processes with TRX and XPlat coverage. Times include process launch through teardown and exit. One warmup per mode preceded the five pairs. The [fixture guide](https://github.com/forge-trust/AppSurface/blob/115f1cf0020c77ea848a1c2b96ddb7e10066a8f2/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/README.md) gives the commands and settings.
 
-## Evidence
+## Workload and timing records
 
-The first five pairs above are the decision sample. A subsequent change binds the independent acceptance TRX to the measured assembly and links it from the index. The separate verification run exercises that change. Its pairs are reported independently and do not replace or extend the original five.
+The first five pairs above are the decision sample. A subsequent change binds the independent acceptance TRX to the measured assembly. The separate verification run exercises that change. Its pairs are reported independently and do not replace or extend the original five.
 
-The independent acceptance run passed 71 cases. The 24 timed processes recorded 408 passing Work/Flow results including warmups. Every Work process ran four cases, every Flow process ran 30, and the empty Flow case ran in both modes. Template preparation and teardown each occurred once per candidate process. All timed processes used the same Release build and settings. The server catalogs before and after the benchmark are included.
+The independent acceptance run passed 71 cases. The 24 timed processes recorded 408 passing Work/Flow results including warmups. Every Work process ran four cases, every Flow process ran 30, and the empty Flow case ran in both modes. Template preparation and teardown each occurred once per candidate process. All timed processes used the same Release build and settings. The fixture catalog matched before and after the benchmark.
 
-Download and extract the [redacted process evidence](https://github.com/forge-trust/AppSurface/blob/115f1cf0020c77ea848a1c2b96ddb7e10066a8f2/artifacts/issue-931-fixture-benchmark/process-evidence.tar.xz), then open `index.md` to inspect the per-arm and per-cohort commands, TRX, coverage, timings, exit codes and load readings. The archive also includes the acceptance TRX, before/after build hashes, catalog observations, and hashes of the original and redacted files. The [frozen workload inventory](https://github.com/forge-trust/AppSurface/blob/115f1cf0020c77ea848a1c2b96ddb7e10066a8f2/artifacts/issue-931-fixture-benchmark/inventory/manifest.json) records the test identities and the empty-case exception.
+The [process and phase timings](timings.md) cover both warmups and all five pairs in each of the three samples. The [frozen workload inventory](https://github.com/forge-trust/AppSurface/blob/115f1cf0020c77ea848a1c2b96ddb7e10066a8f2/artifacts/issue-931-fixture-benchmark/inventory/manifest.json) records the test identities and the empty-case exception.
 
 ## Independent verification after the reporting change
 
-Commit `ce2cc1f16c74e9342871bdf17600fa06077cddfc` also produced a **measured no-go**. The median saving was 0.578 s, or **4.90%**, with a median absolute deviation of 4.64 percentage points. Work slowed by at least 5% once and Flow never did. This run used the same server and protocol. Its own 71-case acceptance receipt matched the SHA-256 recorded by the measured Release assembly. All 24 processes passed and the server catalog returned to its initial state. The [verification archive](https://github.com/forge-trust/AppSurface/blob/115f1cf0020c77ea848a1c2b96ddb7e10066a8f2/artifacts/issue-931-fixture-benchmark/verification-evidence.tar.xz) links the acceptance, server preflight and timed process evidence from its index.
+Commit `ce2cc1f16c74e9342871bdf17600fa06077cddfc` also produced a **measured no-go**. The median saving was 0.578 s, or **4.90%**, with a median absolute deviation of 4.64 percentage points. Work slowed by at least 5% once and Flow never did. This run used the same server and protocol. Its own 71-case acceptance receipt matched the SHA-256 recorded by the measured Release assembly. All 24 processes passed and the server catalog returned to its initial state.
 
 | Pair | Fresh (s) | Template (s) | Saved (s) | Gain | Work gain | Flow gain |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -48,6 +48,6 @@ Commit `756b2425` passed the rule in its own five pairs. It saved a median **0.9
 | 4 | 11.527 | 10.577 | 0.949 | 8.24% | −0.20% | 12.59% |
 | 5 | 11.508 | 10.539 | 0.970 | 8.43% | 1.37% | 12.09% |
 
-The [final verification archive](https://github.com/forge-trust/AppSurface/blob/115f1cf0020c77ea848a1c2b96ddb7e10066a8f2/artifacts/issue-931-fixture-benchmark/final-verification.tar.xz) contains the indexed receipts for all 24 processes, the acceptance TRX, and identical before/after hashes for all 166 Release files. Its catalog query identified zero fixture databases and zero fixture roles both before and after measurement. The earlier archives recorded SQL `json_agg` results, which return `null` for zero matching rows. The final query includes counts and empty arrays explicitly.
+All 166 Release files had identical hashes before and after measurement. The dedicated server had zero fixture databases and zero fixture roles at both boundaries.
 
 The original five pairs determine the experiment’s adoption recommendation. The two verification runs give different answers under the same rule and are reported separately. Fresh remains the default.
