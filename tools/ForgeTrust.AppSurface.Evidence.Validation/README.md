@@ -101,7 +101,7 @@ documentation verification; the root README and explicitly listed authored guide
 
 ### Tool-manifest coverage selection
 
-An update to the existing [local .NET tool manifest](../../.config/dotnet-tools.json), by itself or with
+An update to the existing [local .NET tool manifest](https://github.com/forge-trust/AppSurface/blob/main/.config/dotnet-tools.json), by itself or with
 new direct Markdown files under [`releases/unreleased.entries/`](../../releases/README.md#append-only-unreleased-entries),
 uses the direct patch gate instead of the native coverage supplement. The manifest must have change kind
 `modified`, each release entry must be `added`, and no path may have a previous rename/copy name. Paths
