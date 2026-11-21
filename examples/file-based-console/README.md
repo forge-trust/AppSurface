@@ -4,6 +4,8 @@ This sample is a package-only .NET file-based app. It uses the published AppSurf
 
 ## Run outside the checkout
 
+The .NET SDK must be able to write its file-based app cache. On macOS, an access error naming `Application Support/dotnet/runfile` refers to this SDK cache. Run the command with access to that directory under the current user account.
+
 Install the pinned .NET SDK. Copy `Program.cs` and `appsettings.json` into a sample directory outside the repository. Copy the repository's `global.json` into a common parent of that sample directory and a separate caller directory, then run from the caller directory. The file-based app locates JSON beside the source file through the .NET SDK's entry-point source directory, while the copied `global.json` pins SDK selection from the caller directory.
 
 ```sh

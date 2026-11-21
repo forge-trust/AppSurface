@@ -39,4 +39,6 @@ An independent agent used the published-package example in a temporary directory
 
 ## Decision threshold
 
+In a timed agent walkthrough on macOS 26.7.3 arm64 with SDK 10.0.402, the first package-example invocation was attempted after 2 min 18 s. The sandbox denied access to the SDK’s runfile cache. The first successful help output arrived after 9 min 34 s, exceeding the five-minute target. With the SDK cache writable and an empty NuGet package cache, help took 2.91 s. Warm `inspect` calls took 0.32–0.37 s. [Outside-checkout instructions](../examples/file-based-console/README.md#run-outside-the-checkout)
+
 Prefer documentation or a repo-local helper when one command repeats a convention but no second real command demonstrates the same mechanical work. Consider a public binding API only after a second command repeats that work and the API removes it while preserving final-value validation, diagnostics, source-location behavior, and clean-directory package use. Any public candidate must identify a task a user can complete outside this checkout. Record the decision and observed contributor friction in the issue follow-up rather than treating the inventory ranking as a commitment.
