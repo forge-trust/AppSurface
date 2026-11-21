@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -55,6 +56,9 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var expected = ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx"));
             if (expected.Count == 0) throw new InvalidDataException("The solution contains no test projects.");
             var nativeFanIn = !string.IsNullOrWhiteSpace(_settings.NativeCoverageDirectory);
+            var nativeContract = _settings.NativeCoverageContractVersion;
+            if (nativeContract is not (2 or 3) || (nativeContract == 3 && (!nativeFanIn || !IsRepositoryCommit(_settings.DiffBase))))
+                throw new InvalidDataException("Native v3 requires native captures and a full pinned SHA-1 Git commit ID.");
             if (_settings.CoverageCliPath is { } coverageCli
                 && (!Path.IsPathFullyQualified(coverageCli) || !File.Exists(coverageCli)))
                 throw new InvalidOperationException("The installed coverage CLI must be an existing absolute executable.");
@@ -114,13 +118,14 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                     "run", "--project", Path.Join(root, "tools", "ForgeTrust.AppSurface.Coverage.Dogfood", "ForgeTrust.AppSurface.Coverage.Dogfood.csproj"),
                     "--configuration", "Release", "--", "--operation", "fanin", "--repository", root,
                     "--cli", _settings.CoverageCliPath!, "--output", fanInOutput, "--configuration", "Release",
-                    "--contract-version", "2",
+                    "--contract-version", nativeContract.ToString(CultureInfo.InvariantCulture),
                     "--primary", report, "--timings", timings, "--native-inputs", _settings.NativeCoverageDirectory!,
                     "--diff-base", _settings.DiffBase!, "--run-scope", run["GITHUB_REPOSITORY"]!,
                     "--run-id", run["GITHUB_RUN_ID"]!, "--attempt", run["GITHUB_RUN_ATTEMPT"]!,
                 };
                 await ExecuteAsync("coverage-fanin", dogfoodArgs, root, proof, cancellationToken, _settings.DotnetPath).ConfigureAwait(false);
-                nativeProofHash = await ValidateNativeFanInAsync(fanInOutput, commit, tree, sdk, run, cancellationToken).ConfigureAwait(false);
+                nativeProofHash = await ValidateNativeFanInAsync(fanInOutput, nativeContract, _settings.DiffBase!,
+                    commit, tree, sdk, run, cancellationToken).ConfigureAwait(false);
                 var primaryGateDir = Path.Join(coverage, "primary-gate");
                 Directory.CreateDirectory(primaryGateDir);
                 var primaryGate = Path.Join(primaryGateDir, "coverage-gate.json");
@@ -130,7 +135,6 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 patchJson = Path.Join(patchGateDir, "coverage-gate.json");
                 File.Copy(Path.Join(fanInOutput, "accepted", "composed-gate.json"), patchJson, overwrite: false);
                 ValidateGate(primaryGate, patch: false);
-                ValidateGate(patchJson, patch: true);
             }
             else if (!string.IsNullOrWhiteSpace(_settings.DiffBase) || !string.IsNullOrWhiteSpace(_settings.DiffFile))
             {
@@ -145,7 +149,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             }
 
             ValidateGate(aggregateJson, patch: false);
-            if (patchJson is not null) ValidateGate(patchJson, patch: true);
+            if (patchJson is not null) ValidateGate(patchJson, patch: true, typedPatch: nativeFanIn && nativeContract == 3);
             await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
             await WriteJsonAsync(context.Artifacts, "aggregate-gate", "proof/aggregate-gate.json", aggregateJson, cancellationToken);
             if (patchJson is not null) await WriteJsonAsync(context.Artifacts, "patch-gate", "proof/patch-gate.json", patchJson, cancellationToken);
@@ -158,6 +162,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 sdk,
                 configuration = "Release",
                 fullSolution = true,
+                nativeFanInContractVersion = nativeFanIn ? (int?)nativeContract : null,
                 nativeFanInProofSha256 = nativeProofHash,
                 testProjects = expected.Order(StringComparer.Ordinal).ToArray(),
                 reportSha256 = await HashFileAsync(report, cancellationToken),
@@ -312,17 +317,18 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     }
 
     /// <summary>Requires the installed adapter's delivered acceptance and separate verification, retaining their artifact binding.</summary>
-    private static async Task<string> ValidateNativeFanInAsync(string output, string commit, string tree, string sdk,
+    private static async Task<string> ValidateNativeFanInAsync(string output, int contractVersion, string diffBase, string commit, string tree, string sdk,
         IReadOnlyDictionary<string, string?> run, CancellationToken cancellationToken)
     {
         string? policyDigest = null;
+        JsonElement? applicability = null;
         foreach (var operation in new[] { "accept", "verify" })
         {
             using var document = ReadJson(Path.Join(output, operation + "-result.json"), MaxJson);
             var terminal = document.RootElement;
             var result = terminal.GetProperty("result");
             var delivery = terminal.GetProperty("delivery");
-            if (terminal.GetProperty("schemaVersion").GetInt32() != 2
+            if (terminal.GetProperty("schemaVersion").GetInt32() != contractVersion
                 || terminal.GetProperty("operation").GetString() != operation
                 || terminal.GetProperty("status").GetString() != "succeeded"
                 || terminal.GetProperty("operationOutcome").GetString() != "succeeded"
@@ -338,18 +344,28 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             if (string.IsNullOrWhiteSpace(digest) || (policyDigest is not null && digest != policyDigest))
                 throw new InvalidDataException("Native acceptance and verification refer to different policies.");
             policyDigest = digest;
+            if (contractVersion == 3)
+            {
+                var claim = result.GetProperty("patchApplicability");
+                if (result.GetProperty("outcome").GetString() != "succeeded" || claim.ValueKind != JsonValueKind.Object ||
+                    (applicability is { } prior && !JsonElement.DeepEquals(prior, claim)))
+                    throw new InvalidDataException("Native v3 acceptance and verification disagree on patch applicability.");
+                applicability = claim.Clone();
+            }
         }
         var accepted = Path.Join(output, "accepted");
         using var acceptance = ReadJson(Path.Join(accepted, "acceptance.json"), MaxJson);
         var receipt = acceptance.RootElement;
         var source = receipt.GetProperty("source");
         var workflow = receipt.GetProperty("run");
+        if (receipt.GetProperty("schemaVersion").GetInt32() != contractVersion)
+            throw new InvalidDataException("Native acceptance receipt does not match the verified contract version.");
         if (receipt.GetProperty("policyDigest").GetString() != policyDigest
             || source.GetProperty("commit").GetString() != commit || source.GetProperty("tree").GetString() != tree
             || source.GetProperty("sdk").GetString() != sdk || source.GetProperty("configuration").GetString() != "Release"
             || workflow.GetProperty("runScope").GetString() != run["GITHUB_REPOSITORY"]
             || workflow.GetProperty("runId").GetString() != run["GITHUB_RUN_ID"]
-            || workflow.GetProperty("attempt").GetInt32() != int.Parse(run["GITHUB_RUN_ATTEMPT"]!, System.Globalization.CultureInfo.InvariantCulture))
+            || workflow.GetProperty("attempt").GetInt32() != int.Parse(run["GITHUB_RUN_ATTEMPT"]!, CultureInfo.InvariantCulture))
             throw new InvalidDataException("Native acceptance does not bind the current source and workflow attempt.");
         // The installed verifier owns semantic composition, custody and denominator checks.
         // Bind its retained receipts and the two reports copied into EvidenceHost's artifact slots.
@@ -361,10 +377,61 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         })
             if (receipt.GetProperty(property).GetString() != await HashFileAsync(file, cancellationToken).ConfigureAwait(false))
                 throw new InvalidDataException("Native acceptance differs from its retained gate or composition receipt.");
+        if (applicability is { } verified)
+            await ValidateV3ApplicabilityAsync(accepted, receipt, verified, diffBase, commit, cancellationToken).ConfigureAwait(false);
         return await HashFileAsync(Path.Join(accepted, "acceptance.json"), cancellationToken).ConfigureAwait(false);
     }
 
-    private static void ValidateGate(string path, bool patch)
+    /// <summary>Binds the independent v3 result to the applicability, diff and gate reports retained by the producer.</summary>
+    private static async Task ValidateV3ApplicabilityAsync(string accepted, JsonElement receipt, JsonElement verified,
+        string diffBase, string commit, CancellationToken cancellationToken)
+    {
+        if (receipt.GetProperty("evaluationIntent").GetString() != "currentTrustedRun"
+            || receipt.GetProperty("patchOutcome").GetString() != "PatchAccepted")
+            throw new InvalidDataException("Native v3 did not retain a current patch acceptance receipt.");
+
+        foreach (var (property, file) in new[]
+        {
+            ("applicabilitySha256", "patch-applicability.json"),
+            ("diffSha256", "diff.patch"),
+            ("diffMetadataSha256", "diff-metadata.json"),
+        })
+            if (receipt.GetProperty(property).GetString() != await HashFileAsync(Path.Join(accepted, file), cancellationToken).ConfigureAwait(false))
+                throw new InvalidDataException("Native v3 acceptance differs from its retained patch proof.");
+
+        using var metadata = ReadJson(Path.Join(accepted, "diff-metadata.json"), MaxJson);
+        var diff = metadata.RootElement;
+        if (diff.GetProperty("schemaVersion").GetInt32() != 3
+            || diff.GetProperty("requestedBaseCommit").GetString() != diffBase
+            || diff.GetProperty("headCommit").GetString() != commit
+            || !IsRepositoryCommit(diff.GetProperty("mergeBaseCommit").GetString()))
+            throw new InvalidDataException("Native v3 patch proof is not bound to the requested base and head.");
+        if (diff.GetProperty("diffPolicyId").GetString() != "appsurface-git-patch-v1"
+            || diff.GetProperty("diffSha256").GetString() != receipt.GetProperty("diffSha256").GetString())
+            throw new InvalidDataException("Native v3 diff metadata does not bind the required diff policy and accepted patch.");
+
+        using var applicability = ReadJson(Path.Join(accepted, "patch-applicability.json"), MaxJson);
+        var claim = applicability.RootElement;
+        if (claim.GetProperty("schemaVersion").GetInt32() != 3
+            || claim.GetProperty("reportProfileId").GetString() != "coverlet-collector-cobertura-v1"
+            || new[] { "policyDigest", "source", "run", "diffSha256", "diffMetadataSha256" }
+                .Any(property => !JsonElement.DeepEquals(claim.GetProperty(property), receipt.GetProperty(property))))
+            throw new InvalidDataException("Native v3 applicability does not bind the accepted policy, source, run and diff.");
+
+        foreach (var (dimension, gateFile) in new[] { ("primary", "primary-gate.json"), ("composed", "composed-gate.json") })
+        {
+            var metrics = claim.GetProperty(dimension);
+            using var gate = ReadJson(Path.Join(accepted, gateFile), MaxJson);
+            if (!JsonElement.DeepEquals(metrics, verified.GetProperty(dimension))
+                || !JsonElement.DeepEquals(metrics.GetProperty("line"), gate.RootElement.GetProperty("patchLine"))
+                || !JsonElement.DeepEquals(metrics.GetProperty("branch"), gate.RootElement.GetProperty("patchBranch"))
+                || !V3PatchMetricPasses(metrics.GetProperty("line"), 0m)
+                || !V3PatchMetricPasses(metrics.GetProperty("branch"), 0m))
+                throw new InvalidDataException("Native v3 applicability disagrees with the verified result or gate report.");
+        }
+    }
+
+    private static void ValidateGate(string path, bool patch, bool typedPatch = false)
     {
         using var document = ReadJson(path, MaxJson);
         var root = document.RootElement;
@@ -378,10 +445,34 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         if (patch && (root.GetProperty("thresholds").GetProperty("patchLine").GetDecimal() != 95m
             || root.GetProperty("thresholds").GetProperty("patchBranch").GetDecimal() != 85m
             || root.GetProperty("patchLineMode").GetString() != "codecov"
-            || root.GetProperty("patchLine").GetProperty("percent").GetDecimal() < 94.5m
-            || root.GetProperty("patchBranch").GetProperty("percent").GetDecimal() < 84.5m))
+            || !PatchMetricPasses(root.GetProperty("patchLine"), 94.5m, typedPatch)
+            || !PatchMetricPasses(root.GetProperty("patchBranch"), 84.5m, typedPatch)))
             throw new InvalidDataException("The patch coverage gate did not satisfy the declared policy.");
     }
+
+    private static bool PatchMetricPasses(JsonElement metric, decimal threshold, bool typedPatch) => typedPatch
+        ? V3PatchMetricPasses(metric, threshold)
+        : metric.GetProperty("percent").GetDecimal() >= threshold;
+
+    private static bool V3PatchMetricPasses(JsonElement metric, decimal threshold)
+    {
+        var changed = metric.GetProperty("changedLines").GetInt32();
+        var measurable = metric.GetProperty("measurable").GetInt32();
+        var covered = metric.GetProperty("covered").GetInt32();
+        var percent = metric.GetProperty("percent");
+        if (changed < 0 || covered < 0 || covered > measurable) return false;
+        return (metric.GetProperty("outcome").GetString(), metric.GetProperty("reason").GetString()) switch
+        {
+            ("notApplicable", "no-reported-patch-points") => measurable == 0 && percent.ValueKind == JsonValueKind.Null,
+            ("measured", "reported-points") => changed > 0 && measurable > 0 && percent.ValueKind == JsonValueKind.Number
+                && percent.GetDecimal() >= threshold
+                && percent.GetDecimal() == Math.Round(covered * 100m / measurable, 4, MidpointRounding.AwayFromZero),
+            _ => false,
+        };
+    }
+
+    private static bool IsRepositoryCommit(string? value) => value is { Length: 40 }
+        && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static async Task WriteJsonAsync(EvidenceArtifactWriter writer, string name, string path, string source, CancellationToken ct)
     { var bytes = await File.ReadAllBytesAsync(source, ct); if (bytes.Length > MaxJson) throw new InvalidDataException("Coverage gate artifact exceeded its bound."); await writer.WriteAsync(name, path, bytes, ct); }
