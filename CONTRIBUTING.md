@@ -33,6 +33,8 @@ Run the sample or package-specific command you changed, and include that command
 
 Documentation changes should explain both how to use an API and why a reader would choose it. When a docs change touches public behavior, update the package-level README, repository-level entry point, or release note surface that helps someone discover the change.
 
+For repository command choices, start with the [script inventory](./guides/script-inventory.md) for the audited source baseline and the [repository tooling guide](./guides/repository-tooling.md) for audience, prerequisites, command-form selection, and migration criteria.
+
 Good docs pull requests usually include:
 
 - Reference content for API shape, defaults, constraints, and examples.
