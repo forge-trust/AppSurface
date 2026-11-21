@@ -4,6 +4,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Cli;
 
 // Implementation included by verify.cs. The public CLI owns all PWA expectations and produces the evidence.
 internal static class PwaVerifier
@@ -11,13 +12,20 @@ internal static class PwaVerifier
     private const string IdentityPath = "/_appsurface/verify/instance";
     private const string IdentityVariable = "APPSURFACE_PWA_VERIFY_INSTANCE";
     private const int HarnessFailure = 1;
+    private static readonly JsonSerializerOptions ReportOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true,
+        AllowDuplicateProperties = false
+    };
 
     /// <summary>Builds the two checkout projects and publishes the public verifier's report for this child.</summary>
     public static async Task<int> RunAsync(
         string repositoryRoot, int port, string evidencePath, TimeSpan startupTimeout, CancellationToken cancellationToken)
     {
-        var example = Path.Combine(repositoryRoot, "examples", "web-pwa-install", "WebPwaInstallExample.csproj");
-        var cli = Path.Combine(repositoryRoot, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj");
+        var example = Path.Join(repositoryRoot, "examples", "web-pwa-install", "WebPwaInstallExample.csproj");
+        var cli = Path.Join(repositoryRoot, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj");
         var instance = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
         var endpoint = new Uri($"http://127.0.0.1:{port}");
         using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false })
@@ -46,7 +54,7 @@ internal static class PwaVerifier
             operation = "creating the evidence file";
             var directory = Path.GetDirectoryName(evidencePath)!;
             Directory.CreateDirectory(directory);
-            var candidate = Path.Combine(directory, $".pwa-verify-{Guid.NewGuid():N}.tmp");
+            var candidate = Path.Join(directory, $".pwa-verify-{Guid.NewGuid():N}.tmp");
             report = new FileStream(candidate, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 65536, true);
             temporary = candidate;
             operation = "running the public PWA CLI";
@@ -258,9 +266,11 @@ internal static class PwaVerifier
     }
 
     /// <summary>Checks the combined schema envelope and exit status while preserving the original report bytes.</summary>
+    /// <exception cref="JsonException">The text is invalid JSON or does not match the CLI's report fields.</exception>
+    /// <exception cref="VerificationFailure">The bytes are invalid UTF-8 or the report is inconsistent with a combined verification run.</exception>
     internal static async Task ValidateReportAsync(Stream report, int exitCode, CancellationToken token)
     {
-        // JsonDocument defers transcoding strings. Reject invalid UTF-8 even inside an uninspected diagnostic.
+        // Validate even the bytes in unrecognized fields before publishing the original file.
         using var reader = new StreamReader(report, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
         string output;
         try
@@ -272,27 +282,18 @@ internal static class PwaVerifier
             throw new VerificationFailure("The public CLI returned invalid UTF-8.");
         }
 
-        using var document = JsonDocument.Parse(output);
-        var json = document.RootElement;
-        if (json.ValueKind != JsonValueKind.Object
-            || !json.TryGetProperty("schemaVersion", out var schema) || schema.ValueKind != JsonValueKind.Number
-            || !schema.TryGetInt32(out var version) || version != 3
-            || !json.TryGetProperty("surface", out var surface) || surface.ValueKind != JsonValueKind.String || !surface.ValueEquals("all")
-            || !json.TryGetProperty("passed", out var passed) || passed.ValueKind != (exitCode == 0 ? JsonValueKind.True : JsonValueKind.False)
-            || !json.TryGetProperty("install", out var install) || install.ValueKind != JsonValueKind.Object
-            || !HasField(install, "manifestPath", JsonValueKind.String) || !HasField(install, "icons", JsonValueKind.Array)
-            || !json.TryGetProperty("push", out var push) || push.ValueKind != JsonValueKind.Object
-            || !HasField(push, "worker", JsonValueKind.Object) || !HasField(push, "registrationHelper", JsonValueKind.Object)
-            || !json.TryGetProperty("diagnostics", out var diagnostics) || diagnostics.ValueKind != JsonValueKind.Array)
+        var evidence = JsonSerializer.Deserialize<PwaVerificationV3Report>(output, ReportOptions);
+        if (evidence is not { SchemaVersion: 3, Surface: "all", Install: not null }
+            || evidence.Passed != (exitCode == 0)
+            || evidence.Install.Icons.Any(icon => icon is null)
+            || evidence.Diagnostics.Any(diagnostic => diagnostic is null))
         {
             throw new VerificationFailure("The CLI output is not a complete combined schema-v3 report matching its exit code.");
         }
-
-        static bool HasField(JsonElement parent, string name, JsonValueKind kind) =>
-            parent.TryGetProperty(name, out var value) && value.ValueKind == kind;
     }
 
-    private sealed class VerificationFailure(string message) : Exception(message);
+    /// <summary>Records a verifier failure whose diagnostic can be shown without exposing raw child output.</summary>
+    internal sealed class VerificationFailure(string message) : Exception(message);
 
     private sealed class OwnedProcess : IDisposable
     {
@@ -328,7 +329,10 @@ internal static class PwaVerifier
                 {
                     _process.Kill(entireProcessTree: true);
                 }
-                catch (InvalidOperationException) when (HasExited) { }
+                catch (InvalidOperationException) when (HasExited)
+                {
+                    // The child exited between the first HasExited check and Kill. Its pipes still need draining below.
+                }
             }
 
             await _process.WaitForExitAsync(token);

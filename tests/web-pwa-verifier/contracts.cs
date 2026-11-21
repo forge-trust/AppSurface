@@ -5,6 +5,7 @@
 #:property Nullable=enable
 #:property PublishAot=false
 #:project ../ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj
+#:include ../../Cli/ForgeTrust.AppSurface.Cli/PwaVerificationV3Report.cs
 #:include ../../scripts/web-pwa/PwaVerifier.cs
 #:include ProtocolContracts.cs
 #:include TestHost.cs

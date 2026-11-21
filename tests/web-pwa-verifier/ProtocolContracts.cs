@@ -1,41 +1,84 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 internal static class ProtocolContracts
 {
     public static async Task RunAsync()
     {
-        var validSuccess = """{"schemaVersion":3,"surface":"all","passed":true,"install":{"manifestPath":"/manifest.webmanifest","icons":[]},"push":{"worker":{},"registrationHelper":{}},"diagnostics":[]}""";
-        var validFailure = validSuccess.Replace("true", "false", StringComparison.Ordinal);
+        const string validSuccess = """
+            {
+              "schemaVersion": 3, "surface": "all", "passed": true,
+              "origin": "http://localhost", "baseUrl": "http://localhost/", "entryPath": "/", "entryUrl": "http://localhost/",
+              "install": {
+                "manifestPath": "/manifest.webmanifest", "startUrl": "/", "scope": "/", "display": "standalone",
+                "themeColor": null, "backgroundColor": null, "icons": []
+              },
+              "push": {
+                "expected": "enabled", "enabled": true, "configurationStatus": "not-configured",
+                "worker": {"path": "/sw.js", "scope": "/", "fetch": "ok", "contentType": "ok", "nosniff": "ok", "cacheControl": "ok"},
+                "registrationHelper": {"path": null, "headReference": "absent", "fetch": "unknown", "contentType": "unknown", "nosniff": "unknown", "cacheControl": "unknown"},
+                "vapid": {"activeKeyId": null, "publicKeyFingerprint": null}, "routeMapping": "unknown",
+                "browserSupport": "unknown", "installation": "unknown", "permission": "unknown", "subscription": "unknown",
+                "notificationDisplay": "unknown", "notificationClick": "unknown", "unsubscribe": "unknown", "delivery": "unknown"
+              },
+              "diagnostics": []
+            }
+            """;
+        var validFailure = validSuccess.Replace("\"passed\": true", "\"passed\": false", StringComparison.Ordinal);
         await Accepts(validSuccess, 0);
         await Accepts(validFailure, 7);
-        await Accepts(validSuccess.Replace("\"diagnostics\":[]", "\"diagnostics\":[{\"message\":\"café 🐾\"}]", StringComparison.Ordinal), 0);
+        await Accepts(validSuccess.Insert(1, "\"extra\": true,"), 0);
+        await Rejects<JsonException>(Encoding.UTF8.GetBytes(validSuccess.Insert(1, "\"passed\": false,")), 0);
+        var pushOnly = JsonNode.Parse(validSuccess)!.AsObject();
+        pushOnly["install"] = null;
+        await Rejects<PwaVerifier.VerificationFailure>(Encoding.UTF8.GetBytes(pushOnly.ToJsonString()), 0);
+        await Accepts(validSuccess.Replace("\"diagnostics\": []", """
+            "diagnostics": [{"code":"ASPWA200","severity":"info","message":"café 🐾"}]
+            """, StringComparison.Ordinal), 0);
 
-        foreach (var (property, invalid) in new (string, JsonNode?)[]
+        foreach (var invalid in new[] { "", "[]", "{}", validSuccess[..^1], validSuccess + "{}", validSuccess + " log" })
         {
-            ("schemaVersion", 2), ("schemaVersion", "3"), ("surface", 3), ("surface", "install"),
-            ("passed", "true"), ("install", new JsonObject()), ("push", new JsonObject()), ("diagnostics", new JsonObject())
+            await Rejects<JsonException>(Encoding.UTF8.GetBytes(invalid), 0);
+        }
+
+        foreach (var (path, invalidValue) in new (string, JsonNode?)[]
+        {
+            ("schemaVersion", "3"), ("surface", 3), ("passed", "true"), ("origin", null), ("baseUrl", null),
+            ("entryPath", null), ("entryUrl", null), ("install", new JsonObject()), ("install.icons", new JsonObject()),
+            ("install.themeColor", false), ("push", new JsonObject()), ("push.worker", new JsonObject()),
+            ("push.registrationHelper", new JsonObject()), ("push.vapid", null), ("diagnostics", new JsonObject())
         })
         {
             var mutated = JsonNode.Parse(validSuccess)!.AsObject();
-            mutated[property] = invalid;
-            await Rejects(Encoding.UTF8.GetBytes(mutated.ToJsonString()), 0);
-            mutated.Remove(property);
-            await Rejects(Encoding.UTF8.GetBytes(mutated.ToJsonString()), 0);
+            var fields = path.Split('.');
+            var parent = fields.Length == 2 ? mutated[fields[0]]!.AsObject() : mutated;
+            var field = fields[^1];
+            parent[field] = invalidValue;
+            await Rejects<JsonException>(Encoding.UTF8.GetBytes(mutated.ToJsonString()), 0);
+            parent.Remove(field);
+            await Rejects<JsonException>(Encoding.UTF8.GetBytes(mutated.ToJsonString()), 0);
         }
 
-        foreach (var invalid in new[] { "", "null", "[]", "{}", validSuccess[..^1], validSuccess + "{}", validSuccess + " log" })
+        foreach (var invalid in new[]
         {
-            await Rejects(Encoding.UTF8.GetBytes(invalid), 0);
+            "null",
+            validSuccess.Replace("\"schemaVersion\": 3", "\"schemaVersion\": 2", StringComparison.Ordinal),
+            validSuccess.Replace("\"all\"", "\"install\"", StringComparison.Ordinal),
+            validSuccess.Replace("\"icons\": []", "\"icons\": [null]", StringComparison.Ordinal),
+            validSuccess.Replace("\"diagnostics\": []", "\"diagnostics\": [null]", StringComparison.Ordinal)
+        })
+        {
+            await Rejects<PwaVerifier.VerificationFailure>(Encoding.UTF8.GetBytes(invalid), 0);
         }
 
-        await Rejects(Encoding.UTF8.GetBytes(validSuccess), 1);
-        await Rejects(Encoding.UTF8.GetBytes(validFailure), 0);
-        var invalidUtf8 = Encoding.UTF8.GetBytes(validSuccess.Replace("\"diagnostics\":[]", "\"diagnostics\":[\"X\"]", StringComparison.Ordinal));
+        await Rejects<PwaVerifier.VerificationFailure>(Encoding.UTF8.GetBytes(validSuccess), 1);
+        await Rejects<PwaVerifier.VerificationFailure>(Encoding.UTF8.GetBytes(validFailure), 0);
+        var invalidUtf8 = Encoding.UTF8.GetBytes(validSuccess.Replace("\"diagnostics\": []", "\"extension\": \"X\", \"diagnostics\": []", StringComparison.Ordinal));
         invalidUtf8[Array.IndexOf(invalidUtf8, (byte)'X')] = 0xff;
-        await Rejects(invalidUtf8, 0);
+        await Rejects<PwaVerifier.VerificationFailure>(invalidUtf8, 0);
 
         await PublishesValidFailureAndRefusesMalformedOutput(validFailure);
     }
@@ -48,19 +91,19 @@ internal static class ProtocolContracts
         await PwaVerifier.ValidateReportAsync(report, exitCode, CancellationToken.None);
     }
 
-    private static async Task Rejects(byte[] bytes, int exitCode)
+    private static async Task Rejects<TException>(byte[] bytes, int exitCode) where TException : Exception
     {
         await using var report = new MemoryStream(bytes, writable: false);
         try
         {
             await PwaVerifier.ValidateReportAsync(report, exitCode, CancellationToken.None);
         }
-        catch (Exception)
+        catch (TException)
         {
             return;
         }
 
-        throw new InvalidOperationException($"Expected report rejection for {Encoding.UTF8.GetString(bytes)}");
+        throw new InvalidOperationException($"Expected {typeof(TException).Name} for {Encoding.UTF8.GetString(bytes)}");
     }
 
     private static async Task PublishesValidFailureAndRefusesMalformedOutput(string failedReport)
@@ -83,18 +126,23 @@ internal static class ProtocolContracts
 
         const string previous = "previous-evidence-preserved";
         await File.WriteAllTextAsync(evidence, previous);
-        var malformedPort = TestHost.FreePort();
-        var malformed = await RunFixtureRunner(fixtureRoot, malformedPort, evidence, "not-json", 7);
-        if (malformed.ExitCode != 1 || await File.ReadAllTextAsync(evidence) != previous)
+        var incomplete = JsonNode.Parse(failedReport)!.AsObject();
+        incomplete.Remove("origin");
+        foreach (var invalidReport in new[] { "not-json", incomplete.ToJsonString() })
         {
-            throw new InvalidOperationException("Malformed child output replaced prior evidence or returned the child exit code.");
+            var malformedPort = TestHost.FreePort();
+            var malformed = await RunFixtureRunner(fixtureRoot, malformedPort, evidence, invalidReport, 7);
+            if (malformed.ExitCode != 1 || await File.ReadAllTextAsync(evidence) != previous)
+            {
+                throw new InvalidOperationException("Malformed child output replaced prior evidence or returned the child exit code.");
+            }
+            if (!malformed.StandardError.Contains("validating the public CLI report", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The malformed-output path did not reach child readiness.");
+            }
+            AssertNoTemporaryReports(evidenceDirectory);
+            AssertPortReusable(malformedPort);
         }
-        if (!malformed.StandardError.Contains("validating the public CLI report", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("The malformed-output path did not reach child readiness.");
-        }
-        AssertNoTemporaryReports(evidenceDirectory);
-        AssertPortReusable(malformedPort);
 
         // File.Move cannot replace a directory. This tests publication itself on every platform.
         var occupied = Directory.CreateDirectory(Path.Combine(evidenceDirectory, "occupied"));

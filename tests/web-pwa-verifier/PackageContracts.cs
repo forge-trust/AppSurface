@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ForgeTrust.AppSurface.Testing;
 
 internal static class PackageContracts
 {
@@ -11,7 +12,7 @@ internal static class PackageContracts
     {
         using var temporary = new TempDirectory();
         var consumer = Path.GetFullPath(temporary.Path);
-        var example = Path.Combine(TestHost.Root, "examples", "file-based-console");
+        var example = TestPathUtils.PathUnder(TestHost.Root, "examples", "file-based-console");
         var globalJson = Path.Combine(TestHost.Root, "global.json");
         using var sdkSettings = JsonDocument.Parse(await File.ReadAllTextAsync(globalJson));
         var pinnedSdkVersion = sdkSettings.RootElement.GetProperty("sdk").GetProperty("version").GetString()

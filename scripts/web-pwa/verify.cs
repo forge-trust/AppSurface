@@ -9,6 +9,7 @@
 #:package CliFx
 #:project ../../Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
 #:project ../../Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
+#:include ../../Cli/ForgeTrust.AppSurface.Cli/PwaVerificationV3Report.cs
 #:include PwaVerifier.cs
 
 using System.ComponentModel.DataAnnotations;
@@ -80,7 +81,7 @@ internal sealed partial class VerifyCommand(IConfigManager configManager, IEnvir
             evidence = ResolveStringOption(
                 nameof(EvidencePath),
                 EvidencePath,
-                Path.Combine(PwaVerifyPaths.RepositoryRoot, "examples/web-pwa-install/pwa-verify-v3.json"),
+                Path.Join(PwaVerifyPaths.RepositoryRoot, "examples", "web-pwa-install", "pwa-verify-v3.json"),
                 "--evidence-path");
             startupTimeout = ResolveIntegerOption(nameof(StartupTimeoutSeconds), StartupTimeoutSeconds, 60, "--startup-timeout-seconds");
             settings = new PwaVerifySettings(port.Value, evidence.Value, startupTimeout.Value);
@@ -219,7 +220,7 @@ internal static class PwaVerifyPaths
 {
     public static string ScriptPath { get; } = ResolveScriptPath();
     public static string ScriptDirectory { get; } = Path.GetDirectoryName(ScriptPath)!;
-    public static string RepositoryRoot { get; } = Path.GetFullPath(Path.Combine(ScriptDirectory, "../.."));
+    public static string RepositoryRoot { get; } = Path.GetFullPath("../..", ScriptDirectory);
 
     private static string ResolveScriptPath()
     {
@@ -227,7 +228,7 @@ internal static class PwaVerifyPaths
         var entryPointDirectory = AppContext.GetData("EntryPointFileDirectoryPath") as string;
         if (!string.IsNullOrWhiteSpace(entryPointDirectory))
         {
-            var entryPointSourcePath = Path.Combine(entryPointDirectory, Path.GetFileName(sourcePath));
+            var entryPointSourcePath = Path.Join(entryPointDirectory, Path.GetFileName(sourcePath));
             if (File.Exists(entryPointSourcePath))
             {
                 sourcePath = entryPointSourcePath;
