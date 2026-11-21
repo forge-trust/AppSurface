@@ -49,7 +49,7 @@ internal static class Program
                 run: [--repository <checkout>] [--dotnet <absolute-host>]
                 [--coverage-cli <absolute-installed-appsurface>]
                 run coverage: [--diff-base <commit>] [--diff-file <snapshot.patch>]
-                [--native-coverage-directory <same-run-native-captures>]
+                [--native-coverage-directory <same-run-native-captures> [--native-coverage-contract-version 2|3 (default 2)]]
                 Native fan-in requires --coverage-cli; without it, coverage uses the source CLI through --dotnet.
                 [--coverage-collection <same-run-collection>] [--coverage-schedule-timings <prior-timings.json>]
 
@@ -95,6 +95,8 @@ internal static class Program
             }
             if (options.Keys.Any(key => key is "--policy" or "--operation" or "--changed-paths" or "--plan" or "--manifest" or "--artifact-root"))
                 return await RepositoryEvidenceWorkflow.RunAsync(options, cancellationToken);
+            if (options.ContainsKey("--native-coverage-contract-version"))
+                throw new ArgumentException("Native coverage contract selection requires the repository evidence run operation.");
             var repository = Path.GetFullPath(options.GetValueOrDefault("--repository", Directory.GetCurrentDirectory()));
             var output = Path.GetFullPath(Required(options, "--output"));
             if (Directory.Exists(output) || File.Exists(output)) throw new ArgumentException("Evidence output must be fresh.");
@@ -175,7 +177,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--feed", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
+        string[] allowed = ["--package", "--feed", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)

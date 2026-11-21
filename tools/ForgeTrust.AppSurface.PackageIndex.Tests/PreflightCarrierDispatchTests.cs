@@ -3,6 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Xml;
+using System.Xml.Linq;
+using ForgeTrust.AppSurface.ReleaseContracts;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
@@ -19,6 +22,107 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
     public PreflightCarrierDispatchTests()
     {
         Directory.CreateDirectory(_root);
+    }
+
+    [Fact]
+    public async Task OfflineReleaseArtifactBindingReplay_RejectsSameLabelArchiveReplacement()
+    {
+        var fixture = await CarrierFixture.CreateAsync(_root);
+        var producerBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
+        var producer = await new PackageArtifactManifestReader()
+            .ReadAsync(fixture.Request.ArtifactManifestPath, CancellationToken.None);
+        var release = new ReleaseIdentity("forge-trust/AppSurface", "offline-candidate", SourceCommit);
+
+        // Only the frozen producer supplies expected IDs, version, filenames and hashes.
+        // The release context, package kind and digest algorithm are fixed fixture inputs.
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schema = "appsurface-release-artifacts-v1",
+            repository = release.Repository,
+            releaseId = release.ReleaseId,
+            sourceCommit = release.SourceCommit,
+            assets = producer.Entries.Select(entry => new
+            {
+                id = ReplayPackageId(entry.PackageId, producer.PackageVersion),
+                kind = "nuget-package",
+                locator = entry.ArtifactFileName,
+                digestAlgorithm = "sha512",
+                digest = entry.Sha512,
+            }),
+        });
+        var manifestPin = Convert.ToHexStringLower(SHA256.HashData(manifestBytes));
+        var scratch = TestPathUtils.PathUnder(_root, "offline-replay");
+        Directory.CreateDirectory(scratch);
+        foreach (var path in Directory.EnumerateFiles(fixture.ArtifactDirectory, "*.nupkg"))
+        {
+            File.Copy(path, TestPathUtils.PathUnder(scratch, Path.GetFileName(path)));
+        }
+
+        var original = await ObserveReplayPackagesAsync(scratch);
+        var verified = Assert.IsType<ReleaseBindingResult<VerifiedReleaseManifest>.Success>(
+            VerifiedReleaseManifest.VerifyManifest(manifestBytes, manifestPin, release, original));
+        Assert.Equal(release, verified.Value.Identity);
+        Assert.Equal(manifestPin, verified.Value.Sha256);
+        var selected = Assert.Single(original, asset => asset.Id ==
+            "40:ForgeTrust.AppSurface.Durable.PostgreSql1.2.3-ci.4");
+        var replacedPath = TestPathUtils.PathUnder(scratch, selected.Locator);
+        var replacementPath = TestPathUtils.PathUnder(scratch, "replacement.zip");
+        File.Copy(replacedPath, replacementPath);
+        using (var archive = ZipFile.Open(replacementPath, ZipArchiveMode.Update))
+        {
+            const string payloadPath = "contentFiles/any/any/configure-postgresql-roles.sql";
+            Assert.IsType<ZipArchiveEntry>(archive.GetEntry(payloadPath)).Delete();
+            await using var payload = archive.CreateEntry(payloadPath).Open();
+            await payload.WriteAsync("create role replacement_owner;"u8.ToArray());
+        }
+        File.Move(replacementPath, replacedPath, overwrite: true);
+
+        var replacement = await ObserveReplayPackagesAsync(scratch);
+        var changed = Assert.Single(replacement, asset => asset.Id == selected.Id);
+        Assert.NotEqual(selected.Digest, changed.Digest);
+        Assert.Equal(original.Select(asset => asset.Id == selected.Id ? asset with { Digest = changed.Digest } : asset),
+            replacement);
+        var rejected = Assert.IsType<ReleaseBindingResult<VerifiedReleaseManifest>.Failure>(
+            VerifiedReleaseManifest.VerifyManifest(manifestBytes, manifestPin, release, replacement));
+        Assert.Equal(ReleaseBindingFailure.AssetMismatch, rejected.Code);
+        Assert.Equal(manifestPin, Convert.ToHexStringLower(SHA256.HashData(manifestBytes)));
+        Assert.Equal(producerBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
+        Assert.Equal(original, await ObserveReplayPackagesAsync(fixture.ArtifactDirectory));
+    }
+
+    private static string ReplayPackageId(string id, string version) =>
+        FormattableString.Invariant($"{id.Length}:{id}{version}");
+
+    private static async Task<ReleaseAsset[]> ObserveReplayPackagesAsync(string directory)
+    {
+        var observations = new List<ReleaseAsset>();
+        foreach (var path in Directory.EnumerateFiles(directory, "*.nupkg"))
+        {
+            string id;
+            string version;
+            using (var archive = ZipFile.OpenRead(path))
+            {
+                var nuspec = Assert.Single(archive.Entries,
+                    entry => entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase));
+                using var stream = nuspec.Open();
+                using var reader = XmlReader.Create(stream, new XmlReaderSettings
+                {
+                    DtdProcessing = DtdProcessing.Prohibit,
+                    XmlResolver = null,
+                });
+                var package = Assert.IsType<XElement>(XDocument.Load(reader).Root);
+                var ns = package.Name.Namespace;
+                var metadata = Assert.IsType<XElement>(package.Element(ns + "metadata"));
+                id = Assert.IsType<XElement>(metadata.Element(ns + "id")).Value;
+                version = Assert.IsType<XElement>(metadata.Element(ns + "version")).Value;
+            }
+
+            var digest = await PackageHash.ComputeSha512Async(path, CancellationToken.None);
+            observations.Add(new ReleaseAsset(ReplayPackageId(id, version), "nuget-package",
+                Path.GetFileName(path), "sha512", digest));
+        }
+
+        return observations.OrderBy(asset => asset.Id, StringComparer.Ordinal).ToArray();
     }
 
     [Fact]
