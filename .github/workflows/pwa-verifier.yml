@@ -7,6 +7,7 @@ on:
       - 'scripts/web-pwa/**'
       - 'tests/web-pwa-verifier/**'
       - 'examples/web-pwa-install/**'
+      - 'examples/web-pwa-install.tests/**'
       - 'examples/file-based-console/**'
       - 'Cli/ForgeTrust.AppSurface.Cli/**'
       - 'Cli/ForgeTrust.AppSurface.Cli.Tests/**'
@@ -30,6 +31,7 @@ on:
       - 'scripts/web-pwa/**'
       - 'tests/web-pwa-verifier/**'
       - 'examples/web-pwa-install/**'
+      - 'examples/web-pwa-install.tests/**'
       - 'examples/file-based-console/**'
       - 'Cli/ForgeTrust.AppSurface.Cli/**'
       - 'Cli/ForgeTrust.AppSurface.Cli.Tests/**'
@@ -142,5 +144,5 @@ jobs:
         with:
           name: pwa-verifier-${{ matrix.os }}
           path: ${{ runner.temp }}/pwa-verifier-evidence/**
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7

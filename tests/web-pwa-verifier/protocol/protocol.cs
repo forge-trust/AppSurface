@@ -116,6 +116,29 @@ static async Task PublishesValidFailureAndRefusesMalformedOutput(string failedRe
         }
         AssertNoTemporaryReports(evidenceDirectory);
         AssertPortReusable(occupiedPort);
+
+        const string previousIdentity = "prior-launch";
+        var childDirectory = Path.Combine(fixtureRoot, "examples", "web-pwa-install");
+        var substitute = Path.Combine(childDirectory, "substitute-identity");
+        foreach (var replaceAfterReadiness in new[] { false, true })
+        {
+            if (replaceAfterReadiness)
+                await File.WriteAllTextAsync(Path.Combine(fixtureRoot, "change-identity"), previousIdentity);
+            else
+                await File.WriteAllTextAsync(substitute, previousIdentity);
+
+            var port = FreePort();
+            var outcome = await RunFixtureRunner(fixtureRoot, port, evidence, failedReport, 7, startupSeconds: 3);
+            var ranCli = outcome.StandardError.Contains("running public CLI (PID", StringComparison.Ordinal);
+            var expectedPhase = replaceAfterReadiness ? "no longer owns the requested port" : "did not prove readiness";
+            if (outcome.ExitCode != 1 || ranCli != replaceAfterReadiness ||
+                !outcome.StandardError.Contains(expectedPhase, StringComparison.Ordinal) ||
+                await File.ReadAllTextAsync(evidence) != previous)
+                throw new InvalidOperationException($"Accepted stale instance identity or failed in the wrong phase. {outcome.StandardError}");
+            AssertNoTemporaryReports(evidenceDirectory);
+            AssertPortReusable(port);
+            File.Delete(substitute);
+        }
     }
     finally
     {
@@ -141,7 +164,8 @@ static async Task CreateFixtureCheckout(string root)
         var port = int.Parse(args[portIndex + 1], System.Globalization.CultureInfo.InvariantCulture);
         var app = WebApplication.CreateBuilder(Array.Empty<string>()).Build();
         app.Urls.Add($"http://127.0.0.1:{port}");
-        app.MapGet("/_appsurface/verify/instance", () => Results.Text(Environment.GetEnvironmentVariable("APPSURFACE_PWA_VERIFY_INSTANCE")!));
+        app.MapGet("/_appsurface/verify/instance", () => Results.Text(File.Exists("substitute-identity")
+            ? File.ReadAllText("substitute-identity") : Environment.GetEnvironmentVariable("APPSURFACE_PWA_VERIFY_INSTANCE")!));
         app.MapGet("/{**path}", () => Results.Ok());
         await app.RunAsync();
         """);
@@ -151,13 +175,15 @@ static async Task CreateFixtureCheckout(string root)
         </Project>
         """);
     await File.WriteAllTextAsync(Path.Combine(cliDirectory, "Program.cs"), """
+        if (File.Exists("change-identity"))
+            File.Copy("change-identity", Path.Combine("examples", "web-pwa-install", "substitute-identity"));
         Console.Write(File.ReadAllText("fixture-output.txt"));
         return int.Parse(File.ReadAllText("fixture-exit.txt"), System.Globalization.CultureInfo.InvariantCulture);
         """);
 }
 
 static async Task<(int ExitCode, string StandardError)> RunFixtureRunner(
-    string root, int port, string evidence, string output, int childExit)
+    string root, int port, string evidence, string output, int childExit, int startupSeconds = 20)
 {
     await File.WriteAllTextAsync(Path.Combine(root, "fixture-output.txt"), output);
     await File.WriteAllTextAsync(Path.Combine(root, "fixture-exit.txt"), childExit.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -167,7 +193,7 @@ static async Task<(int ExitCode, string StandardError)> RunFixtureRunner(
     try
     {
         Console.SetError(diagnostics);
-        var code = await PwaVerifier.RunAsync(root, port, evidence, TimeSpan.FromSeconds(20), deadline.Token);
+        var code = await PwaVerifier.RunAsync(root, port, evidence, TimeSpan.FromSeconds(startupSeconds), deadline.Token);
         return (code, diagnostics.ToString());
     }
     finally
