@@ -1077,8 +1077,7 @@ internal static class CoverageFanInRequestReader
         {
             ContractVersion = version,
             ReportProfileId = version == 3 ? ReadString(fields["reportProfileId"]) : null,
-            DiffPolicyId = version == 3 && fields.ContainsKey("diffPolicyId")
-                ? ReadString(fields["diffPolicyId"]) : null
+            DiffPolicyId = fields.TryGetValue("diffPolicyId", out var diffPolicyId) ? ReadString(diffPolicyId) : null
         };
         return policy;
     }

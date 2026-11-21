@@ -54,8 +54,15 @@ internal static class CoverageDogfood
                 ? parsedVersion : versionText is null ? 2 : throw new ArgumentException();
             if (contractVersion is not (2 or 3)) throw new ArgumentException();
             options.TryGetValue("diff-policy-id", out var diffPolicyId);
-            if (diffPolicyId is not null && (contractVersion != 3 || diffPolicyId != CoverageFanInPolicy.VisualBaselinePngDiffPolicyId))
-                throw new ArgumentException("The screenshot diff policy requires fan-in contract version 3.");
+            if (diffPolicyId is not null)
+            {
+                if (contractVersion != 3)
+                    return ReportFailure("options", "diff-policy-version",
+                        "Pass --contract-version 3 when using --diff-policy-id.");
+                if (diffPolicyId != CoverageFanInPolicy.VisualBaselinePngDiffPolicyId)
+                    return ReportFailure("options", "unsupported-diff-policy-id",
+                        $"Use {CoverageFanInPolicy.VisualBaselinePngDiffPolicyId} for --diff-policy-id.");
+            }
             if (configuration is not ("Debug" or "Release") || Directory.Exists(output) || File.Exists(output)) throw new ArgumentException();
             stage = "source-inventory";
             var solution = XDocument.Load(Path.Join(root, "ForgeTrust.AppSurface.slnx"));
@@ -182,10 +189,16 @@ internal static class CoverageDogfood
             var (reason, recovery) = exception is CoverageFanInEvidenceException evidence
                 ? (evidence.Cause, evidence.Recovery)
                 : (exception.GetType().Name, "Inspect retained native command result files and correct the explicit repository policy/configuration.");
-            Console.Error.WriteLine($"ASCOV311 Dogfood failed at {stage} ({reason}). {recovery} Preserve partial output.");
-            return 1;
+            return ReportFailure(stage, reason, recovery);
         }
     }
+
+    private static int ReportFailure(string stage, string reason, string recovery)
+    {
+        Console.Error.WriteLine($"ASCOV311 Dogfood failed at {stage} ({reason}). {recovery} Preserve partial output.");
+        return 1;
+    }
+
     /// <summary>Qualifies the source-bound collector package for every project/framework before labeling fresh reports.</summary>
     private static async Task ValidateCollectorVersionsAsync(string root, IReadOnlyList<string> projects,
         string configuration, InvocationMeasurements measurements)

@@ -50,6 +50,10 @@ public sealed class CoverageFanInV3CommandTests
         Assert.Equal(CoverageFanInPolicy.VisualBaselinePngDiffPolicyId,
             Assert.IsType<CoverageCaptureRequest>(parsed.Request).Policy.DiffPolicyId);
 
+        v3["request"]!["policy"]!["diffPolicyId"] = null;
+        Assert.Throws<CoverageFanInCliInputException>(() =>
+            CoverageFanInRequestReader.Parse(JsonSerializer.SerializeToUtf8Bytes(v3)));
+
         var v2 = JsonNode.Parse(Envelope("capture", CaptureRequest(root.Path, 2), 2))!;
         v2["request"]!["policy"]!["diffPolicyId"] = CoverageFanInPolicy.VisualBaselinePngDiffPolicyId;
         Assert.Throws<CoverageFanInCliInputException>(() =>

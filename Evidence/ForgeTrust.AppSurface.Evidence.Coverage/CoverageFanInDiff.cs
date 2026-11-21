@@ -181,7 +181,7 @@ internal sealed class CoverageFanInDiffContext(CoverageFanInEngineRequest reques
         var preflight = await RunAsync(DiffOptions(false).Concat(["--raw", "-z", "--no-abbrev"]).Concat(endpoints).ToArray(), token).ConfigureAwait(false);
         var candidates = CoverageFanInDiffParser.ReadRaw(preflight, length);
         if (candidates.Count(x => x.Kind is "added" or "deleted") > 1000)
-            throw Fail("limit-exceeded", "Over1000 rename candidates require owner-approved restructuring or a separately qualified policy; no automatic no-renames fallback.");
+            throw Fail("limit-exceeded", "Over 1000 rename candidates require owner-approved restructuring or a separately qualified policy; no automatic no-renames fallback.");
         var objects = candidates.SelectMany(x => new[] { x.OldObject, x.NewObject }).Where(x => x.Any(c => c != '0'))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         var stdin = Utf8.GetBytes(string.Concat(objects.Select(x => x + "\n")));
@@ -222,7 +222,7 @@ internal sealed class CoverageFanInDiffContext(CoverageFanInEngineRequest reques
                 || !long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out var size))
                 throw Fail("malformed-diff", "The pinned object inventory is missing, invalid or unsupported; restore complete objects.");
             if (size > BlobLimit || size > BlobTotalLimit - total)
-                throw Fail("limit-exceeded", "The patch exceeds20MiB/blob or256MiB distinct blob work; restructure with owner approval or separately qualify a policy.");
+                throw Fail("limit-exceeded", "The patch exceeds 20 MiB per blob or 256 MiB across distinct blobs. Restructure the change with owner approval or qualify a separate policy.");
             total = checked(total + size);
             sizes.Add(objects[i], size);
         }
