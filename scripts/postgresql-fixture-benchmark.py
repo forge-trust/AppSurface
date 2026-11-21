@@ -1246,10 +1246,13 @@ def copy_inventory(root: Path, manifest: dict[str, object]) -> None:
 
 
 def protocol(args: argparse.Namespace) -> int:
-    root = args.results_root.expanduser().resolve()
-    if root.exists():
-        raise BenchmarkError("results root already exists, preserving existing evidence")
-    root.mkdir(parents=True)
+    try:
+        root = args.results_root.expanduser().absolute()
+        root.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as error:
+        raise BenchmarkError("results root already exists, preserving existing evidence") from error
+    except (OSError, RuntimeError) as error:
+        raise BenchmarkError("cannot create the results root; choose a new writable directory") from error
     records: list[dict[str, object]] = []
     status = "INVALID"
     try:
@@ -1363,10 +1366,9 @@ def make_parser() -> argparse.ArgumentParser:
             "disposable PostgreSQL 16+ server, a secure APPSURFACE_POSTGRES_TEST_CONNECTION environment value, "
             "a server metadata JSON file, and the parent-supplied independent acceptance TRX receipt. Never place the "
             "connection string in an argument or evidence file. Results roots are created once and are never reused. "
-            "Server metadata JSON shape: {\"version\":\"16.4\",\"settings\":{\"max_connections\":100,"
-            "\"shared_buffers\":\"1GB\"}}. The acceptance TRX must be the completed full fixture lifecycle and "
-            "clone-validation test-project run, include every required witness method, have unique result IDs, "
-            "match every case returned by acceptance-filter, and report zero failures, skips, and aborted results."
+            "Use the SQL in Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/README.md to capture all ten "
+            "required server settings. The acceptance TRX must contain the complete fixture acceptance matrix "
+            "selected by acceptance-filter, with unique result IDs and zero failures, skips, or aborted results."
         ),
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
@@ -1400,6 +1402,9 @@ def main() -> int:
         return args.handler(args)
     except BenchmarkError as error:
         print(f"INVALID: {error}", file=sys.stderr)
+        return 2
+    except OSError:
+        print("INVALID: cannot read or write benchmark evidence; check storage and directory permissions", file=sys.stderr)
         return 2
 
 

@@ -6,6 +6,8 @@ import csv
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -124,6 +126,24 @@ class RedactionTests(unittest.TestCase):
             with self.subTest(sentinel=sentinel):
                 self.assertNotIn(sentinel, output)
         self.assertIn("<redacted connection string>", output)
+
+
+class ResultsDirectoryTests(unittest.TestCase):
+    def test_unusable_results_root_returns_a_controlled_error_and_preserves_the_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            existing = Path(directory) / "existing"
+            existing.write_text("preserve")
+            for root in (existing, existing / "new"):
+                with self.subTest(root=root):
+                    result = subprocess.run(
+                        [sys.executable, str(SCRIPT), "run", "--results-root", str(root),
+                         "--server-info", "unused", "--acceptance-trx", "unused"],
+                        capture_output=True, text=True, check=False,
+                    )
+                    self.assertEqual(2, result.returncode)
+                    self.assertTrue(result.stderr.startswith("INVALID:"))
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual("preserve", existing.read_text())
 
 
 class ServerMetadataTests(unittest.TestCase):
