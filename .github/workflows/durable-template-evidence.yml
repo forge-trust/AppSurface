@@ -162,7 +162,12 @@ jobs:
             echo "$id" >> "$RUNNER_TEMP/durable-cold-container-ids"
             docker start "$id"
             timeout 60 bash -c 'until docker exec "$1" docker info >/dev/null 2>&1; do sleep 1; done' _ "$id"
-            ip=$(docker inspect --format '{{.NetworkSettings.IPAddress}}' "$id")
+            ip=$(docker inspect --format '{{(index .NetworkSettings.Networks "bridge").IPAddress}}' "$id")
+            ipv4_octet='(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])'
+            if [[ ! "$ip" =~ ^${ipv4_octet}\.${ipv4_octet}\.${ipv4_octet}\.${ipv4_octet}$ ]]; then
+              echo "Docker bridge IPv4 address is missing or invalid for $id: '$ip'" >&2
+              exit 1
+            fi
             echo "tcp://$ip:2375" >> "$RUNNER_TEMP/durable-cold-hosts"
           done
           echo "DURABLE_COLD_HOSTS=$(paste -sd, "$RUNNER_TEMP/durable-cold-hosts")" >> "$GITHUB_ENV"

@@ -2,6 +2,8 @@
 
 This is the operator and private-tool reference for the approved [#798 design](designs/issue-798-tailwind-artifact-provenance.md) and [implementation plan](plans/issue-798-tailwind-artifact-provenance.md). The flags, records and workflow behavior below describe the release provenance implementation. There is no consumer-facing package API change.
 
+For the separate internal verifier and local PackageIndex replay, see [offline release artifact binding](../tools/ForgeTrust.AppSurface.ReleaseContracts/README.md#offline-release-artifact-binding).
+
 ## Trust chain and authorities
 
 The validated tag checkout, repository identity, full source commit and coordinated package plan are the source authority. The producer runs `pack-and-verify` once, performs the existing local Linux consumer proof, and emits a package inventory (`package-artifact-manifest.unapproved.json` v1 for release publishing, `package-artifact-manifest.json` for manual rehearsal) plus `tailwind-proof-subject.json` (`appsurface-tailwind-proof-subject-v1`). The subject freezes package version, producer run and attempt, source/repository, exact manifest SHA-256, Tailwind package ID/file/raw SHA-512, exact internal Tailwind release-manifest SHA-256, `net10.0` consumer framework, payload projection version 1, and sorted first-party closure (at the reviewed base, Core and Tailwind), each with ID/version/file/raw SHA-512.
