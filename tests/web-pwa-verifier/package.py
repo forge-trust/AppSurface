@@ -203,14 +203,11 @@ def main() -> int:
             '"provider":"file-based-sample"}}}}',
             encoding="utf-8",
         )
-        shutil.copyfile(ROOT / "global.json", malformed_settings / "global.json")
-        malformed_settings_caller = malformed_settings / "caller"
-        malformed_settings_caller.mkdir()
         malformed_json_result = run_command(
             dotnet,
             malformed_settings / "Program.cs",
             malformed_settings / ".artifacts",
-            malformed_settings_caller,
+            caller,
             ["inspect", "--port", "5056"],
         )
         assert_success(
@@ -239,7 +236,7 @@ def main() -> int:
             dotnet,
             malformed_settings / "Program.cs",
             malformed_settings / ".artifacts",
-            malformed_settings_caller,
+            caller,
             ["inspect"],
         )
         assert malformed_default_result.returncode != 0, (

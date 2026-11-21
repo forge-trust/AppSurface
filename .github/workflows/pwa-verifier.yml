@@ -140,7 +140,7 @@ jobs:
         run: python3 tests/web-pwa-verifier/run.py
       - name: Upload this run's evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1c6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pwa-verifier-${{ matrix.os }}
           path: ${{ runner.temp }}/pwa-verifier-evidence/**
