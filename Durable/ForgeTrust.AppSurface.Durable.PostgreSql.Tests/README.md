@@ -51,7 +51,7 @@ If an owned clone’s drop fails, its case keeps the fixture lease. Once the fai
 
 ## Compare baseline and candidate
 
-The [five-pair measurement](../../artifacts/issue-931-fixture-benchmark/results.md) produced a measured no-go. The median improvement missed the variability threshold. Fresh is the supported default for these cohorts.
+The [original five-pair measurement and two verification runs](../../artifacts/issue-931-fixture-benchmark/results.md) yielded a no-go in the decision sample, a no-go in the first verification, and a pass on the repaired build. The decision sample missed the variability threshold. Fresh is the supported default for these cohorts.
 
 Fresh creation inherits `template1`. A ready candidate uses `CREATE DATABASE … TEMPLATE` with the class-owned source. Both statements omit `STRATEGY`. On PostgreSQL 17 this selects `WAL_LOG`, which copies blocks through the write-ahead log. The template must have no connected sessions when cloning begins. [PostgreSQL 17 CREATE DATABASE reference](https://www.postgresql.org/docs/17/sql-createdatabase.html)
 

@@ -35,3 +35,19 @@ Commit `ce2cc1f16c74e9342871bdf17600fa06077cddfc` also produced a **measured no-
 | 3 | 11.090 | 10.793 | 0.297 | 2.68% | −0.10% | 4.13% |
 | 4 | 12.580 | 11.233 | 1.347 | 10.71% | 3.99% | 14.50% |
 | 5 | 11.797 | 11.220 | 0.578 | 4.90% | −1.64% | 8.29% |
+
+## Final verification after the cleanup and acceptance repairs
+
+Commit `756b2425` passed the rule in its own five pairs. It saved a median **0.970 s** with an **8.43%** median gain and **2.39 percentage points** of median absolute deviation. Neither cohort slowed by 5% in any pair. This run tested the change that retains a case lease after a failed clone drop. The runner required a passing result for every fixture case discovered in the measured Release assembly, including theory rows. All 73 acceptance cases and all 408 timed case executions passed.
+
+| Pair | Fresh (s) | Template (s) | Saved (s) | Gain | Work gain | Flow gain |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 12.169 | 10.520 | 1.650 | 13.56% | 17.17% | 11.39% |
+| 2 | 11.510 | 11.341 | 0.169 | 1.47% | −1.65% | 3.06% |
+| 3 | 12.251 | 10.925 | 1.325 | 10.82% | 1.12% | 15.33% |
+| 4 | 11.527 | 10.577 | 0.949 | 8.24% | −0.20% | 12.59% |
+| 5 | 11.508 | 10.539 | 0.970 | 8.43% | 1.37% | 12.09% |
+
+The [final verification archive](final-verification.tar.xz) contains the indexed receipts for all 24 processes, the acceptance TRX, and identical before/after hashes for all 166 Release files. Its catalog query identified zero fixture databases and zero fixture roles both before and after measurement. The earlier archives recorded SQL `json_agg` results, which return `null` for zero matching rows. The final query includes counts and empty arrays explicitly.
+
+The original five pairs determine the experiment’s adoption recommendation. The two verification runs give different answers under the same rule and are reported separately. Fresh remains the default.

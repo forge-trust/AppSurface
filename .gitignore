@@ -45,6 +45,7 @@ artifacts/*
 !/artifacts/issue-931-fixture-benchmark/results.md
 !/artifacts/issue-931-fixture-benchmark/process-evidence.tar.xz
 !/artifacts/issue-931-fixture-benchmark/verification-evidence.tar.xz
+!/artifacts/issue-931-fixture-benchmark/final-verification.tar.xz
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
