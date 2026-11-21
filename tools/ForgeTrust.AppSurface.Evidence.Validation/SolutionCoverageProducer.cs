@@ -358,6 +358,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         var receipt = acceptance.RootElement;
         var source = receipt.GetProperty("source");
         var workflow = receipt.GetProperty("run");
+        if (receipt.GetProperty("schemaVersion").GetInt32() != contractVersion)
+            throw new InvalidDataException("Native acceptance receipt does not match the verified contract version.");
         if (receipt.GetProperty("policyDigest").GetString() != policyDigest
             || source.GetProperty("commit").GetString() != commit || source.GetProperty("tree").GetString() != tree
             || source.GetProperty("sdk").GetString() != sdk || source.GetProperty("configuration").GetString() != "Release"
@@ -384,8 +386,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     private static async Task ValidateV3ApplicabilityAsync(string accepted, JsonElement receipt, JsonElement verified,
         string diffBase, string commit, CancellationToken cancellationToken)
     {
-        if (receipt.GetProperty("schemaVersion").GetInt32() != 3
-            || receipt.GetProperty("evaluationIntent").GetString() != "currentTrustedRun"
+        if (receipt.GetProperty("evaluationIntent").GetString() != "currentTrustedRun"
             || receipt.GetProperty("patchOutcome").GetString() != "PatchAccepted")
             throw new InvalidDataException("Native v3 did not retain a current patch acceptance receipt.");
 
@@ -399,11 +400,15 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 throw new InvalidDataException("Native v3 acceptance differs from its retained patch proof.");
 
         using var metadata = ReadJson(Path.Join(accepted, "diff-metadata.json"), MaxJson);
-        if (metadata.RootElement.GetProperty("schemaVersion").GetInt32() != 3
-            || metadata.RootElement.GetProperty("requestedBaseCommit").GetString() != diffBase
-            || metadata.RootElement.GetProperty("headCommit").GetString() != commit
-            || !IsRepositoryCommit(metadata.RootElement.GetProperty("mergeBaseCommit").GetString()))
+        var diff = metadata.RootElement;
+        if (diff.GetProperty("schemaVersion").GetInt32() != 3
+            || diff.GetProperty("requestedBaseCommit").GetString() != diffBase
+            || diff.GetProperty("headCommit").GetString() != commit
+            || !IsRepositoryCommit(diff.GetProperty("mergeBaseCommit").GetString()))
             throw new InvalidDataException("Native v3 patch proof is not bound to the requested base and head.");
+        if (diff.GetProperty("diffPolicyId").GetString() != "appsurface-git-patch-v1"
+            || diff.GetProperty("diffSha256").GetString() != receipt.GetProperty("diffSha256").GetString())
+            throw new InvalidDataException("Native v3 diff metadata does not bind the required diff policy and accepted patch.");
 
         using var applicability = ReadJson(Path.Join(accepted, "patch-applicability.json"), MaxJson);
         var claim = applicability.RootElement;

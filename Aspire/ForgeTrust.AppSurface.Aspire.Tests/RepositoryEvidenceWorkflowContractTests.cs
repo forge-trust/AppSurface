@@ -252,7 +252,9 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Equal(1, capture.Split("$env:COVERAGE_V3_DIFF_BASE", StringSplitOptions.None).Length - 1);
         Assert.Equal(1, capture.Split("'--diff-base'", StringSplitOptions.None).Length - 1);
         Assert.Contains("/usr/bin/time -l dotnet @command", capture);
+        Assert.Contains("$resourceLog = \"$env:COVERAGE_DOGFOOD_OUTPUT.time.log\"", capture);
         Assert.Contains("darwin-rss.json", capture);
+        Assert.Contains("if ($rss.Count -ne 1) { throw \"Native coverage capture omitted the macOS maximum RSS.\" }", capture);
         var captureOutput = captureStep["env"].AsMapping()["COVERAGE_DOGFOOD_OUTPUT"].AsScalar();
         Assert.Equal("${{ runner.temp }}/coverage-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}", captureOutput);
         var nativeUpload = FindStep(securitySteps, "Upload attested native coverage")["with"].AsMapping();
@@ -262,7 +264,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Equal("${{ !cancelled() && steps.capture-native-coverage.outcome == 'failure' }}", failureUpload["if"].AsScalar());
         var failureArtifact = failureUpload["with"].AsMapping();
         Assert.Equal("coverage-capture-failure-${{ matrix.os }}-${{ github.run_attempt }}", failureArtifact["name"].AsScalar());
-        Assert.Equal(captureOutput + "/native-result.json", failureArtifact["path"].AsScalar());
+        Assert.Equal(captureOutput + "/native-result.json\n" + captureOutput + ".time.log\n", failureArtifact["path"].AsScalar());
         Assert.Equal("ignore", failureArtifact["if-no-files-found"].AsScalar());
         Assert.Contains("capture-path=$env:COVERAGE_DOGFOOD_OUTPUT", capture);
         Assert.DoesNotContain("python", capture, StringComparison.OrdinalIgnoreCase);

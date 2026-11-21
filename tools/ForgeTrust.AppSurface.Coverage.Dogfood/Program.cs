@@ -175,8 +175,10 @@ internal static class CoverageDogfood
             or InvalidOperationException or FormatException or OverflowException or KeyNotFoundException or UnauthorizedAccessException
             or CoverageExecutionException or OperationCanceledException)
         {
-            var reason = exception is CoverageFanInEvidenceException evidence ? evidence.Cause : exception.GetType().Name;
-            Console.Error.WriteLine($"ASCOV311 Dogfood failed at {stage} ({reason}). Inspect retained native command result files and correct the explicit repository policy/configuration; preserve partial output.");
+            var (reason, recovery) = exception is CoverageFanInEvidenceException evidence
+                ? (evidence.Cause, evidence.Recovery)
+                : (exception.GetType().Name, "Inspect retained native command result files and correct the explicit repository policy/configuration.");
+            Console.Error.WriteLine($"ASCOV311 Dogfood failed at {stage} ({reason}). {recovery} Preserve partial output.");
             return 1;
         }
     }

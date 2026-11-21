@@ -40,6 +40,10 @@ V3 changes patch applicability reporting at the collector trust boundary. A vali
 
 Before promotion to `main`, qualify the rollout on the exact candidate and its actual PR base. Bind the primary, all three native captures, the selected hosted Evidence producers and the required resource measurements to one workflow run and attempt. Run the installed public API and CLI checks and complete the selected local producers against the same candidate. Focused fixture results cover contract behavior only.
 
+Under the [v3 Git diff policy](#deterministic-git-policy-appsurface-git-patch-v1), a tracked binary replacement fails the required PR-native gate with `ASCOV302` and cause `unsupported-diff`, including when the same patch contains covered source changes. A maintainer must resolve the unsupported input or qualify a new diff policy before collecting fresh evidence.
+
+The rollout's full-solution collection also runs the Durable PostgreSQL preflight and Keycloak inspection tests. The rollout includes test-only fixes for PostgreSQL's asynchronous backend exit and for a Keycloak redaction assertion that could match the checkout path in an exception stack trace. The required [coverage workflow](#current-ci-path) needs successful collection before it can run native acceptance.
+
 ### API outcomes and decision rules
 
 The public [Coverage API](../Coverage/ForgeTrust.AppSurface.Coverage/README.md#request-and-result-reference) returns `CoverageFanInResult.PatchApplicability`, a `CoveragePatchApplicability` with required `Primary` and `Composed` metric sets. Each `CoveragePatchMetricSet` has required `Line` and `Branch` results. The v3 CLI result exposes the same four dimensions. Each metric has six required wire fields: `outcome`, `reason`, `changedLines`, `measurable`, `covered`, and `percent`; nullable values remain explicit JSON `null`.
