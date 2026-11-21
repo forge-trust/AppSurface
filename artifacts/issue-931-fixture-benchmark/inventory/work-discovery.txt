@@ -1,0 +1,6 @@
+Test run for <WORKTREE>/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.dll (.NETCoreApp,Version=v10.0)
+The following Tests are available:
+    ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests.DefinitionRequest_AndDirectRequestShareAcceptanceIdentityAndPersistedFacts
+    ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests.ChangedDefinitionDefaultWithoutOverride_Conflicts_WhileExplicitOriginalOverrideRestoresDuplicate
+    ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests.TransactionWriter_RollbackRemovesWorkAndCallerDomainRows
+    ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests.DefinitionBinding_UsesBoundedRuntimePumpAndReturnsExactTypedResult

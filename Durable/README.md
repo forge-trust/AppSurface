@@ -1,5 +1,7 @@
 # Portable durable execution
 
+Contributors working on database setup or test runtime can use the [PostgreSQL fixture and benchmark guide](ForgeTrust.AppSurface.Durable.PostgreSql.Tests/README.md) to reproduce the Work and Flow comparison on a disposable server.
+
 The [runtime doctor](runtime-doctor.md) diagnoses one connected store with a restricted credential and optional worker observation. Its clean result is a captured store/runtime check; deployment preflight and application verification remain separate.
 
 The [schema-11 heartbeat retention guide](heartbeat-retention-operations.md) is the start page for automatic cleanup of stale runtime identities, its 24-hour default, migration, release proof, and recovery.

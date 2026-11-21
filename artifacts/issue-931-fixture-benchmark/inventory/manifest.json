@@ -1,0 +1,281 @@
+{
+  "objective": "Pinned Work and Flow discovery for issue #931",
+  "revision": "3f3126a5febff2cb94847bf8a1092b5d61657a18",
+  "sdk": {
+    "version": "10.0.402"
+  },
+  "configuration": "Release",
+  "project": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj",
+  "restore": "succeeded",
+  "build": {
+    "result": "succeeded",
+    "warnings": 0,
+    "errors": 0
+  },
+  "test_execution": "none; discovery only",
+  "filters": {
+    "work": "FullyQualifiedName~ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests",
+    "flow": "FullyQualifiedName~ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests"
+  },
+  "counts": {
+    "work": 4,
+    "flow": 30
+  },
+  "methods": {
+    "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests": [
+      "DefinitionRequest_AndDirectRequestShareAcceptanceIdentityAndPersistedFacts",
+      "ChangedDefinitionDefaultWithoutOverride_Conflicts_WhileExplicitOriginalOverrideRestoresDuplicate",
+      "TransactionWriter_RollbackRemovesWorkAndCallerDomainRows",
+      "DefinitionBinding_UsesBoundedRuntimePumpAndReturnsExactTypedResult"
+    ],
+    "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests": [
+      "Flow_StartWaitEventResumeComplete_IsIdempotentAndAuthoritative",
+      "EventDuplicate_ReturnsPersistedTruthAfterEventCodecRetires",
+      "FlowClaim_ConcurrentProcessorsApplyOneDecisionAndRejectStaleCandidates",
+      "EventBeforeWait_DoesNotConsumeIdentity_AndChangedStartConflicts",
+      "FlowStore_BoundsUniqueViolationRetriesForEventsAndLifecycleCommands",
+      "FlowStore_RejectsInvalidRuntimeMetadataAndEventsForMissingFlows",
+      "FlowStore_FailsClosedWhenPersistedCommandIdentitiesCross",
+      "Flow_IdentityAndTimerGuards_RejectChangedRetriesAndStaleTimerRows",
+      "FlowClaim_RecoversExpiredLeaseAndReportsAConcurrentSuspensionAsStale",
+      "FlowClaim_ReturnsNullWhenScopeIsInactiveOrRemoved",
+      "FlowClaim_RejectsPersistedContextWithAnInvalidHash",
+      "FlowClaim_RejectsPersistedEventPayloadWithAnInvalidHash",
+      "FlowClaim_RejectsPersistedActivityResultWithAnInvalidHash",
+      "FlowProcessor_SuspendsAnActivityDecisionWithAnInvalidWorkPayload",
+      "ActivityCompletion_ProjectsWorkResultAndResumesParentAtomically",
+      "ClaimTimeRecovery_SuspendsTheParentActivityFlowAtomically",
+      "FlowActivityCommit_GuardsProviderSafetyAndRollsBackStaleChildAcceptance",
+      "FlowClient_StartRejectsANonAuthoritativeContextCodec",
+      "TimerAndEventRace_HasOneRevisionWinnerAndDuplicateStableLoser",
+      "TimerResolution_MissingFlowDispatchRollsBackEveryWinnerMutation",
+      "TraceAttachment_MissingRequestedPointerRollsBackEveryTraceMutation",
+      "TimerResolution_SupersedesACandidateThatIsNoLongerDue",
+      "TimerResolution_ObservesItsCommittedBarrier",
+      "Flow_EventAndLifecycleCardinalityGuards_RollBackPartialProjections",
+      "ScopeDisable_SuspendsFlowDispatchWaitAndHistoryTogether",
+      "Flow_StateProjectionFiltersPaginationAndRecovery_CoverEveryPersistedShape",
+      "Flow_Processor_CoversNextFaultAndTimedOutTransitions",
+      "Flow_LifecycleCommands_CoverFailureDuplicateRaceAndReleaseRecoveryPaths",
+      "Flow_Processor_SuspendsEvaluationFailureManifestMismatchAndInvalidDecision",
+      "Flow_EventContractAndEventWinner_CoverEveryPayloadMismatchAndTimerRaceLoss"
+    ]
+  },
+  "source_comparison": {
+    "work": "4/4 discovered methods match source",
+    "flow": "30/30 discovered methods match source",
+    "database_setup": {
+      "ready": 33,
+      "empty": 1,
+      "empty_method": "FlowClient_StartRejectsANonAuthoritativeContextCodec",
+      "meaning": "Empty PostgreSQL database. The method creates a database and performs no schema migration or epoch initialization."
+    }
+  },
+  "redaction": "absolute worktree path replaced with <WORKTREE> in discovery outputs",
+  "cases": [
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.ActivityCompletion_ProjectsWorkResultAndResumesParentAtomically",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 1270
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.ClaimTimeRecovery_SuspendsTheParentActivityFlowAtomically",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 1758
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.EventBeforeWait_DoesNotConsumeIdentity_AndChangedStartConflicts",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 228
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.EventDuplicate_ReturnsPersistedTruthAfterEventCodecRetires",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 120
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowActivityCommit_GuardsProviderSafetyAndRollsBackStaleChildAcceptance",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 1838
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowClaim_ConcurrentProcessorsApplyOneDecisionAndRejectStaleCandidates",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 180
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowClaim_RecoversExpiredLeaseAndReportsAConcurrentSuspensionAsStale",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 787
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowClaim_RejectsPersistedActivityResultWithAnInvalidHash",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 1138
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowClaim_RejectsPersistedContextWithAnInvalidHash",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 962
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowClaim_RejectsPersistedEventPayloadWithAnInvalidHash",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 1015
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowClaim_ReturnsNullWhenScopeIsInactiveOrRemoved",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 881
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowClient_StartRejectsANonAuthoritativeContextCodec",
+      "database": "empty",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2013
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowProcessor_SuspendsAnActivityDecisionWithAnInvalidWorkPayload",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 1220
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowStore_BoundsUniqueViolationRetriesForEventsAndLifecycleCommands",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 332
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowStore_FailsClosedWhenPersistedCommandIdentitiesCross",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 507
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.FlowStore_RejectsInvalidRuntimeMetadataAndEventsForMissingFlows",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 430
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.Flow_EventAndLifecycleCardinalityGuards_RollBackPartialProjections",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2475
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.Flow_EventContractAndEventWinner_CoverEveryPayloadMismatchAndTimerRaceLoss",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 3196
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.Flow_IdentityAndTimerGuards_RejectChangedRetriesAndStaleTimerRows",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 658
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.Flow_LifecycleCommands_CoverFailureDuplicateRaceAndReleaseRecoveryPaths",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2888
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.Flow_Processor_CoversNextFaultAndTimedOutTransitions",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2830
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.Flow_Processor_SuspendsEvaluationFailureManifestMismatchAndInvalidDecision",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 3109
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.Flow_StartWaitEventResumeComplete_IsIdempotentAndAuthoritative",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 11
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.Flow_StateProjectionFiltersPaginationAndRecovery_CoverEveryPersistedShape",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2705
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.ScopeDisable_SuspendsFlowDispatchWaitAndHistoryTogether",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2576
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.TimerAndEventRace_HasOneRevisionWinnerAndDuplicateStableLoser",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2041
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.TimerResolution_MissingFlowDispatchRollsBackEveryWinnerMutation",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2196
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.TimerResolution_ObservesItsCommittedBarrier",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2411
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.TimerResolution_SupersedesACandidateThatIsNoLongerDue",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2351
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests.TraceAttachment_MissingRequestedPointerRollsBackEveryTraceMutation",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableFlowStoreTests.cs",
+      "line": 2284
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests.ChangedDefinitionDefaultWithoutOverride_Conflicts_WhileExplicitOriginalOverrideRestoresDuplicate",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableWorkDefinitionTests.cs",
+      "line": 64
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests.DefinitionBinding_UsesBoundedRuntimePumpAndReturnsExactTypedResult",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableWorkDefinitionTests.cs",
+      "line": 159
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests.DefinitionRequest_AndDirectRequestShareAcceptanceIdentityAndPersistedFacts",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableWorkDefinitionTests.cs",
+      "line": 16
+    },
+    {
+      "identity": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests.TransactionWriter_RollbackRemovesWorkAndCallerDomainRows",
+      "database": "ready",
+      "source": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableWorkDefinitionTests.cs",
+      "line": 122
+    }
+  ]
+}
