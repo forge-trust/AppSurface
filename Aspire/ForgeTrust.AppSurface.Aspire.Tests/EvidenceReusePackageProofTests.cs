@@ -129,6 +129,12 @@ public sealed class EvidenceReusePackageProofTests
             Assert.True(IsProbeProcess(process, activeProbe.ExecutablePath), "The recorded PID must belong to the private renamed probe apphost.");
             Assert.False(activeRun.IsCompleted);
 
+            var activeLogPath = TestPathUtils.PathUnder(output, "sdk.log");
+            Assert.True(File.Exists(activeLogPath), "Stage diagnostics must exist before the active SDK process exits.");
+            using var activeLog = JsonDocument.Parse(await File.ReadAllBytesAsync(activeLogPath, deadline.Token));
+            Assert.Equal("sdk", activeLog.RootElement.GetProperty("stage").GetString());
+            Assert.Equal("starting", activeLog.RootElement.GetProperty("state").GetString());
+
             var globalJsonPath = TestPathUtils.PathUnder(output, "global.json");
             Assert.True(File.Exists(globalJsonPath), "The pinned SDK configuration must exist while the SDK query process is active.");
             using var globalJson = JsonDocument.Parse(await File.ReadAllBytesAsync(globalJsonPath, deadline.Token));

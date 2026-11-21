@@ -14,7 +14,9 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 /// Feed admission precedes output creation. Consumer restores intentionally use private caches and source mapping;
 /// normal developer caches and checkout outputs are not provenance. Only nested synthetic-local executions remove
 /// GITHUB_ACTIONS. The proof process and normal CI admission remain unchanged. No container runtime is required.
-/// Stage logs and proof.json survive failure. No caller-owned files, feeds, or shared processes are removed.
+/// Stage logs start with a diagnostic marker before launch and are replaced by captured output only after joining
+/// the process. A starting marker is not settlement or acceptance evidence. Logs and proof.json survive failure.
+/// No caller-owned files, feeds, or shared processes are removed.
 /// </remarks>
 internal static class EvidenceReusePackageProof
 {
@@ -583,8 +585,23 @@ internal static class EvidenceReusePackageProof
             environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
             foreach (var key in new[] { "APPSURFACE_EVIDENCE_CHILD_PIPE", "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID", "APPSURFACE_EVIDENCE_CHILD_NONCE" }) environment.Remove(key);
             if (syntheticLocal) environment.Remove("GITHUB_ACTIONS");
+            await File.WriteAllTextAsync(Path.Join(root, stage + ".log"), JsonSerializer.Serialize(new
+            {
+                stage,
+                state = "starting",
+                startedAtUtc = DateTimeOffset.UtcNow
+            }), timeout.Token).ConfigureAwait(false);
             var stopwatch = Stopwatch.StartNew();
-            process.Start();
+            try
+            {
+                process.Start();
+            }
+            catch
+            {
+                // A rejected launch has no active stage; preserve the existing failure-proof contract.
+                File.Delete(Path.Join(root, stage + ".log"));
+                throw;
+            }
             var outputCapture = new StringBuilder();
             var errorCapture = new StringBuilder();
             var stdout = DrainAsync(process.StandardOutput, outputCapture, timeout.Token);

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Testing;
 using Xunit.Abstractions;
@@ -8,6 +10,8 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
 {
+    private const string DiagnosticsParentVariable = "APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS";
+
     [Fact]
     public void PhysicalDirectoryPreservesFilesystemRoots()
     {
@@ -19,12 +23,64 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void DiagnosticsParentRejectsRelativeMissingAndCheckoutDirectories()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        Assert.Throws<ArgumentException>(() => CreateScratchDirectory(repository, "relative-diagnostics"));
+        Assert.Throws<ArgumentException>(() => CreateScratchDirectory(repository,
+            Path.Join(Path.GetTempPath(), "missing-diagnostics-" + Guid.NewGuid().ToString("N"))));
+        Assert.Throws<ArgumentException>(() => CreateScratchDirectory(repository, repository));
+        Assert.Throws<ArgumentException>(() => CreateScratchDirectory(repository, AppContext.BaseDirectory));
+    }
+
+    [Fact]
+    public void DiagnosticsParentReceivesUniquePrivateChildrenAndPreservesExistingFiles()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var parent = Directory.CreateTempSubdirectory("packed-diagnostics-parent-").FullName;
+        try
+        {
+            var sentinel = Path.Join(parent, "sentinel.txt");
+            File.WriteAllText(sentinel, "caller-owned");
+            var first = CreateScratchDirectory(repository, parent);
+            var second = CreateScratchDirectory(repository, parent);
+            Assert.NotEqual(first, second);
+            Assert.Equal(PhysicalDirectory(new DirectoryInfo(parent)), Directory.GetParent(first)!.FullName);
+            Assert.True(Directory.Exists(first));
+            Assert.True(Directory.Exists(second));
+            if (OperatingSystem.IsWindows())
+            {
+                var security = new DirectoryInfo(first).GetAccessControl();
+                Assert.True(security.AreAccessRulesProtected);
+                Assert.Equal(WindowsIdentity.GetCurrent().User, security.GetOwner(typeof(SecurityIdentifier)));
+                var rule = Assert.Single(security.GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>());
+                Assert.Equal(WindowsIdentity.GetCurrent().User, rule.IdentityReference);
+                Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+                Assert.Equal(FileSystemRights.FullControl, rule.FileSystemRights);
+                Assert.Equal(InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, rule.InheritanceFlags);
+            }
+            else
+            {
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                    File.GetUnixFileMode(first));
+            }
+            NativeEvidenceTestDirectory.Delete(first);
+            NativeEvidenceTestDirectory.Delete(second);
+            Assert.Equal("caller-owned", File.ReadAllText(sentinel));
+        }
+        finally
+        {
+            NativeEvidenceTestDirectory.Delete(parent);
+        }
+    }
+
+    [Fact]
     public async Task ActualPackedConsumersRestoreTheOriginalReportsAndSkipWarmHostStartup()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         // Assembly.Location uses the physical path on macOS; pin scratch to the same spelling
         // before the proof compares the independently loaded consumer assemblies to their root.
-        var scratch = PhysicalDirectory(Directory.CreateTempSubdirectory("evidence-packed-journey-"));
+        var scratch = CreateScratchDirectory(repository, Environment.GetEnvironmentVariable(DiagnosticsParentVariable));
         var feed = TestPathUtils.PathUnder(scratch, "feed");
         var proofRoot = TestPathUtils.PathUnder(scratch, "proof");
         Directory.CreateDirectory(feed);
@@ -54,9 +110,22 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
                     repository, scratch, "pack-" + Path.GetFileNameWithoutExtension(project), deadline.Token);
             }
 
+            var consumerLog = TestPathUtils.PathUnder(scratch, "consumer-proof.log");
+            await File.WriteAllTextAsync(consumerLog, JsonSerializer.Serialize(new
+            {
+                stage = "consumer-proof",
+                state = "starting",
+                startedAtUtc = DateTimeOffset.UtcNow
+            }), deadline.Token);
             var result = await ValidationProgram.RunAsync(
                 ["--operation", "reuse-package-proof", "--feed", feed, "--version", version,
                     "--output", proofRoot, "--dotnet", dotnet, "--source-commit", commit], deadline.Token);
+            await File.WriteAllTextAsync(consumerLog, JsonSerializer.Serialize(new
+            {
+                stage = "consumer-proof",
+                state = "completed",
+                exitCode = result
+            }), CancellationToken.None);
             var reportPath = TestPathUtils.PathUnder(proofRoot, "proof.json");
             var report = await File.ReadAllTextAsync(reportPath, deadline.Token);
             Assert.True(result == 0, $"Packed journey failed. Retained report {reportPath}:{Environment.NewLine}{report}");
@@ -105,6 +174,44 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
             .Where(Directory.Exists).Select(directory => TestPathUtils.PathUnder(directory, executable)).First(File.Exists);
     }
 
+    /// <summary>Creates private test scratch, optionally beneath an existing diagnostics parent outside the checkout.</summary>
+    /// <remarks>
+    /// A configured parent receives a random private child (Unix mode 0700 or protected current-user Windows ACL),
+    /// including when runner diagnostics and platform temporary storage occupy different volumes.
+    /// Successful journeys delete only their child; failures retain it. Without a parent, BCL temporary creation is used.
+    /// Physical paths reject a diagnostics parent that resolves into the checkout. This is trusted runner setup,
+    /// not an adversarial filesystem sandbox. The caller owns cleanup and must not treat retained logs as acceptance.
+    /// </remarks>
+    internal static string CreateScratchDirectory(string repository, string? diagnosticsParent)
+    {
+        string? parent = null;
+        if (!string.IsNullOrEmpty(diagnosticsParent))
+        {
+            if (!Path.IsPathFullyQualified(diagnosticsParent) || !Directory.Exists(diagnosticsParent))
+                throw new ArgumentException("Packed journey diagnostics require an existing absolute parent.", nameof(diagnosticsParent));
+            parent = PhysicalDirectory(new DirectoryInfo(diagnosticsParent));
+            var checkout = Path.TrimEndingDirectorySeparator(PhysicalDirectory(new DirectoryInfo(repository)));
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (parent.Equals(checkout, comparison) || parent.StartsWith(checkout + Path.DirectorySeparatorChar, comparison))
+                throw new ArgumentException("Packed journey diagnostics must be outside the checkout.", nameof(diagnosticsParent));
+        }
+
+        if (parent is null) return PhysicalDirectory(Directory.CreateTempSubdirectory("evidence-packed-journey-"));
+        var destination = Path.Join(parent, "evidence-packed-journey-" + Guid.NewGuid().ToString("N"));
+        if (OperatingSystem.IsWindows())
+        {
+            var owner = WindowsIdentity.GetCurrent().User ?? throw new IOException("Current Windows user has no security identifier.");
+            var security = new DirectorySecurity();
+            security.SetOwner(owner);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(owner, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+            new DirectoryInfo(destination).Create(security);
+        }
+        else Directory.CreateDirectory(destination, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return PhysicalDirectory(new DirectoryInfo(destination));
+    }
+
     private static string PhysicalDirectory(DirectoryInfo directory)
     {
         // Volume and UNC roots are terminal; Windows cannot inspect them as links.
@@ -130,6 +237,12 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         process.StartInfo.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(logs, stage + ".log"), JsonSerializer.Serialize(new
+        {
+            stage,
+            state = "starting",
+            startedAtUtc = DateTimeOffset.UtcNow
+        }), cancellationToken);
         process.Start();
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();

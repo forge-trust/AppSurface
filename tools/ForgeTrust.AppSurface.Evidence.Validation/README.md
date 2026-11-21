@@ -335,6 +335,30 @@ The storage producer extracts the package into an owned workspace and verifies i
 
 The consumer producer installs the supplied package in an isolated tool directory and cache, verifies installed bytes, and collects fresh Release coverage and JUnit results from the checked-in two-project consumer. Every required project and test fragment must execute successfully. Overall coverage must pass 95% line and 85% branch with zero tolerance. Report, manifest, log and timing readers must still work, and source/settings integrity must remain unchanged. This fixture proves the repeatable consumer recipe; it does not claim to have executed an arbitrary external application's tests.
 
+### Packed producer reuse package proof
+
+Use `reuse-package-proof` to validate a packed candidate CLI and an independent package-only prepared host. It checks candidate archive identity and dependency closure, installs the packed tool, and runs the host and CLI reuse assertions. The [local producer reuse guide](../../guides/evidence-reuse.md) explains the reuse contract, adoption choices, and pitfalls.
+
+Build or select a candidate feed, then invoke the validation assembly with all five required values:
+
+```bash
+dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll \
+  --operation reuse-package-proof \
+  --feed /absolute/candidate-feed \
+  --version EXACT_VERSION \
+  --source-commit FULL_SOURCE_COMMIT \
+  --dotnet /absolute/dotnet \
+  --output /absolute/fresh-proof
+```
+
+This operation accepts only `--operation`, `--feed`, `--version`, `--source-commit`, `--dotnet`, and `--output`. All are required and there are no option defaults. The feed must contain same-version packages for `ForgeTrust.AppSurface.Cli`, `ForgeTrust.AppSurface.Evidence.Contracts`, `ForgeTrust.AppSurface.Evidence.Planner`, `ForgeTrust.AppSurface.Evidence.Readiness`, `ForgeTrust.AppSurface.Evidence.Coverage`, `ForgeTrust.AppSurface.Coverage`, and `ForgeTrust.AppSurface.Evidence.Aspire`. `ForgeTrust.AppSurface.Evidence.Cli` is checked as well when it is separately packed into the feed. The candidate version and private dependency edges must match exactly, and every package's repository commit metadata must match the supplied 40- or 64-character source commit. The selected host must be an existing .NET SDK host at version 10.0.402.
+
+The output path must be fresh and outside both the checkout and candidate feed. Feed admission happens before output creation. Completed success and caught failures after admission write `proof.json`; caller cancellation or external termination can leave only the stage logs. Each `<stage>.log` is first written immediately before process launch as JSON containing `stage`, `state: "starting"`, and `startedAtUtc`. If `Process.Start` fails, that marker is removed. For a launched stage, the marker remains during execution and is replaced with captured, redacted output only after the child exits and its output streams are collected. A starting marker is diagnostic only. It does not prove process settlement or acceptance by a gate. The operation returns zero only after all recorded assertions pass.
+
+The native [acceptance workflow](../../.github/workflows/native-evidence-validation.yml) runs this proof against its same-source candidate packages. The [packed journey test](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidencePackedReuseJourneyTests.cs) also supports the test-only `APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS` environment variable. When set, its value must be an existing absolute parent physically outside the checkout. The test creates a random child directly under that parent with Unix mode `0700`, or a protected Windows ACL granting the current user FullControl with file and directory inheritance. It does not move the directory from platform temporary storage, so the parent needs no same-filesystem relationship to the temp directory. When unset, the test keeps its existing BCL temporary-directory behavior. Successful journeys delete their scratch child; failed or interrupted journeys preserve it. The existing two-minute inactivity guard is unchanged.
+
+The [build workflow](../../.github/workflows/build.yml) sets this parent to `runner.temp/packed-reuse-diagnostics`. Its upload selection from that parent is limited to `pack-*.log`, `source.log`, `consumer-proof.log`, `proof/*.log`, and `proof/proof.json`. The starting markers in those files are diagnostic snapshots and do not settle a running stage or satisfy native acceptance.
+
 ## External consumer profile
 
 Pass `--consumer-profile /absolute/profile.json` to run a consumer you own. A profile supplies these fields:

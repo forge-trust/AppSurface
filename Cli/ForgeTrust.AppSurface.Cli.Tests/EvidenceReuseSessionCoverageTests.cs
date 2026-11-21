@@ -411,7 +411,10 @@ public sealed class EvidenceReuseSessionCoverageTests
         await using var session = await EvidenceProducerReuseSession.PrepareAsync(plan, Registrations(producer),
             new Dictionary<string, string>(), ReuseOptions(repository.Root, store), _ => artifacts, CancellationToken.None);
         var key = Assert.IsType<string>(Assert.Single(session.Decisions).ProducerKey);
-        Assert.True(await session.BeginExecutionAsync(CancellationToken.None));
+        var admitted = await session.BeginExecutionAsync(CancellationToken.None);
+        Assert.True(admitted, admitted ? null :
+            $"Admission unavailable={session.IsUnavailable}; decisions="
+            + System.Text.Json.JsonSerializer.Serialize(session.Decisions));
         var result = await producer.ProduceAsync(new EvidenceProducerContext(plan, declaration,
             TimeProvider.System, session.GetWriter(declaration)), CancellationToken.None);
         Assert.True(await session.BeforeCleanupAsync(true, CancellationToken.None));

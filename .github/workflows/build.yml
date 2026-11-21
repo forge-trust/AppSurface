@@ -318,7 +318,10 @@ jobs:
 
       - name: Run coverage security contracts
         shell: pwsh
+        env:
+          APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS: ${{ runner.temp }}/packed-reuse-diagnostics
         run: |
+          New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS | Out-Null
           $filter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceHost|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePrepared|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceProducerKeyMaterialExecution|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceKeyMaterialFailure|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceReusePackageProofTests|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePackedReuseJourneyTests|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.NativeEvidenceProgramTests"
           $arguments = @('coverage', 'run',
             '--test-project', 'Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj',
@@ -407,7 +410,13 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-security-diagnostics-${{ matrix.os }}
-          path: ${{ runner.temp }}/coverage-native-results
+          path: |
+            ${{ runner.temp }}/coverage-native-results
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/pack-*.log
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/source.log
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/proof/proof.json
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/consumer-proof.log
           if-no-files-found: warn
           retention-days: 7
 

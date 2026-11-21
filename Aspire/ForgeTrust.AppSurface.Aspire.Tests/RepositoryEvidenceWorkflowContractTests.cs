@@ -92,7 +92,9 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var declaredFilter = JsonSerializer.Deserialize<string>(declaration[(declaration.IndexOf('=') + 1)..]
             .Trim().TrimEnd(';'));
         var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
-        var collector = FindStep(job["steps"].AsSequence(), "Run coverage security contracts")["run"].AsScalar();
+        var securitySteps = job["steps"].AsSequence();
+        var collectorStep = FindStep(securitySteps, "Run coverage security contracts");
+        var collector = collectorStep["run"].AsScalar();
         var filter = Assert.Single(Regex.Matches(collector, "\\$filter\\s*=\\s*\"([^\"]+)\"").Cast<Match>());
 
         Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
@@ -102,11 +104,26 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("'--test-project', 'Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj'", collector);
         Assert.Contains("'--artifact-retention', 'full'", collector);
         Assert.Contains("'--test-argument', '--blame-hang-timeout', '--test-argument', '2m'", collector);
+        Assert.Equal("${{ runner.temp }}/packed-reuse-diagnostics",
+            collectorStep["env"].AsMapping()["APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS"].AsScalar());
+        Assert.Contains("New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS", collector);
         var capture = FindStep(job["steps"].AsSequence(), "Attest successful native coverage evidence")["run"].AsScalar();
         Assert.Contains("'--raw-index', $indexPath, '--timings', $timingsPath", capture);
         Assert.Contains("$reports.Count -ne 2", capture);
         Assert.Contains("$contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }", capture);
         Assert.Contains("'--contract-version', $contractVersion", capture);
+
+        var diagnostics = FindStep(securitySteps, "Upload coverage security diagnostics");
+        var diagnosticPaths = diagnostics["with"].AsMapping()["path"].AsScalar();
+        Assert.Equal(new[]
+        {
+            "${{ runner.temp }}/coverage-native-results",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/pack-*.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/source.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/proof.json",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/consumer-proof.log"
+        }, diagnosticPaths.Split('\n', StringSplitOptions.RemoveEmptyEntries));
     }
 
     [Fact]
