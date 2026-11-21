@@ -856,8 +856,11 @@ public sealed class RazorWireDialogPlaywrightTests
         await page.WaitForURLAsync(url => new Uri(url).AbsolutePath.Equals("/Reactivity", StringComparison.Ordinal));
         Assert.Equal(0, await page.Locator("[data-rw-dialog]").CountAsync());
 
-        await page.GoBackAsync();
-        await page.WaitForURLAsync(url => new Uri(url).AbsolutePath.Equals(DialogPagePath, StringComparison.Ordinal));
+        // Turbo restores this history entry in the same document, so wait for the URL instead of a document load.
+        var dialogPageRestore = page.WaitForURLAsync(
+            url => new Uri(url).AbsolutePath.Equals(DialogPagePath, StringComparison.Ordinal));
+        await page.EvaluateAsync("() => history.back()");
+        await dialogPageRestore;
         Assert.Equal(0, await page.Locator("[data-rw-dialog][open]").CountAsync());
         Assert.Equal(0, await page.Locator("[data-rw-dialog]").CountAsync());
     }
