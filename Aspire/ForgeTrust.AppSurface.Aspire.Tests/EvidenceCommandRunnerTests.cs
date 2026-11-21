@@ -12,7 +12,7 @@ public sealed class EvidenceCommandRunnerTests
         var parent = Directory.CreateTempSubdirectory("evidence-command-pid-publication-").FullName;
         var pidPath = Path.Join(parent, "child.pid");
         using var cancellation = new CancellationTokenSource();
-        var request = CreateForegroundDescendantRequest(parent, pidPath, gatePublication: true);
+        var request = CreateForegroundDescendantRequest(pidPath, gatePublication: true);
         var running = new EvidenceCommandRunner().RunAsync(request, cancellation.Token);
         try
         {
@@ -519,7 +519,7 @@ public sealed class EvidenceCommandRunnerTests
         Task<EvidenceCommandResult>? running = null;
         try
         {
-            var request = CreateForegroundDescendantRequest(parent, pidPath);
+            var request = CreateForegroundDescendantRequest(pidPath);
             running = new EvidenceCommandRunner().RunAsync(request, cancellation.Token);
             if (cancel)
             {
@@ -545,7 +545,7 @@ public sealed class EvidenceCommandRunnerTests
         finally
         {
             // Readiness can fail before the caller-cancellation assertion. Stop and
-            // observe the command before removing its working directory in that case.
+            // observe the command before removing its marker files in that case.
             cancellation.Cancel();
             if (running is not null)
             {
@@ -563,21 +563,21 @@ public sealed class EvidenceCommandRunnerTests
         }
     }
 
-    private static EvidenceCommandRequest CreateForegroundDescendantRequest(string parent, string pidPath, bool gatePublication = false)
+    private static EvidenceCommandRequest CreateForegroundDescendantRequest(string pidPath, bool gatePublication = false)
     {
         // A final marker is a readiness signal only after the writer has closed.
-        // The gate makes an early-publication regression deterministic on every OS.
+        // Keep the marker directory out of the process tree's working directory:
+        // on Windows a terminating descendant can still hold its current directory open.
         var unixGate = gatePublication
-            ? "touch child.pid.written; while [ ! -f child.pid.release ]; do sleep 0.01; done; "
+            ? "touch \"$pidfile.written\"; while [ ! -f \"$pidfile.release\" ]; do sleep 0.01; done; "
             : string.Empty;
         var windowsGate = gatePublication
             ? "[IO.File]::WriteAllText($env:EVIDENCE_CHILD_PID_PATH + '.written', 'written'); while (-not [IO.File]::Exists($env:EVIDENCE_CHILD_PID_PATH + '.release')) { Start-Sleep -Milliseconds 10 }; "
             : string.Empty;
         return CreateShellRequest(
-            "sleep 30 & child=$!; printf '%s' \"$child\" > child.pid.pending; " + unixGate + "mv child.pid.pending child.pid; wait \"$child\"",
+            "pidfile=$EVIDENCE_CHILD_PID_PATH; sleep 30 & child=$!; printf '%s' \"$child\" > \"$pidfile.pending\"; " + unixGate + "mv \"$pidfile.pending\" \"$pidfile\"; wait \"$child\"",
             "$ErrorActionPreference = 'Stop'; $child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -NoNewWindow -PassThru; [IO.File]::WriteAllText($env:EVIDENCE_CHILD_PID_PATH + '.pending', [string]$child.Id); " + windowsGate + "[IO.File]::Move($env:EVIDENCE_CHILD_PID_PATH + '.pending', $env:EVIDENCE_CHILD_PID_PATH); $child.WaitForExit()") with
         {
-            WorkingDirectory = parent,
             Timeout = OperatingSystem.IsWindows() ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2),
             Environment = new Dictionary<string, string> { ["EVIDENCE_CHILD_PID_PATH"] = pidPath },
         };

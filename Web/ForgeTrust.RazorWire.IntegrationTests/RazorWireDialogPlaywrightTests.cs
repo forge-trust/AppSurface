@@ -394,6 +394,7 @@ public sealed class RazorWireDialogPlaywrightTests
         {
             JavaScriptEnabled = false
         });
+        await RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync(context);
         var page = await context.NewPageAsync();
         await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
 
@@ -418,8 +419,8 @@ public sealed class RazorWireDialogPlaywrightTests
             StatusCodes.Status200OK);
         Assert.Equal(StatusCodes.Status200OK, saveResponse.Status);
         Assert.Contains("no-store", await saveResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        await page.WaitForURLAsync($"**{SaveDialogPath}");
-        Assert.Equal(1, await page.Locator("#inline-dialog-form").CountAsync());
+        await Assertions.Expect(page).ToHaveURLAsync($"{_fixture.BaseUrl}{SaveDialogPath}");
+        await Assertions.Expect(page.Locator("#inline-dialog-form")).ToBeVisibleAsync();
 
         // Value: protects=HTML validation retains input and no-store caching; fails_when=invalid POST loses its form;
         // why_new=the existing fallback journey covered only valid POST; seam=none.
@@ -430,7 +431,7 @@ public sealed class RazorWireDialogPlaywrightTests
             CompleteDialogPath,
             StatusCodes.Status422UnprocessableEntity);
         Assert.Contains("no-store", await validationResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        await page.WaitForURLAsync($"**{CompleteDialogPath}");
+        await Assertions.Expect(page).ToHaveURLAsync($"{_fixture.BaseUrl}{CompleteDialogPath}");
         await WaitForTextAsync(page, "#inline-dialog-errors", "Name must be at least 2 characters.");
         Assert.Equal("A", await page.InputValueAsync("#inline-Name"));
         Assert.Equal(0, await page.Locator("turbo-stream, [data-rw-dialog]").CountAsync());
@@ -444,7 +445,7 @@ public sealed class RazorWireDialogPlaywrightTests
 
         Assert.Equal(StatusCodes.Status200OK, submitResponse.Status);
         Assert.Contains("no-store", await submitResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        await page.WaitForURLAsync($"**{CompleteDialogPath}");
+        await Assertions.Expect(page).ToHaveURLAsync($"{_fixture.BaseUrl}{CompleteDialogPath}");
         await WaitForTextAsync(page, "#dialog-result", "Dialog completed for Ada Lovelace");
         Assert.Equal(0, await page.Locator("turbo-stream, [data-rw-dialog]").CountAsync());
         Assert.DoesNotContain("action=\"rw-dialog\"", await page.ContentAsync(), StringComparison.OrdinalIgnoreCase);
