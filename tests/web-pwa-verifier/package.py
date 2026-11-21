@@ -45,6 +45,10 @@ def run_command(
             "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
             "DOTNET_NOLOGO": "1",
             "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
+            "NUGET_PACKAGES": str(working_directory.parent / "nuget" / "packages"),
+            "NUGET_HTTP_CACHE_PATH": str(working_directory.parent / "nuget" / "http"),
+            "NUGET_PLUGINS_CACHE_PATH": str(working_directory.parent / "nuget" / "plugins"),
+            "NUGET_SCRATCH": str(working_directory.parent / "nuget" / "scratch"),
         }
     )
     for name in tuple(environment):
@@ -104,7 +108,11 @@ def main() -> int:
     global_json_source = ROOT / "global.json"
     pinned_sdk_version = json.loads(global_json_source.read_text(encoding="utf-8"))["sdk"]["version"]
     with tempfile.TemporaryDirectory(prefix="pwa-file-package-consumer-") as temporary:
-        consumer = Path(temporary)
+        consumer = Path(temporary).resolve()
+        (consumer / "NuGet.Config").write_text(
+            '<configuration><packageSources><clear/><add key="nuget.org" value="https://api.nuget.org/v3/index.json"/></packageSources></configuration>',
+            encoding="utf-8",
+        )
         program = consumer / "Program.cs"
         program_source = (EXAMPLE / "Program.cs").read_text(encoding="utf-8")
         resolve_method = (

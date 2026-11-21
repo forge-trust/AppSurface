@@ -6,7 +6,7 @@ Use this guide with the revision-specific [script inventory](script-inventory.md
 
 | Form | Choose it when | Example and prerequisites |
 | --- | --- | --- |
-| Bootstrap script | The command installs the SDK or runs before CI selects one. | Keep the [SDK setup script](../agent-setup.sh) runnable with Bash. |
+| Bootstrap script | The command installs the SDK or runs before CI selects one. | Keep the [SDK setup script](../agent-setup.sh) usable with Bash. |
 | Framework-free C# file | The SDK is already present and BCL types are sufficient. | A file that reads a local schema-v3 report and prints its diagnostic codes can use `System.Text.Json` directly. |
 | AppSurface-backed C# file | A focused task needs command help and the same logical settings from JSON, environment variables, or a secret provider. | The [checkout PWA verifier](../scripts/web-pwa/README.md) uses project references. The [standalone file](../examples/file-based-console/README.md) pins published packages. |
 | Project-based internal CLI | Several maintainer commands share services, tested policy, or subcommands. | Keep branch and release orchestration within the [repository release tool](../tools/ForgeTrust.AppSurface.Release/README.md). Use [ForgeTrust.AppSurface.Console](../Console/ForgeTrust.AppSurface.Console/README.md) when extending a native CLI. |
