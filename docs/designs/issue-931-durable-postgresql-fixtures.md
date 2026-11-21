@@ -1,9 +1,17 @@
-## URGENT, outside this plan
+# Durable PostgreSQL fixture experiment
+
+**Outcome, 21 November 2026.** Keep fresh setup as the default. The original five-pair sample gained 8.16% against a required 8.98% variability threshold. A later verification gained 4.90%. After cleanup and acceptance fixes, the final build passed all 73 fixture acceptance cases and gained 8.43% in its own five pairs. All three runs used the same 34 Work and Flow cases. [Measured results and evidence archives](../../artifacts/issue-931-fixture-benchmark/results.md) · [Contributor commands](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/README.md)
+
+## Historical planning record
+
+The plan, review notes and task list below record what was known at approval. References to pending measurements or tests describe that point in time.
+
+### URGENT, outside this plan
 
 None.
 
 ## Implementation plan
-# Template-backed PostgreSQL fixtures for Durable tests
+### Template-backed PostgreSQL fixtures for Durable tests
 
 **Approved for implementation on 21 November 2026** · Internal engineering · AppSurface at `3f3126a5`
 
