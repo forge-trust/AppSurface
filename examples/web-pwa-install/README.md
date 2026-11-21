@@ -17,6 +17,8 @@ dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csp
   --json
 ```
 
+The [C# file-based verifier](../../scripts/web-pwa/README.md) builds this example, verifies combined install/push evidence and cleans up its child processes. From the repository root, run `dotnet run --file scripts/web-pwa/verify.cs`. The [native process checks](../../.github/workflows/pwa-verifier.yml) exercise the replacement on Windows, Linux and macOS.
+
 Or run the bundled proof script:
 
 ```bash
