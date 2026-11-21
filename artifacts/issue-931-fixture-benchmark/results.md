@@ -23,3 +23,15 @@ The first five pairs above are the decision sample. A subsequent change binds th
 The independent acceptance run passed 71 cases. The 24 timed processes recorded 408 passing Work/Flow results including warmups. Every Work process ran four cases, every Flow process ran 30, and the empty Flow case ran in both modes. Template preparation and teardown each occurred once per candidate process. All timed processes used the same Release build and settings. The server catalogs before and after the benchmark are included.
 
 Download and extract the [redacted process evidence](process-evidence.tar.xz), then open `index.md` to inspect the per-arm and per-cohort commands, TRX, coverage, timings, exit codes and load readings. The archive also includes the acceptance TRX, before/after build hashes, catalog observations, and hashes of the original and redacted files. The [frozen workload inventory](inventory/manifest.json) records the test identities and the empty-case exception.
+
+## Independent verification after the reporting change
+
+Commit `ce2cc1f16c74e9342871bdf17600fa06077cddfc` also produced a **measured no-go**. The median saving was 0.578 s, or **4.90%**, with a median absolute deviation of 4.64 percentage points. Work slowed by at least 5% once and Flow never did. This run used the same server and protocol. Its own 71-case acceptance receipt matched the SHA-256 recorded by the measured Release assembly. All 24 processes passed and the server catalog returned to its initial state. The [verification archive](verification-evidence.tar.xz) links the acceptance, server preflight and timed process evidence from its index.
+
+| Pair | Fresh (s) | Template (s) | Saved (s) | Gain | Work gain | Flow gain |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 11.862 | 11.832 | 0.031 | 0.26% | −6.84% | 3.71% |
+| 2 | 11.300 | 10.165 | 1.135 | 10.04% | 5.55% | 12.48% |
+| 3 | 11.090 | 10.793 | 0.297 | 2.68% | −0.10% | 4.13% |
+| 4 | 12.580 | 11.233 | 1.347 | 10.71% | 3.99% | 14.50% |
+| 5 | 11.797 | 11.220 | 0.578 | 4.90% | −1.64% | 8.29% |

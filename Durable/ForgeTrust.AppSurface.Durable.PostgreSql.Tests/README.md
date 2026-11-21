@@ -39,7 +39,7 @@ APPSURFACE_DURABLE_POSTGRES_TEST_FIXTURE=template \
     --results-directory "$results/flow" --logger trx --collect 'XPlat Code Coverage'
 ```
 
-A requested timing file must be new and writable. Ordinary runs can leave its setting unset. Timing rows use monotonic milliseconds. Setup covers database creation through readiness, and teardown covers resource disposal and catalog verification. Template preparation and teardown each occur once per candidate host. The benchmark uses elapsed process time from launch through exit as its decision metric.
+A requested timing file must be new and writable. Use an absolute path because the test host can start in the Release output directory. Ordinary runs can leave its setting unset. Timing rows use monotonic milliseconds. Setup covers database creation through readiness, and teardown covers resource disposal and catalog verification. Template preparation and teardown each occur once per candidate host. The benchmark uses elapsed process time from launch through exit as its decision metric.
 
 ## Lifecycle and recovery
 
