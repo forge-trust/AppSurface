@@ -134,6 +134,35 @@ The required hosts are exactly `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64
 
 The [package artifact workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-artifacts.yml), [package gate](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml), and [prerelease](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-prerelease-publish.yml)/[stable](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-stable-publish.yml) carriers retain the safe `cloudtasks-package-consumer-proof.md` report in their diagnostic uploads when it exists. A later proof failure therefore preserves the completed isolation evidence. The report is written only after the isolation proof succeeds; its absence from a diagnostic artifact does not identify the failed step. Neither its presence nor the diagnostic upload replaces the complete package workflow's success requirement.
 
+## Docs native asset release proof
+
+The [Docs native asset policy](../../Web/ForgeTrust.AppSurface.Docs/README.md#tree-sitter-native-assets-in-build-and-publish-output)
+adds a release proof requirement when the selected Docs archive contains its
+`buildTransitive/ForgeTrust.AppSurface.Docs.targets` entry. The packed-consumer
+[verifier](../../scripts/verify-docs-native-consumer.py) exercises separate direct and transitive
+C# project graphs. The required evidence covers eight SDK host RIDs and Windows x64 execution
+of the exact Linux x64 default and keep-all publish archives.
+
+The [Docs evidence workflow](../../.github/workflows/docs-native-evidence.yml) tries native Linux
+Arm32 execution on `ubuntu-24.04-arm` with the pinned Microsoft Arm32 SDK container. The host
+needs Arm32 userspace support and Docker on Arm hardware. Set the optional repository variable
+`APPSURFACE_DOCS_LINUX_ARM32_RUNNER` to a unique label for another trusted runner with those
+capabilities. The job checks the SDK RID and runtime process architecture, and it requires successful
+native grammar execution. Other jobs install the SDK for their selected architecture. The Windows
+destination launches the two transferred publish archives without a restore or build.
+Each new aggregate uses one complete workflow attempt. If artifact collection is missing a job from
+a partial rerun, rerun all jobs to produce a complete attempt.
+
+Before requesting NuGet credentials, use `--docs-native-proof`, `--docs-native-artifact-id`,
+and `--docs-native-sha256` with the existing publication preflight and validation commands.
+Provide the downloaded proof JSON, its immutable upload ID, and its SHA-256.
+The preflight verifies the selected package version, producer, source revision, archive digest,
+host outcomes and both transferred publish digests. It writes the Docs ID and SHA-256 alongside
+the Tailwind reference in the version 2 publication-start receipt. For a resumed publication,
+recover both proof references from the original receipt and pass them to the same validation before
+credentials and again at the push boundary. A candidate that predates the Docs target continues
+using the version 1 publication-start receipt.
+
 ## Durable preflight artifact proof (#845)
 
 The [schema-11 operations guide](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)

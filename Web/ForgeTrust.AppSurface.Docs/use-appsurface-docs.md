@@ -939,6 +939,17 @@ Use locale folders only with explicit `translation_key` metadata. A file such as
 
 Phase 1 builds the locale graph, validates configuration, and reports diagnostics. Visible `/fr/...` routes, fallback pages, language switchers, localized SEO tags, and locale-filtered search are follow-up surfaces.
 
+## Publish a host that harvests Python
+
+When your CI and deployment platforms differ, choose how the [Docs NuGet package selects Tree-sitter native assets](./README.md#tree-sitter-native-assets-in-build-and-publish-output).
+Use `dotnet publish -r <rid>` when you know the destination RID. For a portable artifact that must harvest
+Python on several platforms, use `dotnet publish -p:AppSurfaceDocsKeepAllTreeSitterRuntimes=true`.
+Set the same property on the preceding build if you publish with `--no-build`.
+
+A default no-RID publish carries the SDK host's native assets on supported hosts. If Python harvesting
+fails after moving that artifact, check harvest health for
+[`appsurfacedocs.python.parser_unavailable`](./README.md#diagnostics).
+
 ## Adoption checklist
 
 - Pick a host: embedded AppSurface web module or standalone AppSurface Docs app.
