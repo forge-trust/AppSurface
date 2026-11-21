@@ -77,10 +77,17 @@ public sealed class NativeEvidenceProgramTests
     [Fact]
     public async Task NativeContractVersion_IsRejectedOutsideRepositoryEvidenceRun()
     {
-        var result = await InvokeAsync(["--native-coverage-contract-version", "3"]);
+        using var fixture = new NativeCaptureFixture();
+        var package = Path.Join(fixture.Root, "candidate.nupkg");
+        await File.WriteAllBytesAsync(package, []);
+        var output = Path.Join(fixture.Root, "evidence");
+        var result = await InvokeAsync(["--package", package, "--version", "1.0.0", "--source-commit", "source",
+            "--dotnet", ResolveDotnetHost(), "--output", output, "--mode", "storage", "--scratch-parent", fixture.Root,
+            "--native-coverage-contract-version", "3"]);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Native validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
     }
 
     [Theory]

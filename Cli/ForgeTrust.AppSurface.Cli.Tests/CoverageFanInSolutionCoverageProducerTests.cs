@@ -859,6 +859,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData("historical")]
     [InlineData("wrong-policy")]
     [InlineData("wrong-source")]
+    [InlineData("wrong-receipt-version")]
     [InlineData("wrong-run")]
     [InlineData("altered-gate")]
     [InlineData("failed-aggregate")]
@@ -969,9 +970,8 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 Assert.Equal("appsurface-visual-baseline-png-v1", metadata.RootElement.GetProperty("diffPolicyId").GetString());
             if (scenario == "both-not-applicable")
                 foreach (var set in new[] { "primary", "composed" })
-                    foreach (var dimension in new[] { "line", "branch" })
+                    foreach (var metric in new[] { "line", "branch" }.Select(claim.GetProperty(set).GetProperty))
                     {
-                        var metric = claim.GetProperty(set).GetProperty(dimension);
                         Assert.Equal("notApplicable", metric.GetProperty("outcome").GetString());
                         Assert.Equal("no-reported-patch-points", metric.GetProperty("reason").GetString());
                         Assert.Equal(0, metric.GetProperty("measurable").GetInt32());
@@ -980,9 +980,10 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                     }
             if (scenario == "mixed")
             {
-                Assert.Equal("notApplicable", claim.GetProperty("primary").GetProperty("line").GetProperty("outcome").GetString());
-                Assert.Equal("measured", claim.GetProperty("primary").GetProperty("branch").GetProperty("outcome").GetString());
+                Assert.Equal("measured", claim.GetProperty("primary").GetProperty("line").GetProperty("outcome").GetString());
+                Assert.Equal("notApplicable", claim.GetProperty("primary").GetProperty("branch").GetProperty("outcome").GetString());
                 Assert.Equal("measured", claim.GetProperty("composed").GetProperty("line").GetProperty("outcome").GetString());
+                Assert.Equal("measured", claim.GetProperty("composed").GetProperty("branch").GetProperty("outcome").GetString());
             }
             if (scenario == "exact-thresholds")
             {
@@ -1000,7 +1001,8 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
 
             foreach (var operation in new[] { "accept", "verify" })
             {
-                using var terminal = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(fanInOutput, operation + "-result.json")));
+                using var terminal = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                    TestPathUtils.PathUnder(fanInOutput, operation + "-result.json")));
                 Assert.Equal(3, terminal.RootElement.GetProperty("schemaVersion").GetInt32());
                 Assert.Equal("succeeded", terminal.RootElement.GetProperty("result").GetProperty("outcome").GetString());
             }
@@ -1042,6 +1044,8 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData("wrong-diff-policy")]
     [InlineData("metadata-merge-base-short")]
     [InlineData("metadata-merge-base-invalid-hex")]
+    [InlineData("metadata-diff-policy")]
+    [InlineData("metadata-diff-sha256")]
     [InlineData("applicability-schema-version")]
     [InlineData("applicability-report-profile")]
     [InlineData("applicability-policy-digest")]
@@ -1298,7 +1302,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         public void CreateNativeCaptureDirectories(RepositoryCheckSettings settings)
         {
             foreach (var platform in new[] { "linux", "windows", "darwin" })
-                Directory.CreateDirectory(Path.Join(settings.NativeCoverageDirectory!, platform));
+                Directory.CreateDirectory(TestPathUtils.PathUnder(settings.NativeCoverageDirectory!, platform));
         }
 
         public async Task WriteNativeV3ProofAsync(string output, string scenario)
@@ -1309,55 +1313,60 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             Directory.CreateDirectory(accepted);
             Directory.CreateDirectory(composed);
 
+            const int addedLines = 200;
             static object Metric(string outcome, string reason, int changedLines, int measurable, int covered, decimal? percent) =>
                 new { outcome, reason, changedLines, measurable, covered, percent };
+            static object Reported(int measurable, int covered, decimal percent) =>
+                Metric("measured", "reported-points", addedLines, measurable, covered, percent);
 
-            var notApplicable = Metric("notApplicable", "no-reported-patch-points", 1, 0, 0, null);
-            var measuredLine = Metric("measured", "reported-points", 1, 100, 99, 99m);
-            var measuredBranch = Metric("measured", "reported-points", 1, 100, 90, 90m);
-            var lineBelow = Metric("measured", "reported-points", 1, 100, 94, 94m);
-            var branchBelow = Metric("measured", "reported-points", 1, 100, 80, 80m);
-            var repeatingRatioLine = Metric("measured", "reported-points", 1, 21, 20, 95.2381m);
+            var notApplicable = Metric("notApplicable", "no-reported-patch-points", addedLines, 0, 0, null);
+            var measuredLine = Reported(100, 99, 99m);
+            var measuredBranch = Reported(100, 90, 90m);
+            var lineBelow = Reported(100, 94, 94m);
+            var branchBelow = Reported(100, 80, 80m);
+            var repeatingRatioLine = Reported(21, 20, 95.2381m);
             var primaryLine = scenario switch
             {
-                "both-not-applicable" or "mixed" => notApplicable,
-                "invalid-primary-not-applicable" => Metric("notApplicable", "no-reported-patch-points", 1, 0, 1, null),
-                "primary-below-threshold" => Metric("measured", "reported-points", 1, 100, 90, 90m),
-                "invalid-primary-metric" => Metric("measured", "reported-points", 1, 100, 98, 99m),
+                "both-not-applicable" => notApplicable,
+                "invalid-primary-not-applicable" => Metric("notApplicable", "no-reported-patch-points", addedLines, 0, 1, null),
+                "primary-below-threshold" => Reported(100, 90, 90m),
+                "invalid-primary-metric" => Reported(100, 98, 99m),
                 "repeating-ratio" => repeatingRatioLine,
                 "negative-changed-lines" => Metric("measured", "reported-points", -1, 100, 99, 99m),
-                "negative-covered-lines" => Metric("measured", "reported-points", 1, 100, -1, 99m),
+                "negative-covered-lines" => Reported(100, -1, 99m),
                 _ => measuredLine,
             };
             var primaryBranch = scenario switch
             {
-                "both-not-applicable" => notApplicable,
+                "both-not-applicable" or "mixed" => notApplicable,
                 "primary-below-threshold" => branchBelow,
+                "exact-thresholds" => Reported(200, 169, 84.5m),
                 _ => measuredBranch,
             };
             var composedLine = scenario switch
             {
                 "both-not-applicable" => notApplicable,
-                "invalid-composed-not-applicable" => Metric("notApplicable", "no-reported-patch-points", 1, 0, 1, null),
+                "invalid-composed-not-applicable" => Metric("notApplicable", "no-reported-patch-points", addedLines, 0, 1, null),
                 "below-threshold" => lineBelow,
-                "false-not-applicable-measured" => Metric("notApplicable", "no-reported-patch-points", 1, 1, 1, 100m),
-                "unverified" => Metric("unverified", "verification-failed", 1, 0, 0, null),
-                "exact-thresholds" => Metric("measured", "reported-points", 1, 200, 189, 94.5m),
+                "false-not-applicable-measured" => Metric("notApplicable", "no-reported-patch-points", addedLines, 1, 1, 100m),
+                "unverified" => Metric("unverified", "verification-failed", addedLines, 0, 0, null),
+                "exact-thresholds" => Reported(200, 189, 94.5m),
                 "repeating-ratio" => repeatingRatioLine,
-                "invalid-composed-metric" => Metric("measured", "reported-points", 1, 100, 98, 99m),
+                "invalid-composed-metric" => Reported(100, 98, 99m),
                 _ => measuredLine,
             };
             var composedBranch = scenario switch
             {
                 "both-not-applicable" => notApplicable,
-                "exact-thresholds" => Metric("measured", "reported-points", 1, 200, 169, 84.5m),
+                "exact-thresholds" => Reported(200, 169, 84.5m),
                 _ => measuredBranch,
             };
             var primary = new { line = primaryLine, branch = primaryBranch };
             var composedMetrics = new { line = composedLine, branch = composedBranch };
 
+            var additions = string.Concat(Enumerable.Range(1, addedLines).Select(line => $"+if (value < {line}) value++;\n"));
             var patchBytes = System.Text.Encoding.UTF8.GetBytes(
-                $"diff --git a/src/Example.cs b/src/Example.cs\nindex {new string('d', 40)}..{new string('e', 40)} 100644\n--- a/src/Example.cs\n+++ b/src/Example.cs\n@@ -1 +1 @@\n-before\n+after\n");
+                $"diff --git a/src/Example.cs b/src/Example.cs\nindex {new string('d', 40)}..{new string('e', 40)} 100644\n--- a/src/Example.cs\n+++ b/src/Example.cs\n@@ -1 +1,{addedLines} @@\n-before\n{additions}");
             var diffSha256 = Hash(patchBytes);
             var metadataBytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
@@ -1370,9 +1379,13 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                     _ => NativeV3DiffBase,
                 },
                 headCommit = scenario == "metadata-head-commit" ? new string('f', 40) : Commit,
-                diffPolicyId = scenario == "wrong-diff-policy"
-                    ? "appsurface-git-patch-v1" : "appsurface-visual-baseline-png-v1",
-                diffSha256,
+                diffPolicyId = scenario switch
+                {
+                    "wrong-diff-policy" => "appsurface-git-patch-v1",
+                    "metadata-diff-policy" => "another-policy",
+                    _ => "appsurface-visual-baseline-png-v1"
+                },
+                diffSha256 = scenario == "metadata-diff-sha256" ? new string('a', 64) : diffSha256,
                 empty = false,
                 changes = new[]
                 {
@@ -1381,7 +1394,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                         kind = "modified",
                         oldPath = "src/Example.cs",
                         newPath = "src/Example.cs",
-                        addedRanges = new[] { new { start = 1, count = 1 } },
+                        addedRanges = new[] { new { start = 1, count = addedLines } },
                     },
                 },
             });
@@ -1403,9 +1416,9 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             };
 
             object primaryReportLine = scenario == "primary-report-mismatch"
-                ? Metric("measured", "reported-points", 1, 100, 98, 98m) : primaryLine;
+                ? Reported(100, 98, 98m) : primaryLine;
             object composedReportLine = scenario == "composed-report-mismatch"
-                ? Metric("measured", "reported-points", 1, 100, 98, 98m) : composedLine;
+                ? Reported(100, 98, 98m) : composedLine;
             var primaryGateBytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
                 passed = true,
@@ -1450,15 +1463,15 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             await File.WriteAllBytesAsync(Path.Join(composed, "verification.json"), compositionReceiptBytes);
 
             object resultPrimary = scenario == "result-primary-mismatch"
-                ? new { line = Metric("measured", "reported-points", 1, 100, 98, 98m), branch = primaryBranch }
+                ? new { line = Reported(100, 98, 98m), branch = primaryBranch }
                 : primary;
             object resultComposed = scenario == "result-composed-mismatch"
-                ? new { line = Metric("measured", "reported-points", 1, 100, 98, 98m), branch = composedBranch }
+                ? new { line = Reported(100, 98, 98m), branch = composedBranch }
                 : composedMetrics;
             var resultApplicability = new { primary = resultPrimary, composed = resultComposed };
-            foreach (var operation in new[] { "accept", "verify" })
+            foreach (var operation in new[] { "accept", "verify" }
+                         .Where(operation => operation != "verify" || scenario != "missing-verify"))
             {
-                if (operation == "verify" && scenario == "missing-verify") continue;
                 var terminal = new
                 {
                     schemaVersion = scenario == "wrong-terminal-version" && operation == "verify" ? 2 : 3,
@@ -1479,7 +1492,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                         patchApplicability = resultApplicability,
                     },
                 };
-                await File.WriteAllTextAsync(Path.Join(output, operation + "-result.json"), JsonSerializer.Serialize(terminal));
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, operation + "-result.json"), JsonSerializer.Serialize(terminal));
             }
 
             var acceptance = new
@@ -1543,7 +1556,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                         policyDigest = operation == "verify" && defect == "wrong-policy" ? "another-policy" : "policy",
                     },
                 };
-                await File.WriteAllTextAsync(Path.Join(output, operation + "-result.json"), JsonSerializer.Serialize(terminal));
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, operation + "-result.json"), JsonSerializer.Serialize(terminal));
             }
             foreach (var patch in new[] { false, true })
             {
@@ -1565,6 +1578,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, relative))));
             var acceptance = new
             {
+                schemaVersion = defect == "wrong-receipt-version" ? 3 : 2,
                 policyDigest = "policy",
                 source = new { commit = defect == "wrong-source" ? new string('c', 40) : Commit, tree = new string('b', 40), sdk = "10.0.100", configuration = "Release" },
                 run = new { runScope = "forge-trust/appsurface", runId = "12345", attempt = defect == "wrong-run" ? 1 : 2 },
