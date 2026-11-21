@@ -73,37 +73,18 @@ jobs:
         with:
           dotnet-version: 10.0.402
       - name: Run native protocol contract
-        run: dotnet run --file tests/web-pwa-verifier/protocol/protocol.cs
-      - name: Run configuration matrix
-        shell: bash
+        run: dotnet run --file tests/web-pwa-verifier/contracts.cs -- protocol
+      - name: Run configuration contracts
+        run: dotnet run --file tests/web-pwa-verifier/contracts.cs -- config
+      - name: Run package-consumer contracts
+        run: dotnet run --file tests/web-pwa-verifier/contracts.cs -- package
+      - name: Run native process contracts
         env:
-          DOTNET_EXE: dotnet
-        run: python3 tests/web-pwa-verifier/config.py
-      - name: Run package-consumer contract
-        shell: bash
-        env:
-          DOTNET_EXE: dotnet
-        run: python3 tests/web-pwa-verifier/package.py
-      - name: Measure file runner cold and warm
-        shell: bash
-        env:
-          NUGET_PACKAGES: ${{ runner.temp }}/pwa-file-runner-nuget
           PWA_VERIFY_EVIDENCE_DIR: ${{ runner.temp }}/pwa-verifier-evidence
-          DOTNET_EXE: dotnet
           DOTNET_CLI_USE_MSBUILD_SERVER: '0'
           UseSharedCompilation: 'false'
           MSBUILDDISABLENODEREUSE: '1'
-        run: python3 tests/web-pwa-verifier/run.py --cost-samples
-      - name: Run cross-platform process and black-box contracts
-        shell: bash
-        env:
-          NUGET_PACKAGES: ${{ runner.temp }}/pwa-file-runner-nuget
-          PWA_VERIFY_EVIDENCE_DIR: ${{ runner.temp }}/pwa-verifier-evidence
-          DOTNET_EXE: dotnet
-          DOTNET_CLI_USE_MSBUILD_SERVER: '0'
-          UseSharedCompilation: 'false'
-          MSBUILDDISABLENODEREUSE: '1'
-        run: python3 tests/web-pwa-verifier/run.py
+        run: dotnet run --file tests/web-pwa-verifier/contracts.cs -- process
       - name: Upload this run's evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

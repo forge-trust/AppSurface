@@ -15,7 +15,7 @@ for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->
 ## Usage
 
-For a package-only file-based app, use the pinned [Console + Config sample](../../examples/file-based-console/README.md). It reads `appsettings.json` beside `Program.cs`, so callers can launch it from another working directory. It demonstrates a command-local Config-key attribute, explicit-option precedence over malformed lower-priority port configuration, and final .NET DataAnnotations validation. The [package-consumer smoke test](https://github.com/forge-trust/AppSurface/blob/main/tests/web-pwa-verifier/package.py) exercises the sample outside the checkout. For repository-wide script inventory and tooling choices, see the [repository tooling guide](../../guides/repository-tooling.md).
+For a package-only file-based app, use the pinned [Console + Config sample](../../examples/file-based-console/README.md). It reads `appsettings.json` beside `Program.cs`, so callers can launch it from another working directory. It demonstrates a command-local Config-key attribute, explicit-option precedence over malformed lower-priority port configuration, and final .NET DataAnnotations validation. The [package-consumer smoke test](https://github.com/forge-trust/AppSurface/blob/main/tests/web-pwa-verifier/PackageContracts.cs) exercises the sample outside the checkout. For repository-wide script inventory and tooling choices, see the [repository tooling guide](../../guides/repository-tooling.md).
 
 Create a startup class that inherits from `ConsoleStartup<TModule>`:
 

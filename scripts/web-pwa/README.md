@@ -42,3 +42,13 @@ The verifier prints the PIDs of its example and public CLI to stderr. An opt-in 
 A publication message identifies this run’s complete schema-v3 JSON. Verification failure can produce a valid `passed: false` report and the public CLI’s nonzero status. Binding, startup, malformed output and file errors produce a nonzero exit. An existing destination can belong to an earlier run. Check stderr and the exit code, and use a fresh path in CI. If startup fails, check the child port and the example build. If publication fails, choose a writable file path. The runner tears down processes it started on success, failure and cooperative cancellation.
 
 The command uses a local attribute beside each CliFx switch to choose the Config key for an omitted value. CliFx handles parsing. One final settings object owns validation. The pilot adds no package API. The [repository tooling guide](../../guides/repository-tooling.md) describes how to choose a file or project for the next tool.
+
+## Run the verifier tests
+
+From the repository root, run the C# contract suite with the pinned SDK:
+
+```sh
+dotnet run --file tests/web-pwa-verifier/contracts.cs
+```
+
+To run a single group, append `-- protocol`, `-- config`, `-- package`, or `-- process`. The configuration tests exercise the real command, including its default port 5055, which must be available. The package tests restore the standalone example from NuGet in an isolated directory. The process tests start the example and public CLI, send Ctrl+C during startup and verification, and check report publication and child cleanup. Set `PWA_VERIFY_EVIDENCE_DIR` to retain the process suite’s reports at a chosen location. The [native CI workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/pwa-verifier.yml) runs these groups on Linux, macOS, and Windows and uploads the reports.
