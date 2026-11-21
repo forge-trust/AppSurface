@@ -8,7 +8,6 @@ import json
 import os
 import pathlib
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -18,10 +17,10 @@ import time
 import urllib.request
 import uuid
 
+from checkout import ROOT, source_checkout
 from native_console import launch_native_console, process_is_running, send_ctrl_c
 
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
 DOTNET = os.environ.get("DOTNET_EXE", "dotnet")
 EVIDENCE_ROOT = pathlib.Path(os.environ.get("PWA_VERIFY_EVIDENCE_DIR", tempfile.gettempdir()))
 TIMEOUT = 180
@@ -144,17 +143,6 @@ def temporarily_removed(path: pathlib.Path):
         yield
     finally:
         path.write_bytes(content)
-
-
-def make_fixture_checkout(destination: pathlib.Path) -> pathlib.Path:
-    destination = destination.resolve()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    excluded = {
-        ".git", ".codex", ".gstack", "bin", "obj", "node_modules",
-        "artifacts", ".nuget", "TestResults", "packages", "benchmark-results",
-    }
-    shutil.copytree(ROOT, destination, ignore=lambda _directory, names: excluded.intersection(names))
-    return destination.resolve()
 
 
 def assert_children_stopped(stderr: str) -> None:
@@ -358,7 +346,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="pwa-verifier-process-") as temporary:
         scratch = pathlib.Path(temporary)
-        fixture = make_fixture_checkout(scratch / "fixture")
+        fixture = source_checkout(scratch / "fixture")
         run_process_contracts(fixture, scratch)
     print(f"PWA verifier process contracts passed on {sys.platform}")
     return 0
