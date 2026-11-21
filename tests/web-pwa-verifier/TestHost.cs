@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text;
+using ForgeTrust.AppSurface.Testing;
 
 internal sealed record CommandResult(int ExitCode, string StandardOutput, string StandardError);
 
@@ -19,7 +20,7 @@ internal sealed class TempDirectory : IDisposable
             return CanonicalPath(target);
         }
         return directory.Parent is { } parent
-            ? System.IO.Path.Combine(CanonicalPath(parent), directory.Name)
+            ? TestPathUtils.PathUnder(CanonicalPath(parent), directory.Name)
             : directory.FullName;
     }
 
@@ -35,7 +36,7 @@ internal static class TestHost
     private static string GetRepositoryRoot([CallerFilePath] string source = "")
     {
         var directory = AppContext.GetData("EntryPointFileDirectoryPath") as string ?? Path.GetDirectoryName(source)!;
-        return Path.GetFullPath(Path.Combine(directory, "..", ".."));
+        return TestPathUtils.FindRepoRoot(directory);
     }
 
     public static void Check(bool condition, string message)
@@ -63,10 +64,10 @@ internal static class TestHost
         Check(listed.ExitCode == 0, $"git ls-files failed: {listed.StandardError}");
         foreach (var relative in listed.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
-            var source = Path.Combine(Root, relative);
+            var source = TestPathUtils.PathUnder(Root, relative);
             if (File.Exists(source))
             {
-                var target = Path.Combine(destination, relative);
+                var target = TestPathUtils.PathUnder(destination, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(source, target, overwrite: true);
             }

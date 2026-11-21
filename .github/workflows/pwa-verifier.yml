@@ -6,6 +6,7 @@ on:
     paths:
       - 'scripts/web-pwa/**'
       - 'tests/web-pwa-verifier/**'
+      - 'tests/ForgeTrust.AppSurface.Testing/**'
       - 'examples/web-pwa-install/**'
       - 'examples/web-pwa-install.tests/**'
       - 'examples/file-based-console/**'
@@ -30,6 +31,7 @@ on:
     paths:
       - 'scripts/web-pwa/**'
       - 'tests/web-pwa-verifier/**'
+      - 'tests/ForgeTrust.AppSurface.Testing/**'
       - 'examples/web-pwa-install/**'
       - 'examples/web-pwa-install.tests/**'
       - 'examples/file-based-console/**'

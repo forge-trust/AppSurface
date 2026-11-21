@@ -4,6 +4,7 @@
 #:property ImplicitUsings=enable
 #:property Nullable=enable
 #:property PublishAot=false
+#:project ../ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj
 #:include ../../scripts/web-pwa/PwaVerifier.cs
 #:include ProtocolContracts.cs
 #:include TestHost.cs
