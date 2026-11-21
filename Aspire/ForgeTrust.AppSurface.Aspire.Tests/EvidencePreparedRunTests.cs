@@ -239,6 +239,65 @@ public sealed class EvidencePreparedRunTests
         }
     }
 
+    [Fact]
+    public async Task ThrowingFactoryCancellationCallbackCannotCompleteDisposalBeforeActualCleanup()
+    {
+        using var fixture = new Fixture();
+        var plan = fixture.Plan(fixture.Declaration("a", "a.txt", "db-a"));
+        var producer = new Producer("a");
+        var owner = new Owner();
+        var prepared = await fixture.PrepareAsync(plan, producer);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failure = new InvalidOperationException("Synthetic factory cancellation callback failure.");
+        Task? disposal = null;
+        var run = prepared.RunAsync(async (ids, token) =>
+        {
+            using var registration = token.Register(() =>
+            {
+                cancellationObserved.TrySetResult();
+                throw failure;
+            });
+            entered.TrySetResult();
+            await release.Task;
+            return fixture.Scope(ids, owner);
+        });
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            disposal = prepared.DisposeAsync().AsTask();
+            await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(disposal.IsCompleted);
+            Assert.False(run.IsCompleted);
+            Assert.Equal(0, producer.Disposals);
+            Assert.Equal(0, owner.Disposals);
+
+            release.TrySetResult();
+            var manifest = await run.WaitAsync(TimeSpan.FromSeconds(10));
+            var observed = await Assert.ThrowsAsync<AggregateException>(() => disposal.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Same(failure, Assert.Single(observed.InnerExceptions));
+            Assert.Equal(EvidenceProducerOutcome.Cancelled, Assert.Single(manifest.ProducerResults).Outcome);
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.Equal(0, producer.Runs);
+            Assert.Equal(1, producer.Disposals);
+            Assert.Equal(1, owner.Disposals);
+            var repeated = await Assert.ThrowsAsync<AggregateException>(() => prepared.DisposeAsync().AsTask());
+            Assert.Same(observed, repeated);
+            Assert.Equal(1, producer.Disposals);
+            Assert.Equal(1, owner.Disposals);
+            await using var retry = await fixture.PrepareAsync(plan, new Producer("a"));
+            Assert.Equal(EvidenceReuseStatus.Miss, Assert.Single(retry.Decisions).Status);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await run.WaitAsync(TimeSpan.FromSeconds(10));
+            await Record.ExceptionAsync(() => (disposal ?? prepared.DisposeAsync().AsTask()).WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+    }
+
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -49,6 +49,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     private EvidenceHostResourceScope? _scope;
     private EvidenceHostBootstrap? _host;
     private Task<bool>? _cleanup;
+    private Exception? _factoryCancellationFailure;
     private bool _used;
     private bool _disposed;
 
@@ -322,7 +323,8 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
 
     /// <summary>Requests factory cancellation and joins actual cleanup before releasing execution ownership.</summary>
     /// <returns>The actual cleanup operation; this does not interpret a grace timeout as termination.</returns>
-    /// <remarks>Cancellation is requested before joining an active run so a token-cooperative factory can stop.</remarks>
+    /// <remarks>Cancellation is requested before joining an active run. A throwing cancellation callback is retained
+    /// while actual factory and owner cleanup are joined, then rethrown; cleanup failures remain primary.</remarks>
     public async ValueTask DisposeAsync()
     {
         lock (_cleanupSync)
@@ -330,14 +332,17 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             if (!_disposed)
             {
                 _disposed = true;
-                _factoryCancellation.Cancel();
+                try { _factoryCancellation.Cancel(); }
+                catch (Exception exception) { _factoryCancellationFailure = exception; }
             }
         }
         await _execution.WaitAsync().ConfigureAwait(false);
         try { ObserveCleanup(); }
         finally { _execution.Release(); }
-        await _cleanup!.ConfigureAwait(false);
-        lock (_cleanupSync) _factoryCancellation.Dispose();
+        try { await _cleanup!.ConfigureAwait(false); }
+        finally { lock (_cleanupSync) _factoryCancellation.Dispose(); }
+        if (_factoryCancellationFailure is not null)
+            ExceptionDispatchInfo.Capture(_factoryCancellationFailure).Throw();
     }
 
     private static void ValidateRegistrations(EvidencePlan plan, EvidenceHostPreparationRegistration registration,

@@ -1101,6 +1101,7 @@ internal static class EvidenceReceiptQuota
                     || entry.OriginCompletedAt is not null || entry.LastSuccessfulUse is not null
                     || entry.ProducerId is not null || entry.InputIdentityDigest is not null
                     || entry.EssentialReservationIds.Count != 0 || entry.PayloadReservations is { Count: > 0 }))
+                || (entry.AuthorityState is null && (entry.HasInFlight || entry.HasAuditIntent || entry.Quarantined))
                 || (entry.AuthorityState is { } state && (state.SchemaVersion != 1 || state.Key != entry.Key
                     || (state.PayloadDirectoryName is { } authorityPayload && !IsFinalPayloadDirectoryName(authorityPayload))
                     || (state.AuditExpectedAssertions is not null

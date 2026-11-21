@@ -198,6 +198,35 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         }
     }
 
+    [Theory]
+    [InlineData("in-flight")]
+    [InlineData("audit-intent")]
+    [InlineData("quarantine")]
+    public async Task MissingAuthorityCannotEraseRetainedExecutionOrAuditFlags(string mode)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("old", auditIntent: mode != "in-flight");
+        if (mode == "audit-intent") fixture.Lease.SettleExecution("old");
+        if (mode == "quarantine") fixture.Lease.MarkAuditMismatch("old", "[]");
+        var original = fixture.IndexBytes();
+        var index = JsonNode.Parse(original)!;
+        index["Entries"]!.AsArray().Single()!["AuthorityState"] = null;
+        var indexPath = TestPathUtils.PathUnder(fixture.Root, "quota-index.json");
+        await File.WriteAllBytesAsync(indexPath, Encoding.UTF8.GetBytes(index.ToJsonString()));
+        var before = fixture.IndexBytes();
+        try
+        {
+            Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.ReadAuthority(
+                fixture.Root, fixture.Repository, fixture.Lease.Key, readOnly: true));
+            Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.ReadAuthority(
+                fixture.Root, fixture.Repository, fixture.Lease.Key));
+            Assert.Throws<InvalidDataException>(() => fixture.Lease.EstablishAuthority("new"));
+            Assert.Equal(before, fixture.IndexBytes());
+        }
+        finally { await File.WriteAllBytesAsync(indexPath, original); }
+    }
+
+
     [Fact]
     public async Task DisposedKeyLeaseCannotReadOrRewriteRetainedExecutionAuthority()
     {
