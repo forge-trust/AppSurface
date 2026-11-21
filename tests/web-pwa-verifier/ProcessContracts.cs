@@ -139,6 +139,7 @@ internal static class ProcessContracts
     private static async Task<JsonObject> CheckReportAsync(string path, CommandResult result, int expectedExit)
     {
         TestHost.Check(result.ExitCode == expectedExit, $"Expected exit {expectedExit}, got {result.ExitCode}.\n{result.StandardError}");
+        TestHost.Check(File.Exists(path), $"Verifier exited {result.ExitCode} without publishing {path}.\n{result.StandardOutput}\n{result.StandardError}");
         var report = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
         TestHost.Check((int?)report["schemaVersion"] == 3 && (string?)report["surface"] == "all"
             && (bool?)report["passed"] == (expectedExit == 0) && report["install"] is JsonObject

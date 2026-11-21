@@ -8,7 +8,20 @@ internal sealed record CommandResult(int ExitCode, string StandardOutput, string
 
 internal sealed class TempDirectory : IDisposable
 {
-    public string Path { get; } = Directory.CreateTempSubdirectory("pwa-contract-").FullName;
+    public string Path { get; } = CanonicalPath(Directory.CreateTempSubdirectory("pwa-contract-"));
+
+    // File-based restores can lose transitive project references if the SDK sees both
+    // a symlinked temp directory and its physical path (for example /var on macOS).
+    private static string CanonicalPath(DirectoryInfo directory)
+    {
+        if (directory.ResolveLinkTarget(returnFinalTarget: true) is DirectoryInfo target)
+        {
+            return CanonicalPath(target);
+        }
+        return directory.Parent is { } parent
+            ? System.IO.Path.Combine(CanonicalPath(parent), directory.Name)
+            : directory.FullName;
+    }
 
     public void Dispose() => Directory.Delete(Path, recursive: true);
 }
