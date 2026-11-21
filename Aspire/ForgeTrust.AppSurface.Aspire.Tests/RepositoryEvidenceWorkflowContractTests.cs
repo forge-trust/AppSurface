@@ -381,6 +381,16 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
+    public void FullSolutionCollectionUsesTheSupportedPlaywrightUbuntuImage()
+    {
+        // Protects real browser execution when ubuntu-latest advances beyond the pinned Playwright host table.
+        // The native security matrix still exercises its declared platforms; no test or gate is omitted.
+        var collection = _buildWorkflow["jobs"].AsMapping()["coverage-collection"].AsMapping();
+
+        Assert.Equal("ubuntu-24.04", collection["runs-on"].AsScalar());
+    }
+
+    [Fact]
     public void DocsExportOverlapsBuildButDeploymentWaitsForAllPreviouslyRequiredAcceptance()
     {
         var jobs = _buildWorkflow["jobs"].AsMapping();
@@ -388,7 +398,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var deploy = jobs["deploy-appsurface-docs"].AsMapping();
         Assert.Equal(["export-appsurface-docs", "build", "coverage-manifest-gate"],
             deploy["needs"].AsSequence().Select(node => node.AsScalar()));
-        Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", deploy["if"].AsScalar());
+        Assert.Equal("${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}", deploy["if"].AsScalar());
     }
 
     [Fact]

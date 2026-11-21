@@ -130,6 +130,50 @@ public sealed class CoverageRunProcessContractTests
     }
 
     [Fact]
+    public async Task PipeTargets_ShouldStartBothPrebufferedStreamsBeforeAccountingWaits()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var streamsStarted = new CountdownEvent(2);
+        using var stdoutSource = new MemoryStream("out"u8.ToArray());
+        using var stderrSource = new MemoryStream("err"u8.ToArray());
+        using var stdout = new MemoryStream();
+        using var stderr = new MemoryStream();
+        long charged = 0;
+        var callbackCount = 0;
+        var budget = new CliWrapCoverageRunProcessRunner.CoverageRunProcessBudgetCharge(bytes =>
+        {
+            Interlocked.Add(ref charged, bytes);
+            if (Interlocked.Increment(ref callbackCount) <= 2)
+            {
+                streamsStarted.Signal();
+                if (!streamsStarted.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    throw new TimeoutException("prebuffered stdout prevented stderr from starting");
+                }
+            }
+        }, cancellation);
+        var outputPipe = CliWrapCoverageRunProcessRunner.CreateFaultTerminatingTarget(
+            (source, token) => CliWrapCoverageRunProcessRunner.CopyPipeToBufferAsync(
+                source, stdout, 1024, token, null, budget, strictUtf8: true),
+            cancellation, budget);
+        var errorPipe = CliWrapCoverageRunProcessRunner.CreateFaultTerminatingTarget(
+            (source, token) => CliWrapCoverageRunProcessRunner.CopyPipeToBufferAsync(
+                source, stderr, 1024, token, null, budget, strictUtf8: true),
+            cancellation, budget);
+
+        // MemoryStream reads complete synchronously, so the first call must hand off before invoking accounting.
+        var outputCopy = outputPipe.CopyFromAsync(stdoutSource, CancellationToken.None);
+        var errorCopy = errorPipe.CopyFromAsync(stderrSource, CancellationToken.None);
+        await Task.WhenAll(outputCopy, errorCopy).WaitAsync(TimeSpan.FromSeconds(20));
+
+        budget.ThrowIfFailed();
+        Assert.False(cancellation.IsCancellationRequested);
+        Assert.Equal("out", Encoding.UTF8.GetString(stdout.ToArray()));
+        Assert.Equal("err", Encoding.UTF8.GetString(stderr.ToArray()));
+        Assert.Equal(6, charged);
+    }
+
+    [Fact]
     public async Task ProcessRunner_ShouldChargeConcurrentStreamsAndReturnStandardErrorSeparately()
     {
         using var directory = TestDirectory.Create();
