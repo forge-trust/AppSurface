@@ -76,10 +76,11 @@ python3 scripts/postgresql-fixture-benchmark.py validate \
   --dotnet "$(command -v dotnet)" --server-info "$scratch/server.json"
 ```
 
-Run the fixture acceptance tests on a disposable server before measuring. A complete run of the test project includes the lifecycle, clone validation, and migration regressions. Give it its own results directory. Use the same Release build for the benchmark. Point `APPSURFACE_POSTGRES_TEST_CONNECTION` at the dedicated measurement server before starting the runner and leave that server idle for the duration.
+Run the fixture acceptance tests on a disposable server before measuring. The runner's `acceptance-filter` command selects the lifecycle, clone validation, configuration, timing, metadata and existing database-helper tests. The runner discovers these cases in the measured Release assembly and requires one passing result for every discovered case, including each theory row. Give this run its own results directory. Point `APPSURFACE_POSTGRES_TEST_CONNECTION` at the dedicated measurement server before starting the benchmark and leave that server idle for the duration.
 
 ```sh
-dotnet test "$project" -c Release --no-build --no-restore \
+acceptance=$(python3 scripts/postgresql-fixture-benchmark.py acceptance-filter)
+dotnet test "$project" -c Release --no-build --no-restore --filter "$acceptance" \
   --results-directory "$scratch/acceptance" --logger 'trx;LogFileName=acceptance.trx'
 python3 scripts/postgresql-fixture-benchmark.py run \
   --dotnet "$(command -v dotnet)" --server-info "$scratch/server.json" \

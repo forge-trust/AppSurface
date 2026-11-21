@@ -150,6 +150,55 @@ public sealed class PostgreSqlCohortFixtureTests
     }
 
     [Fact]
+    public async Task CreateReadyDatabaseAsync_ActivationFailureDisposesCloneReleasesLeaseAndCleansTemplate()
+    {
+        await using var anchor = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var seededEpoch = Guid.NewGuid();
+        string? templateName = null;
+        var timingPath = Path.Combine(Path.GetTempPath(), $"postgresql-cohort-failure-{Guid.NewGuid():N}.csv");
+        var options = PostgreSqlCohortFixtureOptions.Parse(
+            nameof(PostgreSqlCohortFixtureTests),
+            "template",
+            anchor.ConnectionString,
+            timingPath);
+
+        try
+        {
+            await using var fixture = new PostgreSqlCohortFixtureCore(
+                options,
+                fixtureDrainTimeout: TimeSpan.FromMilliseconds(100),
+                afterTemplatePreparedAsync: async template =>
+                {
+                    templateName = new NpgsqlConnectionStringBuilder(template.ConnectionString).Database;
+                    await new PostgreSqlDurableRuntimeSchemaManager(template.DataSource)
+                        .InitializeRuntimeEpochAsync(seededEpoch, "fixture-tests", "issue-931-invalid-template");
+                });
+
+            await fixture.InitializeAsync().WaitAsync(TestOperationTimeout);
+
+            var activationError = await Assert.ThrowsAsync<PostgreSqlFixtureException>(
+                () => fixture.CreateReadyDatabaseAsync("fixture-tests", "issue-931").AsTask());
+
+            Assert.Contains("active runtime epoch", activationError.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(templateName);
+
+            await fixture.DisposeAsync().AsTask().WaitAsync(TestOperationTimeout);
+
+            Assert.False(await DatabaseExistsAsync(anchor, templateName));
+            var phases = (await File.ReadAllLinesAsync(timingPath))
+                .Skip(1)
+                .Select(row => row.Split(',')[0])
+                .ToArray();
+            Assert.Equal(1, phases.Count(phase => phase == "database_setup"));
+            Assert.Equal(1, phases.Count(phase => phase == "database_teardown"));
+        }
+        finally
+        {
+            File.Delete(timingPath);
+        }
+    }
+
+    [Fact]
     public async Task DisposeAsync_WritesSetupAndTeardownTimingRowsForReadyAndEmptyDatabases()
     {
         await using var anchor = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

@@ -185,15 +185,19 @@ class TrxEvidenceTests(unittest.TestCase):
             # An exact, passing Work cohort alone provides no ownership or fault evidence.
             write_trx(path, "work")
             with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "witness"):
-                BENCHMARK.validate_acceptance_trx(path)
+                BENCHMARK.validate_acceptance_trx(path, expected_rows=MANIFEST["_identities"]["work"])
             identities = [f"{BENCHMARK.POSTGRES_TEST_NAMESPACE}.{class_name}.{method}"
                           for class_name, methods in BENCHMARK.ACCEPTANCE_WITNESSES.values()
                           for method in methods]
             write_trx(path, "matrix", identities=identities, include_collector=False)
-            self.assertEqual(len(identities), BENCHMARK.validate_acceptance_trx(path)["passed"])
+            self.assertEqual(len(identities), BENCHMARK.validate_acceptance_trx(path, expected_rows=identities)["passed"])
+            with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "discovery"):
+                BENCHMARK.validate_acceptance_trx(path, expected_rows=[*identities, "fixture.Theory(value: 1)"])
+            with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "discovery"):
+                BENCHMARK.validate_acceptance_trx(path, expected_rows=[*identities, identities[0]])
             write_trx(path, "matrix", identities=identities[1:], include_collector=False)
             with self.assertRaises(BENCHMARK.BenchmarkError):
-                BENCHMARK.validate_acceptance_trx(path)
+                BENCHMARK.validate_acceptance_trx(path, expected_rows=identities)
 
     def test_acceptance_build_marker_must_match_the_measured_release(self):
         digest = "ab" * 32
@@ -212,9 +216,9 @@ class TrxEvidenceTests(unittest.TestCase):
             )
             tree.write(path, encoding="utf-8")
             self.assertEqual(len(identities), BENCHMARK.validate_acceptance_trx(
-                path, expected_assembly_sha256=digest)["passed"])
+                path, expected_rows=identities, expected_assembly_sha256=digest)["passed"])
             with self.assertRaises(BENCHMARK.BenchmarkError):
-                BENCHMARK.validate_acceptance_trx(path, expected_assembly_sha256="11" * 32)
+                BENCHMARK.validate_acceptance_trx(path, expected_rows=identities, expected_assembly_sha256="11" * 32)
 
     def test_requires_exact_pass_identity_set_and_xplat_collector(self):
         with tempfile.TemporaryDirectory() as directory:

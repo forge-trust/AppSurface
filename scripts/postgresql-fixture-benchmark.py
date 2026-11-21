@@ -48,6 +48,15 @@ SERVER_METADATA_TEST = (
     "ReportsMeasurementServerSettings"
 )
 SERVER_METADATA_PREFIX = "FIXTURE_SERVER_METADATA "
+ACCEPTANCE_CLASSES = (
+    "PostgreSqlCohortFixtureOptionsTests",
+    "PostgreSqlCohortFixtureTests",
+    "PostgreSqlFixtureServerMetadataTests",
+    "PostgreSqlFixtureTimingCsvTests",
+    "PostgreSqlIntegrationTestDatabaseCloneSchemaTests",
+    "PostgreSqlIntegrationTestDatabaseTests",
+    "PostgreSqlOwnedDatabaseTests",
+)
 ACCEPTANCE_WITNESSES = {
     "owned_database_lifecycle": (
         "PostgreSqlOwnedDatabaseTests",
@@ -322,6 +331,28 @@ def class_test_filter(cohort: str) -> str:
     return f"FullyQualifiedName~{EXPECTED_CLASSES[cohort]}."
 
 
+def acceptance_filter() -> str:
+    return "|".join(f"FullyQualifiedName~{POSTGRES_TEST_NAMESPACE}.{name}." for name in ACCEPTANCE_CLASSES)
+
+
+def discover_acceptance_rows(dotnet: str) -> list[str]:
+    result = run_checked([
+        dotnet, "test", str(PROJECT_RELATIVE), "--configuration", "Release",
+        "--no-build", "--no-restore", "--list-tests", "--filter", acceptance_filter(),
+    ])
+    if result.returncode:
+        raise BenchmarkError("could not discover the fixture acceptance cases in the measured Release build")
+    lines = [line.strip() for line in result.stdout.splitlines()]
+    rows = []
+    for name in ACCEPTANCE_CLASSES:
+        prefix = f"{POSTGRES_TEST_NAMESPACE}.{name}."
+        cases = [line for line in lines if line.startswith(prefix)]
+        if not cases:
+            raise BenchmarkError(f"acceptance discovery returned no cases for {name}")
+        rows.extend(cases)
+    return sorted(rows)
+
+
 def validate_environment(dotnet: str, manifest: dict[str, object]) -> dict[str, object]:
     if not PROJECT.is_file():
         raise BenchmarkError(f"test project is missing: {PROJECT_RELATIVE}")
@@ -387,6 +418,7 @@ def validate_environment(dotnet: str, manifest: dict[str, object]) -> dict[str, 
 def validate_acceptance_trx(
     path: Path,
     *,
+    expected_rows: list[str],
     expected_assembly_sha256: str | None = None,
 ) -> dict[str, object]:
     try:
@@ -410,6 +442,9 @@ def validate_acceptance_trx(
     if missing:
         details = "; ".join(f"{family}: {', '.join(names)}" for family, names in missing.items())
         raise BenchmarkError(f"acceptance TRX is missing required fixture witnesses: {details}")
+    actual_rows = Counter(result.get("testName", "") for result in root.findall(".//{*}UnitTestResult"))
+    if not expected_rows or actual_rows != Counter(expected_rows):
+        raise BenchmarkError("acceptance TRX cases differ from the Release fixture discovery, including theory rows")
     receipt: dict[str, object] = {
         "status": "PASS",
         "source_sha256": hashlib.sha256(raw).hexdigest(),
@@ -1234,6 +1269,7 @@ def protocol(args: argparse.Namespace) -> int:
         assembly_sha256 = str(environment["release_assembly_sha256"])
         acceptance = validate_acceptance_trx(
             retained_acceptance,
+            expected_rows=discover_acceptance_rows(dotnet),
             expected_assembly_sha256=assembly_sha256,
         )
         server_check = capture_server_metadata(dotnet, root, server_info, assembly_sha256)
@@ -1314,6 +1350,11 @@ def validate_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def print_acceptance_filter(_args: argparse.Namespace) -> int:
+    print(acceptance_filter())
+    return 0
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Reproducible, redacted paired benchmark for the issue #931 PostgreSQL fixture experiment.",
@@ -1325,10 +1366,12 @@ def make_parser() -> argparse.ArgumentParser:
             "Server metadata JSON shape: {\"version\":\"16.4\",\"settings\":{\"max_connections\":100,"
             "\"shared_buffers\":\"1GB\"}}. The acceptance TRX must be the completed full fixture lifecycle and "
             "clone-validation test-project run, include every required witness method, have unique result IDs, "
-            "and report zero failures, skips, and aborted results. Theory rows may produce multiple results per method."
+            "match every case returned by acceptance-filter, and report zero failures, skips, and aborted results."
         ),
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
+    show_filter = subparsers.add_parser("acceptance-filter", help="print the VSTest filter for the complete fixture acceptance matrix")
+    show_filter.set_defaults(handler=print_acceptance_filter)
 
     validate = subparsers.add_parser(
         "validate",
