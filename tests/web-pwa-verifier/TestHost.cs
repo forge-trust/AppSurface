@@ -15,13 +15,16 @@ internal sealed class TempDirectory : IDisposable
     // a symlinked temp directory and its physical path (for example /var on macOS).
     private static string CanonicalPath(DirectoryInfo directory)
     {
+        // Windows cannot query a volume root with ResolveLinkTarget.
+        if (directory.Parent is not { } parent)
+        {
+            return directory.FullName;
+        }
         if (directory.ResolveLinkTarget(returnFinalTarget: true) is DirectoryInfo target)
         {
             return CanonicalPath(target);
         }
-        return directory.Parent is { } parent
-            ? TestPathUtils.PathUnder(CanonicalPath(parent), directory.Name)
-            : directory.FullName;
+        return TestPathUtils.PathUnder(CanonicalPath(parent), directory.Name);
     }
 
     public void Dispose() => Directory.Delete(Path, recursive: true);
