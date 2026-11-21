@@ -62,6 +62,15 @@ internal static class RepositoryEvidenceWorkflow
 
         var output = Path.GetFullPath(Required(options, "--output"));
         if (Directory.Exists(output) || File.Exists(output)) throw new ArgumentException("Evidence output must be fresh.");
+        var nativeCoverageDirectory = options.GetValueOrDefault("--native-coverage-directory");
+        var nativeCoverageContractVersion = 2;
+        if (options.TryGetValue("--native-coverage-contract-version", out var nativeContract))
+        {
+            if (string.IsNullOrWhiteSpace(nativeCoverageDirectory) || nativeContract is not ("2" or "3")
+                || !plan.Profile.Producers.Any(producer => producer.Id == "solution-coverage"))
+                throw new ArgumentException("Select native coverage contract 2 or 3 only for a selected solution coverage producer with native captures.");
+            nativeCoverageContractVersion = nativeContract == "3" ? 3 : 2;
+        }
         ValidationSettings? settings = null;
         RepositoryCheckSettings? checks = null;
         if (operation == "run" && plan.Profile.Producers.Count > 0)
@@ -76,7 +85,6 @@ internal static class RepositoryEvidenceWorkflow
                     throw new ArgumentException("The selected coverage CLI must be an existing absolute executable.");
                 coverageCli = Path.GetFullPath(selectedCoverageCli);
             }
-            var nativeCoverageDirectory = options.GetValueOrDefault("--native-coverage-directory");
             if (!string.IsNullOrWhiteSpace(nativeCoverageDirectory) && coverageCli is null)
                 throw new ArgumentException("Native coverage requires --coverage-cli with the installed candidate executable.");
             if (RequiresPackage(plan.Profile))
@@ -86,6 +94,7 @@ internal static class RepositoryEvidenceWorkflow
             checks = new RepositoryCheckSettings(repository, dotnet, output,
                 options.GetValueOrDefault("--diff-base"), nativeCoverageDirectory, options.GetValueOrDefault("--diff-file"), coverageCli)
             {
+                NativeCoverageContractVersion = nativeCoverageContractVersion,
                 VerifyLocalSourceAsync = verifyLocalSourceAsync,
                 CoverageCollectionDirectory = options.GetValueOrDefault("--coverage-collection"),
                 CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
@@ -273,7 +282,7 @@ internal static class RepositoryEvidenceWorkflow
         string[] selected = operation switch
         {
             "plan" => ["--output"],
-            "run" => ["--plan", "--output", "--package", "--version", "--source-commit", "--dotnet", "--scratch-parent", "--repository", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli", "--coverage-collection", "--coverage-schedule-timings"],
+            "run" => ["--plan", "--output", "--package", "--version", "--source-commit", "--dotnet", "--scratch-parent", "--repository", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--coverage-collection", "--coverage-schedule-timings"],
             _ => ["--plan", "--manifest", "--artifact-root"],
         };
         if (options.Keys.Except(common.Concat(selected), StringComparer.Ordinal).Any())
