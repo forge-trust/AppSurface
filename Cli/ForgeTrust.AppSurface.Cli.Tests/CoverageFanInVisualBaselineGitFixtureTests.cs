@@ -132,7 +132,7 @@ public sealed class CoverageFanInVisualBaselineGitFixtureTests
     public async Task VisualBaselinePolicyRefusesStructuralScreenshotChanges(string operation)
     {
         using var fixture = await Fixture.CreateAsync();
-        var existing = Path.Join(fixture.Repository, ScreenshotPath);
+        var existing = TestPathUtils.PathUnder(fixture.Repository, ScreenshotPath);
         var sibling = Path.Join(Path.GetDirectoryName(existing), "another-home.png");
         switch (operation)
         {
@@ -261,9 +261,9 @@ public sealed class CoverageFanInVisualBaselineGitFixtureTests
             Environment.SetEnvironmentVariable(PolicyStoreEnvironment, Path.Join(fixture.Temp.Path, "store"));
             fixture.Temp.WriteFile("producer/coverage.xml", string.Empty);
             fixture.Temp.WriteFile("producer/timings.json", TimingsJson);
-            fixture.Temp.WriteFile(Path.Join("repo", ProjectPath),
+            fixture.Temp.WriteFile(TestPathUtils.RelativePath("repo", ProjectPath),
                 "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
-            fixture.Temp.WriteFile(Path.Join("repo", SourcePath), InitialSource);
+            fixture.Temp.WriteFile(TestPathUtils.RelativePath("repo", SourcePath), InitialSource);
             fixture.Temp.WriteFile("repo/.gitattributes", "*.png -diff\n");
             fixture.WritePng(OriginalPng);
             await fixture.GitAsync("init");
@@ -300,7 +300,7 @@ public sealed class CoverageFanInVisualBaselineGitFixtureTests
         internal async Task CommitPatchAsync(bool replaceScreenshot, bool changeSource)
         {
             if (replaceScreenshot) WritePng(ReplacementPng);
-            if (changeSource) Temp.WriteFile(Path.Join("repo", SourcePath), ChangedSource);
+            if (changeSource) Temp.WriteFile(TestPathUtils.RelativePath("repo", SourcePath), ChangedSource);
             await GitAsync("add", "-A");
             await GitAsync("commit", "-m", "visual baseline and optional source change");
             Policy = Policy with

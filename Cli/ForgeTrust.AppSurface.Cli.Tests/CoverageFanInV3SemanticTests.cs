@@ -117,6 +117,18 @@ public sealed class CoverageFanInV3SemanticTests
         Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
     }
 
+    [Fact]
+    public void IndependentReplayRejectsUnknownDiffPolicyEvenWhenTrustedInputAgrees()
+    {
+        const string unsupportedPolicyId = "appsurface-unrecognized-diff-v1";
+        var oracle = new Oracle();
+        oracle.UseUnknownDiffPolicy(unsupportedPolicyId);
+
+        Assert.Equal(unsupportedPolicyId, oracle.Expected.DiffPolicyId);
+        Assert.Equal(unsupportedPolicyId, oracle.Input.DiffPolicyId);
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
     [Theory]
     [InlineData("index-mode")]
     [InlineData("index-object")]
@@ -185,6 +197,33 @@ public sealed class CoverageFanInV3SemanticTests
             report.Descendants("classes").Single().Add(new XElement("class",
                 new XAttribute("name", "reported screenshot"), new XAttribute("filename", reportPath), new XElement("lines")));
         oracle.RebindReports();
+
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Theory]
+    [InlineData("added")]
+    [InlineData("deleted")]
+    [InlineData("mode-changed")]
+    [InlineData("executable")]
+    [InlineData("regular-to-executable")]
+    public void IndependentReplayRejectsStructuralChangesAtQualifiedPngPaths(string changeKind)
+    {
+        var oracle = new Oracle();
+        oracle.UseQualifiedPngOnly();
+        var oldId = new string('a', 20) + "0" + new string('a', 19);
+        var newId = new string('b', 20) + "0" + new string('b', 19);
+        var zeros = new string('0', 40);
+        var raw = changeKind switch
+        {
+            "added" => $":000000 100644 {zeros} {newId} A\0{VisualBaselinePath}\0",
+            "deleted" => $":100644 000000 {oldId} {zeros} D\0{VisualBaselinePath}\0",
+            "mode-changed" => $":100644 100755 {oldId} {oldId} M\0{VisualBaselinePath}\0",
+            "executable" => $":100755 100755 {oldId} {newId} M\0{VisualBaselinePath}\0",
+            "regular-to-executable" => $":100644 100755 {oldId} {newId} M\0{VisualBaselinePath}\0",
+            _ => throw new ArgumentOutOfRangeException(nameof(changeKind))
+        };
+        oracle.Input = oracle.Input with { Raw = raw };
 
         Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
     }
@@ -913,6 +952,15 @@ public sealed class CoverageFanInV3SemanticTests
             RehashDiffEvidence();
         }
 
+        internal void UseUnknownDiffPolicy(string diffPolicyId)
+        {
+            var policy = JsonNode.Parse(Expected.Policy.GetRawText())!.AsObject();
+            policy["diffPolicyId"] = diffPolicyId;
+            using var document = JsonDocument.Parse(policy.ToJsonString());
+            Expected = new(document.RootElement.Clone(), Expected.Digest);
+            Input = Input with { DiffPolicyId = diffPolicyId };
+        }
+
         internal void UseMixedVisualBaselinePng(string path = VisualBaselinePath)
         {
             SelectVisualBaselinePolicy();
@@ -935,7 +983,8 @@ public sealed class CoverageFanInV3SemanticTests
         private void SelectVisualBaselinePolicy()
         {
             var policy = CoveragePolicyEncoding.Decode<CoverageFanInPolicy>(
-                Encoding.UTF8.GetBytes(Expected.Policy.GetRawText())) with { DiffPolicyId = VisualBaselineDiffPolicyId };
+                Encoding.UTF8.GetBytes(Expected.Policy.GetRawText())) with
+            { DiffPolicyId = VisualBaselineDiffPolicyId };
             Expected = new(CoveragePolicyEncoding.ToElement(policy), CoveragePolicyEncoding.Digest(policy));
             Claim["policyDigest"] = Expected.Digest;
         }

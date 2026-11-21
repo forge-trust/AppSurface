@@ -115,6 +115,15 @@ public sealed class CoverageFanInPolicyTests
         Assert.Equal(CoverageFanInPolicy.VisualBaselinePngDiffPolicyId, decoded.DiffPolicyId);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("future-policy")]
+    public void V3RejectsUnrecognizedDiffPolicySelectors(string selector)
+    {
+        var policy = V3Policy() with { DiffPolicyId = selector };
+        Assert.Throws<ArgumentException>("diffPolicyId", () => CoveragePolicyEncoding.Freeze(policy));
+    }
+
     [Fact]
     public void V2PolicyCannotSelectTheV3DiffPolicy()
         => Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(Policy() with

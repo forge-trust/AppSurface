@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Coverage;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -121,6 +122,18 @@ public sealed class CoverageFanInVisualBaselinePngTests
     }
 
     [Fact]
+    public void ValidatorRequiresCompleteHeaderAndEndChunks()
+    {
+        var compressed = CompressScanlines(1, 1, 64, 0, 0);
+        var header = Chunk("IHDR", Header(1, 1, 2));
+        var imageData = Chunk("IDAT", compressed);
+        var end = Chunk("IEND", []);
+        Assert.False(IsSupported(Png(Signature, header, imageData)));
+        Assert.False(IsSupported(Png(Signature, imageData, end)));
+        Assert.False(IsSupported(Png(Signature, Chunk("IHDR", Header(1, 1, 2)[..12]), imageData, end)));
+    }
+
+    [Fact]
     public void ValidatorRejectsUnsupportedHeaderMissingImageDataAndRepeatedHeader()
     {
         var unsupported = BuildPng(6, 64);
@@ -140,6 +153,7 @@ public sealed class CoverageFanInVisualBaselinePngTests
     [Theory]
     [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite/home-system-light.png", true)]
     [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsLight/home-mobile-390x844.png", true)]
+    [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsLight/home_mobile.png", true)]
     [InlineData("web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite/home.png", false)]
     [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite/nested/home.png", false)]
     [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite/home page.png", false)]
@@ -267,6 +281,18 @@ public sealed class CoverageFanInVisualBaselinePngTests
     }
 
     [Fact]
+    public async Task EmptyDiffProducesNoQualifiedScreenshotsOrBlobReads()
+    {
+        using var fixture = await DiffFixture.CreateAsync(changePng: false);
+
+        var input = await fixture.ReadAsync();
+
+        Assert.Empty(CoverageFanInDiffParser.Parse(input));
+        Assert.Empty(input.QualifiedPngPaths);
+        Assert.Empty(fixture.Runner.BlobRequests);
+    }
+
+    [Fact]
     public async Task VisualPolicySkipsBlobReadsWhenNoQualifiedScreenshotChanged()
     {
         using var fixture = await DiffFixture.CreateAsync(changePng: false, changeSource: true);
@@ -289,10 +315,13 @@ public sealed class CoverageFanInVisualBaselinePngTests
         Assert.Empty(fixture.Runner.BlobRequests);
     }
 
-    [Fact]
-    public async Task VisualPolicyRejectsAnInvalidPinnedDiffAttributeInventory()
+    [Theory]
+    [InlineData("unexpected\0diff\0unspecified\0")]
+    [InlineData("")]
+    [InlineData(Path + "\0diff\0unspecified\0unexpected-tail")]
+    public async Task VisualPolicyRejectsAnInvalidPinnedDiffAttributeInventory(string attributeResponse)
     {
-        using var fixture = await DiffFixture.CreateAsync(invalidAttributeInventory: true);
+        using var fixture = await DiffFixture.CreateAsync(attributeResponse: attributeResponse);
 
         var exception = await Assert.ThrowsAsync<CoverageFanInEvidenceException>(() => fixture.ReadAsync());
 
@@ -480,14 +509,16 @@ public sealed class CoverageFanInVisualBaselinePngTests
 
         internal static async Task<DiffFixture> CreateAsync(BlobReadFailure? failure = null,
             bool missingBlobInventory = false, bool changePng = true, bool changeSource = false,
-            string diffPolicyId = VisualPolicyId, bool invalidAttributeInventory = false)
+            string diffPolicyId = VisualPolicyId, string? attributeResponse = null)
         {
             var temp = TestDirectory.Create();
             var root = temp.Path;
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.Join(root, Path))!);
+            var screenshotFile = TestPathUtils.PathUnder(root, Path);
+            var sourceFile = TestPathUtils.PathUnder(root, SourcePath);
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(screenshotFile)!);
             Directory.CreateDirectory(System.IO.Path.Join(root, "src"));
-            await File.WriteAllBytesAsync(System.IO.Path.Join(root, Path), BuildPng(2, 64));
-            await File.WriteAllTextAsync(System.IO.Path.Join(root, SourcePath), "class Example { }\n");
+            await File.WriteAllBytesAsync(screenshotFile, BuildPng(2, 64));
+            await File.WriteAllTextAsync(sourceFile, "class Example { }\n");
             await GitAsync(root, null, "init", "-q");
             await GitAsync(root, null, "config", "user.email", "fixture@example.invalid");
             await GitAsync(root, null, "config", "user.name", "Fixture");
@@ -496,14 +527,14 @@ public sealed class CoverageFanInVisualBaselinePngTests
             var requestedBase = await GitAsync(root, null, "rev-parse", "HEAD");
             var oldPngObject = await GitAsync(root, null, "rev-parse", $"{requestedBase}:{Path}");
 
-            if (changePng) await File.WriteAllBytesAsync(System.IO.Path.Join(root, Path), BuildPng(2, 65));
-            if (changeSource) await File.WriteAllTextAsync(System.IO.Path.Join(root, SourcePath), "class Example { int Added => 1; }\n");
+            if (changePng) await File.WriteAllBytesAsync(screenshotFile, BuildPng(2, 65));
+            if (changeSource) await File.WriteAllTextAsync(sourceFile, "class Example { int Added => 1; }\n");
             await GitAsync(root, null, "add", "--", Path, SourcePath);
-            await GitAsync(root, null, "commit", "-m", "fixture change");
+            await GitAsync(root, null, "commit", "--allow-empty", "-m", "fixture change");
             var head = await GitAsync(root, null, "rev-parse", "HEAD");
             var tree = await GitAsync(root, null, "rev-parse", "HEAD^{tree}");
             var newPngObject = await GitAsync(root, null, "rev-parse", $"{head}:{Path}");
-            var oldPng = await File.ReadAllBytesAsync(System.IO.Path.Join(root, Path));
+            var oldPng = await File.ReadAllBytesAsync(screenshotFile);
             var newPng = changePng ? BuildPng(2, 65) : oldPng;
 
             var policy = CoverageFanInPolicyTests.Policy() with
@@ -523,7 +554,7 @@ public sealed class CoverageFanInVisualBaselinePngTests
                 [newPngObject] = newPng
             };
             var runner = new VisualBaselineProcessRunner(blobContents, failure, missingBlobInventory,
-                invalidAttributeInventory, failure switch
+                attributeResponse, failure switch
                 {
                     BlobReadFailure.InvalidOldPng => oldPngObject,
                     BlobReadFailure.InvalidNewPng => newPngObject,
@@ -548,7 +579,7 @@ public sealed class CoverageFanInVisualBaselinePngTests
         IReadOnlyDictionary<string, byte[]> blobContents,
         BlobReadFailure? failure,
         bool missingBlobInventory,
-        bool invalidAttributeInventory,
+        string? attributeResponse,
         string? invalidPngObject,
         string oldPngObject,
         string newPngObject) : ICoverageRunProcessRunner
@@ -566,8 +597,8 @@ public sealed class CoverageFanInVisualBaselinePngTests
                 request.Lease.Complete();
                 var paths = Encoding.UTF8.GetString(request.StandardInputBytes ?? []).Split('\0',
                     StringSplitOptions.RemoveEmptyEntries);
-                if (invalidAttributeInventory)
-                    return new(0, "unexpected\0diff\0unspecified\0", StandardOutput: "unexpected\0diff\0unspecified\0");
+                if (attributeResponse is not null)
+                    return new(0, attributeResponse, StandardOutput: attributeResponse);
 
                 ValidAttributePaths.AddRange(paths);
                 var output = string.Concat(paths.Select(path => $"{path}\0diff\0unspecified\0"));
