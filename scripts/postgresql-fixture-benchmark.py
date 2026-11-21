@@ -49,6 +49,7 @@ SERVER_METADATA_TEST = (
 )
 SERVER_METADATA_PREFIX = "FIXTURE_SERVER_METADATA "
 ACCEPTANCE_CLASSES = (
+    "PostgreSqlCohortDatabaseRetryTests",
     "PostgreSqlCohortFixtureOptionsTests",
     "PostgreSqlCohortFixtureTests",
     "PostgreSqlFixtureServerMetadataTests",

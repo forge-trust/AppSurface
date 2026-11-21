@@ -47,6 +47,8 @@ The [database helper](PostgreSqlIntegrationTestDatabase.cs) registers the genera
 
 A failed create with an unknown acknowledgement, or a different OID under a recorded name, leaves the resource for the disposable-server owner to reconcile. Keep the failed run and its diagnostic. Inspect the observed and expected OIDs and any dependent roles on that same server. An incomplete cleanup invalidates a benchmark arm. Use the disposable server’s normal retirement procedure when ownership cannot be established.
 
+If an owned clone’s drop fails, its case keeps the fixture lease. Once the failed attempt has finished and ownership is confirmed, retry disposal on the same case handle. Successful cleanup releases the lease and lets fixture disposal remove the template.
+
 ## Compare baseline and candidate
 
 The [five-pair measurement](../../artifacts/issue-931-fixture-benchmark/results.md) produced a measured no-go. The median improvement missed the variability threshold. Fresh is the supported default for these cohorts.
@@ -77,6 +79,8 @@ python3 scripts/postgresql-fixture-benchmark.py validate \
 ```
 
 Run the fixture acceptance tests on a disposable server before measuring. The runner's `acceptance-filter` command selects the lifecycle, clone validation, configuration, timing, metadata and existing database-helper tests. The runner discovers these cases in the measured Release assembly and requires one passing result for every discovered case, including each theory row. Give this run its own results directory. Point `APPSURFACE_POSTGRES_TEST_CONNECTION` at the dedicated measurement server before starting the benchmark and leave that server idle for the duration.
+
+Limit that connection override to the experiment commands. For [repository-wide validation](../../CONTRIBUTING.md#local-verification), the default Testcontainers server provides the `appsurface` login and TCP connection used by the Schedule and idle-session tests.
 
 ```sh
 acceptance=$(python3 scripts/postgresql-fixture-benchmark.py acceptance-filter)

@@ -50,8 +50,8 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
     /// <summary>Receives elapsed teardown time once, after the first attempt that acquired the lifecycle gate.</summary>
     internal Action<TimeSpan>? ObserveTeardown { get; set; }
 
-    /// <summary>Releases the class fixture's case lease after teardown acquires the gate and finishes its attempt.
-    /// A caller timing out behind active setup or disposal leaves the lease with its current owner.</summary>
+    /// <summary>Releases the class fixture's case lease after owned-resource cleanup succeeds.
+    /// A timed-out or failed cleanup leaves the callback registered for a safe retry.</summary>
     internal Action? AfterDispose { get; set; }
 
     private PostgreSqlIntegrationTestDatabase(
@@ -734,9 +734,13 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
         finally
         {
             var timing = ObserveTeardown;
-            var release = AfterDispose;
+            var release = _disposed ? AfterDispose : null;
             ObserveTeardown = null;
-            AfterDispose = null;
+            if (_disposed)
+            {
+                AfterDispose = null;
+            }
+
             _lifecycleGate.Release();
             try
             {
