@@ -240,12 +240,27 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         var publicationDirectory = TestPathUtils.PathUnder(_root, "cli-publication-prepared");
         var preflightReport = TestPathUtils.PathUnder(_root, "cli-publication-preflight-report");
 
-        var preflight = await fixture.RunEvidenceCliAsync("publish-preflight", preflightReport,
+        string[] preflightArguments =
+        [
             "--manifest", fixture.PlanManifestPath!,
             "--aggregate-input", aggregateDirectory,
             "--aggregate-artifact-id", "702",
             "--expected-aggregate-sha256", aggregateHash,
-            "--publication-directory", publicationDirectory);
+            "--publication-directory", publicationDirectory
+        ];
+        var unexpectedProof = TestPathUtils.PathUnder(_root, "unexpected-docs-native-proof.json");
+        await File.WriteAllTextAsync(unexpectedProof, DocsNativeReleaseEvidenceTests.CreateProof().ToJsonString());
+        var unexpectedHash = Sha256(await File.ReadAllBytesAsync(unexpectedProof));
+        var rejectedReport = TestPathUtils.PathUnder(_root, "unexpected-docs-proof-report");
+        var rejected = await fixture.RunEvidenceCliAsync("publish-preflight", rejectedReport,
+            [.. preflightArguments, "--docs-native-proof", unexpectedProof, "--docs-native-artifact-id", "704",
+                "--docs-native-sha256", unexpectedHash]);
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.Contains("does not carry the Docs native asset target", rejected.Stderr, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(publicationDirectory));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(rejectedReport, "publication-start-receipt.json")));
+
+        var preflight = await fixture.RunEvidenceCliAsync("publish-preflight", preflightReport, preflightArguments);
 
         Assert.True(preflight.ExitCode == 0, preflight.Stderr + Environment.NewLine + preflight.Stdout);
         Assert.Empty(preflight.Stderr);
