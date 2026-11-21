@@ -110,7 +110,8 @@ internal static class RepositoryEvidenceWorkflow
             hasProducers = plan.Profile.Producers.Count > 0,
             requiresCoverage = plan.Profile.Producers.Any(producer => producer.Id == "solution-coverage"),
             requiresNativeCoverage = rootPlan.Profile.Producers.Any(producer => producer.Id == "solution-coverage")
-                && rootPlan.Profile.Producers.Any(producer => producer.Id != "solution-coverage"),
+                && rootPlan.Profile.Producers.Any(producer => producer.Id != "solution-coverage")
+                && !IsToolManifestOnlyChange(rootPlan.ChangedPaths),
             requiresPackageChecks = plan.Profile.Producers.Any(producer => producer.Id == "package-checks"),
             producerIds = plan.Profile.Producers.Select(producer => producer.Id).ToArray(),
         }, Program.JsonOptions), cancellationToken);
@@ -236,6 +237,23 @@ internal static class RepositoryEvidenceWorkflow
     /// <summary>Whether the selected profile needs the separately packed CLI used by native acceptance journeys.</summary>
     internal static bool RequiresPackage(EvidenceProfile profile) =>
         profile.Producers.Any(producer => producer.Id is "packed-storage" or "installed-consumer");
+
+    /// <summary>
+    /// Identifies an existing local tool manifest update with optional new, direct Markdown release entries.
+    /// Only the native coverage supplement is omitted; all selected producers and direct coverage gates remain required.
+    /// Renames, deletions and any other changed path retain native coverage, including either name of a rename.
+    /// </summary>
+    private static bool IsToolManifestOnlyChange(IReadOnlyList<NormalizedDiffPath> paths)
+    {
+        const string manifest = ".config/dotnet-tools.json";
+        const string entries = "releases/unreleased.entries/";
+        return paths.Any(path => path.Path == manifest && path.Kind == "modified" && path.PreviousPath is null)
+            && paths.All(path => path.PreviousPath is null
+                && ((path.Path == manifest && path.Kind == "modified")
+                    || (path.Kind == "added" && path.Path.StartsWith(entries, StringComparison.Ordinal)
+                        && path.Path.EndsWith(".md", StringComparison.Ordinal)
+                        && !path.Path[entries.Length..].Contains('/'))));
+    }
 
     /// <summary>Projects a validated shared policy into one execution lane without reclassifying changed paths.</summary>
     internal static EvidencePlan ResolveScope(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> paths, string scope)
