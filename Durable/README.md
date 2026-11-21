@@ -1,6 +1,6 @@
 # Portable durable execution
 
-Contributors working on database setup or test runtime can use the [PostgreSQL fixture and benchmark guide](ForgeTrust.AppSurface.Durable.PostgreSql.Tests/README.md) to reproduce the Work and Flow comparison on a disposable server.
+Contributors working on database setup or test runtime can use the [PostgreSQL fixture and benchmark guide](https://github.com/forge-trust/AppSurface/blob/115f1cf0020c77ea848a1c2b96ddb7e10066a8f2/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/README.md) to reproduce the Work and Flow comparison on a disposable server.
 
 The [runtime doctor](runtime-doctor.md) diagnoses one connected store with a restricted credential and optional worker observation. Its clean result is a captured store/runtime check; deployment preflight and application verification remain separate.
 
