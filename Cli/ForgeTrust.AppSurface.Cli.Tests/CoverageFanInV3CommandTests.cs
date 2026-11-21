@@ -40,6 +40,23 @@ public sealed class CoverageFanInV3CommandTests
     }
 
     [Fact]
+    public void ScreenshotPolicyIsAcceptedOnlyInV3Requests()
+    {
+        using var root = TestDirectory.Create();
+        var v3 = JsonNode.Parse(Envelope("capture", CaptureRequest(root.Path, 3), 3))!;
+        v3["request"]!["policy"]!["diffPolicyId"] = CoverageFanInPolicy.VisualBaselinePngDiffPolicyId;
+        var parsed = CoverageFanInRequestReader.Parse(JsonSerializer.SerializeToUtf8Bytes(v3));
+        CoverageFanInRequestReader.ValidateCanonicalPolicy(parsed);
+        Assert.Equal(CoverageFanInPolicy.VisualBaselinePngDiffPolicyId,
+            Assert.IsType<CoverageCaptureRequest>(parsed.Request).Policy.DiffPolicyId);
+
+        var v2 = JsonNode.Parse(Envelope("capture", CaptureRequest(root.Path, 2), 2))!;
+        v2["request"]!["policy"]!["diffPolicyId"] = CoverageFanInPolicy.VisualBaselinePngDiffPolicyId;
+        Assert.Throws<CoverageFanInCliInputException>(() =>
+            CoverageFanInRequestReader.Parse(JsonSerializer.SerializeToUtf8Bytes(v2)));
+    }
+
+    [Fact]
     /// <summary>protects: the frozen v2 request shape. fails_when: v2 carries v3 policy members. no_claim: v3 admission.</summary>
     public void V2_reader_rejects_new_policy_properties_instead_of_accepting_an_ambiguous_legacy_request()
     {

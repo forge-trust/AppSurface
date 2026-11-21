@@ -34,6 +34,8 @@ Choose `CollectAndCaptureAsync` when this process should supervise test executio
 
 `CoverageFanInPolicy` defaults to contract version 2 with no report profile; this preserves v2 canonical policy bytes/digests and CLI result shape. V3 is an explicit opt-in via `ContractVersion = 3` plus `ReportProfileId = "coverlet-collector-cobertura-v1"`. V3 adds `CoverageFanInResult.PatchApplicability` with primary/composed line and branch outcomes. **Pitfall:** v3 `PatchOutcome == "PatchAccepted"` includes valid N/A dimensions. Pin the expected `contractVersion: 3` and preserve the complete four primary/composed line/branch outcomes; v3 accepts valid N/A without an additional measured-only switch. The repository build explicitly selects v3 for pull requests requiring native coverage. The standalone Dogfood adapter's `--contract-version` option defaults to 2 and selects v3 with value `3`. See the [canonical v3 applicability, trust, diff, artifact, and recovery reference](../../guides/coverage-fan-in.md#opt-in-schema-v3-report-based-patch-applicability).
 
+Set `CoverageFanInPolicy.DiffPolicyId = "appsurface-visual-baseline-png-v1"` on a v3 policy to admit replacements for the AppSurface docs screenshot baselines. Omit the property for the default text diff. The selection participates in the policy digest. See [screenshot baseline updates](../../guides/coverage-fan-in.md#screenshot-baseline-updates) for accepted paths, blob checks and replay behavior.
+
 ```csharp
 var result = await CoverageFanIn.CollectAndCaptureAsync(
     new CoverageCollectRequest(

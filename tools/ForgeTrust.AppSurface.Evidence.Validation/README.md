@@ -107,6 +107,7 @@ patch gates retain 95/85 and Codecov mode. The [CLI patch gate](../../Cli/ForgeT
 documents that a direct patch metric with no measurable changed lines or branches reports 100%. Local patch snapshots include current tracked and
 untracked content, so uncommitted code participates. CI PRs whose root policy selection includes coverage
 and another producer retain native Linux/Windows/macOS supplementation and independent aggregate acceptance.
+Native PR captures and the receiving producer select the [screenshot diff policy](../../guides/coverage-fan-in.md#screenshot-baseline-updates). The producer checks its ID in the verified diff metadata before it closes the coverage obligation.
 The checked-in `build.yml` PR-native path explicitly selects v3 with
 `--native-coverage-contract-version 3`, paired with the full pinned event PR base in AppSurface's 40-digit
 lowercase SHA-1 format and exactly three Linux,
@@ -114,7 +115,7 @@ Windows and macOS captures from the current workflow attempt. The installed CLI 
 then verify it independently in read-only mode. The validator checks and retains the typed primary and
 composed patch applicability with its bound diff and acceptance proof under the producer evidence. The
 acceptance receipt must use the same schema version as the verified CLI result. For v3, the retained diff
-metadata must name `appsurface-git-patch-v1` and carry the hash of the accepted patch. V3
+metadata must name `appsurface-visual-baseline-png-v1` and carry the hash of the accepted patch. V3
 `notApplicable` is valid only when the accepted collector reported no patch points for that dimension; it
 does not certify that changed code is non-executable or allow a narrower producer inventory. The existing
 95/85 thresholds, 0.5-point tolerance, Codecov mode, instrumentation, producer selection and required jobs

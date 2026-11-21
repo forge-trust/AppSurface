@@ -181,7 +181,7 @@ internal static partial class CoverageFanInEngine
 
     private static IReadOnlyDictionary<string, string> V3Context(CoverageFanInEngineRequest r, string? exceptionType = null)
     {
-        var context = new Dictionary<string, string>(StringComparer.Ordinal) { ["contractVersion"] = "3", ["diffPolicyId"] = CoverageFanInDiffContext.PolicyId };
+        var context = new Dictionary<string, string>(StringComparer.Ordinal) { ["contractVersion"] = "3", ["diffPolicyId"] = r.Expected.DiffPolicyId };
         if (r.Expected.Policy.TryGetProperty("reportProfileId", out var profile)) context["reportProfileId"] = profile.GetString()!;
         if (r.Expected.Gate.GetProperty("diffBase").GetString() is { } basis) context["baseCommit"] = basis;
         context["headCommit"] = r.Expected.Source.GetProperty("commit").GetString()!;

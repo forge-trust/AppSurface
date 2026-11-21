@@ -1055,7 +1055,10 @@ internal static class CoverageFanInRequestReader
         var required = version == 3
             ? new[] { "contractVersion", "reportProfileId", "source", "run", "testProjects", "supplements", "gate" }
             : ["source", "run", "testProjects", "supplements", "gate"];
-        var fields = ReadObject(element, required, ["instrumentation", "limits"]);
+        var optional = version == 3
+            ? new[] { "instrumentation", "limits", "diffPolicyId" }
+            : ["instrumentation", "limits"];
+        var fields = ReadObject(element, required, optional);
         if (version == 3)
         {
             var selected = ReadInt32(fields["contractVersion"]);
@@ -1073,7 +1076,9 @@ internal static class CoverageFanInRequestReader
             ReadInstrumentation(fields), ReadLimits(fields))
         {
             ContractVersion = version,
-            ReportProfileId = version == 3 ? ReadString(fields["reportProfileId"]) : null
+            ReportProfileId = version == 3 ? ReadString(fields["reportProfileId"]) : null,
+            DiffPolicyId = version == 3 && fields.ContainsKey("diffPolicyId")
+                ? ReadString(fields["diffPolicyId"]) : null
         };
         return policy;
     }
