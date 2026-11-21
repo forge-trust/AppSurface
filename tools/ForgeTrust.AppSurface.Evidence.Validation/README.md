@@ -99,19 +99,51 @@ Unmatched files still select the conservative profile, and policy edits cannot e
 New exceptions deserve the same review as test exemptions. Packaged README changes require package
 documentation verification; the root README and explicitly listed authored guides are exempt.
 
+### Tool-manifest coverage selection
+
+An update to the existing [local .NET tool manifest](https://github.com/forge-trust/AppSurface/blob/main/.config/dotnet-tools.json), by itself or with
+new direct Markdown files under [`releases/unreleased.entries/`](../../releases/README.md#append-only-unreleased-entries),
+uses the direct patch gate instead of the native coverage supplement. The manifest must have change kind
+`modified`, each release entry must be `added`, and no path may have a previous rename/copy name. Paths
+are matched exactly and case-sensitively; nested release paths and non-Markdown additions do not qualify.
+Any other changed path, manifest addition/deletion, or rename retains the normal native selection.
+
+This exception changes only `selection.json.requiresNativeCoverage`. It preserves the shared policy's
+four producers, every obligation, full-solution coverage, package verification, and the native installed
+consumer and storage journeys. Aggregate and applicable patch thresholds remain 95% line / 85% branch,
+with 0.5-point tolerance and Codecov patch mode. The direct gate follows its documented
+[no-measurable-patch behavior](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate).
+A manifest-only patch has no Cobertura source lines. A tool update accompanied by C# implementation,
+tests, policy changes, or broader infrastructure changes follows the normal [native fan-in selection](../../guides/coverage-fan-in.md#current-ci-path).
+
+### Coverage and package producers
+
 `solution-coverage` invokes the collector over every solution test project and applies the gates to that complete result. CI supplies `--coverage-cli /absolute/installed/appsurface`, verified against its same-source candidate package, for both collection and gate commands. When omitted for a direct local run, the producer uses the repository CLI project; a supplied path must be absolute and name an existing executable. Native fan-in requires the explicit installed command. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md)
 exclusively, matching the [compatibility coverage command](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) so their
 timing and transport fixtures do not compete with another test project. It verifies the complete
 successful timing inventory, and requires 95% line / 85% branch coverage with 0.5-point tolerance. Applicable
 patch gates retain 95/85 and Codecov mode. The [CLI patch gate](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
-documents that a patch metric with no measurable changed lines or branches reports 100%. Native fan-in
-keeps its strict nonempty-denominator verification. Local patch snapshots include current tracked and
-untracked content, so uncommitted code participates. CI PRs whose root policy selection includes coverage
-and another producer retain native Linux/Windows/macOS supplementation, independent aggregate acceptance
-and nondecreasing measurable patch denominators through the installed
-[schema-v2-default, v3-opt-in fan-in commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-fan-in). The repository [dogfood adapter](../ForgeTrust.AppSurface.Coverage.Dogfood/README.md) supplies AppSurface policy and invokes capture/import, composition, acceptance and separate independent verification. Its `--contract-version` defaults to 2 and accepts explicit value `3`; the selected repository policy remains v2 pending fresh same-run/attempt shadow proof.
+documents that a direct patch metric with no measurable changed lines or branches reports 100%. Local patch snapshots include current tracked and
+untracked content, so uncommitted code participates. Subject to the [tool manifest exception](#tool-manifest-coverage-selection), CI PRs whose root policy
+selects coverage and another producer require native Linux/Windows/macOS supplementation and independent aggregate acceptance.
+The checked-in `build.yml` PR-native path explicitly selects v3 with
+`--native-coverage-contract-version 3`, paired with the full pinned event PR base in AppSurface's 40-digit
+lowercase SHA-1 format and exactly three Linux,
+Windows and macOS captures from the current workflow attempt. The installed CLI must accept the fan-in and
+then verify it independently in read-only mode. The validator checks and retains the typed primary and
+composed patch applicability with its bound diff and acceptance proof under the producer evidence. The
+acceptance receipt must use the same schema version as the verified CLI result. For v3, the retained diff
+metadata must name `appsurface-git-patch-v1` and carry the hash of the accepted patch. V3
+`notApplicable` is valid only when the accepted collector reported no patch points for that dimension; it
+does not certify that changed code is non-executable or allow a narrower producer inventory. The existing
+95/85 thresholds, 0.5-point tolerance, Codecov mode, instrumentation, producer selection and required jobs
+are unchanged. Test-only PRs and qualifying tool updates use the direct patch gate, aggregate-only main runs remain aggregate-only,
+and local paths keep their existing behavior. The reusable installed [schema-v2-default, v3-opt-in fan-in
+commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-fan-in) and the repository
+[Dogfood adapter](../ForgeTrust.AppSurface.Coverage.Dogfood/README.md) retain their v2 defaults and
+historical behavior. See the [v3 rollout section](../../guides/coverage-fan-in.md#rollout-qualification) for deployment qualification requirements and status.
 Main baseline runs enforce aggregate coverage without inventing a PR patch. Reports and diagnostics live
-under `coverage/`, with optional `coverage-fanin/` request/result files and `primary/`, `native-*`, `composed/` and `accepted/` children. Test-only PRs
+under `coverage/`, with optional `coverage-fanin/` request/result files and `primary/`, `native-*`, `composed/` and `accepted/` children. Test-only PRs and qualifying tool updates
 run the direct patch gate and do not produce those fan-in directories; source-code-plus-package PRs require
 the three native captures and fan-in verification.
 The native producer requires the adapter's delivered `accept-result.json` and separate
@@ -249,8 +281,9 @@ dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/Forge
 `plan` writes `evidence-plan.json`, `selection.json` (`profileId`, `requiresPackage`, `hasProducers`,
 `requiresCoverage`, `requiresNativeCoverage`, `requiresPackageChecks`, `producerIds`) and
 `evidence-summary.md` into a fresh directory. `requiresNativeCoverage` reflects the root policy selection:
-it is true when `solution-coverage` and at least one other producer are selected. CI uses it to select the
-native matrix and PR fan-in; a test-only coverage selection stays on the direct patch gate. `run` requires
+it is true when `solution-coverage` and at least one other producer are selected, except for the
+[tool-manifest-only inventory](#tool-manifest-coverage-selection). CI uses it to select the
+native matrix and PR fan-in; test-only coverage and qualifying tool updates use the direct patch gate. `run` requires
 that exact plan and independently resolves
 the policy and paths again before executing only its selected registrations through EvidenceHost. It
 writes the same plan/selection/summary plus `evidence-manifest.json` and declared artifacts. For an explicit
@@ -361,7 +394,7 @@ Only `TargetedComplete` returns exit zero. Missing prerequisites, failed asserti
 
 `--fan-in-request /absolute/trusted-request.json` adds a required producer using [native fan-in verification](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#verified-coverage-fan-in). Supply the trusted expected source commit/tree, SDK, Release/Debug configuration, workflow run and attempt, full solution project inventory, primary capture, exactly three native captures, composed reports and gate JSON. The request is trusted configuration, not an automatically authenticated attestation.
 
-The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and 95/85 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. This `--fan-in-request` option retains the historical schema-v1 compatibility contract. The current [coverage workflow](../../guides/coverage-fan-in.md#current-ci-path) selects v2; the dogfood adapter defaults `--contract-version` to 2 and offers v3 only by explicit value `3`. Repository acceptance remains v2, and the required fresh v3 shadow proof using the same workflow run and attempt across all selected lanes has not run. See the [v3 reference](../../guides/coverage-fan-in.md#opt-in-schema-v3-report-based-patch-applicability); v1, v2 and v3 captures cannot mix or be relabeled.
+The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and historical v1 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. This `--fan-in-request` option retains the historical schema-v1 compatibility contract. For the checked-in [build.yml PR-native path](../../guides/coverage-fan-in.md#rollout-qualification), the repository validator selects v3 with `--native-coverage-contract-version 3` and pairs it with the full pinned event PR base and three current-attempt native captures. The installed CLI acceptance and separate read-only verification must agree on the complete typed applicability and retained diff proof. The validator option defaults to v2 for compatibility callers; the installed CLI and Dogfood defaults and historical v1/v2 behavior also remain unchanged. V1, v2 and v3 captures cannot mix or be relabeled.
 
 The packed-storage fixture writes its explicit retention policy with owner-only access: mode `0600` on Unix and a protected current-user ACL on Windows. This satisfies the existing [private storage contract](../../guides/coverage-storage.md); it does not relax policy-file access validation. Failure artifacts redact the owned workspace path and retain at most 16 KiB of UTF-8 bytes per captured output stream, keeping the most recent complete UTF-8 text. External consumer output remains withheld. A size cap is not general secret redaction: do not pass secrets to fixture commands, because other failure details can appear in CI logs. Installed CLI assembly identity is checked only beneath the installed tool path private `.store`; at least one candidate must exist and every matching assembly must match the package archive hash, so workspace decoys cannot mask a mismatch.
 
