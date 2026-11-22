@@ -4,6 +4,8 @@
 
 The repository retains the decision, [process and phase timings](../../artifacts/issue-931-fixture-benchmark/timings.md), frozen test inventory and paired runner. During review, use the local TRX files, coverage XML and process logs to validate each run.
 
+The [shared fixture follow-up](https://github.com/forge-trust/AppSurface/pull/939) provides database leases for Durable and other integration suites. Fresh setup remains the default. The Durable fixture delegates database creation, catalog identity checks, physical cloning and verified drop to that project. It owns the migration checksums, virgin store check, rekey, epoch initialization and clock-role cleanup. The original three samples used PostgreSQL's default clone strategy. The shared package explicitly requests `FILE_COPY` when cloning a template, so the new five-pair result is a separate sample.
+
 ## Historical planning record
 
 The plan, review notes and task list below record what was known at approval. References to pending measurements or tests describe that point in time.

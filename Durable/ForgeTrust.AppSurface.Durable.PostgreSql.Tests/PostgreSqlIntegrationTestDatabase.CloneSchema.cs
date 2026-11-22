@@ -17,17 +17,16 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
         try
         {
             ObjectDisposedException.ThrowIf(_closing || _disposed, this);
-            if (!_isTemplate || _sourceTemplateOid is not null)
+            if (!_isTemplate)
             {
                 throw new PostgreSqlFixtureException("Template preparation requires a registered template database.");
             }
 
-            RequireRegistration();
             var manager = new PostgreSqlDurableRuntimeSchemaManager(DataSource);
             await using (var maintenance = new NpgsqlConnection(_maintenanceConnectionString))
             {
                 await maintenance.OpenAsync(cancellationToken).ConfigureAwait(false);
-                var databaseExists = await VerifyResourceAsync(maintenance, role: false, cancellationToken).ConfigureAwait(false);
+                var databaseExists = await _lease.ExistsAsync(maintenance, cancellationToken).ConfigureAwait(false);
                 if (!databaseExists)
                 {
                     throw new PostgreSqlFixtureException("The registered template database is absent before preparation. Preserve the disposable server state.");
@@ -131,7 +130,7 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
         try
         {
             ObjectDisposedException.ThrowIf(_closing || _disposed, this);
-            if (_isTemplate || _sourceTemplateOid is null)
+            if (_isTemplate || _copiedTemplateStoreId is null)
             {
                 throw new PostgreSqlFixtureException("Clone activation requires a registered clone database.");
             }
@@ -141,7 +140,6 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
                 throw new PostgreSqlFixtureException("The supplied template store ID does not match this clone's registered source identity.");
             }
 
-            RequireRegistration();
             var manager = new PostgreSqlDurableRuntimeSchemaManager(DataSource);
             Guid newStoreId;
             await using (var connection = await DataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false))

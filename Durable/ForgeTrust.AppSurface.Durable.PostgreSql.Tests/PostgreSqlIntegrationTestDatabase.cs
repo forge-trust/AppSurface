@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.PostgreSql.Testing;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit.Sdk;
@@ -29,18 +30,14 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
     private static readonly TimeSpan ContainerStartupProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly SemaphoreSlim SharedContainerServerGate = new(1, 1);
     private readonly List<NpgsqlDataSource> _additionalDataSources = [];
-    private readonly string _databaseName;
+    private readonly PostgreSqlDatabaseLease _lease;
     private readonly string _maintenanceConnectionString;
     private string? _executionClockReaderRole;
     private static Task<PostgreSqlTestServer>? _sharedContainerServer;
 
     private static readonly TimeSpan LifecycleBudget = TimeSpan.FromSeconds(60);
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
-    private readonly uint _databaseOid;
-    private readonly uint? _sourceTemplateOid;
     private readonly bool _isTemplate;
-    // One registry per fixed server and fixture family. Clones share their template's registry.
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Name, uint Oid), bool> _registry;
     private uint? _clockRoleOid;
     private uint? _clockFunctionOid;
     private bool _disposed;
@@ -55,31 +52,30 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
     internal Action? AfterDispose { get; set; }
 
     private PostgreSqlIntegrationTestDatabase(
-        string databaseName,
+        PostgreSqlDatabaseLease lease,
         string maintenanceConnectionString,
-        string connectionString,
-        NpgsqlDataSource dataSource,
-        uint databaseOid,
-        bool isTemplate,
-        PostgreSqlIntegrationTestDatabase? sourceTemplate)
+        bool isTemplate)
     {
-        _databaseOid = databaseOid;
+        _lease = lease;
         _isTemplate = isTemplate;
-        _sourceTemplateOid = sourceTemplate?._databaseOid;
-        _registry = sourceTemplate?._registry ?? new();
-        if (!_registry.TryAdd((databaseName, databaseOid), isTemplate))
-        {
-            throw new PostgreSqlFixtureException("Duplicate fixture database registration. Reconcile the dedicated server.");
-        }
-        _databaseName = databaseName;
         _maintenanceConnectionString = maintenanceConnectionString;
-        ConnectionString = connectionString;
-        DataSource = dataSource;
+        var settings = new NpgsqlConnectionStringBuilder(lease.ConnectionString);
+        if (isTemplate)
+        {
+            settings.Pooling = false;
+        }
+
+        ConnectionString = settings.ConnectionString;
+        DataSource = NpgsqlDataSource.Create(ConnectionString);
     }
 
     internal NpgsqlDataSource DataSource { get; }
 
     internal string ConnectionString { get; }
+
+    private string _databaseName => _lease.Name;
+
+    private uint _databaseOid => _lease.Oid;
 
     /// <summary>
     /// Sets this isolated database's authoritative execution time for integration tests.
@@ -247,90 +243,88 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
         CancellationToken cancellationToken,
         CancellationToken deadline)
     {
-        var name = $"appsurface_durable_{Guid.NewGuid():N}";
-        var settings = new NpgsqlConnectionStringBuilder(server.ConnectionString) { Database = name };
-        if (isTemplate)
-        {
-            settings.Pooling = false;
-        }
-
-        var source = NpgsqlDataSource.Create(settings.ConnectionString);
-        PostgreSqlIntegrationTestDatabase? owned = null;
-        var dispatched = false;
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline);
+        PostgreSqlDatabaseLease lease;
         try
         {
-            await using var maintenance = new NpgsqlConnection(server.MaintenanceConnectionString);
-            using var beforeDispatch = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline);
-            await maintenance.OpenAsync(beforeDispatch.Token);
-            if (template is not null && !await template.VerifyResourceAsync(maintenance, role: false, beforeDispatch.Token))
+            if (template is not null)
             {
-                throw new PostgreSqlFixtureException($"Clone source {template._databaseName} is absent. Reconcile the disposable server before retrying.");
+                await using var maintenance = new NpgsqlConnection(server.MaintenanceConnectionString);
+                await maintenance.OpenAsync(operation.Token);
+                await using var activeSessions = new NpgsqlCommand(
+                    "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity WHERE datid = @database_oid AND pid <> pg_backend_pid())",
+                    maintenance);
+                activeSessions.Parameters.AddWithValue("database_oid", NpgsqlTypes.NpgsqlDbType.Oid, template._lease.Oid);
+                if ((bool)(await activeSessions.ExecuteScalarAsync(operation.Token))!)
+                {
+                    throw new PostgreSqlFixtureException(
+                        $"Fixture server rejected CREATE DATABASE {template._databaseName} " +
+                        $"(SQLSTATE {PostgresErrorCodes.ObjectInUse}). No ownership was registered. Check the template before retrying.");
+                }
             }
 
-            var clause = template is null ? string.Empty : $" TEMPLATE \"{template._databaseName}\"";
-            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"{clause}", maintenance);
-            beforeDispatch.Token.ThrowIfCancellationRequested();
-            dispatched = true;
-            try
-            {
-                await create.ExecuteNonQueryAsync(deadline);
-            }
-            catch (PostgresException error) when (error.SqlState is
-                PostgresErrorCodes.InsufficientPrivilege or PostgresErrorCodes.DuplicateDatabase or
-                PostgresErrorCodes.ObjectInUse or PostgresErrorCodes.InvalidCatalogName)
-            {
-                dispatched = false;
-                throw new PostgreSqlFixtureException($"Fixture server rejected CREATE DATABASE {name} (SQLSTATE {error.SqlState}). No ownership was registered. Check the server and template before retrying.");
-            }
+            lease = template is null
+                ? await PostgreSqlDatabaseLease.CreateAsync(
+                    server.ConnectionString,
+                    "appsurface_durable",
+                    afterCreate,
+                    operation.Token)
+                : await template._lease.CloneAsync(
+                    "appsurface_durable",
+                    afterCreate,
+                    operation.Token);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            throw new PostgreSqlFixtureException("Fixture creation timed out within the lifecycle budget. Check the dedicated server before retrying.");
+        }
+        catch (PostgreSqlDatabaseCleanupException)
+        {
+            throw;
+        }
+        catch (PostgreSqlDatabaseOwnershipException ownershipError)
+        {
+            throw new PostgreSqlFixtureException(ownershipError.Message);
+        }
+        catch (PostgresException error) when (error.SqlState is
+            PostgresErrorCodes.InsufficientPrivilege or PostgresErrorCodes.DuplicateDatabase or
+            PostgresErrorCodes.ObjectInUse or PostgresErrorCodes.InvalidCatalogName)
+        {
+            throw new PostgreSqlFixtureException(
+                $"Fixture server rejected database creation (SQLSTATE {error.SqlState}). No ownership was registered. " +
+                "Check the server and template before retrying.");
+        }
+        catch (PostgreSqlFixtureException)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            throw new PostgreSqlFixtureException(
+                $"Database creation failed ({PostgreSqlFixtureException.Describe(error)}). Check the fixture server.");
+        }
 
-            if (afterCreate is not null)
-            {
-                await afterCreate(name, deadline).AsTask().WaitAsync(deadline);
-            }
-
-            var oid = await ReadDatabaseOidAsync(maintenance, name, deadline)
-                ?? throw new PostgreSqlFixtureException("Database identity capture returned no catalog OID.");
-            owned = new PostgreSqlIntegrationTestDatabase(name, server.MaintenanceConnectionString,
-                settings.ConnectionString, source, oid, isTemplate, template);
-            cancellationToken.ThrowIfCancellationRequested();
-            return owned;
+        try
+        {
+            return new PostgreSqlIntegrationTestDatabase(lease, server.MaintenanceConnectionString, isTemplate);
         }
         catch (Exception setupError)
         {
-            if (owned is not null)
+            try
             {
-                try
-                {
-                    await owned.DisposeAsync();
-                }
-                catch (Exception cleanupError)
-                {
-                    throw new PostgreSqlFixtureException(
-                        $"Database setup failed ({PostgreSqlFixtureException.Describe(setupError)}). Cleanup failed ({PostgreSqlFixtureException.Describe(cleanupError)}).");
-                }
-
-                throw;
+                await lease.DisposeAsync();
+            }
+            catch (Exception cleanupError)
+            {
+                throw new PostgreSqlDatabaseCleanupException(lease, cleanupError, setupError);
             }
 
-            await source.DisposeAsync();
-            if (dispatched)
-            {
-                throw new PostgreSqlFixtureException(
-                    $"Create on fixture server for database {name} has uncertain identity (expected OID unregistered, observed unknown). " +
-                    $"Cleanup incomplete ({PostgreSqlFixtureException.Describe(setupError)}). Preserve the target and reconcile with the disposable-server owner.");
-            }
-
-            if (setupError is PostgreSqlFixtureException or OperationCanceledException)
-            {
-                if (setupError is OperationCanceledException && deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                {
-                    throw new PostgreSqlFixtureException("Fixture creation timed out before dispatch. Check the dedicated server before retrying.");
-                }
-
-                throw;
-            }
-
-            throw new PostgreSqlFixtureException($"Database creation failed before dispatch ({PostgreSqlFixtureException.Describe(setupError)}). Check the fixture server.");
+            throw new PostgreSqlFixtureException(
+                $"Fixture data source creation failed ({PostgreSqlFixtureException.Describe(setupError)}). The owned database was removed.");
         }
     }
 
@@ -559,25 +553,14 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
         }
     }
 
-    private static async ValueTask<uint?> ReadDatabaseOidAsync(
-        NpgsqlConnection connection, string name, CancellationToken cancellationToken)
-    {
-        await using var cmd = new NpgsqlCommand("SELECT oid FROM pg_catalog.pg_database WHERE datname = @name", connection);
-        cmd.Parameters.AddWithValue("name", name);
-        return (uint?)await cmd.ExecuteScalarAsync(cancellationToken);
-    }
-
     // The dedicated server has no independent administrators renaming resources between this check and the DDL.
     // Look up both directions so a registered OID surviving under another name is never classified as absent.
-    private async ValueTask<bool> VerifyResourceAsync(NpgsqlConnection connection, bool role, CancellationToken token)
+    private async ValueTask<bool> VerifyClockRoleAsync(NpgsqlConnection connection, CancellationToken token)
     {
-        RequireRegistration();
-        var catalog = role ? "pg_catalog.pg_roles" : "pg_catalog.pg_database";
-        var column = role ? "rolname" : "datname";
-        var name = role ? _executionClockReaderRole! : _databaseName;
-        var oid = role ? _clockRoleOid!.Value : _databaseOid;
+        var name = _executionClockReaderRole!;
+        var oid = _clockRoleOid!.Value;
         await using var cmd = new NpgsqlCommand(
-            $"SELECT (SELECT oid FROM {catalog} WHERE {column} = @name), EXISTS(SELECT 1 FROM {catalog} WHERE oid = @oid)", connection);
+            "SELECT (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = @name), EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE oid = @oid)", connection);
         cmd.Parameters.AddWithValue("name", name);
         cmd.Parameters.AddWithValue("oid", NpgsqlTypes.NpgsqlDbType.Oid, oid);
         await using var reader = await cmd.ExecuteReaderAsync(token);
@@ -593,7 +576,7 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
             return false;
         }
 
-        throw IdentityError(role ? "role" : "database", name, oid, actual);
+        throw IdentityError("role", name, oid, actual);
     }
 
     private static PostgreSqlFixtureException IdentityError(string kind, string name, uint? expected, uint? actual) =>
@@ -603,23 +586,7 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
     private async ValueTask VerifyConnectedIdentityAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
     {
-        RequireRegistration();
-        await using var query = new NpgsqlCommand(
-            "SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database() AND datname = @name", connection, transaction);
-        query.Parameters.AddWithValue("name", _databaseName);
-        var oid = (uint?)await query.ExecuteScalarAsync(cancellationToken);
-        if (oid is null || oid != _databaseOid)
-        {
-            throw IdentityError("database", _databaseName, _databaseOid, oid);
-        }
-    }
-
-    private void RequireRegistration()
-    {
-        if (!_registry.TryGetValue((_databaseName, _databaseOid), out var isTemplate) || isTemplate != _isTemplate)
-        {
-            throw new PostgreSqlFixtureException($"Fixture database {_databaseName} has no matching ownership registration. Preserve the resource.");
-        }
+        await _lease.VerifyConnectedIdentityAsync(connection, transaction, cancellationToken);
     }
 
     public ValueTask DisposeAsync() => DisposeRegisteredAsync(null);
@@ -653,7 +620,7 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
                 return;
             }
 
-            if (_isTemplate && _registry.Count > 1)
+            if (_lease.HasRegisteredClones)
             {
                 throw new PostgreSqlFixtureException($"Template {_databaseName} still has registered clones. Release them before template teardown.");
             }
@@ -665,43 +632,31 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
             }
 
             await _closeSources.WaitAsync(deadline.Token);
-            await using var maintenance = new NpgsqlConnection(_maintenanceConnectionString);
-            await maintenance.OpenAsync(deadline.Token);
-            bool databaseExists = await VerifyResourceAsync(maintenance, role: false, deadline.Token);
-            if (_executionClockReaderRole is not null)
+            if (_executionClockReaderRole is null)
             {
-                await VerifyResourceAsync(maintenance, role: true, deadline.Token);
+                await _lease.DropAsync(dropDatabaseAsync, deadline.Token);
             }
+            else
+            {
+                await using var maintenance = new NpgsqlConnection(_maintenanceConnectionString);
+                await maintenance.OpenAsync(deadline.Token);
+                await _lease.ExistsAsync(maintenance, deadline.Token);
+                await VerifyClockRoleAsync(maintenance, deadline.Token);
 
-            Exception? dropError = null;
-            try
-            {
-                if (databaseExists)
+                Exception? dropError = null;
+                try
                 {
-                    if (dropDatabaseAsync is null)
-                    {
-                        await using var drop = new NpgsqlCommand($"DROP DATABASE \"{_databaseName}\" WITH (FORCE)", maintenance);
-                        await drop.ExecuteNonQueryAsync(deadline.Token);
-                    }
-                    else
-                    {
-                        await dropDatabaseAsync(maintenance);
-                    }
+                    Func<NpgsqlConnection, ValueTask>? dropOnRoleConnection = dropDatabaseAsync is null
+                        ? null
+                        : _ => dropDatabaseAsync(maintenance);
+                    await _lease.DropAsync(dropOnRoleConnection, deadline.Token);
                 }
-
-                if (await VerifyResourceAsync(maintenance, role: false, deadline.Token))
+                catch (Exception error)
                 {
-                    throw new PostgreSqlFixtureException($"Owned database {_databaseName} still exists after drop. Reconcile the fixture server.");
+                    dropError = error;
+                    throw;
                 }
-            }
-            catch (Exception error)
-            {
-                dropError = error;
-                throw;
-            }
-            finally
-            {
-                if (_executionClockReaderRole is not null)
+                finally
                 {
                     try
                     {
@@ -714,7 +669,6 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
                 }
             }
 
-            _registry.TryRemove((_databaseName, _databaseOid), out _);
             _disposed = true;
         }
         catch (Exception error)
@@ -722,9 +676,18 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
             cleanupFailure = error;
             var secondary = error.Data["ExecutionClockCleanupException"] is Exception roleError
                 ? $" Role cleanup failed ({PostgreSqlFixtureException.Describe(roleError)})." : string.Empty;
-            if (dropDatabaseAsync is not null || (error is PostgreSqlFixtureException && secondary.Length == 0))
+            if (dropDatabaseAsync is not null || error is PostgreSqlDatabaseCleanupException ||
+                error is PostgreSqlFixtureException && secondary.Length == 0)
             {
                 throw;
+            }
+
+            if (error is PostgreSqlDatabaseOwnershipException && secondary.Length == 0)
+            {
+                cleanupFailure = new PostgreSqlFixtureException(
+                    $"Fixture server database {_databaseName} expected OID {_databaseOid}: cleanup incomplete " +
+                    $"({PostgreSqlFixtureException.Describe(error)}). Reconcile the dedicated server before retrying.");
+                throw cleanupFailure;
             }
 
             cleanupFailure = new PostgreSqlFixtureException($"Fixture server database {_databaseName} expected OID {_databaseOid}: cleanup incomplete " +
@@ -761,8 +724,8 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
     private async ValueTask ReleaseClockRoleAsync(NpgsqlConnection maintenance, CancellationToken token)
     {
         // Recheck the target after DROP. Release only the recorded clock function and its case-local grants.
-        var databaseExists = await VerifyResourceAsync(maintenance, role: false, token);
-        if (await VerifyResourceAsync(maintenance, role: true, token))
+        var databaseExists = await _lease.ExistsAsync(maintenance, token);
+        if (await VerifyClockRoleAsync(maintenance, token))
         {
             if (databaseExists && _clockFunctionOid is not null)
             {
@@ -794,7 +757,7 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
 
             await using var drop = new NpgsqlCommand($"DROP ROLE \"{_executionClockReaderRole}\"", maintenance);
             await drop.ExecuteNonQueryAsync(token);
-            if (await VerifyResourceAsync(maintenance, role: true, token))
+            if (await VerifyClockRoleAsync(maintenance, token))
             {
                 throw new PostgreSqlFixtureException("Clock role cleanup incomplete. Reconcile the dedicated server.");
             }
@@ -828,6 +791,7 @@ internal sealed class PostgreSqlFixtureException(string safeMessage) : InvalidOp
     internal static string Describe(Exception error) => error switch
     {
         PostgreSqlFixtureException fixture => fixture.Message,
+        PostgreSqlDatabaseOwnershipException ownership => ownership.Message,
         PostgresException postgres => $"PostgreSQL SQLSTATE {postgres.SqlState}",
         AggregateException aggregate => string.Join(", ", aggregate.InnerExceptions.Select(Describe)),
         _ => error.GetType().Name,
