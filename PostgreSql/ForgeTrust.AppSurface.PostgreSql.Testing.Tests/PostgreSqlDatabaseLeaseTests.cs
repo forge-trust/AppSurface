@@ -245,8 +245,11 @@ public sealed class PostgreSqlDatabaseLeaseTests
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
         var maintenanceConnectionString = MaintenanceConnectionString(connectionString);
-        var password = "lease-diagnostic-secret";
-        var secretConnectionString = new NpgsqlConnectionStringBuilder(connectionString) { Password = password }.ConnectionString;
+        const string sentinelPassword = "lease-diagnostic-secret";
+        var diagnosticConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            Password = sentinelPassword,
+        }.ConnectionString;
         var prefix = PostgreSqlTestServer.NewPrefix("lease_unknown_ack");
         string? databaseName = null;
         uint? databaseOid = null;
@@ -258,13 +261,13 @@ public sealed class PostgreSqlDatabaseLeaseTests
                 {
                     databaseName = name;
                     return ValueTask.FromException(new NpgsqlException(
-                        $"Simulated lost CREATE acknowledgement for {secretConnectionString}."));
+                        $"Simulated lost CREATE acknowledgement for {diagnosticConnectionString}."));
                 }, CancellationToken.None));
 
             Assert.NotNull(databaseName);
             Assert.Contains(databaseName, failure.Message, StringComparison.Ordinal);
-            Assert.DoesNotContain(password, failure.ToString(), StringComparison.Ordinal);
-            Assert.DoesNotContain(secretConnectionString, failure.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(sentinelPassword, failure.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(diagnosticConnectionString, failure.ToString(), StringComparison.Ordinal);
             databaseOid = await ReadDatabaseOidAsync(maintenanceConnectionString, databaseName);
             Assert.NotEqual(0u, databaseOid);
         }
