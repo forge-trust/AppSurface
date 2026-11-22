@@ -771,7 +771,11 @@ class WorkflowTransportTests(unittest.TestCase):
         native = NATIVE.read_text()
         self.assertIn("tailwind-native-rehearsal:", package)
         self.assertIn("name: Nonpublishing aggregate and publisher replay rehearsal", package)
-        self.assertIn("needs: [package-artifacts, tailwind-native-rehearsal, docs-native-rehearsal]", package)
+        self.assertIn(
+            "needs: [package-artifacts, tailwind-native-rehearsal, docs-native-rehearsal, durable-template-evidence]",
+            package,
+        )
+        self.assertIn("artifact-ids: ${{ needs.durable-template-evidence.outputs.receipt_artifact_ids }}", package)
         self.assertIn("github.event_name == 'workflow_dispatch' && github.repository == 'forge-trust/AppSurface'", package)
         self.assertIn("github.ref_type == 'branch' && inputs['release-rehearsal']", package)
         self.assertIn("rehearsal: ${{ github.ref == 'refs/heads/main' }}", package)

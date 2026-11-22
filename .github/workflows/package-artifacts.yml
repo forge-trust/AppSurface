@@ -225,7 +225,7 @@ jobs:
 
   tailwind-publish-rehearsal:
     name: Nonpublishing aggregate and publisher replay rehearsal
-    needs: [package-artifacts, tailwind-native-rehearsal, docs-native-rehearsal]
+    needs: [package-artifacts, tailwind-native-rehearsal, docs-native-rehearsal, durable-template-evidence]
     if: ${{ needs.package-artifacts.outputs.release_rehearsal == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -263,6 +263,12 @@ jobs:
         with:
           artifact-ids: ${{ env.DOCS_NATIVE_ARTIFACT_ID }}
           path: ${{ runner.temp }}/docs-native-proof
+      - name: Download Durable template receipts by immutable IDs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.durable-template-evidence.outputs.receipt_artifact_ids }}
+          path: ${{ runner.temp }}/durable-template-evidence
+          merge-multiple: true
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         env:
@@ -354,6 +360,7 @@ jobs:
           TAILWIND_REHEARSAL_DOCS_NATIVE_PROOF: ${{ runner.temp }}/docs-native-proof/docs-native-proof.json
           TAILWIND_REHEARSAL_DOCS_NATIVE_ARTIFACT_ID: ${{ env.DOCS_NATIVE_ARTIFACT_ID }}
           TAILWIND_REHEARSAL_DOCS_NATIVE_SHA256: ${{ env.DOCS_NATIVE_SHA256 }}
+          TAILWIND_REHEARSAL_DURABLE_TEMPLATE_EVIDENCE: ${{ runner.temp }}/durable-template-evidence
         run: |
           dotnet restore tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj --locked-mode
           dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj -c Release --no-restore -p:SourceRevisionId="$SOURCE_REVISION_ID" --filter 'FullyQualifiedName~TailwindPublishingTests|FullyQualifiedName~OriginalCandidatePublicationReplayTests'
