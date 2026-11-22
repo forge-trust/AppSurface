@@ -59,7 +59,7 @@ internal static class ProcessContracts
         await ReplaceSourceAsync(program, source, entry, "await Task.Delay(TimeSpan.FromSeconds(20));\n" + entry);
 
         port = TestHost.FreePort();
-        result = await TestHost.RunAsync(Verifier(checkout, port, evidence, timeoutSeconds: 1), TimeSpan.FromSeconds(30));
+        result = await RunStartupFailureAsync(Verifier(checkout, port, evidence, timeoutSeconds: 1));
         TestHost.Check(result.ExitCode != 0 && result.StandardError.Contains("did not prove readiness"),
             $"Expected startup timeout. {result.StandardError}");
         await CheckPriorReportAsync(evidence);
@@ -96,20 +96,36 @@ internal static class ProcessContracts
     {
         var port = TestHost.FreePort();
         using var process = NativeConsole.Start(Verifier(checkout, port, evidence));
+        var result = await WaitFromPhaseAsync(process, phase, TimeSpan.FromSeconds(10), NativeConsole.SendCtrlCAsync);
+        TestHost.Check(result.ExitCode == 130, $"Ctrl+C during {phase} returned {result.ExitCode}.\n{result.StandardError}");
+        await CheckPriorReportAsync(evidence);
+        await CheckTeardownAsync(result.StandardError, port, phase);
+    }
+
+    private static async Task<CommandResult> RunStartupFailureAsync(ProcessStartInfo start)
+    {
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not launch the verifier.");
+        // dotnet builds the projects before the example starts. Only post-launch time counts toward this watchdog.
+        return await WaitFromPhaseAsync(process, Starting, TimeSpan.FromSeconds(30));
+    }
+
+    private static async Task<CommandResult> WaitFromPhaseAsync(
+        Process process, string phase, TimeSpan exitTimeout, Func<Process, Task>? onPhase = null)
+    {
         var output = process.StandardOutput.ReadToEndAsync();
         var phaseReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var diagnostics = ReadDiagnosticsAsync();
         try
         {
             await phaseReached.Task.WaitAsync(RunTimeout);
-            using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await NativeConsole.SendCtrlCAsync(process).WaitAsync(watchdog.Token);
+            using var watchdog = new CancellationTokenSource(exitTimeout);
+            if (onPhase is not null)
+            {
+                await onPhase(process).WaitAsync(watchdog.Token);
+            }
             await process.WaitForExitAsync(watchdog.Token);
             var stderr = await diagnostics.WaitAsync(watchdog.Token);
-            await output.WaitAsync(watchdog.Token);
-            TestHost.Check(process.ExitCode == 130, $"Ctrl+C during {phase} returned {process.ExitCode}.\n{stderr}");
-            await CheckPriorReportAsync(evidence);
-            await CheckTeardownAsync(stderr, port, phase);
+            return new CommandResult(process.ExitCode, await output.WaitAsync(watchdog.Token), stderr);
         }
         finally
         {
@@ -190,8 +206,7 @@ internal static class ProcessContracts
         try
         {
             var origin = new Uri(foreign.Urls.Single());
-            var result = await TestHost.RunAsync(Verifier(TestHost.Root, origin.Port, evidence, timeoutSeconds: 4),
-                TimeSpan.FromSeconds(30));
+            var result = await RunStartupFailureAsync(Verifier(TestHost.Root, origin.Port, evidence, timeoutSeconds: 4));
             TestHost.Check(result.ExitCode != 0 && result.StandardError.Contains("No evidence published by this run"),
                 $"Expected refusal of the unrelated listener.\n{result.StandardError}");
             await CheckPriorReportAsync(evidence);
