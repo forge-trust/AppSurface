@@ -155,7 +155,21 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     [CommandOption("observation-only", Description = "Emit an informational observation claim instead of a gate-eligible claim.")]
     public bool ObservationOnly { get; set; }
 
+    /// <summary>Gets or sets the factory for the built-in <c>test</c> producer; tests replace it to supply a fake test-run source.</summary>
+    internal Func<string, TestEvidenceProducerOptions, TestEvidenceProducer> TestProducerFactory { get; set; } =
+        static (id, options) => new TestEvidenceProducer(id, options);
+
+    /// <summary>Gets or sets the resolver for the repository root that declared test project paths are relative to.</summary>
+    internal Func<string> RepositoryRootResolver { get; set; } =
+        static () => GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory());
+
     /// <inheritdoc />
+    /// <remarks>
+    /// Order: resolve the plan; reject selections that cannot run truthfully (<c>ASEVD214</c>, <c>ASEVD215</c>);
+    /// retire the earlier manifest, summary and selected artifact directories; write the plan; run producers one at a
+    /// time; confirm returned artifacts on disk and downgrade a producer whose artifact is not there; write the
+    /// manifest and summary. Kinds <c>coverage</c> and <c>test</c> are built in; any other kind is <c>Unavailable</c>.
+    /// </remarks>
     public override async ValueTask ExecuteAsync(IConsole console)
     {
         try
@@ -163,8 +177,17 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             var cancellationToken = console.RegisterCancellationHandler();
             var resolution = await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken);
             var plan = resolution.Plan;
+            TestEvidenceRunSupport.ValidateSelection(plan);
+            TestEvidenceRunSupport.RetireOutputs(OutputDirectory, plan);
             await Workflow.WritePlanAsync(plan, OutputDirectory, cancellationToken);
+            var hasTestProducer = plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer);
+            if (hasTestProducer)
+            {
+                await console.Output.WriteLineAsync(TestEvidenceRunSupport.PreviewLine);
+            }
+
             var results = new List<EvidenceProducerResult>();
+            var testReports = new List<string>();
             var resourceResults = plan.Profile.Resources
                 .Select(resource => new EvidenceResourceResult(
                     resource.Id,
@@ -182,20 +205,37 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             }
             else
             {
+                var artifactRoot = Path.Join(OutputDirectory, "artifacts");
                 foreach (var producer in plan.Profile.Producers)
                 {
-                    results.Add(await RunProducerAsync(producer, resolution.DiffSnapshot, console, cancellationToken));
+                    var produced = TestEvidenceRunSupport.IsTestProducer(producer)
+                        ? await RunTestProducerAsync(plan, producer, artifactRoot, console, testReports, cancellationToken)
+                        : await RunProducerAsync(producer, resolution.DiffSnapshot, console, cancellationToken);
+                    var checkedResult = await TestEvidenceRunSupport.EnforceArtifactsAsync(artifactRoot, produced, cancellationToken);
+                    if (!ReferenceEquals(checkedResult, produced))
+                    {
+                        await console.Error.WriteLineAsync(checkedResult.Diagnostic);
+                    }
+
+                    results.Add(checkedResult);
                 }
             }
 
             var manifest = EvidenceManifestBuilder.Build(plan, results, ObservationOnly, resourceResults: resourceResults);
             await Workflow.WriteManifestAsync(manifest, OutputDirectory, cancellationToken);
             await console.Output.WriteLineAsync(EvidenceCliWorkflow.FormatSummary(manifest));
+            foreach (var report in testReports)
+            {
+                await console.Output.WriteLineAsync(report);
+            }
+
             await console.Output.WriteLineAsync($"Artifacts: {Path.Join(OutputDirectory, "evidence-plan.json")}, {Path.Join(OutputDirectory, "evidence-manifest.json")}, {Path.Join(OutputDirectory, "evidence-summary.json")}");
-            await WriteGitHubSummaryAsync(manifest, cancellationToken);
+            await WriteGitHubSummaryAsync(manifest, testReports, cancellationToken);
             if (manifest.ClaimKind == EvidenceClaimKind.None)
             {
-                throw new CommandException("ASEVD211: Evidence is incomplete. Inspect evidence-summary.json and the producer output before allowing a gate to proceed.");
+                throw new CommandException(hasTestProducer
+                    ? "ASEVD211: Evidence is incomplete. Read the per-project reasons printed above and evidence-summary.json before allowing a gate to proceed; test producer output is not kept."
+                    : "ASEVD211: Evidence is incomplete. Inspect evidence-summary.json and the producer output before allowing a gate to proceed.");
             }
         }
         catch (EvidencePlanningException exception)
@@ -223,7 +263,49 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             cancellationToken);
     }
 
-    private static async Task WriteGitHubSummaryAsync(EvidenceManifest manifest, CancellationToken cancellationToken)
+    private async Task<EvidenceProducerResult> RunTestProducerAsync(
+        EvidencePlan plan,
+        EvidenceProducerDeclaration declaration,
+        string artifactRoot,
+        IConsole console,
+        List<string> reports,
+        CancellationToken cancellationToken)
+    {
+        var producer = TestProducerFactory(
+            declaration.Id,
+            new TestEvidenceProducerOptions(RepositoryRootResolver())
+            {
+                DiagnosticsDirectory = Path.Join(OutputDirectory, "diagnostics"),
+                Progress = console.Error,
+            });
+        var result = await producer.ProduceAsync(
+            new EvidenceProducerContext(plan, declaration, TimeProvider.System, new EvidenceArtifactWriter(declaration, Path.Join(artifactRoot, declaration.Id))),
+            cancellationToken);
+
+        // The table is read back from the receipt that was just written, so the console shows exactly what a gate will read.
+        var receiptPath = Path.Join(artifactRoot, declaration.Id, TestEvidenceProducer.ReceiptRelativePath);
+        reports.Add(TestEvidenceRunSupport.FormatCountsTable(
+            declaration.Id,
+            TestEvidenceRunSupport.TryReadReceipt(receiptPath, out var rows) ? rows : null));
+        foreach (var line in TestEvidenceRunSupport.FormatIncomplete(declaration.Id, producer.LastProjects))
+        {
+            await console.Error.WriteLineAsync(line);
+        }
+
+        foreach (var notice in TestEvidenceRunSupport.FormatMinimumNotices(declaration.Test?.Projects ?? [], producer.LastProjects))
+        {
+            await console.Output.WriteLineAsync(notice);
+        }
+
+        if (producer.LastTracePath is { } tracePath)
+        {
+            await console.Error.WriteLineAsync($"The test producer stopped on an internal error. Trace (exception type and stack frames only): {tracePath}");
+        }
+
+        return result;
+    }
+
+    private static async Task WriteGitHubSummaryAsync(EvidenceManifest manifest, IReadOnlyList<string> testReports, CancellationToken cancellationToken)
     {
         var summaryPath = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
         if (string.IsNullOrWhiteSpace(summaryPath))
@@ -232,14 +314,19 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         }
 
         var markdown = $"## AppSurface Evidence{Environment.NewLine}{Environment.NewLine}- Claim: `{manifest.ClaimKind}`{Environment.NewLine}- Execution: `{manifest.ExecutionVerdict}`{Environment.NewLine}- Closed obligations: {manifest.ClosedObligationIds.Count}{Environment.NewLine}- Unmediated obligations: {manifest.UnmediatedObligationIds.Count}{Environment.NewLine}";
+        foreach (var report in testReports)
+        {
+            markdown += Environment.NewLine + report + Environment.NewLine;
+        }
+
         await File.AppendAllTextAsync(summaryPath, markdown, new UTF8Encoding(false), cancellationToken);
     }
 }
 
 /// <summary>
-/// Verifies that an immutable evidence manifest binds to its resolved plan without rerunning producers.
+/// Verifies that an immutable evidence manifest binds to its resolved plan and that its retained artifacts are intact, without rerunning producers.
 /// </summary>
-[Command("evidence verify", Description = "Verify plan and manifest digests without rerunning producers.")]
+[Command("evidence verify", Description = "Verify plan and manifest digests and retained artifacts without rerunning producers.")]
 internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow) : ICommand
 {
     private readonly EvidenceCliWorkflow _workflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
@@ -251,6 +338,10 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
     /// <summary>Gets or sets the resolved plan path. Defaults next to the manifest.</summary>
     [CommandOption("plan", Description = "Generated evidence-plan.json path. Defaults next to the manifest.")]
     public string? PlanPath { get; set; }
+
+    /// <summary>Gets or sets the directory that holds one subdirectory per producer id. Defaults to <c>artifacts</c> beside the manifest.</summary>
+    [CommandOption("artifact-root", Description = "Directory holding retained producer artifacts. Defaults to the artifacts directory beside the manifest.")]
+    public string? ArtifactRoot { get; set; }
 
     /// <inheritdoc />
     public async ValueTask ExecuteAsync(IConsole console)
@@ -265,7 +356,7 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
             var planPath = string.IsNullOrWhiteSpace(PlanPath)
                 ? Path.Join(Path.GetDirectoryName(Path.GetFullPath(ManifestPath))!, "evidence-plan.json")
                 : PlanPath;
-            var (_, manifest) = await _workflow.VerifyAsync(planPath, ManifestPath, console.RegisterCancellationHandler());
+            var (_, manifest) = await _workflow.VerifyAsync(planPath, ManifestPath, ArtifactRoot, console.RegisterCancellationHandler());
             await console.Output.WriteLineAsync($"Evidence manifest verified: {manifest.ClaimKind} ({manifest.Eligibility})");
         }
         catch (EvidenceCliException exception)

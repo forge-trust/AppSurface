@@ -98,5 +98,24 @@ The planner does not classify C# semantics or infer that a getter, constructor, 
 | `ASEVD132` | A coverage producer has an unsupported `coverageArtifactRetention` value. | Use `managed` (the default) or `full`; this setting does not change coverage gate requirements. |
 | `ASEVD135` | A Git patch path header is empty or contains invalid quoting or Git path escapes. | Supply an unmodified Git unified patch with UTF-8 paths. |
 | `ASEVD136` | The exact patch snapshot contains malformed UTF-8 anywhere in its bytes. | Supply a valid UTF-8 unified patch; the planner rejects it before policy selection. |
+| `ASEVD137` | A `test` producer has no `test` block or an empty `test.projects`. | Declare 1 to 32 projects in the [test declaration](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#test-producer-declaration-preview). |
+| `ASEVD138` | A `test` producer declares more than 32 projects. | Split the projects across more than one `test` producer. |
+| `ASEVD139` | A `test.projects` path is not a repository-relative forward-slash path of at most 512 characters ending in `.csproj`, `.fsproj` or `.vbproj`, or it has a `.`/`..` segment, a segment starting with `-`, a `:` or a control character. | Correct the path; it is passed to `dotnet` as an argument, so a leading `-` is refused. |
+| `ASEVD140` | A `test` producer declares the same project path twice, compared without regard to case. | Declare each project once and combine filters with `\|` in one entry. |
+| `ASEVD141` | A `filter` is blank, longer than 1024 characters, or holds a control character or line break. | Use a one-line VSTest filter, or omit `filter` to select every test. |
+| `ASEVD142` | `minimumTests` is below 1. | Use 1 or greater, or omit it for the default of 1. |
+| `ASEVD143` | A producer of another kind declares a `test` block. | Remove the block or set `kind` to `test`. |
+| `ASEVD144` | A `test` producer declares `coverageGate`, `coverageExecution` or a non-default `coverageArtifactRetention`. | Remove the coverage fields; a `test` producer makes no coverage claim. Use kind `coverage` for coverage evidence. |
+| `ASEVD145` | A `test` producer's `assertionIds` is not exactly `["appsurface/test/discovery-complete@1"]`. | Paste the array printed in the message. |
+| `ASEVD146` | A `test` producer does not declare exactly one required `test-receipt` slot with media type `application/json`. | Paste the `artifactSlots` value printed in the message. |
+| `ASEVD147` | The `test-receipt` slot's `maximumBytes` is below 4096 plus, per project, 512 plus the UTF-8 length of its path. | Set `maximumBytes` to at least the minimum printed in the message. |
+| `ASEVD148` | A `test` producer's `timeoutSeconds` is below 30. | Use 30 or more so the producer keeps time to write its receipt. |
+| `ASEVD149` | A `test` producer id is not one safe path segment (`A-Z a-z 0-9 . _ -`, and not `.` or `..`). | Rename the producer; its id names the artifact directory. Other kinds keep the general identifier rule (`ASEVD121`). |
+
+### Test producer rules (preview)
+
+`ASEVD137` through `ASEVD149` apply only to producers of kind `test`, except `ASEVD143`, which keeps a `test` block off every other kind. The planner checks them in this order and reports the first failure: `ASEVD143`, `ASEVD149`, `ASEVD137`, `ASEVD138`, then per project `ASEVD139` to `ASEVD142`, then `ASEVD144` to `ASEVD148`. The general producer rules (`ASEVD110`, `ASEVD121`, `ASEVD125`, `ASEVD126`) run first.
+
+Why these rules exist: a `test` producer claims only that the tests it selected all ran and passed. `ASEVD144` and `ASEVD145` stop that claim from standing in for a coverage assertion, and `ASEVD146` and `ASEVD147` guarantee the producer can always write the receipt a gate reads. The kind, its assertion id and these codes are preview and may change without a compatibility step. Pitfall: an older planner ignores an unknown `test` block instead of rejecting it, so upgrade every CLI that plans or verifies before adding one to a shared policy.
 
 Read next: [contracts](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), [CLI workflow](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md), and the [policy cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).

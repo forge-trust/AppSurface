@@ -38,7 +38,9 @@ EvidenceHost has four honest outcomes:
 | `NoEvidenceRequired` | Pull request | A checked-in, explicit empty profile matched the changed paths. It never means “tests were skipped.” |
 | `ObservationOnly` | No | A useful diagnostic run that cannot satisfy a gate. |
 
-Anything else has `ClaimKind.None`: a filtered test suite, missing browser runtime, unavailable Docker dependency, timed-out producer, or unsatisfied assertion is incomplete evidence—not a partial pass. This is intentional. A repository-wide gate on an incomplete test profile is a configuration error, and EvidenceHost makes that condition visible instead of encouraging a misleading green badge.
+Anything else has `ClaimKind.None`: a filtered test suite standing in for a coverage assertion, missing browser runtime, unavailable Docker dependency, timed-out producer, or unsatisfied assertion is incomplete evidence—not a partial pass. This is intentional. A repository-wide gate on an incomplete test profile is a configuration error, and EvidenceHost makes that condition visible instead of encouraging a misleading green badge.
+
+A filtered suite can close exactly one kind of assertion: the selection-completeness assertion of the preview [`test` producer](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#test-producer-preview), whose projects and filters are written in the policy. That claim means "every selected test ran and passed". It does not mean the tests exercise the change, so a route that replaces broader evidence with it should first replay a known regression that the selected tests catch.
 
 ## Choose the smallest path
 
@@ -49,6 +51,7 @@ Anything else has `ClaimKind.None`: a filtered test suite, missing browser runti
 | A test needs one profile-based AppHost started and an HTTP status condition checked. | [Typed AppSurface Aspire fixture](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture) and the neutral [HTTP readiness package](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md) | One startup budget covers typed profile creation, build, start, native health, endpoint allocation, and the HTTP check. Ordinary tests do not need an EvidenceHost plan or producer. |
 | Consumer has PostgreSQL, a browser, or a real E2E journey to prove. | [`ForgeTrust.AppSurface.Evidence.Aspire`](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) | A separate explicit EvidenceHost waits for consumer-owned readiness, runs typed producers, and cleans them up. Its optional HTTP adapter composes native health with one declared HTTP condition. |
 | You are writing a producer, external gate, or policy editor. | [`ForgeTrust.AppSurface.Evidence.Contracts`](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) and [`Planner`](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) | Stable contracts and deterministic diff-to-plan resolution. |
+| A changed path has no production code to cover: a workflow, a script, release tooling. | Preview [`test` producer](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#test-producer-preview) | Runs the test projects the policy declares and closes one assertion only when every selected test ran and passed. It makes no coverage claim, and its filter is declared in the policy and bound into the plan. |
 | You only need numeric Cobertura thresholds. | [`appsurface coverage gate`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) | Keep the current private, local coverage gate; EvidenceHost does not hide its configured threshold. |
 
 ## Aspire HTTP readiness

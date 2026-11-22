@@ -224,6 +224,100 @@ public sealed record EvidenceProducerDeclaration(
     /// See the <c>coverageArtifactRetention</c> reference in the coverage storage guide.
     /// </remarks>
     public string CoverageArtifactRetention { get; init; } = "managed";
+
+    /// <summary>Gets the test projects a built-in <c>test</c> producer lists, runs, and reconciles; <see langword="null"/> for every other kind.</summary>
+    /// <remarks>
+    /// Preview. Only producers of kind <see cref="EvidenceTestProducerContract.Kind"/> may declare this value, and they must.
+    /// It is omitted from canonical JSON when absent, so policies that do not use it keep their existing digests.
+    /// Because the whole declaration is hashed, changing a project, filter, or minimum changes <c>PolicyDigest</c> and <c>PlanDigest</c>.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EvidenceTestDeclaration? Test { get; init; }
+}
+
+/// <summary>
+/// Declares the test projects selected by a built-in <c>test</c> producer.
+/// </summary>
+/// <remarks>
+/// Preview: this shape may change without a compatibility step until a real route has closed with it.
+/// The planner requires 1 through <see cref="EvidenceTestProducerContract.MaximumProjects"/> uniquely named projects.
+/// </remarks>
+/// <param name="Projects">Declared test projects, attempted in declaration order.</param>
+public sealed record EvidenceTestDeclaration(IReadOnlyList<EvidenceTestProject> Projects);
+
+/// <summary>
+/// Declares one test project, its optional VSTest filter, and its optional minimum discovered test count.
+/// </summary>
+/// <remarks>
+/// The filter is public plan data: it appears in the policy, the plan, <c>explain</c>, and rerun hints.
+/// A filter that matches fewer tests than expected still passes unless <see cref="MinimumTests"/> is set.
+/// </remarks>
+/// <param name="Path">
+/// Repository-relative, forward-slash project file path ending in <c>.csproj</c>, <c>.fsproj</c>, or <c>.vbproj</c>.
+/// </param>
+public sealed record EvidenceTestProject(string Path)
+{
+    /// <summary>Gets the optional VSTest filter expression, passed to the test platform as one argument and never through a shell.</summary>
+    /// <remarks>At most <see cref="EvidenceTestProducerContract.MaximumFilterLength"/> characters, with no control character or line break. Omit it to select every test.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Filter { get; init; }
+
+    /// <summary>Gets the optional minimum number of discovered tests; <see langword="null"/> means 1, the non-empty rule.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MinimumTests { get; init; }
+}
+
+/// <summary>
+/// Names the fixed parts of the preview built-in <c>test</c> producer contract that the planner enforces.
+/// </summary>
+/// <remarks>
+/// A <c>test</c> producer claims selection completeness: every test its declared projects and filters selected ran and passed.
+/// It never makes a coverage claim, so the planner pins its single assertion id and its single receipt slot to the values here.
+/// Use the <c>coverage</c> kind instead when the evidence needed is a coverage threshold.
+/// </remarks>
+public static class EvidenceTestProducerContract
+{
+    /// <summary>The producer kind, <c>test</c>.</summary>
+    public const string Kind = "test";
+
+    /// <summary>The only assertion id a <c>test</c> producer may declare and close.</summary>
+    public const string AssertionId = "appsurface/test/discovery-complete@1";
+
+    /// <summary>The logical name of the single required receipt artifact slot.</summary>
+    public const string ReceiptSlotLogicalName = "test-receipt";
+
+    /// <summary>The required media type of the receipt artifact slot.</summary>
+    public const string ReceiptMediaType = "application/json";
+
+    /// <summary>The largest number of projects one <c>test</c> producer may declare.</summary>
+    public const int MaximumProjects = 32;
+
+    /// <summary>The largest declared project path length, in characters.</summary>
+    public const int MaximumProjectPathLength = 512;
+
+    /// <summary>The largest declared filter length, in characters.</summary>
+    public const int MaximumFilterLength = 1024;
+
+    /// <summary>The smallest <c>timeoutSeconds</c> a <c>test</c> producer may declare, so its internal deadline keeps a usable reserve.</summary>
+    public const int MinimumTimeoutSeconds = 30;
+
+    /// <summary>
+    /// Computes the smallest <c>maximumBytes</c> the receipt slot may declare for a set of projects:
+    /// 4096 bytes, plus 512 bytes and the UTF-8 length of the path for each project.
+    /// </summary>
+    /// <param name="projects">Declared projects; a <see langword="null"/> path counts as empty.</param>
+    /// <returns>The minimum receipt slot size in bytes.</returns>
+    public static long GetMinimumReceiptBytes(IReadOnlyList<EvidenceTestProject> projects)
+    {
+        ArgumentNullException.ThrowIfNull(projects);
+        long total = 4096;
+        foreach (var project in projects)
+        {
+            total += 512 + System.Text.Encoding.UTF8.GetByteCount(project?.Path ?? string.Empty);
+        }
+
+        return total;
+    }
 }
 
 /// <summary>
@@ -523,7 +617,19 @@ public sealed class EvidenceArtifactWriter
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            await File.WriteAllBytesAsync(destination, contents, cancellationToken).ConfigureAwait(false);
+            // Write beside the destination and move into place, so a reader never sees a partial artifact.
+            var temporary = destination + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                await File.WriteAllBytesAsync(temporary, contents, cancellationToken).ConfigureAwait(false);
+                File.Move(temporary, destination, overwrite: true);
+            }
+            catch
+            {
+                TryDeletePartial(temporary);
+                throw;
+            }
+
             var artifact = new EvidenceArtifactResult(
                 logicalName,
                 normalizedPath,
@@ -748,6 +854,147 @@ public sealed class EvidenceArtifactWriter
         {
         }
     }
+}
+
+/// <summary>
+/// Result of checking one manifest-listed artifact against the file retained on disk.
+/// </summary>
+public enum EvidenceArtifactFileStatus
+{
+    /// <summary>The file exists as a regular, unlinked file with the recorded length and SHA-256.</summary>
+    Valid,
+
+    /// <summary>The producer id or the recorded relative path is absolute, empty, or traverses outside the artifact root.</summary>
+    InvalidPath,
+
+    /// <summary>The artifact root, a directory on the way, or the file itself is a symbolic link or other reparse point.</summary>
+    Linked,
+
+    /// <summary>The file or one of its directories does not exist or cannot be opened.</summary>
+    Missing,
+
+    /// <summary>The file length differs from the recorded length.</summary>
+    LengthMismatch,
+
+    /// <summary>The file has the recorded length but a different SHA-256.</summary>
+    DigestMismatch,
+}
+
+/// <summary>
+/// Checks that an artifact recorded in a producer result is still the file retained on disk.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="EvidenceArtifactValidation"/> validates artifact metadata against a declaration; this type validates
+/// the bytes. It is the one on-disk rule shared by <c>appsurface evidence verify</c>, by <c>appsurface evidence run</c>
+/// before it writes a manifest, and by the repository validation tool. Use it whenever a claim depends on a retained
+/// artifact; manifest digests alone do not show that the artifact still exists.
+/// </para>
+/// <para>
+/// Layout: <c>&lt;artifactRoot&gt;/&lt;producerId&gt;/&lt;artifact.RelativePath&gt;</c>, the layout
+/// <see cref="EvidenceArtifactWriter"/> rooted at a producer directory writes.
+/// </para>
+/// <para>
+/// Pitfalls: links are rejected at the artifact root and at every component below it, but not above the root, so pass
+/// a root you trust. The check does not authenticate the manifest; obtain it through a trusted channel.
+/// </para>
+/// </remarks>
+public static class EvidenceArtifactFileValidation
+{
+    /// <summary>
+    /// Compares one retained artifact file with its recorded length and SHA-256.
+    /// </summary>
+    /// <param name="artifactRoot">Directory that holds one subdirectory per producer id.</param>
+    /// <param name="producerId">Producer id that owns the artifact; must be a single path segment.</param>
+    /// <param name="artifact">Recorded artifact metadata.</param>
+    /// <param name="cancellationToken">Cancellation token observed while hashing.</param>
+    /// <returns>
+    /// <see cref="EvidenceArtifactFileStatus.Valid"/> only for an unlinked regular file whose length and digest match.
+    /// Length is compared before hashing, and at most the recorded length is hashed.
+    /// </returns>
+    public static async Task<EvidenceArtifactFileStatus> CheckAsync(
+        string artifactRoot,
+        string producerId,
+        EvidenceArtifactResult artifact,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(artifactRoot);
+        ArgumentNullException.ThrowIfNull(producerId);
+        ArgumentNullException.ThrowIfNull(artifact);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        string relative;
+        try
+        {
+            relative = EvidenceArtifactValidation.NormalizeRelativePath(artifact.RelativePath);
+        }
+        catch (ArgumentException)
+        {
+            return EvidenceArtifactFileStatus.InvalidPath;
+        }
+
+        if (producerId.Length == 0
+            || producerId is "." or ".."
+            || producerId.IndexOfAny(['/', '\\', ':']) >= 0
+            || artifact.LengthBytes < 0)
+        {
+            return EvidenceArtifactFileStatus.InvalidPath;
+        }
+
+        try
+        {
+            var path = Path.GetFullPath(artifactRoot);
+            if (IsLink(path))
+            {
+                return EvidenceArtifactFileStatus.Linked;
+            }
+
+            foreach (var component in relative.Split('/').Prepend(producerId))
+            {
+                path = Path.Join(path, component);
+                if (IsLink(path))
+                {
+                    return EvidenceArtifactFileStatus.Linked;
+                }
+            }
+
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            if (stream.Length != artifact.LengthBytes)
+            {
+                return EvidenceArtifactFileStatus.LengthMismatch;
+            }
+
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[64 * 1024];
+            long remaining = artifact.LengthBytes;
+            while (remaining > 0)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    return EvidenceArtifactFileStatus.LengthMismatch;
+                }
+
+                hash.AppendData(buffer, 0, read);
+                remaining -= read;
+            }
+
+            if (await stream.ReadAsync(buffer.AsMemory(0, 1), cancellationToken).ConfigureAwait(false) != 0)
+            {
+                return EvidenceArtifactFileStatus.LengthMismatch;
+            }
+
+            return string.Equals(Convert.ToHexString(hash.GetHashAndReset()), artifact.Sha256, StringComparison.OrdinalIgnoreCase)
+                ? EvidenceArtifactFileStatus.Valid
+                : EvidenceArtifactFileStatus.DigestMismatch;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return EvidenceArtifactFileStatus.Missing;
+        }
+    }
+
+    private static bool IsLink(string path) => File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
 }
 
 /// <summary>
