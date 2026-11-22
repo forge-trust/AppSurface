@@ -1,8 +1,11 @@
 namespace ForgeTrust.AppSurface.PostgreSql.Testing;
 
-/// <summary>Outcomes for the exact template registrations selected by a cleanup operation.</summary>
+/// <summary>Outcomes for the selected templates and any failed fresh database drops retried during full cleanup.</summary>
 public sealed record TemplateCleanupResult(IReadOnlyList<TemplateCleanupOutcome> Outcomes, TimeSpan Elapsed)
 {
+    /// <summary>Outcomes of retrying previously failed fresh case drops during full fixture cleanup. These do not count as templates.</summary>
+    public IReadOnlyList<TemplateCleanupOutcome> FreshDatabaseOutcomes { get; init; } = [];
+
     /// <summary>Number of selected registrations, including incomplete attempts.</summary>
     public int RegisteredTemplateCount => Outcomes.Count;
 
@@ -10,22 +13,22 @@ public sealed record TemplateCleanupResult(IReadOnlyList<TemplateCleanupOutcome>
     public int RemovedTemplateCount => Outcomes.Count(outcome => outcome.Status == TemplateCleanupStatus.Removed);
 
     /// <summary>Database or cancellation failures in this attempt.</summary>
-    public IReadOnlyList<TemplateCleanupOutcome> Failures => Outcomes.Where(outcome => outcome.Status == TemplateCleanupStatus.Failed).ToArray();
+    public IReadOnlyList<TemplateCleanupOutcome> Failures => Outcomes.Concat(FreshDatabaseOutcomes).Where(outcome => outcome.Status == TemplateCleanupStatus.Failed).ToArray();
 
     /// <summary>Every registration for which this operation could not confirm removal.</summary>
-    public IReadOnlyList<TemplateCleanupOutcome> IncompleteOutcomes => Outcomes.Where(outcome => outcome.Status != TemplateCleanupStatus.Removed).ToArray();
+    public IReadOnlyList<TemplateCleanupOutcome> IncompleteOutcomes => Outcomes.Concat(FreshDatabaseOutcomes).Where(outcome => outcome.Status != TemplateCleanupStatus.Removed).ToArray();
 
     /// <summary>Throws with the full result when any selected registration remains unresolved.</summary>
     public void ThrowIfFailed()
     {
-        if (RemovedTemplateCount != RegisteredTemplateCount)
+        if (IncompleteOutcomes.Count != 0)
         {
             throw new TemplateCleanupException(this);
         }
     }
 }
 
-/// <summary>The exact PostgreSQL identifier, disposition, and optional failure for one owned template.</summary>
+/// <summary>The exact PostgreSQL identifier, disposition, and optional failure for one owned database.</summary>
 public sealed record TemplateCleanupOutcome(string DatabaseName, TemplateCleanupStatus Status, string? Failure)
 {
     /// <summary>Indicates that cleanup verified the database was removed or already absent.</summary>
@@ -39,7 +42,7 @@ public sealed record TemplateCleanupOutcome(string DatabaseName, TemplateCleanup
         new(databaseName, TemplateCleanupStatus.Failed, $"{exception.GetType().Name}: {exception.Message}");
 }
 
-/// <summary>Disposition of an individual registration in one cleanup attempt.</summary>
+/// <summary>Disposition of one database in a cleanup attempt.</summary>
 public enum TemplateCleanupStatus
 {
     /// <summary>The database and its registration were released.</summary>
@@ -52,7 +55,7 @@ public enum TemplateCleanupStatus
 
 /// <summary>Reports partial or failed cleanup after every selected registration has been attempted.</summary>
 public sealed class TemplateCleanupException(TemplateCleanupResult result)
-    : Exception("PostgreSQL template cleanup did not complete for " + string.Join(", ", result.IncompleteOutcomes.Select(
+    : Exception("PostgreSQL fixture cleanup did not complete for " + string.Join(", ", result.IncompleteOutcomes.Select(
         outcome => $"{outcome.DatabaseName} ({outcome.Status}: {outcome.Failure ?? "cleanup was already in progress"})")))
 {
     /// <summary>Includes successful, failed, and concurrently owned registrations from this attempt.</summary>

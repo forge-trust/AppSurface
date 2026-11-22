@@ -1,23 +1,43 @@
+using System.Data;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace ForgeTrust.AppSurface.PostgreSql.Testing;
 
-/// <summary>Runs fixture DDL against the maintenance database. The two keys also coordinate with existing Skoolit hosts.</summary>
+/// <summary>Runs fixture database catalog operations under the shared PostgreSQL advisory locks.</summary>
 internal static class PostgreSqlCatalog
 {
     private const long DatabaseCatalogLockKey = 5_300_219_492_281_001;
     private const long ClusterInitializationLockKey = 5_300_219_492_281_002;
+    private const int CommandTimeoutSeconds = 300;
     internal static readonly TimeSpan Timeout = TimeSpan.FromMinutes(5);
 
     internal static string Target(string connectionString, string name, bool disablePooling = false)
     {
-        var builder = new NpgsqlConnectionStringBuilder(connectionString) { Database = name };
+        var builder = ParseConnectionString(connectionString);
+        builder.Database = name;
         if (disablePooling)
         {
             builder.Pooling = false;
         }
 
         return builder.ConnectionString;
+    }
+
+    internal static void ValidateSingleServer(string connectionString)
+    {
+        var builder = ParseConnectionString(connectionString);
+        if (string.IsNullOrWhiteSpace(builder.Host))
+        {
+            throw new ArgumentException("PostgreSQL database leases require an explicit host.", nameof(connectionString));
+        }
+
+        if (builder.Host.Contains(',') || builder.LoadBalanceHosts)
+        {
+            throw new ArgumentException(
+                "PostgreSQL database leases require a single-host connection without host load balancing.",
+                nameof(connectionString));
+        }
     }
 
     internal static async Task WithClusterInitializationLockAsync(string connectionString, Func<CancellationToken, Task> action)
@@ -27,75 +47,123 @@ internal static class PostgreSqlCatalog
         await admin.OpenAsync(deadline.Token);
         await AcquireAsync(admin, ClusterInitializationLockKey, deadline.Token);
         await action(deadline.Token);
-        // Closing this dedicated physical session releases the lock on every exit.
+        // Disposing this dedicated non-pooled session releases the cluster initialization lock.
     }
 
-    internal static async Task CreateAsync(string connectionString, string name, string? template, Action onCreateStarted, CancellationToken token)
+    internal static async Task<DatabaseCatalogIdentity> ReadDatabaseIdentityAsync(
+        NpgsqlConnection connection,
+        string name,
+        uint oid,
+        NpgsqlTransaction? transaction,
+        CancellationToken cancellationToken)
     {
-        await using var admin = new NpgsqlConnection(Target(connectionString, "postgres"));
-        await admin.OpenAsync(token);
-        if (template != null)
+        await using var command = new NpgsqlCommand(
+            "SELECT (SELECT oid FROM pg_catalog.pg_database WHERE datname = @name), " +
+            "(SELECT datname FROM pg_catalog.pg_database WHERE oid = @oid);",
+            connection,
+            transaction)
         {
-            await TerminateSessionsAsync(admin, template, clientsOnly: false, token);
-        }
-
-        var command = template == null
-            ? $"""CREATE DATABASE "{name}";"""
-            : $"""CREATE DATABASE "{name}" TEMPLATE "{template}" STRATEGY FILE_COPY;""";
-        await ExecuteLockedAsync(admin, command, token, onCreateStarted);
-    }
-
-    internal static async Task DropAsync(string connectionString, string name, CancellationToken token)
-    {
-        // A canceled CREATE may have broken its connection. Teardown checks out its own session.
-        await using var admin = new NpgsqlConnection(Target(connectionString, "postgres"));
-        await admin.OpenAsync(token);
-        await TerminateSessionsAsync(admin, name, clientsOnly: true, token);
-        await ExecuteLockedAsync(admin, $"""DROP DATABASE IF EXISTS "{name}" WITH (FORCE);""", token);
-    }
-
-    private static async Task TerminateSessionsAsync(NpgsqlConnection admin, string name, bool clientsOnly, CancellationToken token)
-    {
-        const string predicate = "datname = CAST(@database AS name) AND pid <> pg_backend_pid()";
-        var command = "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE " + predicate
-            + (clientsOnly ? " AND backend_type = 'client backend'" : "");
-        await using var terminate = new NpgsqlCommand(command, admin);
-        terminate.Parameters.AddWithValue("database", name);
-        await terminate.ExecuteNonQueryAsync(token);
-    }
-
-    private static async Task AcquireAsync(NpgsqlConnection admin, long key, CancellationToken token)
-    {
-        await using var acquire = new NpgsqlCommand($"SELECT pg_advisory_lock({key});", admin)
-        {
-            CommandTimeout = (int)Timeout.TotalSeconds,
+            CommandTimeout = CommandTimeoutSeconds,
         };
-        await acquire.ExecuteNonQueryAsync(token);
+        command.Parameters.AddWithValue("name", name);
+        command.Parameters.AddWithValue("oid", NpgsqlDbType.Oid, oid);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        var oidAtName = reader.IsDBNull(0) ? (uint?)null : reader.GetFieldValue<uint>(0);
+        var nameAtOid = reader.IsDBNull(1) ? null : reader.GetString(1);
+        return new DatabaseCatalogIdentity(oidAtName, nameAtOid);
     }
 
-    private static async Task ExecuteLockedAsync(NpgsqlConnection admin, string sql, CancellationToken token, Action? onCommandStarting = null)
+    internal static async Task TerminateSessionsAsync(
+        NpgsqlConnection admin,
+        uint databaseOid,
+        bool clientsOnly,
+        CancellationToken cancellationToken)
+    {
+        var commandText = "SELECT pg_catalog.pg_terminate_backend(pid) " +
+            "FROM pg_catalog.pg_stat_activity " +
+            "WHERE datid = @oid AND pid <> pg_catalog.pg_backend_pid()" +
+            (clientsOnly ? " AND backend_type = 'client backend'" : "") + ";";
+        await using var command = new NpgsqlCommand(commandText, admin)
+        {
+            CommandTimeout = CommandTimeoutSeconds,
+        };
+        command.Parameters.AddWithValue("oid", NpgsqlDbType.Oid, databaseOid);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    internal static string QuoteIdentifier(string identifier)
+    {
+        using var builder = new NpgsqlCommandBuilder();
+        return builder.QuoteIdentifier(identifier);
+    }
+
+    internal static async Task WithDatabaseCatalogLockAsync(
+        NpgsqlConnection admin,
+        Func<Task> action,
+        CancellationToken cancellationToken)
     {
         var acquired = false;
         try
         {
-            await AcquireAsync(admin, DatabaseCatalogLockKey, token);
+            await AcquireAsync(admin, DatabaseCatalogLockKey, cancellationToken);
             acquired = true;
-            await using var command = new NpgsqlCommand(sql, admin);
-            onCommandStarting?.Invoke();
-            await command.ExecuteNonQueryAsync(token);
+            await action();
         }
         finally
         {
-            // Cancellation can arrive after the server grants the lock. Always release before returning to the pool.
-            if (admin.State == System.Data.ConnectionState.Open)
+            if (admin.State == ConnectionState.Open)
             {
                 using var deadline = new CancellationTokenSource(Timeout);
-                await using var release = new NpgsqlCommand($"SELECT pg_advisory_unlock({DatabaseCatalogLockKey});", admin);
-                if (await release.ExecuteScalarAsync(deadline.Token) is not true && acquired)
+                await using var release = new NpgsqlCommand($"SELECT pg_advisory_unlock({DatabaseCatalogLockKey});", admin)
+                {
+                    CommandTimeout = CommandTimeoutSeconds,
+                };
+                var unlocked = await release.ExecuteScalarAsync(deadline.Token) is true;
+                if (!unlocked && acquired)
                 {
                     throw new InvalidOperationException("The PostgreSQL fixture lost its catalog advisory lock.");
                 }
             }
         }
+    }
+
+    private static async Task AcquireAsync(NpgsqlConnection admin, long key, CancellationToken cancellationToken)
+    {
+        await using var acquire = new NpgsqlCommand($"SELECT pg_advisory_lock({key});", admin)
+        {
+            CommandTimeout = CommandTimeoutSeconds,
+        };
+        await acquire.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static NpgsqlConnectionStringBuilder ParseConnectionString(string connectionString)
+    {
+        try
+        {
+            return new NpgsqlConnectionStringBuilder(connectionString);
+        }
+        catch (ArgumentException)
+        {
+            throw new ArgumentException("The PostgreSQL connection string is invalid.", nameof(connectionString));
+        }
+        catch (FormatException)
+        {
+            throw new ArgumentException("The PostgreSQL connection string is invalid.", nameof(connectionString));
+        }
+    }
+
+    internal static ServerIdentity ServerEndpoint(string connectionString)
+    {
+        var builder = ParseConnectionString(connectionString);
+        return new ServerIdentity(builder.Host!, builder.Port);
+    }
+
+    internal readonly record struct DatabaseCatalogIdentity(uint? OidAtName, string? NameAtOid);
+
+    internal readonly record struct ServerIdentity(string Host, int Port)
+    {
+        internal bool Matches(ServerIdentity other) =>
+            string.Equals(Host, other.Host, StringComparison.Ordinal) && Port == other.Port;
     }
 }

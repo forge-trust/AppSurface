@@ -7,6 +7,8 @@
     <PackageTags>appsurface;postgresql;testing;npgsql</PackageTags>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.PostgreSql.Testing.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Durable.PostgreSql.Tests" />
     <PackageReference Include="Npgsql" />
   </ItemGroup>
 </Project>
