@@ -854,13 +854,15 @@ public sealed class RazorWireDialogPlaywrightTests
             "() => { const link = document.createElement('a'); link.id = 'dialog-cache-navigation'; " +
             "link.href = '/Reactivity'; link.textContent = 'Navigate away'; document.body.append(link); link.click(); }");
         await page.WaitForURLAsync(url => new Uri(url).AbsolutePath.Equals("/Reactivity", StringComparison.Ordinal));
+        await page.Locator("#counter-distant-result").WaitForAsync();
         Assert.Equal(0, await page.Locator("[data-rw-dialog]").CountAsync());
 
-        // Turbo restores this history entry in the same document, so wait for the URL instead of a document load.
+        // Turbo can restore the URL before it renders the cached dialog page.
         var dialogPageRestore = page.WaitForURLAsync(
             url => new Uri(url).AbsolutePath.Equals(DialogPagePath, StringComparison.Ordinal));
         await page.EvaluateAsync("() => history.back()");
         await dialogPageRestore;
+        await page.Locator("html:not([data-turbo-preview]) #dialog-result-heading").WaitForAsync();
         Assert.Equal(0, await page.Locator("[data-rw-dialog][open]").CountAsync());
         Assert.Equal(0, await page.Locator("[data-rw-dialog]").CountAsync());
     }

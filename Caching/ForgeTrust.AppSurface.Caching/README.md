@@ -21,8 +21,9 @@ for current release risk, migration guidance, and readiness.
 
 ## Usage
 
-Register the caching dependency in your application module. Leave the `AddMemoryCache()` call to
-`AppSurfaceCachingModule`, which also registers `IMemo` for injection into application services.
+In the class that implements [`IAppSurfaceModule`](../../ForgeTrust.AppSurface.Core/IAppSurfaceModule.cs),
+register the caching dependency in `RegisterDependentModules`. `AppSurfaceCachingModule` calls
+`AddMemoryCache()` and registers `IMemo` for injection into application services.
 
 ```csharp
 public void RegisterDependentModules(ModuleDependencyBuilder builder)
