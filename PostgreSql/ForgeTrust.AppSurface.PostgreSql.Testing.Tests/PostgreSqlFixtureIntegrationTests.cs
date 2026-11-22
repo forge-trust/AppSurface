@@ -273,6 +273,10 @@ public sealed class PostgreSqlFixtureIntegrationTests
 
             Assert.Equal(2, templateNames.Count);
 
+            var otherConnection = new NpgsqlConnectionStringBuilder(connectionString) { ApplicationName = "other-owner" };
+            var unmatched = await fixture.CleanupTemplatesAsync(otherConnection.ConnectionString, [firstTemplatePrefix]);
+            Assert.Empty(unmatched.Outcomes);
+
             var firstCleanup = await fixture.CleanupTemplatesAsync(connectionString, [firstTemplatePrefix]);
 
             Assert.Equal(1, firstCleanup.RegisteredTemplateCount);
@@ -744,7 +748,9 @@ public sealed class PostgreSqlFixtureIntegrationTests
         });
 
         await firstActionEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var second = PostgreSqlFixture.WithClusterInitializationLockAsync(connectionString, cancellationToken =>
+        var waiterName = PostgreSqlTestServer.NewPrefix("cluster_lock_waiter");
+        var waiterConnectionString = new NpgsqlConnectionStringBuilder(connectionString) { ApplicationName = waiterName };
+        var second = PostgreSqlFixture.WithClusterInitializationLockAsync(waiterConnectionString.ConnectionString, cancellationToken =>
         {
             secondActionEntered.TrySetResult();
             return Task.CompletedTask;
@@ -752,16 +758,32 @@ public sealed class PostgreSqlFixtureIntegrationTests
 
         try
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(200));
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var observerConnectionString = new NpgsqlConnectionStringBuilder(connectionString) { Database = "postgres" };
+            await using var observer = new NpgsqlConnection(observerConnectionString.ConnectionString);
+            await observer.OpenAsync(deadline.Token);
+            await using var waiting = new NpgsqlCommand("""
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_locks l
+                    JOIN pg_catalog.pg_stat_activity a ON a.pid = l.pid
+                    WHERE a.application_name = @waiter AND l.locktype = 'advisory' AND NOT l.granted);
+                """, observer);
+            waiting.Parameters.AddWithValue("waiter", waiterName);
+            while (await waiting.ExecuteScalarAsync(deadline.Token) is false)
+            {
+                Assert.False(second.IsCompleted, "The second initializer completed before waiting for the first.");
+                await Task.Delay(TimeSpan.FromMilliseconds(25), deadline.Token);
+            }
+
             Assert.False(secondActionEntered.Task.IsCompleted);
-            releaseFirstAction.TrySetResult();
-            await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(15));
-            Assert.True(secondActionEntered.Task.IsCompletedSuccessfully);
         }
         finally
         {
             releaseFirstAction.TrySetResult();
+            await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(15));
         }
+
+        Assert.True(secondActionEntered.Task.IsCompletedSuccessfully);
     }
 
     private static async Task<bool> HasDatabaseWithPrefixAsync(string connectionString, string prefix)
@@ -869,6 +891,40 @@ public sealed class PostgreSqlFixtureIntegrationTests
             if (caseName != null && await PostgreSqlTestServer.DatabaseExistsAsync(connection, caseName))
             {
                 await SetDatabaseTemplateFlagAsync(connection, caseName, false);
+            }
+
+            await fixture.CleanupAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ProcessExit_PreservesFailedFreshDropForTheNextCleanupAttempt()
+    {
+        var connection = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
+        var fixture = new PostgreSqlFixture();
+        string? protectedDatabase = null;
+        try
+        {
+            var failure = await Assert.ThrowsAsync<PostgreSqlDatabaseCleanupException>(() =>
+                fixture.RunFreshAsync(connection, "exit_retry", async (database, _) =>
+                {
+                    protectedDatabase = new NpgsqlConnectionStringBuilder(database).Database!;
+                    await SetDatabaseTemplateFlagAsync(connection, protectedDatabase, true);
+                }));
+            Assert.Equal(protectedDatabase, failure.Database.Name);
+            fixture.OnProcessExit(null, EventArgs.Empty);
+            Assert.True(await PostgreSqlTestServer.DatabaseExistsAsync(connection, failure.Database.Name));
+
+            await SetDatabaseTemplateFlagAsync(connection, failure.Database.Name, false);
+            fixture.OnProcessExit(null, EventArgs.Empty);
+            Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connection, failure.Database.Name));
+            Assert.Empty((await fixture.CleanupAllAsync()).FreshDatabaseOutcomes);
+        }
+        finally
+        {
+            if (protectedDatabase is not null && await PostgreSqlTestServer.DatabaseExistsAsync(connection, protectedDatabase))
+            {
+                await SetDatabaseTemplateFlagAsync(connection, protectedDatabase, false);
             }
 
             await fixture.CleanupAllAsync();

@@ -115,7 +115,7 @@ internal static class PostgreSqlCatalog
             if (admin.State == ConnectionState.Open)
             {
                 using var deadline = new CancellationTokenSource(Timeout);
-                await using var release = new NpgsqlCommand($"SELECT pg_advisory_unlock({DatabaseCatalogLockKey});", admin)
+                await using var release = new NpgsqlCommand($"SELECT pg_catalog.pg_advisory_unlock({DatabaseCatalogLockKey});", admin)
                 {
                     CommandTimeout = CommandTimeoutSeconds,
                 };
@@ -130,7 +130,7 @@ internal static class PostgreSqlCatalog
 
     private static async Task AcquireAsync(NpgsqlConnection admin, long key, CancellationToken cancellationToken)
     {
-        await using var acquire = new NpgsqlCommand($"SELECT pg_advisory_lock({key});", admin)
+        await using var acquire = new NpgsqlCommand($"SELECT pg_catalog.pg_advisory_lock({key});", admin)
         {
             CommandTimeout = CommandTimeoutSeconds,
         };

@@ -329,7 +329,8 @@ public sealed class PostgreSqlFixture
         watchingProcessExit = needed;
     }
 
-    private void OnProcessExit(object? sender, EventArgs args)
+    /// <summary>Attempts bounded teardown during process exit. Explicit cleanup can retry any retained leases.</summary>
+    internal void OnProcessExit(object? sender, EventArgs args)
     {
         try
         {
