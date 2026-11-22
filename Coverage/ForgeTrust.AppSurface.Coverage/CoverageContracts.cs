@@ -84,6 +84,13 @@ public sealed record CoverageFanInPolicy(CoverageSourceIdentity Source, Coverage
     IReadOnlyList<string> TestProjects, IReadOnlyList<CoverageSupplement> Supplements, CoverageGatePolicy Gate,
     CoverageInstrumentation? Instrumentation = null, CoverageOperationLimits? Limits = null)
 {
+    /// <summary>Diff interpretation opt-in for contract version 3; null retains the strict Git patch policy.</summary>
+    /// <remarks>The supported opt-in is <c>appsurface-visual-baseline-png-v1</c>. Version 2 cannot select a diff policy.</remarks>
+    public string? DiffPolicyId { get; init; }
+
+    /// <summary>Supported contract version 3 visual-baseline PNG diff policy identifier.</summary>
+    public const string VisualBaselinePngDiffPolicyId = "appsurface-visual-baseline-png-v1";
+
     /// <summary>Fan-in contract version; defaults to the legacy version 2 contract.</summary>
     /// <remarks>Version 2 canonical policy bytes omit this property to preserve their frozen encoding.</remarks>
     public int ContractVersion { get; init; } = 2;

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Coverage;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -123,6 +124,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                     "--diff-base", _settings.DiffBase!, "--run-scope", run["GITHUB_REPOSITORY"]!,
                     "--run-id", run["GITHUB_RUN_ID"]!, "--attempt", run["GITHUB_RUN_ATTEMPT"]!,
                 };
+                if (nativeContract == 3)
+                    dogfoodArgs.AddRange(["--diff-policy-id", CoverageFanInPolicy.VisualBaselinePngDiffPolicyId]);
                 await ExecuteAsync("coverage-fanin", dogfoodArgs, root, proof, cancellationToken, _settings.DotnetPath).ConfigureAwait(false);
                 nativeProofHash = await ValidateNativeFanInAsync(fanInOutput, nativeContract, _settings.DiffBase!,
                     commit, tree, sdk, run, cancellationToken).ConfigureAwait(false);
@@ -406,7 +409,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             || diff.GetProperty("headCommit").GetString() != commit
             || !IsRepositoryCommit(diff.GetProperty("mergeBaseCommit").GetString()))
             throw new InvalidDataException("Native v3 patch proof is not bound to the requested base and head.");
-        if (diff.GetProperty("diffPolicyId").GetString() != "appsurface-git-patch-v1"
+        if (diff.GetProperty("diffPolicyId").GetString() != CoverageFanInPolicy.VisualBaselinePngDiffPolicyId
             || diff.GetProperty("diffSha256").GetString() != receipt.GetProperty("diffSha256").GetString())
             throw new InvalidDataException("Native v3 diff metadata does not bind the required diff policy and accepted patch.");
 
