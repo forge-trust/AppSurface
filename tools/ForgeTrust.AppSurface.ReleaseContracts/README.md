@@ -12,6 +12,82 @@ The package exposes immutable release-link vocabulary for package indexes and re
 
 Use these types when building an AppSurface package index or release-aware documentation integration. For application release notes, follow the [append-only unreleased-entry workflow](../../releases/README.md#append-only-unreleased-entries) through the public [CLI composition command](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) instead.
 
+
+## Offline release artifact binding
+
+Use this internal verifier when a caller has a trusted manifest pin, expected release identity, and independent observations of every asset. Bind each promotion receipt separately to the verified manifest. The [PackageIndex replay](../ForgeTrust.AppSurface.PackageIndex.Tests/PreflightCarrierDispatchTests.cs) proves the package projection with real producer output and a local archive replacement. The [deployment fixture](../ForgeTrust.AppSurface.Release.Tests/ReleaseArtifactBindingTests.cs) uses synthetic OCI bytes. [Protected Tailwind publication](../../docs/tailwind-artifact-provenance.md) continues to enforce producer, per-host, and aggregate evidence through its own workflow.
+
+### Records and limits
+
+| Schema | Required fields |
+|---|---|
+| `appsurface-release-artifacts-v1` | `schema`, `repository`, `releaseId`, `sourceCommit`, `assets`. Each asset has `id`, `kind`, `locator`, `digestAlgorithm`, and `digest`. |
+| `appsurface-promotion-receipt-v1` | `schema`, `promotionId`, `target`, `releaseManifestSha256`, `authorizationRef`, and `outcome` (`succeeded` or `failed`). |
+
+Both schemas require strict UTF-8 JSON with the exact fields, no duplicate names, and no BOM, comments, or trailing commas. The parser bounds JSON depth to 8. The maximum document sizes are 256 KiB for a manifest and 16 KiB for a receipt. A manifest contains 1–128 assets, and the caller can supply up to 128 observations. A decoded field value can occupy up to 1,024 UTF-8 bytes. Blank values, controls, and invalid Unicode are rejected. Commit IDs are full 40- or 64-character lowercase hex. Digests are lowercase hex, 64 characters for `sha256` and 128 for `sha512`. Manifest pins always use SHA-256. All values compare ordinally, and asset IDs are unique across kinds. Kind and locator are opaque.
+
+The methods recognize their respective v1 discriminators. Adding or removing a field requires an explicit new schema and migration decision. The pin refers to the original bytes, so changing whitespace or reserializing the same fields requires a new trusted pin.
+
+### Internal API
+
+- `VerifiedReleaseManifest.VerifyManifest(ReadOnlyMemory<byte>, string?, ReleaseIdentity?, IReadOnlyList<ReleaseAsset>?)` checks byte and observed count caps, then caller formats. It hashes a bounded snapshot before parsing it. The parsed manifest must be valid before release identity and inventory are compared. Inventory order is irrelevant, and every asset field must match by ID. `Success.Value` holds a detached `VerifiedReleaseManifest` with read-only `Identity` and `Sha256`. Only successful verification creates it.
+- `VerifiedReleaseManifest.VerifyPromotionBinding(ReadOnlyMemory<byte>, VerifiedReleaseManifest?, PromotionIdentity?)` checks the byte cap, verified token and expected fields first. After the schema and record shape, it validates `outcome` before checking the exact promotion ID, target, release manifest digest, and authorization reference. `Success.Value` is the recorded `PromotionOutcome.Succeeded` or `PromotionOutcome.Failed`.
+- `ReleaseIdentity`, `ReleaseAsset`, and `PromotionIdentity` carry the corresponding string fields above. There are no defaults for missing fields. Keep input memory and observations stable throughout each call. An invalid count or an unavailable index in the bounded observations produces `invalid-record`. Validate or refresh the observation before retrying.
+- `ReleaseBindingResult<T>` has mutually exclusive `Success` and `Failure` cases. `Failure.Code` is a stable string, and that case has no success value. The verifier is read-only and reports no raw input values.
+
+Check a manifest with an independently trusted pin and fresh observations:
+
+```csharp
+var binding = VerifiedReleaseManifest.VerifyManifest(
+    retainedManifestBytes, trustedManifestSha256, expectedRelease, freshlyObservedAssets);
+if (binding is ReleaseBindingResult<VerifiedReleaseManifest>.Failure rejected)
+{
+    return Reject(rejected.Code);
+}
+
+var verified = ((ReleaseBindingResult<VerifiedReleaseManifest>.Success)binding).Value;
+```
+
+Use the verified value for each independently identified receipt:
+
+```csharp
+var promotion = VerifiedReleaseManifest.VerifyPromotionBinding(receiptBytes, verified, expectedPromotion);
+return promotion switch
+{
+    ReleaseBindingResult<PromotionOutcome>.Success bound => RecordOutcome(bound.Value),
+    ReleaseBindingResult<PromotionOutcome>.Failure rejected => Reject(rejected.Code),
+    _ => throw new InvalidOperationException(),
+};
+```
+
+`Reject` and `RecordOutcome` are caller actions. A bound `Failed` receipt records that an attempt failed. The caller supplies the trusted pin and expectations, obtains the full observation, establishes receipt authenticity, and evaluates authorization, freshness, chronology, and outcome. The verifier performs no artifact downloads, signing, or provider checks. Use the source workflow's existing controls for those responsibilities.
+
+### Failure codes and recovery
+
+| Code | What failed | Next step |
+|---|---|---|
+| `invalid-record` | JSON encoding, shape, a required value or caller field is malformed, or authored asset IDs repeat. | Correct the record or caller input at its source. Read the required shape and field rules above before retrying. |
+| `unsupported-schema` | The discriminator identifies a schema this method cannot bind. | Select the expected v1 record or an explicitly supported verifier for the new schema. |
+| `input-limit-exceeded` | A byte, count, or decoded string limit was exceeded. | Correct the producer or input scope. Truncating an inventory would invalidate the proof. |
+| `manifest-digest-mismatch` | The exact manifest bytes disagree with the trusted pin. | Retrieve the independently pinned bytes. Replacing the pin with a hash of the received bytes would discard the check. |
+| `release-identity-mismatch` | The manifest is for a different repository, release, or source commit. | Retrieve the manifest for the expected identity from the trusted source. |
+| `asset-mismatch` | The inventory is missing, extra, duplicated, or contains a mismatched field or digest. | Reopen the complete inventory and inspect its ID, kind, locator, algorithm and raw bytes against producer evidence. |
+| `promotion-binding-mismatch` | A receipt differs in manifest pin, attempt ID, target, or authorization reference. | Retrieve the receipt for the exact expected attempt and recheck the caller's independent inputs. |
+
+### Run the offline binding proof
+
+From the repository root, use the SDK pinned by [`global.json`](https://github.com/forge-trust/AppSurface/blob/main/global.json) and restore project dependencies. The existing test projects can access these internal types through their assembly friendship. Application code does not consume a supported package API for this contract.
+
+```sh
+dotnet --version
+dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj --filter FullyQualifiedName~OfflineReleaseArtifactBindingReplay
+dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj --filter FullyQualifiedName~ReleaseArtifactBindingTests
+```
+
+In the [replay test](../ForgeTrust.AppSurface.PackageIndex.Tests/PreflightCarrierDispatchTests.cs), the frozen PackageIndex manifest supplies the expected package IDs, report version, filenames, and raw SHA-512 values. The test projects these into a separate release manifest and computes its SHA-256 once. A fresh directory scan supplies every observed archive. The observer reads ID and version from each reopened nuspec, uses the actual filename as its opaque locator, and computes the raw SHA-512 again. Both paths encode ID as the invariant decimal UTF-16 length of the package ID, a colon, the exact ID, and the exact version. The fixture supplies the release context, file kind, digest algorithm and pin.
+
+The replay passes when the original inventory verifies and replacing one archive payload in a scratch copy changes only its observed digest. The second verification must return `asset-mismatch` with the original release manifest and pin. The [contract tests](../ForgeTrust.AppSurface.Release.Tests/ReleaseArtifactBindingTests.cs) cover the byte pin, both record formats, limits, and promotion outcomes.
+
 ## Composition boundary
 
 The package also contains the `internal` `UnreleasedEntryComposer`, `UnreleasedEntry`, and `UnreleasedEntryException` types shared by AppSurface Docs and the repository's [release-preparation workflow](../../tools/ForgeTrust.AppSurface.Release/README.md#append-only-unreleased-entries). They accept a flat, filename-sorted entry directory whose files begin with `<!-- appsurface:unreleased-entry section="section" -->`; templates declare each accepted section exactly once with `<!-- appsurface:unreleased-entries section="section" -->`. Section identifiers use lowercase letters, digits, and single hyphens. The internal workflow rejects undeclared or duplicate sections, malformed or code-block markers, source markers, top-level entry headings, and terminal control characters other than tabs and ordinary line breaks; it reports those failures as `UnreleasedEntryException`.

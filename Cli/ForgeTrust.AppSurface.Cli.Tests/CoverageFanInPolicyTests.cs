@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Coverage;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -91,6 +92,44 @@ public sealed class CoverageFanInPolicyTests
     }
 
     [Fact]
+    public void V3DiffPolicySelectorIsOptionalDigestBoundAndDefaultsToStrictAtTheEngineBoundary()
+    {
+        var strictPolicy = V3Policy();
+        var strictElement = CoveragePolicyEncoding.ToElement(strictPolicy);
+        var strictExpected = new CoverageFanInExpected(strictElement, CoveragePolicyEncoding.Digest(strictPolicy));
+
+        Assert.False(strictElement.TryGetProperty("diffPolicyId", out _));
+        Assert.Equal("appsurface-git-patch-v1", strictExpected.DiffPolicyId);
+
+        var visualPolicy = strictPolicy with { DiffPolicyId = CoverageFanInPolicy.VisualBaselinePngDiffPolicyId };
+        var visualElement = CoveragePolicyEncoding.ToElement(visualPolicy);
+        var visualExpected = new CoverageFanInExpected(visualElement, CoveragePolicyEncoding.Digest(visualPolicy));
+        var decoded = CoveragePolicyEncoding.Decode<CoverageFanInPolicy>(
+            JsonSerializer.SerializeToUtf8Bytes(visualPolicy, CoveragePolicyEncoding.Json));
+
+        Assert.Equal(CoverageFanInPolicy.VisualBaselinePngDiffPolicyId,
+            visualElement.GetProperty("diffPolicyId").GetString());
+        Assert.Equal(CoverageFanInPolicy.VisualBaselinePngDiffPolicyId, visualExpected.DiffPolicyId);
+        Assert.NotEqual(strictExpected.Digest, visualExpected.Digest);
+        Assert.Equal(CoveragePolicyEncoding.Digest(visualPolicy), CoveragePolicyEncoding.Digest(decoded));
+        Assert.Equal(CoverageFanInPolicy.VisualBaselinePngDiffPolicyId, decoded.DiffPolicyId);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("future-policy")]
+    public void V3RejectsUnrecognizedDiffPolicySelectors(string selector)
+    {
+        var policy = V3Policy() with { DiffPolicyId = selector };
+        Assert.Throws<ArgumentException>("diffPolicyId", () => CoveragePolicyEncoding.Freeze(policy));
+    }
+
+    [Fact]
+    public void V2PolicyCannotSelectTheV3DiffPolicy()
+        => Assert.Throws<ArgumentException>(() => CoveragePolicyEncoding.Freeze(Policy() with
+        { DiffPolicyId = CoverageFanInPolicy.VisualBaselinePngDiffPolicyId }));
+
+    [Fact]
     public void GenericJsonKeepsV2PolicyClosedAndRoundTripsV3Selectors()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
@@ -102,23 +141,31 @@ public sealed class CoverageFanInPolicyTests
 
         Assert.False(v2PolicyJson.TryGetProperty("contractVersion", out _));
         Assert.False(v2PolicyJson.TryGetProperty("reportProfileId", out _));
+        Assert.False(v2PolicyJson.TryGetProperty("diffPolicyId", out _));
         var decodedCapture = CoveragePolicyEncoding.Decode<CoverageCaptureRequest>(Encoding.UTF8.GetBytes(captureJson));
         Assert.Equal(2, decodedCapture.Policy.ContractVersion);
         Assert.Null(decodedCapture.Policy.ReportProfileId);
         Assert.Equal(CanonicalGolden, Encoding.UTF8.GetString(
             CoveragePolicyEncoding.CanonicalBytes(decodedCapture.Policy)));
 
-        var v3Policy = V3Policy();
+        var v3DefaultJson = JsonSerializer.Serialize(V3Policy(), options);
+        using var v3DefaultDocument = JsonDocument.Parse(v3DefaultJson);
+        Assert.False(v3DefaultDocument.RootElement.TryGetProperty("diffPolicyId", out _));
+
+        var v3Policy = V3Policy() with { DiffPolicyId = CoverageFanInPolicy.VisualBaselinePngDiffPolicyId };
         var v3Json = JsonSerializer.Serialize(v3Policy, options);
         using var v3Document = JsonDocument.Parse(v3Json);
         Assert.Equal(3, v3Document.RootElement.GetProperty("contractVersion").GetInt32());
         Assert.Equal("coverlet-collector-cobertura-v1",
             v3Document.RootElement.GetProperty("reportProfileId").GetString());
+        Assert.Equal(CoverageFanInPolicy.VisualBaselinePngDiffPolicyId,
+            v3Document.RootElement.GetProperty("diffPolicyId").GetString());
 
         var v3RoundTrip = JsonSerializer.Deserialize<CoverageFanInPolicy>(v3Json, options);
         Assert.NotNull(v3RoundTrip);
         Assert.Equal(3, v3RoundTrip.ContractVersion);
         Assert.Equal(v3Policy.ReportProfileId, v3RoundTrip.ReportProfileId);
+        Assert.Equal(v3Policy.DiffPolicyId, v3RoundTrip.DiffPolicyId);
         Assert.Equal(CoveragePolicyEncoding.CanonicalBytes(v3Policy),
             CoveragePolicyEncoding.CanonicalBytes(v3RoundTrip));
     }

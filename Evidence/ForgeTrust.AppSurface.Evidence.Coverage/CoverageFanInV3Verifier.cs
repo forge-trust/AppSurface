@@ -19,6 +19,9 @@ internal static class CoverageFanInV3Verifier
 
 internal static partial class CoverageFanInIndependentVerifier
 {
+    private const string StrictDiffPolicyId = "appsurface-git-patch-v1";
+    private const string VisualBaselinePngDiffPolicyId = "appsurface-visual-baseline-png-v1";
+
     /// <summary>Independently replays raw objects, hunks, counters, gates and all stored claim copies.</summary>
     internal static void VerifyV3(JsonElement primaryGate, JsonElement composedGate, JsonElement claim,
         JsonElement metadata, CoverageFanInExpected expected, XDocument primary, XDocument composed,
@@ -28,15 +31,22 @@ internal static partial class CoverageFanInIndependentVerifier
         try
         {
             Require(expected.ContractVersion == 3, GateError);
+            var diffPolicyId = expected.DiffPolicyId;
+            Require((diffPolicyId is StrictDiffPolicyId or VisualBaselinePngDiffPolicyId)
+                && input.DiffPolicyId == diffPolicyId, GateError);
+            Require(diffPolicyId != VisualBaselinePngDiffPolicyId || !input.Patch.AsSpan().Contains((byte)0), GateError);
+            var qualifiedPngPaths = input.QualifiedPngPaths.ToHashSet(StringComparer.Ordinal);
+            Require(qualifiedPngPaths.Count == input.QualifiedPngPaths.Count, GateError);
             var raw = V3Raw(input);
-            var facts = V3Patch(input, raw);
+            V3QualifiedPngChanges(qualifiedPngPaths, raw, diffPolicyId);
+            var facts = V3Patch(input, raw, qualifiedPngPaths);
             var expectedMetadata = CoverageFanInV3Encoding.Element(new
             {
                 schemaVersion = 3,
                 requestedBaseCommit = input.RequestedBase,
                 mergeBaseCommit = input.MergeBase,
                 headCommit = input.Head,
-                diffPolicyId = "appsurface-git-patch-v1",
+                diffPolicyId,
                 diffSha256 = CoverageFanInIO.Hash(input.Patch),
                 empty = input.Patch.Length == 0,
                 changes = raw.OrderBy(x => x.NewPath ?? x.OldPath, StringComparer.Ordinal).ThenBy(x => x.OldPath, StringComparer.Ordinal)
@@ -59,12 +69,15 @@ internal static partial class CoverageFanInIndependentVerifier
             var hashes = Property(claim, "captureManifestHashes");
             Require(hashes.ValueKind == JsonValueKind.Array && hashes.EnumerateArray().Select(x => x.GetString()).SequenceEqual(captureHashes), GateError);
             var aliases = new HashSet<string>(trackedPaths.Select(path => path.Normalize(NormalizationForm.FormC)), StringComparer.OrdinalIgnoreCase);
+            var qualifiedAliases = new HashSet<string>(qualifiedPngPaths.Select(path =>
+                path.Normalize(NormalizationForm.FormC)), StringComparer.OrdinalIgnoreCase);
             foreach (var document in new[] { primary, composed })
                 foreach (var cls in document.Descendants().Where(x => x.Name.LocalName == "class"))
                 {
                     var path = NormalizeRelative(RequiredAttribute(cls, "filename"));
                     V3Path(path);
                     Require(trackedPaths.Contains(path) || !aliases.Contains(path.Normalize(NormalizationForm.FormC)), GateError);
+                    Require(!qualifiedAliases.Contains(path.Normalize(NormalizationForm.FormC)), GateError);
                 }
             var policy = ReadGatePolicy(expected.Policy);
             var primaryMetrics = CalculatePatch(primary, facts, policy.PatchLineMode);
@@ -143,6 +156,26 @@ internal static partial class CoverageFanInIndependentVerifier
     private sealed record V3Change(string Kind, string? OldPath, string? NewPath, string OldId, string NewId, string OldMode, string NewMode)
     { internal SortedSet<int> Additions { get; } = []; }
 
+    private static void V3QualifiedPngChanges(IReadOnlySet<string> qualifiedPngPaths, IReadOnlyList<V3Change> changes, string diffPolicyId)
+    {
+        if (diffPolicyId == StrictDiffPolicyId)
+        {
+            Require(qualifiedPngPaths.Count == 0, GateError);
+            return;
+        }
+
+        var expected = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var change in changes)
+        {
+            var oldBaseline = change.OldPath is { } oldPath && CoverageFanInPngValidator.IsQualifiedPath(oldPath);
+            var newBaseline = change.NewPath is { } newPath && CoverageFanInPngValidator.IsQualifiedPath(newPath);
+            if (!oldBaseline && !newBaseline) continue;
+            Require(change.Kind == "modified" && change.OldMode == "100644" && change.NewMode == "100644", GateError);
+            expected.Add(change.NewPath!);
+        }
+        Require(expected.SetEquals(qualifiedPngPaths), GateError);
+    }
+
     private static List<V3Change> V3Raw(CoverageFanInDiffInput input)
     {
         var result = new List<V3Change>();
@@ -174,7 +207,8 @@ internal static partial class CoverageFanInIndependentVerifier
         return result;
     }
 
-    private static PatchFacts V3Patch(CoverageFanInDiffInput input, IReadOnlyList<V3Change> changes)
+    private static PatchFacts V3Patch(CoverageFanInDiffInput input, IReadOnlyList<V3Change> changes,
+        IReadOnlySet<string> qualifiedPngPaths)
     {
         var text = new UTF8Encoding(false, true).GetString(input.Patch);
         if (text.Length == 0) { Require(changes.Count == 0, GateError); return new(new(StringComparer.Ordinal), 0); }
@@ -209,7 +243,15 @@ internal static partial class CoverageFanInIndependentVerifier
             {
                 Finish(); Require(++fileIndex < changes.Count, GateError); current = changes[fileIndex];
                 Require(V3HeaderPair(line[11..], "a/" + (current.OldPath ?? current.NewPath), "b/" + (current.NewPath ?? current.OldPath)), GateError);
-                oldEnd = newEnd = -1; hasIndex = oldHeader = newHeader = renameFrom = renameTo = hasHunk = false; continue;
+                oldEnd = newEnd = -1; hasIndex = oldHeader = newHeader = renameFrom = renameTo = hasHunk = false;
+                if (qualifiedPngPaths.Contains(current.NewPath ?? string.Empty))
+                {
+                    Require(i + 2 < lines.Length - 1, GateError);
+                    Require(lines[++i] == $"index {current.OldId}..{current.NewId} 100644", GateError);
+                    Require(lines[++i] == $"Binary files a/{current.NewPath} and b/{current.NewPath} differ", GateError);
+                    current = null;
+                }
+                continue;
             }
             Require(current is not null, GateError);
             if (line.StartsWith("@@ ", StringComparison.Ordinal))
