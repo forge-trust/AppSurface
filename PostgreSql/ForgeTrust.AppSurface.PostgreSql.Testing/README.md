@@ -49,3 +49,12 @@ Use `PostgreSqlDatabaseLease` when the test framework acquires a database in one
 `DropAsync(cancellationToken)` and `DisposeAsync()` release the lease only after confirming removal. If a drop fails, retain the same handle, address the reported cause, and retry. A surviving child prevents its parent template from being removed. If a create request was dispatched and its identity could not be confirmed, inspect the disposable cluster before retrying. The generated name alone does not establish ownership.
 
 The callback APIs use these leases too. If callback teardown fails, `PostgreSqlDatabaseCleanupException.Database` exposes the lease for retry. `CleanupError` and `OperationError` distinguish a teardown failure from a preceding case failure. Host cleanup retries failed case drops before dropping their templates. Full cleanup also retries previously failed fresh cases and reports them in `TemplateCleanupResult.FreshDatabaseOutcomes`. The registered and removed template counts describe templates only.
+
+<!-- appsurface-release-guidance: begin -->
+## Release Guidance
+
+This package has an explicitly experimental or publication-held contract. Do not
+treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and
+[release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and
+migration guidance.
+<!-- appsurface-release-guidance: end -->

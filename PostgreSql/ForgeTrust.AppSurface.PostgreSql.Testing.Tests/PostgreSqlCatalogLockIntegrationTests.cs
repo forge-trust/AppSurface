@@ -15,7 +15,7 @@ public sealed class PostgreSqlCatalogLockIntegrationTests
             SearchPath = "pg_catalog,public",
         }.ConnectionString;
         var schemaName = PostgreSqlTestServer.NewPrefix("catalog_lock_fault");
-        var quotedSchemaName = new NpgsqlCommandBuilder().QuoteIdentifier(schemaName);
+        var quotedSchemaName = PostgreSqlCatalog.QuoteIdentifier(schemaName);
         var databaseNamePrefix = PostgreSqlTestServer.NewPrefix("catalog_lock_db");
         var ownedDatabasePrefix = databaseNamePrefix[..Math.Min(databaseNamePrefix.Length, 46)];
 
@@ -109,7 +109,7 @@ public sealed class PostgreSqlCatalogLockIntegrationTests
     {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
-        var quotedDatabaseName = new NpgsqlCommandBuilder().QuoteIdentifier(databaseName);
+        var quotedDatabaseName = PostgreSqlCatalog.QuoteIdentifier(databaseName);
         await using var command = new NpgsqlCommand(
             $"DROP DATABASE IF EXISTS {quotedDatabaseName} WITH (FORCE);",
             connection);

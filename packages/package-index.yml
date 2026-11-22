@@ -450,6 +450,7 @@ packages:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
   - project: PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/ForgeTrust.AppSurface.PostgreSql.Testing.csproj
+    release_guidance_variant: experimental
     classification: public
     publish_decision: do_not_publish
     publish_reason: This trial package remains unpublished until its trial report is reviewed and public publication is explicitly authorized.
