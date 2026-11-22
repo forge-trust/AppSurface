@@ -8,6 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="BouncyCastle.Cryptography" Version="2.7.0" />
+    <!-- Repository coverage history file app: read Python-compatible BZIP2/LZMA ZIP entries. -->
+    <PackageVersion Include="SharpCompress" Version="[0.50.11]" />
     <PackageVersion Include="ZstdSharp.Port" Version="0.8.8" />
     <PackageVersion Include="Aspire.Hosting" Version="13.6.5" />
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.5" />

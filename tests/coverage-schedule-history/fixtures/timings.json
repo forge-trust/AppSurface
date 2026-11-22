@@ -1,0 +1,21 @@
+{
+  "source" : "coverage-schedule-history",
+  "projects" : [
+    {
+      "project" : "tests/First.Tests/First.Tests.csproj",
+      "seconds" : 5,
+      "hangDiagnostics" : {
+        "schemaVersion" : 999,
+        "futureStatus" : { "value" : "ignored" }
+      }
+    },
+    {
+      "project" : "tests/Slow.Tests/Slow.Tests.csproj",
+      "seconds" : 50
+    },
+    {
+      "project" : "tests/After.Tests/After.Tests.csproj",
+      "seconds" : 90
+    }
+  ]
+}

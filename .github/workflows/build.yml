@@ -867,6 +867,12 @@ jobs:
       - name: Verify Cloud Run execution fixture comparisons
         run: python3 -m unittest discover -s Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1 -p 'test_*.py'
 
+      - name: Compare revision A coverage history implementations
+        run: python3 .github/tests/coverage_schedule_history_parity.py
+
+      - name: Test C# coverage scheduling history contracts
+        run: dotnet run --file tests/coverage-schedule-history/contracts.cs
+
       - name: Test coverage scheduling history helper
         run: python3 -m unittest discover -s .github/tests -p 'coverage_schedule_history_tests.py'
 
@@ -887,7 +893,12 @@ jobs:
           dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
           dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
           args=(--operation collect-coverage --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --coverage-cli "$COVERAGE_CLI_PATH" --output "$RUNNER_TEMP/solution-coverage-collection")
-          if [[ -f "$RUNNER_TEMP/coverage-schedule/timings.json" ]]; then args+=(--coverage-schedule-timings "$RUNNER_TEMP/coverage-schedule/timings.json"); fi
+          if [[ -f "$RUNNER_TEMP/coverage-schedule/timings.json" ]]; then
+            args+=(--coverage-schedule-timings "$RUNNER_TEMP/coverage-schedule/timings.json")
+            echo "Collecting coverage with restored scheduling timings."
+          else
+            echo "Collecting coverage without historical scheduling timings."
+          fi
           dotnet "$validation" "${args[@]}"
 
       - name: Preserve same-attempt coverage collection
