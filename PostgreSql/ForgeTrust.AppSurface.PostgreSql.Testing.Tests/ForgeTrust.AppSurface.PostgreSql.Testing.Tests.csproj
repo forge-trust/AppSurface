@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <StartupObject>ForgeTrust.AppSurface.PostgreSql.Testing.Tests.PostgreSqlFixtureTestProcess</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" PrivateAssets="all" />
+    <PackageReference Include="coverlet.msbuild" PrivateAssets="all" />
+    <PackageReference Include="GitHubActionsTestLogger" PrivateAssets="all" />
+    <PackageReference Include="JunitXml.TestLogger" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ForgeTrust.AppSurface.PostgreSql.Testing/ForgeTrust.AppSurface.PostgreSql.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="ForgeTrust.AppSurface.PostgreSql.Testing" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

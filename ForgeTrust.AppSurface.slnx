@@ -155,6 +155,10 @@
     <Project Path="Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj" />
     <Project Path="Observability/ForgeTrust.AppSurface.Observability.Tests/ForgeTrust.AppSurface.Observability.Tests.csproj" />
   </Folder>
+  <Folder Name="/PostgreSql/">
+    <Project Path="PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/ForgeTrust.AppSurface.PostgreSql.Testing.csproj" />
+    <Project Path="PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing.Tests/ForgeTrust.AppSurface.PostgreSql.Testing.Tests.csproj" />
+  </Folder>
   <Folder Name="/Examples/config-key-contract/">
     <Project Path="examples/config-key-contract/ConfigKeyContract.csproj" />
   </Folder>
