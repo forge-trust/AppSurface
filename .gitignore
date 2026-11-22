@@ -44,6 +44,7 @@ artifacts/*
 !/artifacts/issue-931-fixture-benchmark/inventory/flow-discovery.txt
 !/artifacts/issue-931-fixture-benchmark/results.md
 !/artifacts/issue-931-fixture-benchmark/timings.md
+!/artifacts/issue-931-fixture-benchmark/shared-fixture-results.md
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt

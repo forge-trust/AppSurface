@@ -1,5 +1,7 @@
 # Measured no-go for the Durable PostgreSQL fixture
 
+The [shared fixture benchmark](shared-fixture-results.md) records the subsequent Durable run using AppSurface database leases and PostgreSQL’s `FILE_COPY` clone strategy.
+
 The median combined Work and Flow time was **11.838 s fresh** and **10.872 s from templates**. Across five pairs, the median saving was 0.966 s and the median gain was **8.16%**. The median absolute deviation was 4.49 percentage points, giving a required gain above **8.98%**. The observed saving does not justify maintaining a second setup path for routine use in these cohorts.
 
 | Pair | First arm | Fresh (s) | Template (s) | Saved (s) | Gain | Work gain | Flow gain |

@@ -1,5 +1,7 @@
 # Timing appendix
 
+The [shared fixture benchmark](shared-fixture-results.md) records the subsequent Durable run using AppSurface database leases and PostgreSQL’s `FILE_COPY` clone strategy.
+
 ## Samples
 
 - [Initial measured run](#initial-measured-run)
