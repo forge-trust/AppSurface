@@ -5,20 +5,21 @@ internal static class ConfigContracts
     public static async Task RunAsync()
     {
         using var temporary = new TempDirectory();
-        var checkout = Path.Combine(temporary.Path, "src");
+        var checkout = Path.Join(temporary.Path, "src");
         await TestHost.CopyCheckoutAsync(checkout);
 
-        var caller = Path.Combine(temporary.Path, "caller with spaces");
+        var caller = Path.Join(temporary.Path, "caller with spaces");
         Directory.CreateDirectory(caller);
-        File.Copy(Path.Combine(TestHost.Root, "global.json"), Path.Combine(caller, "global.json"));
+        File.Copy(Path.Join(TestHost.Root, "global.json"), Path.Join(caller, "global.json"));
 
-        var script = Path.Combine(checkout, "scripts", "web-pwa", "verify.cs");
-        var production = Path.Combine(Path.GetDirectoryName(script)!, "appsettings.json");
-        var development = Path.Combine(Path.GetDirectoryName(script)!, "appsettings.Development.json");
+        var scriptDirectory = Path.Join(checkout, "scripts", "web-pwa");
+        var script = Path.Join(scriptDirectory, "verify.cs");
+        var production = Path.Join(scriptDirectory, "appsettings.json");
+        var development = Path.Join(scriptDirectory, "appsettings.Development.json");
         const string decoy = "{\"PwaVerify\":{\"Port\":0,\"StartupTimeoutSeconds\":0}}";
-        await File.WriteAllTextAsync(Path.Combine(caller, "appsettings.json"), decoy);
+        await File.WriteAllTextAsync(Path.Join(caller, "appsettings.json"), decoy);
 
-        var defaultOutput = Path.Combine(checkout, "examples", "web-pwa-install", "pwa-verify-v3.json");
+        var defaultOutput = Path.Join(checkout, "examples", "web-pwa-install", "pwa-verify-v3.json");
         await AssertSuccessAsync(defaultOutput, 5055);
         File.Delete(defaultOutput);
 
@@ -34,7 +35,7 @@ internal static class ConfigContracts
         {
             ["DOTNET_ENVIRONMENT"] = "Development"
         };
-        await AssertSuccessAsync(Path.Combine(caller, "json proof.json"), port, environment: developmentEnvironment);
+        await AssertSuccessAsync(Path.Join(caller, "json proof.json"), port, environment: developmentEnvironment);
 
         port = TestHost.FreePort();
         var mappedEnvironment = new Dictionary<string, string>(developmentEnvironment)
@@ -42,14 +43,14 @@ internal static class ConfigContracts
             ["APP_SURFACE_WEB_PWA_PORT"] = port.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["APP_SURFACE_WEB_PWA_EVIDENCE"] = "env proof.json"
         };
-        await AssertSuccessAsync(Path.Combine(caller, "env proof.json"), port, environment: mappedEnvironment);
+        await AssertSuccessAsync(Path.Join(caller, "env proof.json"), port, environment: mappedEnvironment);
         await AssertSuccessAsync(
-            Path.Combine(caller, "explicit proof.json"),
+            Path.Join(caller, "explicit proof.json"),
             5055,
             ["--port", "5055", "--evidence-path", "explicit proof.json"],
             mappedEnvironment);
 
-        var priorEvidence = Path.Combine(caller, "previous.json");
+        var priorEvidence = Path.Join(caller, "previous.json");
         var priorContents = "previous report"u8.ToArray();
         await File.WriteAllBytesAsync(priorEvidence, priorContents);
         await File.WriteAllTextAsync(production, "{\"PwaVerify\":{\"Port\":5055}}");

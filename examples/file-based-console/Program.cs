@@ -24,11 +24,11 @@ await ConsoleApp<DemoModule>.RunAsync(args, options => options.OutputMode = Cons
 public sealed partial class InspectCommand(IConfigManager configManager) : ICommand
 {
     [CommandOption("port", Description = "Port number (Config key Demo:Port, default 5055).")]
-    [ConfigKey("Demo:Port")]
+    [OptionConfigKey("Demo:Port")]
     public int? Port { get; set; }
 
     [CommandOption("region", Description = "Deployment region (Config key Demo:Region).")]
-    [ConfigKey("Demo:Region")]
+    [OptionConfigKey("Demo:Region")]
     public string? Region { get; set; }
 
     public ValueTask ExecuteAsync(IConsole console)
@@ -62,13 +62,13 @@ public sealed partial class InspectCommand(IConfigManager configManager) : IComm
     }
 
     private static string ReadConfigKey(string propertyName) =>
-        typeof(InspectCommand).GetProperty(propertyName)?.GetCustomAttributes(typeof(ConfigKeyAttribute), inherit: true)
-            .Cast<ConfigKeyAttribute>().SingleOrDefault()?.Key
+        typeof(InspectCommand).GetProperty(propertyName)?.GetCustomAttributes(typeof(OptionConfigKeyAttribute), inherit: true)
+            .Cast<OptionConfigKeyAttribute>().SingleOrDefault()?.Key
         ?? throw new InvalidOperationException($"The {propertyName} switch is missing its Config key metadata.");
 }
 
 [AttributeUsage(AttributeTargets.Property)]
-internal sealed class ConfigKeyAttribute(string key) : Attribute
+internal sealed class OptionConfigKeyAttribute(string key) : Attribute
 {
     public string Key { get; } = key;
 }

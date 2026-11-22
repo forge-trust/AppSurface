@@ -53,15 +53,15 @@ internal sealed class ScriptConfigFileLocationProvider(string directory) : IConf
 internal sealed partial class VerifyCommand(IConfigManager configManager, IEnvironmentProvider environmentProvider) : ICommand
 {
     [CommandOption("port", Description = "Port for the child host. Config key PwaVerify:Port, environment APP_SURFACE_WEB_PWA_PORT, default 5055.")]
-    [ConfigKey("PwaVerify:Port")]
+    [OptionConfigKey("PwaVerify:Port")]
     public int? Port { get; set; }
 
     [CommandOption("evidence-path", Description = "Evidence file. Config key PwaVerify:EvidencePath, environment APP_SURFACE_WEB_PWA_EVIDENCE, default examples/web-pwa-install/pwa-verify-v3.json.")]
-    [ConfigKey("PwaVerify:EvidencePath")]
+    [OptionConfigKey("PwaVerify:EvidencePath")]
     public string? EvidencePath { get; set; }
 
     [CommandOption("startup-timeout-seconds", Description = "Startup deadline in seconds. Config key PwaVerify:StartupTimeoutSeconds, environment PWAVERIFY__STARTUPTIMEOUTSECONDS, default 60.")]
-    [ConfigKey("PwaVerify:StartupTimeoutSeconds")]
+    [OptionConfigKey("PwaVerify:StartupTimeoutSeconds")]
     public int? StartupTimeoutSeconds { get; set; }
 
     public async ValueTask ExecuteAsync(IConsole console)
@@ -204,14 +204,14 @@ internal sealed partial class VerifyCommand(IConfigManager configManager, IEnvir
     private static AppSurfaceConfigKey GetConfigKey(string propertyName)
     {
         var property = typeof(VerifyCommand).GetProperty(propertyName)!;
-        var key = property.GetCustomAttributes(typeof(ConfigKeyAttribute), inherit: false)
-            .Cast<ConfigKeyAttribute>().Single().Key;
+        var key = property.GetCustomAttributes(typeof(OptionConfigKeyAttribute), inherit: false)
+            .Cast<OptionConfigKeyAttribute>().Single().Key;
         return AppSurfaceConfigKey.Parse(key);
     }
 }
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
-internal sealed class ConfigKeyAttribute(string key) : Attribute
+internal sealed class OptionConfigKeyAttribute(string key) : Attribute
 {
     public string Key { get; } = key;
 }

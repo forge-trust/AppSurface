@@ -123,6 +123,8 @@ internal static class ProtocolContracts
         }
         AssertNoTemporaryReports(evidenceDirectory);
         AssertPortReusable(validPort);
+        TestHost.Check(!valid.StandardError.Contains("Child stderr diagnostic:", StringComparison.Ordinal),
+            "A published verification result unexpectedly printed child diagnostics.");
 
         const string previous = "previous-evidence-preserved";
         await File.WriteAllTextAsync(evidence, previous);
@@ -140,6 +142,9 @@ internal static class ProtocolContracts
             {
                 throw new InvalidOperationException("The malformed-output path did not reach child readiness.");
             }
+            TestHost.Check(malformed.StandardError.Contains("Child stderr diagnostic: ASPWA212", StringComparison.Ordinal)
+                && !malformed.StandardError.Contains("private-fixture-value", StringComparison.Ordinal),
+                "Malformed output should surface only the recognized diagnostic from the child's stderr.");
             AssertNoTemporaryReports(evidenceDirectory);
             AssertPortReusable(malformedPort);
         }
@@ -180,6 +185,14 @@ internal static class ProtocolContracts
             AssertPortReusable(port);
             File.Delete(substitute);
         }
+
+        await File.WriteAllTextAsync(Path.Join(childDirectory, "BuildFailure.cs"), "#error private-fixture-value");
+        var buildFailure = await RunFixtureRunner(fixtureRoot, TestHost.FreePort(), evidence, failedReport, 7);
+        TestHost.Check(buildFailure.ExitCode == 1 && await File.ReadAllTextAsync(evidence) == previous
+            && buildFailure.StandardError.Contains("building the example", StringComparison.Ordinal)
+            && buildFailure.StandardError.Contains("Child stderr diagnostic: CS1029", StringComparison.Ordinal)
+            && !buildFailure.StandardError.Contains("private-fixture-value", StringComparison.Ordinal),
+            "The failed example build should retain prior evidence and print the compiler code without its message.");
     }
 
     private static async Task CreateFixtureCheckout(string root)
@@ -213,6 +226,8 @@ internal static class ProtocolContracts
         await File.WriteAllTextAsync(Path.Combine(cliDirectory, "Program.cs"), """
             if (File.Exists("change-identity"))
                 File.Copy("change-identity", Path.Combine("examples", "web-pwa-install", "substitute-identity"));
+            Console.Error.Write(new string('x', 100_000));
+            Console.Error.WriteLine(" ASPWA212: private-fixture-value");
             Console.Write(File.ReadAllText("fixture-output.txt"));
             return int.Parse(File.ReadAllText("fixture-exit.txt"), System.Globalization.CultureInfo.InvariantCulture);
             """);

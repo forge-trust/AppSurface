@@ -39,11 +39,13 @@ With the verifier’s default Production environment, put the following in `apps
 
 The verifier prints the PIDs of its example and public CLI to stderr. An opt-in Development endpoint at `/_appsurface/verify/instance` returns a fresh value passed only to the launched example, for requests arriving over loopback. A listening port or a plausible manifest alone cannot establish ownership. The verifier also checks the manifest and status endpoint, runs the public CLI with combined install/push expectations, then confirms the example identity again.
 
-A publication message identifies this run’s complete schema-v3 JSON. The runner reads the [CLI’s report type](../../Cli/ForgeTrust.AppSurface.Cli/PwaVerificationV3Report.cs), requires both install and push evidence, and checks that `passed` agrees with the CLI exit code. It preserves the original report bytes, including extra fields. If a required field is missing or a recognized field appears twice in the same object, the runner keeps the previous report.
+A publication message identifies this run’s complete schema-v3 JSON. The runner reads the [CLI’s report type](https://github.com/forge-trust/AppSurface/blob/main/Cli/ForgeTrust.AppSurface.Cli/PwaVerificationV3Report.cs), requires both install and push evidence, and checks that `passed` agrees with the CLI exit code. It preserves the original report bytes, including extra fields. If a required field is missing or a recognized field appears twice in the same object, the runner keeps the previous report.
 
 Verification failure can produce a valid `passed: false` report and the public CLI’s nonzero status. Binding, startup, malformed output and file errors produce a nonzero exit. An existing destination can belong to an earlier run. Check stderr and the exit code, and use a fresh path in CI. If startup fails, check the child port and the example build. If publication fails, choose a writable file path. The runner tears down processes it started on success, failure and cooperative cancellation.
 
-The command uses a local attribute beside each CliFx switch to choose the Config key for an omitted value. CliFx handles parsing. One final settings object owns validation. The pilot adds no package API. The [repository tooling guide](../../guides/repository-tooling.md) describes how to choose a file or project for the next tool.
+When a child causes a harness failure, look for `Child stderr diagnostic` on stderr. The verifier checks the last 4,096 characters of that child's stderr for a compiler, MSBuild, NuGet, .NET SDK or PWA diagnostic code, or a recognized runtime exception name. It prints only the identifier. For full compiler output, run the project build named in the failure message.
+
+The command uses a local `[OptionConfigKey]` attribute beside each CliFx switch to choose the Config key for an omitted value. CliFx handles parsing. One final settings object owns validation. The pilot adds no package API. The [repository tooling guide](../../guides/repository-tooling.md) describes how to choose a file or project for the next tool.
 
 ## Run the verifier tests
 

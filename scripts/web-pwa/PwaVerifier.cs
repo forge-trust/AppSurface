@@ -4,6 +4,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Cli;
 
 // Implementation included by verify.cs. The public CLI owns all PWA expectations and produces the evidence.
@@ -34,6 +35,8 @@ internal static class PwaVerifier
             Timeout = Timeout.InfiniteTimeSpan
         };
         var children = new List<OwnedProcess>();
+        OwnedProcess? currentChild = null;
+        OwnedProcess? failedChild = null;
         FileStream? report = null;
         string? temporary = null;
         var published = false;
@@ -51,6 +54,7 @@ internal static class PwaVerifier
             Console.Error.WriteLine($"PWA verifier starting example (PID {host.Id}).");
             await WaitForReadinessAsync(host, http, instance, startupTimeout, cancellationToken);
 
+            currentChild = null;
             operation = "creating the evidence file";
             var directory = Path.GetDirectoryName(evidencePath)!;
             Directory.CreateDirectory(directory);
@@ -71,10 +75,12 @@ internal static class PwaVerifier
             operation = "validating the public CLI report";
             report.Position = 0;
             await ValidateReportAsync(report, exit, cancellationToken);
+            currentChild = null;
             await report.DisposeAsync();
             report = null;
 
             operation = "confirming the example still owns the endpoint";
+            currentChild = host;
             using (var probe = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
                 probe.CancelAfter(TimeSpan.FromSeconds(2));
@@ -85,6 +91,7 @@ internal static class PwaVerifier
             }
 
             operation = "publishing the evidence file";
+            currentChild = null;
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(temporary, evidencePath, overwrite: true);
             temporary = null;
@@ -101,6 +108,7 @@ internal static class PwaVerifier
                                    or JsonException or HttpRequestException or OperationCanceledException or InvalidOperationException)
         {
             // Raw child output and exception messages can include the caller's configuration.
+            failedChild = currentChild;
             var detail = ex is VerificationFailure ? ex.Message : ex.GetType().Name;
             Console.Error.WriteLine($"PWA-VERIFY: Failed while {operation}. {detail}");
         }
@@ -118,6 +126,11 @@ internal static class PwaVerifier
             }
             finally
             {
+                if (failedChild?.Diagnostic is { } diagnostic)
+                {
+                    Console.Error.WriteLine($"Child stderr diagnostic: {diagnostic}");
+                }
+
                 foreach (var child in children)
                 {
                     child.Dispose();
@@ -164,6 +177,7 @@ internal static class PwaVerifier
             cancellationToken.ThrowIfCancellationRequested();
             var child = new OwnedProcess(info, stdout);
             children.Add(child);
+            currentChild = child;
             return child;
         }
 
@@ -181,6 +195,7 @@ internal static class PwaVerifier
                 throw new VerificationFailure($"Build exited {code}. Run dotnet build on {project} to inspect the compiler diagnostics.");
             }
 
+            currentChild = null;
             return dll;
         }
     }
@@ -299,18 +314,44 @@ internal static class PwaVerifier
     {
         private readonly Process _process;
         private readonly Task _output;
-        private readonly Task _errors;
+        private readonly Task<string?> _errors;
 
         internal OwnedProcess(ProcessStartInfo info, Stream stdout)
         {
             _process = Process.Start(info) ?? throw new VerificationFailure("Failed to start the dotnet host.");
             _output = _process.StandardOutput.BaseStream.CopyToAsync(stdout);
-            _errors = _process.StandardError.BaseStream.CopyToAsync(Stream.Null);
+            _errors = ReadDiagnosticAsync(_process.StandardError);
         }
 
         internal int Id => _process.Id;
         internal int ExitCode => _process.ExitCode;
         internal bool HasExited => _process.HasExited;
+        internal string? Diagnostic => _errors.IsCompletedSuccessfully ? _errors.Result : null;
+
+        // A child can write configuration, credentials, or an unbroken line. Drain it in fixed space
+        // and return only a recognized diagnostic identifier, never a message or stack trace.
+        private static async Task<string?> ReadDiagnosticAsync(StreamReader reader)
+        {
+            var tail = new char[4096];
+            var offset = 0;
+            var wrapped = false;
+            int count;
+            while ((count = await reader.ReadAsync(tail.AsMemory(offset))) > 0)
+            {
+                offset += count;
+                if (offset == tail.Length)
+                {
+                    offset = 0;
+                    wrapped = true;
+                }
+            }
+
+            var text = wrapped ? string.Concat(tail.AsSpan(offset), tail.AsSpan(0, offset)) : new string(tail, 0, offset);
+            var match = Regex.Match(text,
+                @"\b(?:error (?<id>(?:CS|MSB|NU|NETSDK)[0-9]{4})\b|(?<id>ASPWA[0-9]{3})\b|(?<id>AddressInUseException|SocketException|FileNotFoundException|BadImageFormatException)\b)",
+                RegexOptions.CultureInvariant);
+            return match.Success ? match.Groups["id"].Value : null;
+        }
 
         internal async Task<int> WaitAsync(CancellationToken token)
         {
