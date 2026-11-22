@@ -23,8 +23,9 @@ public sealed class PostgreSqlDatabaseLeaseTests
             Assert.StartsWith(leasePrefix, lease.Name, StringComparison.Ordinal);
             Assert.NotEqual(0u, lease.Oid);
             Assert.Equal(lease.Name, new NpgsqlConnectionStringBuilder(lease.ConnectionString).Database);
+            var templateConnection = new NpgsqlConnectionStringBuilder(lease.ConnectionString) { Pooling = false }.ConnectionString;
             await PostgreSqlTestServer.ExecuteAsync(
-                lease.ConnectionString,
+                templateConnection,
                 "CREATE TABLE lease_probe (value integer NOT NULL); INSERT INTO lease_probe VALUES (37);");
 
             await using (var maintenance = new NpgsqlConnection(maintenanceConnectionString))
@@ -33,10 +34,14 @@ public sealed class PostgreSqlDatabaseLeaseTests
                 Assert.True(await lease.ExistsAsync(maintenance));
             }
 
-            await using (var connection = new NpgsqlConnection(lease.ConnectionString))
+            await using (var connection = new NpgsqlConnection(templateConnection))
             {
                 await connection.OpenAsync();
                 await using var transaction = await connection.BeginTransactionAsync();
+                await lease.VerifyConnectedIdentityAsync(connection, transaction);
+                var rejection = await Assert.ThrowsAsync<PostgresException>(() => lease.CloneAsync(clonePrefix));
+                Assert.Equal(PostgresErrorCodes.ObjectInUse, rejection.SqlState);
+                Assert.False(lease.HasRegisteredClones);
                 await lease.VerifyConnectedIdentityAsync(connection, transaction);
             }
 

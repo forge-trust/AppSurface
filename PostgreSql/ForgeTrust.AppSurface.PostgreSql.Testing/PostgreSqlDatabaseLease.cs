@@ -60,12 +60,12 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
         return CreateCoreAsync(connectionString, name, null, afterCreate, cancellationToken);
     }
 
-    /// <summary>Copies this database into an independent child using FILE_COPY. Dispose children before their parent.</summary>
+    /// <summary>Copies this database into an independent child using FILE_COPY. Close source connections first. PostgreSQL rejects a busy source. Dispose children before their parent.</summary>
     public Task<PostgreSqlDatabaseLease> CloneAsync(string databaseNamePrefix, CancellationToken cancellationToken = default) =>
         CloneAsync(databaseNamePrefix, null, cancellationToken);
 
     internal async Task<PostgreSqlDatabaseLease> CloneAsync(string databaseNamePrefix,
-        Func<string, CancellationToken, ValueTask>? afterCreate, CancellationToken cancellationToken)
+        Func<string, CancellationToken, ValueTask>? afterCreate, CancellationToken cancellationToken, bool disconnectTemplateSessions = false)
     {
         var name = NewName(databaseNamePrefix);
         using var deadline = Deadline(cancellationToken);
@@ -73,7 +73,7 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(dropped, this);
-            return await CreateCoreAsync(ConnectionString, name, this, afterCreate, deadline.Token);
+            return await CreateCoreAsync(ConnectionString, name, this, afterCreate, deadline.Token, disconnectTemplateSessions);
         }
         finally
         {
@@ -82,7 +82,8 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
     }
 
     private static async Task<PostgreSqlDatabaseLease> CreateCoreAsync(string connectionString, string name,
-        PostgreSqlDatabaseLease? parent, Func<string, CancellationToken, ValueTask>? afterCreate, CancellationToken token)
+        PostgreSqlDatabaseLease? parent, Func<string, CancellationToken, ValueTask>? afterCreate, CancellationToken token,
+        bool disconnectTemplateSessions = false)
     {
         using var beforeDispatch = Deadline(token);
         await using var admin = new NpgsqlConnection(PostgreSqlCatalog.Target(connectionString, "postgres"));
@@ -100,7 +101,11 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
                         throw new PostgreSqlDatabaseOwnershipException($"Clone source {parent.Name} is absent.");
                     }
 
-                    await PostgreSqlCatalog.TerminateSessionsAsync(admin, parent.Oid, clientsOnly: false, beforeDispatch.Token);
+                    if (disconnectTemplateSessions)
+                    {
+                        await PostgreSqlCatalog.TerminateSessionsAsync(admin, parent.Oid, clientsOnly: false, beforeDispatch.Token);
+                    }
+
                     sql += $" TEMPLATE {PostgreSqlCatalog.QuoteIdentifier(parent.Name)} STRATEGY FILE_COPY";
                 }
 
