@@ -247,22 +247,6 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
         PostgreSqlDatabaseLease lease;
         try
         {
-            if (template is not null)
-            {
-                await using var maintenance = new NpgsqlConnection(server.MaintenanceConnectionString);
-                await maintenance.OpenAsync(operation.Token);
-                await using var activeSessions = new NpgsqlCommand(
-                    "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity WHERE datid = @database_oid AND pid <> pg_backend_pid())",
-                    maintenance);
-                activeSessions.Parameters.AddWithValue("database_oid", NpgsqlTypes.NpgsqlDbType.Oid, template._lease.Oid);
-                if ((bool)(await activeSessions.ExecuteScalarAsync(operation.Token))!)
-                {
-                    throw new PostgreSqlFixtureException(
-                        $"Fixture server rejected CREATE DATABASE {template._databaseName} " +
-                        $"(SQLSTATE {PostgresErrorCodes.ObjectInUse}). No ownership was registered. Check the template before retrying.");
-                }
-            }
-
             lease = template is null
                 ? await PostgreSqlDatabaseLease.CreateAsync(
                     server.ConnectionString,
@@ -297,10 +281,6 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposab
             throw new PostgreSqlFixtureException(
                 $"Fixture server rejected database creation (SQLSTATE {error.SqlState}). No ownership was registered. " +
                 "Check the server and template before retrying.");
-        }
-        catch (PostgreSqlFixtureException)
-        {
-            throw;
         }
         catch (Exception error)
         {
