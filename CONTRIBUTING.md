@@ -33,6 +33,8 @@ Run the sample or package-specific command you changed, and include that command
 
 Documentation changes should explain both how to use an API and why a reader would choose it. When a docs change touches public behavior, update the package-level README, repository-level entry point, or release note surface that helps someone discover the change.
 
+For repository command choices, start with the [script inventory](./guides/script-inventory.md) for the audited source baseline and the [repository tooling guide](./guides/repository-tooling.md) for audience, prerequisites, command-form selection, and migration criteria.
+
 Good docs pull requests usually include:
 
 - Reference content for API shape, defaults, constraints, and examples.
@@ -48,6 +50,10 @@ Tests that build a full filesystem path under a repository root, temp workspace,
 Use `PathUnder` for dynamic repo-relative, temp-relative, or output-relative values such as `projectPath`, `relativePath`, and `outputRelativePath`. Use `TestPathUtils.RelativePath` only when the test needs a validated relative string rather than a full filesystem path.
 
 Literal expected paths and tests intentionally exercising `Path.Join` or `Path.Combine` platform behavior may continue to use the BCL APIs directly. If the policy test flags an intentional case, add a reasoned entry to `tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml`; entries without reasons or entries that no longer match a violation fail validation.
+
+For tests that launch a child process, use a [CliWrap-backed helper](./ForgeTrust.AppSurface.Core/README.md#process-execution-utilities)
+that returns the exit code, stdout and stderr. Assert the expected exit code and include both output streams in the
+assertion’s failure message. Use `System.Diagnostics.Process` directly when the process wrapper itself is under test.
 
 ## Release contract
 

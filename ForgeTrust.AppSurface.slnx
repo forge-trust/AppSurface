@@ -131,6 +131,7 @@
     <Project Path="examples/web-error-pages/WebErrorPagesExample.csproj" />
     <Project Path="examples/tenant-theme-selection/TenantThemeSelectionExample.csproj" />
     <Project Path="examples/web-pwa-install/WebPwaInstallExample.csproj" />
+    <Project Path="examples/web-pwa-install.tests/WebPwaInstallExample.Tests.csproj" />
   </Folder>
   <Folder Name="/Flow/">
     <Project Path="Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />
