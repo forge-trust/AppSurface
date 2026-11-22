@@ -236,10 +236,11 @@ from the repository root with the SDK pinned by
 dotnet run --file tests/coverage-schedule-history/contracts.cs
 ```
 
-The codec contracts exercise the committed [BZIP2](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/bzip2.zip),
-[LZMA](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/lzma.zip),
-and [method 9](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/method-9-deflate64-stored-block.zip)
-archives alongside stored, deflate and CRC cases.
+The codec contracts decode the Base64 fixtures for
+[BZIP2](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/bzip2.zip.b64),
+[LZMA](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/lzma.zip.b64),
+and [method 9](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/method-9-deflate64-stored-block.zip.b64).
+They verify each archive's SHA-256 before testing it alongside stored, deflate and CRC cases.
 
 For a live lookup, run from the repository root with `gh` installed and authenticated for the repository.
 Set `GITHUB_REPOSITORY` to its `owner/name`, set `GITHUB_DEFAULT_BRANCH` to its default branch, and let

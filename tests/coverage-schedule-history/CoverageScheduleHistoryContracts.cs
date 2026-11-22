@@ -925,7 +925,7 @@ internal static class CoverageScheduleHistoryContracts
         foreach (var (name, expectedArchiveHash) in positiveFixtures)
         {
             using var temporary = NewTemporaryDirectory();
-            var archive = File.ReadAllBytes(Path.Combine(Root, "tests", "coverage-schedule-history", "fixtures", name + ".zip"));
+            var archive = ReadCodecFixture(name);
             Equal(expectedArchiveHash, Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant(), name + " immutable archive SHA-256");
             var output = Path.Combine(temporary.Path, name, "timings.json");
             var result = await InvokeAsync(temporary.Path, output, SingleCandidateResponses(archive));
@@ -940,12 +940,7 @@ internal static class CoverageScheduleHistoryContracts
 
         using (var temporary = NewTemporaryDirectory())
         {
-            var archive = File.ReadAllBytes(Path.Combine(
-                Root,
-                "tests",
-                "coverage-schedule-history",
-                "fixtures",
-                "method-9-deflate64-stored-block.zip"));
+            var archive = ReadCodecFixture("method-9-deflate64-stored-block");
             Equal(Method9ArchiveSha256, Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant(), "method 9 immutable archive SHA-256");
             var output = Path.Combine(temporary.Path, "method-9", "timings.json");
             var result = await InvokeAsync(temporary.Path, output, SingleCandidateResponses(archive));
@@ -1321,6 +1316,12 @@ internal static class CoverageScheduleHistoryContracts
 
     private static string DownloadEndpoint(int artifactId) =>
         $"repos/{Repository}/actions/artifacts/{artifactId}/zip";
+
+    private static byte[] ReadCodecFixture(string name)
+    {
+        var path = Path.Combine(Root, "tests", "coverage-schedule-history", "fixtures", name + ".zip.b64");
+        return Convert.FromBase64String(File.ReadAllText(path));
+    }
 
     private static byte[] ReadCanonicalFixture() =>
         File.ReadAllBytes(Path.Combine(Root, "tests", "coverage-schedule-history", "fixtures", "timings.json"));
