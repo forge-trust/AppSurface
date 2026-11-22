@@ -7,6 +7,10 @@ on:
         description: Exact prerelease package version to pack and validate.
         required: true
         type: string
+      startup-only:
+        description: Replay the original Linux publish archive on Windows without repacking.
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -18,7 +22,7 @@ concurrency:
 
 jobs:
   package-artifacts:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/rehearse-937-docs-native' && github.repository == 'forge-trust/AppSurface' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/rehearse-937-docs-native' && github.repository == 'forge-trust/AppSurface' && !inputs.startup-only }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -324,3 +328,49 @@ jobs:
               --publication-start-artifact-id "$START_ARTIFACT_ID" \
               --report-directory "$RUNNER_TEMP/rehearsal-start-validation-$pass"
           done
+
+  windows-startup-recheck:
+    name: Original Linux x64 archives on Windows x64
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/rehearse-937-docs-native' && github.repository == 'forge-trust/AppSurface' && inputs.startup-only }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      SOURCE_COMMIT: 4b6313b6e45f87c84d73b2de19e390259ee81829
+      PRODUCER_ARTIFACT_ID: '14743720391'
+      TRANSFER_ARTIFACT_ID: '14742769305'
+      PACKAGE_VERSION: 0.0.0-rehearsal.937.1
+    steps:
+      - name: Checkout exact PR candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
+      - name: Download untouched original Linux publish archives by immutable ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: '44993709127'
+          artifact-ids: ${{ env.TRANSFER_ARTIFACT_ID }}
+          path: ${{ runner.temp }}/docs-transfer
+      - name: Install Windows x64 runtime and SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
+        with:
+          dotnet-version: 10.0.402
+          architecture: x64
+      - name: Start both original Linux-published consumers on Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          python -B scripts/verify-docs-native-consumer.py destination \
+            --transfer-dir "$RUNNER_TEMP/docs-transfer" --transfer-artifact-id "$TRANSFER_ARTIFACT_ID" \
+            --producer-id "$PRODUCER_ARTIFACT_ID" --source-commit "$SOURCE_COMMIT" --package-version "$PACKAGE_VERSION" \
+            --work "$RUNNER_TEMP/docs-destination" --output "$RUNNER_TEMP/destination.json"
+      - name: Upload original candidate startup proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-original-937-windows-startup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/destination.json
+          if-no-files-found: error
