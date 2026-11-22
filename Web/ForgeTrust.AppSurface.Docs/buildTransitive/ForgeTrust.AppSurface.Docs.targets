@@ -19,9 +19,10 @@
       <_AppSurfaceDocsTreeSitterNative Include="@(RuntimeTargetsCopyLocalItems)"
           Condition="'%(RuntimeTargetsCopyLocalItems.NuGetPackageId)' == 'TreeSitter.DotNet'
                      and '%(RuntimeTargetsCopyLocalItems.AssetType)' == 'native'" />
+      <!-- NuGet records package paths with forward slashes. The SDK builds the copy destination with host separators. -->
       <_AppSurfaceDocsTreeSitterVerifiedNative Include="@(_AppSurfaceDocsTreeSitterNative)"
           Condition="'%(_AppSurfaceDocsTreeSitterNative.RuntimeIdentifier)' != ''
-                     and '%(_AppSurfaceDocsTreeSitterNative.PathInPackage)' == '%(_AppSurfaceDocsTreeSitterNative.DestinationSubPath)'
+                     and '%(_AppSurfaceDocsTreeSitterNative.PathInPackage)' == $([System.String]::Copy('%(_AppSurfaceDocsTreeSitterNative.DestinationSubPath)').Replace('\', '/'))
                      and $([System.String]::Copy('%(_AppSurfaceDocsTreeSitterNative.PathInPackage)').StartsWith('runtimes/%(_AppSurfaceDocsTreeSitterNative.RuntimeIdentifier)/native/'))" />
       <_AppSurfaceDocsTreeSitterUnclassified Include="@(RuntimeTargetsCopyLocalItems)"
           Condition="'%(RuntimeTargetsCopyLocalItems.NuGetPackageId)' == 'TreeSitter.DotNet'
