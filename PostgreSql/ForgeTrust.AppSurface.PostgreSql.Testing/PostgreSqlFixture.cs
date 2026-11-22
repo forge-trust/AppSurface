@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.PostgreSql.Testing;
@@ -110,7 +111,7 @@ public sealed class PostgreSqlFixture
 
         foreach (var prefix in templateNamePrefixes)
         {
-            ValidatePrefix(prefix);
+            ValidatePrefix(prefix, nameof(templateNamePrefixes));
         }
 
         var prefixes = templateNamePrefixes.ToHashSet(StringComparer.Ordinal);
@@ -246,12 +247,15 @@ public sealed class PostgreSqlFixture
         }
     }
 
-    private static void ValidatePrefix(string prefix)
+    /// <summary>Checks the fixture's ASCII database identifier prefix rules without requiring a configured server.</summary>
+    public static void ValidateDatabaseNamePrefix(string databaseNamePrefix) => ValidatePrefix(databaseNamePrefix);
+
+    private static void ValidatePrefix(string prefix, [CallerArgumentExpression(nameof(prefix))] string? argumentName = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefix, argumentName);
         if (prefix.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '_'))
         {
-            throw new ArgumentException("Database name prefixes may only contain ASCII letters, digits, and underscores.", nameof(prefix));
+            throw new ArgumentException("Database name prefixes may only contain ASCII letters, digits, and underscores.", argumentName);
         }
     }
 

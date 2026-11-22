@@ -27,6 +27,7 @@ finally
 
 | Operation | Contract |
 | --- | --- |
+| `ValidateDatabaseNamePrefix` | Checks identifier syntax offline, including before a test host reads optional database configuration. A rejected value raises an argument exception naming the input. |
 | `RunFreshAsync` | Creates an empty uniquely named database, invokes the callback, and drops the database on exit. Use it when the test verifies migrations, initial installation, or missing schema. |
 | `RunFromTemplateAsync` | Initializes one template per fixture, exact connection string and logical template prefix. Each callback gets a fresh physical clone of that template. The template initializer receives a non-pooled connection string and an independent five-minute setup token. A canceled waiter leaves preparation available to other tests. A failed initializer that cleans up successfully can be retried. |
 | `WithClusterInitializationLockAsync` | Runs a callback under a cluster bootstrap advisory lock. Use this for operations such as creating a shared role. The callback receives the initialization deadline. Database cloning alone does not isolate roles or other cluster-wide objects. |
