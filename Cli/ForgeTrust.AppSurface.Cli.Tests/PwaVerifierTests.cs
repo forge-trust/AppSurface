@@ -1628,7 +1628,7 @@ public sealed class PwaVerifierTests
             "https://app.example.test/",
             """<!doctype html><html><head><link rel="manifest" href="/manifest.webmanifest"><script src="/_appsurface/pwa/register.js?v=build-1" data-appsurface-pwa-scope="/" data-appsurface-pwa-worker="/service-worker.js"></script></head><body></body></html>""",
             "text/html");
-        http.Add("https://app.example.test/manifest.webmanifest", ValidManifest(), "application/manifest+json");
+        http.Add("https://app.example.test/manifest.webmanifest", ValidManifest(startUrl: "/launch"), "application/manifest+json");
         http.Add("https://app.example.test/icons/app-192.png", "png", "image/png");
         http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
         var verifier = new PwaVerifier(http);
@@ -1641,6 +1641,11 @@ public sealed class PwaVerifierTests
         Assert.Equal("all", report.Surface);
         Assert.NotNull(report.Install);
         Assert.Equal("/manifest.webmanifest", report.Install.ManifestPath);
+        Assert.Equal("/launch", report.Install.StartUrl);
+        Assert.Equal("/", report.Install.Scope);
+        Assert.Equal("standalone", report.Install.Display);
+        Assert.Equal("#2563eb", report.Install.ThemeColor);
+        Assert.Equal("#ffffff", report.Install.BackgroundColor);
         Assert.Equal("configured", report.Push.ConfigurationStatus);
     }
 
