@@ -1,0 +1,97 @@
+name: PWA verifier native process contracts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/web-pwa/**'
+      - 'tests/web-pwa-verifier/**'
+      - 'tests/ForgeTrust.AppSurface.Testing/**'
+      - 'examples/web-pwa-install/**'
+      - 'examples/web-pwa-install.tests/**'
+      - 'examples/file-based-console/**'
+      - 'Cli/ForgeTrust.AppSurface.Cli/**'
+      - 'Cli/ForgeTrust.AppSurface.Cli.Tests/**'
+      - 'Web/**'
+      - 'Auth/**'
+      - 'Console/**'
+      - 'Config/**'
+      - 'ForgeTrust.AppSurface.Core/**'
+      - 'ForgeTrust.AppSurface.Core.Tests/**'
+      - 'Directory.Build.*'
+      - 'Directory.Packages.props'
+      - 'Directory.Solution.props'
+      - '.config/dotnet-tools.json'
+      - 'global.json'
+      - 'NuGet*.config'
+      - 'ForgeTrust.AppSurface.slnx'
+      - '.github/workflows/pwa-verifier.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/web-pwa/**'
+      - 'tests/web-pwa-verifier/**'
+      - 'tests/ForgeTrust.AppSurface.Testing/**'
+      - 'examples/web-pwa-install/**'
+      - 'examples/web-pwa-install.tests/**'
+      - 'examples/file-based-console/**'
+      - 'Cli/ForgeTrust.AppSurface.Cli/**'
+      - 'Cli/ForgeTrust.AppSurface.Cli.Tests/**'
+      - 'Web/**'
+      - 'Auth/**'
+      - 'Console/**'
+      - 'Config/**'
+      - 'ForgeTrust.AppSurface.Core/**'
+      - 'ForgeTrust.AppSurface.Core.Tests/**'
+      - 'Directory.Build.*'
+      - 'Directory.Packages.props'
+      - 'Directory.Solution.props'
+      - '.config/dotnet-tools.json'
+      - 'global.json'
+      - 'NuGet*.config'
+      - 'ForgeTrust.AppSurface.slnx'
+      - '.github/workflows/pwa-verifier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-verifier:
+    name: PWA verifier (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
+        with:
+          dotnet-version: 10.0.402
+      - name: Run native protocol contract
+        run: dotnet run --file tests/web-pwa-verifier/contracts.cs -- protocol
+      - name: Run configuration contracts
+        run: dotnet run --file tests/web-pwa-verifier/contracts.cs -- config
+      - name: Run package-consumer contracts
+        run: dotnet run --file tests/web-pwa-verifier/contracts.cs -- package
+      - name: Run native process contracts
+        env:
+          PWA_VERIFY_EVIDENCE_DIR: ${{ runner.temp }}/pwa-verifier-evidence
+          DOTNET_CLI_USE_MSBUILD_SERVER: '0'
+          UseSharedCompilation: 'false'
+          MSBUILDDISABLENODEREUSE: '1'
+        run: dotnet run --file tests/web-pwa-verifier/contracts.cs -- process
+      - name: Upload this run's evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pwa-verifier-${{ matrix.os }}
+          path: ${{ runner.temp }}/pwa-verifier-evidence/**
+          if-no-files-found: error
+          retention-days: 7

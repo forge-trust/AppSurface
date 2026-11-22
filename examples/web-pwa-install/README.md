@@ -17,13 +17,19 @@ dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csp
   --json
 ```
 
-Or run the bundled proof script:
+Run the [C# file-based verifier](../../scripts/web-pwa/README.md) from the repository root with the [pinned SDK](https://github.com/forge-trust/AppSurface/blob/main/global.json). It builds the example, checks combined install and push evidence, and stops its child processes. The [native CI workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/pwa-verifier.yml) exercises this command on Windows, Linux and macOS.
 
-```bash
-examples/web-pwa-install/verify.sh
+```sh
+dotnet run --file scripts/web-pwa/verify.cs
 ```
 
-The script writes schema-v3 CI-friendly verifier evidence to `examples/web-pwa-install/pwa-verify-v3.json` by default. Override that path with `APP_SURFACE_WEB_PWA_EVIDENCE`.
+The default output is `examples/web-pwa-install/pwa-verify-v3.json`. To change the port or destination for one invocation, pass switches after `--`.
+
+```sh
+dotnet run --file scripts/web-pwa/verify.cs -- --port 5155 --evidence-path "artifacts/pwa-verify-v3.json"
+```
+
+The verifier runs the child in Development and uses no VAPID keys or external credentials. A valid failed report preserves the public CLI’s nonzero exit code. The [configuration reference](../../scripts/web-pwa/README.md#configure-a-run) lists the logical keys, environment variables and defaults.
 
 For a Bash schema-v3 proof on Linux or macOS, direct each requested surface to a named artifact:
 
@@ -39,16 +45,6 @@ dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csp
   --surface push --base-url http://localhost:5055 --entry-path / \
   --expect-push disabled --json > artifacts/pwa-push-disabled.json
 ```
-
-PowerShell parity is available on Windows, macOS, and Linux when `pwsh` is installed. It accepts explicit port and evidence-path inputs, starts the example for a bounded interval, cleans up the child host, and writes schema-v3 combined evidence:
-
-```powershell
-pwsh ./examples/web-pwa-install/verify.ps1 `
-  -Port 5055 `
-  -EvidencePath ./artifacts/pwa-verify-v3.json
-```
-
-The Bash and PowerShell proofs use Development configuration only and never generate, read, or require VAPID keys or other secrets. A nonzero `appsurface pwa verify` exit is authoritative even when the named JSON artifact exists.
 
 ## What It Proves
 
