@@ -13,6 +13,10 @@ on:
         description: Exact prerelease package version to pack and validate.
         required: true
         type: string
+      release-rehearsal:
+        description: Run the credential-free release rehearsal on a same-repository feature branch.
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -22,6 +26,9 @@ concurrency:
   group: package-artifacts-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.label || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  RELEASE_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'forge-trust/AppSurface' && (github.ref == 'refs/heads/main' || (github.ref_type == 'branch' && inputs['release-rehearsal'])) }}
+
 jobs:
   package-artifacts:
     runs-on: ubuntu-latest
@@ -30,6 +37,7 @@ jobs:
       producer_artifact_id: ${{ steps.upload-package-artifacts.outputs.artifact-id }}
       expected_subject_sha256: ${{ steps.validate-producer-binding.outputs.expected_subject_sha256 }}
       package_version: ${{ steps.producer-binding.outputs.package_version }}
+      release_rehearsal: ${{ steps.producer-binding.outputs.release_rehearsal }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,22 +103,21 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number) }}
           SOURCE_COMMIT: ${{ github.sha }}
-          REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}
         run: |
           set -euo pipefail
-          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+          printf 'package_version=%s\nrelease_rehearsal=%s\n' "$PACKAGE_VERSION" "$RELEASE_REHEARSAL" >> "$GITHUB_OUTPUT"
           dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode
           dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_COMMIT"
           args=(verify-packages --package-version "$PACKAGE_VERSION" \
             --artifacts-output "$RUNNER_TEMP/package-artifacts" \
             --artifact-manifest "$RUNNER_TEMP/package-artifacts/package-artifact-manifest.json" \
             --report "$RUNNER_TEMP/package-artifacts/package-validation-report.md")
-          if [[ "$REHEARSAL" == true ]]; then
+          if [[ "$RELEASE_REHEARSAL" == true ]]; then
             args+=(--repository-id "$GITHUB_REPOSITORY_ID" --producer-run-id "$GITHUB_RUN_ID" \
               --producer-attempt "$GITHUB_RUN_ATTEMPT" --source-commit "$SOURCE_COMMIT")
           fi
           dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" "${args[@]}"
-          if [[ "$REHEARSAL" == true ]]; then
+          if [[ "$RELEASE_REHEARSAL" == true ]]; then
             subject="$RUNNER_TEMP/package-artifacts/tailwind-proof-subject.json"
             test -f "$subject"
             echo "expected_subject_sha256=$(sha256sum "$subject" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
@@ -145,13 +152,13 @@ jobs:
         id: upload-package-artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' && format('appsurface-package-artifacts-{0}-{1}', github.run_id, github.run_attempt) || format('appsurface-package-artifacts-{0}-{1}', github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number), github.run_attempt) }}
+          name: ${{ env.RELEASE_REHEARSAL == 'true' && format('appsurface-package-artifacts-{0}-{1}', github.run_id, github.run_attempt) || format('appsurface-package-artifacts-{0}-{1}', github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number), github.run_attempt) }}
           path: ${{ runner.temp }}/package-artifacts
           if-no-files-found: error
           retention-days: ${{ github.retention_days }}
 
       - name: Download rehearsal producer by exact artifact ID
-        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}
+        if: ${{ env.RELEASE_REHEARSAL == 'true' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ steps.upload-package-artifacts.outputs.artifact-id }}
@@ -159,7 +166,7 @@ jobs:
 
       - name: Revalidate frozen producer bundle with typed verifier
         id: validate-producer-binding
-        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}
+        if: ${{ env.RELEASE_REHEARSAL == 'true' }}
         env:
           SOURCE_COMMIT: ${{ github.sha }}
           PRODUCER_ATTEMPT: ${{ github.run_attempt }}
@@ -192,22 +199,34 @@ jobs:
   tailwind-native-rehearsal:
     name: Manual native evidence rehearsal
     needs: package-artifacts
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}
+    if: ${{ needs.package-artifacts.outputs.release_rehearsal == 'true' }}
     permissions:
       actions: read
       contents: read
     uses: ./.github/workflows/tailwind-native-host-evidence.yml
     with:
-      package_version: ${{ inputs['package-version'] }}
+      package_version: ${{ needs.package-artifacts.outputs.package_version }}
       source_commit: ${{ github.sha }}
       producer_artifact_id: ${{ needs.package-artifacts.outputs.producer_artifact_id }}
       expected_subject_sha256: ${{ needs.package-artifacts.outputs.expected_subject_sha256 }}
-      rehearsal: true
+      # The Tailwind subject mutation check still uses the protected main-only lane.
+      rehearsal: ${{ github.ref == 'refs/heads/main' }}
+
+  docs-native-rehearsal:
+    name: Docs native release evidence rehearsal
+    needs: package-artifacts
+    if: ${{ needs.package-artifacts.outputs.release_rehearsal == 'true' }}
+    uses: ./.github/workflows/docs-native-evidence.yml
+    with:
+      package_version: ${{ needs.package-artifacts.outputs.package_version }}
+      source_commit: ${{ github.sha }}
+      producer_artifact_id: ${{ needs.package-artifacts.outputs.producer_artifact_id }}
+      artifact_manifest_file: package-artifact-manifest.json
 
   tailwind-publish-rehearsal:
     name: Nonpublishing aggregate and publisher replay rehearsal
-    needs: [package-artifacts, tailwind-native-rehearsal]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' && needs.tailwind-native-rehearsal.result == 'success' }}
+    needs: [package-artifacts, tailwind-native-rehearsal, docs-native-rehearsal]
+    if: ${{ needs.package-artifacts.outputs.release_rehearsal == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -221,7 +240,8 @@ jobs:
       EXPECTED_AGGREGATE_SHA256: ${{ needs.tailwind-native-rehearsal.outputs.aggregate_sha256 }}
       REPOSITORY_ID: ${{ github.repository_id }}
       PRODUCER_RUN_ID: ${{ github.run_id }}
-      NATIVE_INVOCATION_ID: ${{ needs.tailwind-native-rehearsal.outputs.native_invocation_id }}
+      DOCS_NATIVE_ARTIFACT_ID: ${{ needs.docs-native-rehearsal.outputs.artifact_id }}
+      DOCS_NATIVE_SHA256: ${{ needs.docs-native-rehearsal.outputs.sha256 }}
     steps:
       - name: Checkout triggering source commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -238,6 +258,11 @@ jobs:
         with:
           artifact-ids: ${{ env.AGGREGATE_ARTIFACT_ID }}
           path: ${{ runner.temp }}/rehearsal-aggregate
+      - name: Download separate Docs proof by immutable ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.DOCS_NATIVE_ARTIFACT_ID }}
+          path: ${{ runner.temp }}/docs-native-proof
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         env:
@@ -258,7 +283,9 @@ jobs:
           REPORT_DIRECTORY: ${{ runner.temp }}/rehearsal-preflight
         run: |
           set -euo pipefail
-          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
+          source .github/scripts/docs-native-publication-args.sh
+          test "${#docs_native_args[@]}" -eq 6
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence "${docs_native_args[@]}" \
             --repo-root "$GITHUB_WORKSPACE" --mode publish-preflight \
             --artifacts-input "$PRODUCER_DIRECTORY" \
             --artifact-manifest "$PRODUCER_DIRECTORY/package-artifact-manifest.json" \
@@ -291,8 +318,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/docs-native-publication-args.sh
+          test "${#docs_native_args[@]}" -eq 6
           for pass in initial replay; do
-            dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
+            dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence "${docs_native_args[@]}" \
               --mode validate-publication-start --repo-root "$GITHUB_WORKSPACE" \
               --artifacts-input "$PRODUCER_DIRECTORY" \
               --artifact-manifest "$PRODUCER_DIRECTORY/package-artifact-manifest.json" \
@@ -322,6 +351,9 @@ jobs:
           TAILWIND_REHEARSAL_AGGREGATE_ARTIFACT_ID: ${{ env.AGGREGATE_ARTIFACT_ID }}
           TAILWIND_REHEARSAL_AGGREGATE_SHA256: ${{ env.EXPECTED_AGGREGATE_SHA256 }}
           TAILWIND_REHEARSAL_START_ARTIFACT_ID: ${{ steps.upload-rehearsal-start.outputs.artifact-id }}
+          TAILWIND_REHEARSAL_DOCS_NATIVE_PROOF: ${{ runner.temp }}/docs-native-proof/docs-native-proof.json
+          TAILWIND_REHEARSAL_DOCS_NATIVE_ARTIFACT_ID: ${{ env.DOCS_NATIVE_ARTIFACT_ID }}
+          TAILWIND_REHEARSAL_DOCS_NATIVE_SHA256: ${{ env.DOCS_NATIVE_SHA256 }}
         run: |
           dotnet restore tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj --locked-mode
           dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj -c Release --no-restore -p:SourceRevisionId="$SOURCE_REVISION_ID" --filter 'FullyQualifiedName~TailwindPublishingTests|FullyQualifiedName~OriginalCandidatePublicationReplayTests'

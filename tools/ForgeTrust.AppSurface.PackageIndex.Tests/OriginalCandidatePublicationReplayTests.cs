@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 /// <summary>Credential-free rehearsal of interrupted Tailwind publication recovery.</summary>
@@ -19,6 +21,9 @@ public sealed class OriginalCandidatePublicationReplayTests
         var aggregateDirectory = Required("TAILWIND_REHEARSAL_AGGREGATE_DIRECTORY");
         var startReceiptPath = Required("TAILWIND_REHEARSAL_START_RECEIPT");
         var preparedDirectory = Required("TAILWIND_REHEARSAL_PREPARED_DIRECTORY");
+        var docsNativeProofPath = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_PROOF");
+        var docsNativeArtifactId = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_ARTIFACT_ID");
+        var docsNativeSha256 = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_SHA256");
         var manifestPath = Path.Combine(producerDirectory, "package-artifact-manifest.json");
         var manifest = await new PackageArtifactManifestReader().ReadAsync(manifestPath, CancellationToken.None);
         var tailwindArtifact = Assert.Single(manifest.Entries, entry => entry.PackageId == PackageId);
@@ -43,7 +48,25 @@ public sealed class OriginalCandidatePublicationReplayTests
                 Required("TAILWIND_REHEARSAL_AGGREGATE_ARTIFACT_ID"),
                 Required("TAILWIND_REHEARSAL_AGGREGATE_SHA256"),
                 string.Empty, startReceiptPath,
-                Required("TAILWIND_REHEARSAL_START_ARTIFACT_ID"), string.Empty);
+                Required("TAILWIND_REHEARSAL_START_ARTIFACT_ID"), string.Empty)
+            {
+                DocsNativeEvidence = new DocsNativeEvidenceInput(
+                    docsNativeProofPath, docsNativeArtifactId, docsNativeSha256)
+            };
+
+            using (var startReceipt = JsonDocument.Parse(await File.ReadAllBytesAsync(startReceiptPath)))
+            {
+                Assert.Equal(
+                    "appsurface-tailwind-publication-start-v2",
+                    startReceipt.RootElement.GetProperty("schema").GetString());
+                var docsNativeIdentity = startReceipt.RootElement.GetProperty("docsNativeEvidence");
+                Assert.Equal(
+                    docsNativeArtifactId,
+                    docsNativeIdentity.GetProperty("artifactId").GetString());
+                Assert.Equal(
+                    docsNativeSha256,
+                    docsNativeIdentity.GetProperty("sha256").GetString());
+            }
 
             PackagePublishRequest RequestFor(int attempt)
             {
