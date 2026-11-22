@@ -3815,6 +3815,9 @@ internal sealed record CoverageRunProcessRequest(
     /// </summary>
     public bool StrictUtf8 { get; init; }
 
+    /// <summary>Return buffered stdout bytes verbatim and enforce stream limits while reading. Stderr stays separate.</summary>
+    public bool CaptureBinaryStandardOutput { get; init; }
+
     /// <summary>
     /// Optional standard-input bytes. The request snapshots up to one MiB so callers cannot mutate
     /// the bytes while the child is consuming them.
@@ -3859,6 +3862,9 @@ internal sealed record CoverageRunProcessResult(
     /// Bounded standard-error text, kept separate from <see cref="Output"/> for role-specific parsing.
     /// </summary>
     public string StandardError { get; init; } = string.Empty;
+
+    /// <summary>Complete buffered stdout when requested as bytes. Null for text runs and truncated results.</summary>
+    public byte[]? BinaryStandardOutput { get; init; }
 }
 
 /// <summary>
@@ -3948,7 +3954,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     token,
                     request.OutputObserver,
                     budgetCharge,
-                    request.StrictUtf8),
+                    request.StrictUtf8,
+                    stopAtLimit: request.CaptureBinaryStandardOutput),
                 executionCancellation,
                 budgetCharge))
             .WithStandardErrorPipe(CreateFaultTerminatingTarget(
@@ -3959,7 +3966,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     token,
                     request.OutputObserver,
                     budgetCharge,
-                    request.StrictUtf8),
+                    request.StrictUtf8,
+                    stopAtLimit: request.CaptureBinaryStandardOutput),
                 executionCancellation,
                 budgetCharge));
 
@@ -3978,11 +3986,18 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             || standardOutput.Length > standardOutputLimitBytes
             || standardError.Length > MaximumBufferedBytesPerStream;
         var strictDecode = request.StrictUtf8 && !budgetCharge.OutputLimitExceeded;
-        var stdout = DecodeBufferedOutput(standardOutput, standardOutputLimitBytes, strictDecode);
         var stderr = DecodeBufferedOutput(standardError, MaximumBufferedBytesPerStream, strictDecode);
-        var output = stdout + stderr;
+        if (request.CaptureBinaryStandardOutput)
+        {
+            return new CoverageRunProcessResult(exitCode, stderr, outputTruncated)
+            {
+                StandardError = stderr,
+                BinaryStandardOutput = outputTruncated ? null : standardOutput.ToArray()
+            };
+        }
 
-        return new CoverageRunProcessResult(exitCode, output, outputTruncated, stdout)
+        var stdout = DecodeBufferedOutput(standardOutput, standardOutputLimitBytes, strictDecode);
+        return new CoverageRunProcessResult(exitCode, stdout + stderr, outputTruncated, stdout)
         {
             StandardError = stderr,
         };
@@ -4130,6 +4145,9 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
 
     private static void ValidateRequest(CoverageRunProcessRequest request)
     {
+        if (request.CaptureBinaryStandardOutput && (request.StrictUtf8 || request.OutputFile is not null))
+            throw new ArgumentException("Binary stdout requires buffered output without UTF-8 decoding.", nameof(request));
+
         if (request.StandardOutputLimitBytes is < 0 or > int.MaxValue - 1)
         {
             throw new ArgumentOutOfRangeException(
@@ -4161,9 +4179,11 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CancellationToken cancellationToken,
         Action<int>? outputObserver,
         CoverageRunProcessBudgetCharge budgetCharge,
-        bool strictUtf8)
+        bool strictUtf8,
+        bool stopAtLimit = false)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(PipeBufferSize);
+        var enforceLimit = strictUtf8 || stopAtLimit;
         var decoder = strictUtf8 ? StrictUtf8Encoding.GetDecoder() : null;
         var characters = strictUtf8 ? ArrayPool<char>.Shared.Rent(StrictUtf8Encoding.GetMaxCharCount(buffer.Length)) : null;
         try
@@ -4182,14 +4202,14 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                 if (decoder is not null) decoder.GetChars(buffer.AsSpan(0, read), characters, flush: false);
                 var bytesBeforeRead = target.Length;
                 var exceedsLimit = bytesBeforeRead + read > maximumBytes;
-                var storageLimit = strictUtf8 ? maximumBytes : maximumBytes + 1;
+                var storageLimit = enforceLimit ? maximumBytes : maximumBytes + 1;
                 var remaining = storageLimit - bytesBeforeRead;
                 if (remaining > 0)
                 {
                     await target.WriteAsync(buffer.AsMemory(0, (int)Math.Min(read, remaining)), cancellationToken);
                 }
 
-                if (strictUtf8 && exceedsLimit)
+                if (enforceLimit && exceedsLimit)
                 {
                     budgetCharge.RejectOutputLimit(maximumBytes);
                 }

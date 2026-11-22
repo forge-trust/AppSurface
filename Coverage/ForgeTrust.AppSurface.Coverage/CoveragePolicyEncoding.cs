@@ -165,7 +165,8 @@ internal static partial class CoveragePolicyEncoding
                 frozen.Supplements, frozen.TestProjects), Json),
             ReportApplicabilityContractVersion => JsonSerializer.SerializeToElement(new PolicyV3Document(
                 frozen.ContractVersion, frozen.ReportProfileId!, frozen.Gate, frozen.Instrumentation,
-                frozen.Limits, frozen.Run, frozen.Source, frozen.Supplements, frozen.TestProjects), Json),
+                frozen.Limits, frozen.Run, frozen.Source, frozen.Supplements, frozen.TestProjects,
+                frozen.DiffPolicyId), Json),
             _ => throw Invalid("contractVersion")
         };
 
@@ -191,12 +192,16 @@ internal static partial class CoveragePolicyEncoding
         if (policy.ContractVersion == LegacyContractVersion)
         {
             if (policy.ReportProfileId is not null) throw Invalid("reportProfileId");
+            if (policy.DiffPolicyId is not null) throw Invalid("diffPolicyId");
             return;
         }
 
         if (policy.ContractVersion != ReportApplicabilityContractVersion) throw Invalid("contractVersion");
         if (!StringComparer.Ordinal.Equals(policy.ReportProfileId, InitialReportProfileId))
             throw Invalid("reportProfileId");
+        if (policy.DiffPolicyId is not null
+            && !StringComparer.Ordinal.Equals(policy.DiffPolicyId, CoverageFanInPolicy.VisualBaselinePngDiffPolicyId))
+            throw Invalid("diffPolicyId");
     }
 
     private static void Write(Utf8JsonWriter writer, JsonElement element)
@@ -387,7 +392,8 @@ internal static partial class CoveragePolicyEncoding
     private sealed record PolicyV3Document(int ContractVersion, string ReportProfileId, CoverageGatePolicy Gate,
         CoverageInstrumentation? Instrumentation, CoverageOperationLimits? Limits, CoverageRunIdentity Run,
         CoverageSourceIdentity Source, IReadOnlyList<CoverageSupplement> Supplements,
-        IReadOnlyList<string> TestProjects);
+        IReadOnlyList<string> TestProjects,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DiffPolicyId = null);
 
     private static (BigInteger Coefficient, int Scale) ParseDecimal(string raw)
     {

@@ -365,6 +365,7 @@ jobs:
             '--output', $env:COVERAGE_DOGFOOD_OUTPUT, '--configuration', 'Release', '--native-platform', $platform,
             '--raw-index', $indexPath, '--timings', $timingsPath,
             '--run-scope', $env:COVERAGE_RUN_SCOPE, '--run-id', $env:COVERAGE_RUN_ID, '--attempt', $env:COVERAGE_RUN_ATTEMPT)
+          if ($contractVersion -eq '3') { $adapter += @('--diff-policy-id', 'appsurface-visual-baseline-png-v1') }
           if ($diffBase) { $adapter += @('--diff-base', $diffBase) }
           $command = @('run', '--project', 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj',
             '--configuration', 'Release', '--no-restore', '--') + $adapter
