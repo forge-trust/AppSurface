@@ -744,7 +744,7 @@ internal static class TailwindEvidenceWorkflow
         if (docs is not null)
         {
             TailwindProofSubjectService.ValidateBasename(docs.ArtifactFileName, "Docs artifact filename");
-            var path = Path.Combine(request.ArtifactsInputPath, docs.ArtifactFileName);
+            var path = Path.Join(request.ArtifactsInputPath, docs.ArtifactFileName);
             RequireRegularFileWithoutLinks(path);
             using var archive = ZipFile.OpenRead(path);
             if (archive.GetEntry(DocsNativeReleaseEvidence.TargetPath) is not null)

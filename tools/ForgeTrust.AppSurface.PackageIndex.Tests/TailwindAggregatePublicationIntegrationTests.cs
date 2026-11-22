@@ -160,10 +160,12 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.False(workflowDiagnostics.RootElement.GetProperty("releaseEligible").GetBoolean());
     }
 
-    [Fact]
-    public async Task PublicationStart_BindsSeparateExactDocsProofWhenTheCandidateHasTheTarget()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublicationStart_RequiresSeparateExactDocsProofWhenTheCandidateHasTheTarget(bool includeDocsNativeTarget)
     {
-        using var fixture = await Fixture.CreateAsync(_root, includeDocsNativeTarget: true);
+        using var fixture = await Fixture.CreateAsync(_root, includeDocsNativeTarget: includeDocsNativeTarget);
         var aggregate = await fixture.AggregateAsync("docs-candidate-tailwind");
         Assert.True(aggregate.Succeeded);
         var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
@@ -176,6 +178,17 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             "501", fixture.SubjectHash, "12345", "901", fixture.SourceCommit, Path.GetDirectoryName(aggregate.ReportPath)!,
             "702", Sha256(await File.ReadAllBytesAsync(aggregate.ReportPath)), TestPathUtils.PathUnder(_root, "docs-prepared"),
             TestPathUtils.PathUnder(preflightReport, "publication-start-receipt.json"), "703", preflightReport);
+
+        if (!includeDocsNativeTarget)
+        {
+            await TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, planned, CancellationToken.None);
+            using var legacyReceipt = JsonDocument.Parse(await File.ReadAllBytesAsync(request.PublicationStartReceiptPath));
+            Assert.Equal("appsurface-tailwind-publication-start-v1", legacyReceipt.RootElement.GetProperty("schema").GetString());
+            Assert.False(legacyReceipt.RootElement.TryGetProperty("docsNativeEvidence", out _));
+            var validatedLegacy = await TailwindEvidenceWorkflow.ValidatePublicationAsync(request, manifest, planned, CancellationToken.None);
+            Assert.Equal(planned.Length, validatedLegacy.Count);
+            return;
+        }
 
         var missing = await Assert.ThrowsAsync<PackageIndexException>(() => TailwindEvidenceWorkflow.PreparePublicationAsync(
             request with { ReportDirectory = TestPathUtils.PathUnder(_root, "missing-docs-proof") }, manifest, planned, CancellationToken.None));
@@ -680,7 +693,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         public string? PlanManifestPath { get; }
 
         public static async Task<Fixture> CreateAsync(
-            string parent, bool includeWebPublicationPlan = false, bool includeDocsNativeTarget = false)
+            string parent, bool includeWebPublicationPlan = false, bool? includeDocsNativeTarget = null)
         {
             var root = TestPathUtils.PathUnder(parent, Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
@@ -725,7 +738,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                 manifestEntries.Add(webEntry);
             }
 
-            if (includeDocsNativeTarget)
+            if (includeDocsNativeTarget.HasValue)
             {
                 const string docsPackageId = "ForgeTrust.AppSurface.Docs";
                 const string docsProject = "Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj";
@@ -735,7 +748,10 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                 {
                     Add(archive, $"{docsPackageId}.nuspec",
                         $"<package><metadata><id>{docsPackageId}</id><version>{Version}</version></metadata></package>");
-                    Add(archive, DocsNativeReleaseEvidence.TargetPath, "<Project />");
+                    if (includeDocsNativeTarget.Value)
+                    {
+                        Add(archive, DocsNativeReleaseEvidence.TargetPath, "<Project />");
+                    }
                 }
 
                 manifestEntries.Add(new PackageArtifactManifestEntry(docsPackageId, docsProject, "publish",

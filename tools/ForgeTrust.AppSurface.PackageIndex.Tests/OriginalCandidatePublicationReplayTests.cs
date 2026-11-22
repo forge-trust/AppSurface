@@ -22,7 +22,7 @@ public sealed class OriginalCandidatePublicationReplayTests
         var startReceiptPath = Required("TAILWIND_REHEARSAL_START_RECEIPT");
         var preparedDirectory = Required("TAILWIND_REHEARSAL_PREPARED_DIRECTORY");
         var durableTemplateEvidence = Required("TAILWIND_REHEARSAL_DURABLE_TEMPLATE_EVIDENCE");
-        var publicationPlanPath = Path.Combine(repositoryRoot, "packages", "package-index.yml");
+        var publicationPlanPath = TestPathUtils.PathUnder(repositoryRoot, "packages", "package-index.yml");
         var docsNativeProofPath = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_PROOF");
         var docsNativeArtifactId = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_ARTIFACT_ID");
         var docsNativeSha256 = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_SHA256");
