@@ -3,6 +3,17 @@ namespace ForgeTrust.AppSurface.PostgreSql.Testing.Tests;
 public sealed class PostgreSqlFixtureArgumentTests
 {
     [Theory]
+    [InlineData("Database=postgres")]
+    [InlineData("not-a-valid-option=sentinel-private")]
+    [InlineData("Host=localhost;Port=sentinel-private")]
+    public async Task Lease_RejectsInvalidEndpointsWithoutEchoingConnectionSettings(string connectionString)
+    {
+        var error = await Assert.ThrowsAnyAsync<ArgumentException>(() =>
+            PostgreSqlDatabaseLease.CreateAsync(connectionString, "case"));
+        Assert.DoesNotContain("sentinel-private", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

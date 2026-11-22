@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.PostgreSql.Testing.Tests;
@@ -805,6 +805,105 @@ public sealed class PostgreSqlFixtureIntegrationTests
         return names;
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedCaseDrop_RetainsTheDatabaseUntilHostCleanupCanRetry(bool useTemplate)
+    {
+        var connection = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
+        var fixture = new PostgreSqlFixture();
+        var templatePrefix = PostgreSqlTestServer.NewPrefix("parent");
+        var casePrefix = PostgreSqlTestServer.NewPrefix("case");
+        var actionError = new InvalidOperationException("case failed");
+        string? caseName = null;
+        string? templateName = null;
+
+        async Task BlockDropAsync(string database, CancellationToken token)
+        {
+            caseName = new NpgsqlConnectionStringBuilder(database).Database!;
+            await SetDatabaseTemplateFlagAsync(connection, caseName, true);
+            throw actionError;
+        }
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<PostgreSqlDatabaseCleanupException>(() => useTemplate
+                ? fixture.RunFromTemplateAsync(connection, casePrefix, templatePrefix, (database, token) =>
+                {
+                    templateName = new NpgsqlConnectionStringBuilder(database).Database;
+                    return Task.CompletedTask;
+                }, BlockDropAsync)
+                : fixture.RunFreshAsync(connection, casePrefix, BlockDropAsync));
+            Assert.Equal(caseName, error.Database.Name);
+            Assert.Same(actionError, error.OperationError);
+            Assert.IsType<PostgresException>(error.CleanupError);
+
+            var blocked = await Assert.ThrowsAsync<TemplateCleanupException>(() => fixture.CleanupAllAsync().AsTask());
+            Assert.Single(blocked.Result.Failures);
+            Assert.True(await PostgreSqlTestServer.DatabaseExistsAsync(connection, caseName!));
+            if (useTemplate)
+            {
+                Assert.True(await PostgreSqlTestServer.DatabaseExistsAsync(connection, templateName!));
+                Assert.Equal(templateName, Assert.Single(blocked.Result.Outcomes).DatabaseName);
+            }
+            else
+            {
+                Assert.Empty(blocked.Result.Outcomes);
+                Assert.Equal(caseName, Assert.Single(blocked.Result.FreshDatabaseOutcomes).DatabaseName);
+            }
+
+            await SetDatabaseTemplateFlagAsync(connection, caseName!, false);
+            var retry = await fixture.CleanupAllAsync();
+            Assert.Equal(useTemplate ? 1 : 0, retry.RemovedTemplateCount);
+            Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connection, caseName!));
+            if (useTemplate)
+            {
+                Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connection, templateName!));
+            }
+
+            await error.Database.DisposeAsync();
+            Assert.Empty((await fixture.CleanupAllAsync()).FreshDatabaseOutcomes);
+        }
+        finally
+        {
+            if (caseName != null && await PostgreSqlTestServer.DatabaseExistsAsync(connection, caseName))
+            {
+                await SetDatabaseTemplateFlagAsync(connection, caseName, false);
+            }
+
+            await fixture.CleanupAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CanceledCreate_ExposesVerifiedLeaseWhenRollbackFails()
+    {
+        var connection = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
+        using var cancel = new CancellationTokenSource();
+        var error = await Assert.ThrowsAsync<PostgreSqlDatabaseCleanupException>(() => PostgreSqlDatabaseLease.CreateAsync(
+            connection, "rollback", async (name, _) =>
+            {
+                await SetDatabaseTemplateFlagAsync(connection, name, true);
+                cancel.Cancel();
+            }, cancel.Token));
+
+        try
+        {
+            Assert.IsAssignableFrom<OperationCanceledException>(error.OperationError);
+            Assert.IsType<PostgresException>(error.CleanupError);
+            var stillExists = await Assert.ThrowsAsync<PostgreSqlDatabaseOwnershipException>(() =>
+                error.Database.DropAsync(_ => ValueTask.CompletedTask, CancellationToken.None).AsTask());
+            Assert.Contains("still exists after drop", stillExists.Message);
+        }
+        finally
+        {
+            await SetDatabaseTemplateFlagAsync(connection, error.Database.Name, false);
+            await error.Database.DisposeAsync();
+        }
+
+        Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connection, error.Database.Name));
+    }
+
     private static async Task SetDatabaseTemplateFlagAsync(string connectionString, string databaseName, bool isTemplate)
     {
         var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
@@ -815,7 +914,8 @@ public sealed class PostgreSqlFixtureIntegrationTests
 
         await using var connection = new NpgsqlConnection(maintenanceConnectionString);
         await connection.OpenAsync();
-        var quotedDatabaseName = new NpgsqlCommandBuilder().QuoteIdentifier(databaseName);
+        using var builder = new NpgsqlCommandBuilder();
+        var quotedDatabaseName = builder.QuoteIdentifier(databaseName);
         await using var command = new NpgsqlCommand(
             $"ALTER DATABASE {quotedDatabaseName} WITH IS_TEMPLATE {isTemplate};",
             connection);
