@@ -288,17 +288,12 @@ is consumed by both the restore contracts and the existing
 [longest-first scheduler test](https://github.com/forge-trust/AppSurface/blob/main/Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunTests.cs),
 which verifies the measured project order while retaining extra JSON fields and whitespace for the byte-preservation check.
 
-The migration has two gated stages. **Stage A** keeps the Python helper and its 14-test baseline from
-[revision `a6c362d`](https://github.com/forge-trust/AppSurface/commit/a6c362d7a917301dade1247adc394d9ed37c7497)
-alongside the C# file app,
-then runs both against the same fixed GitHub responses on `ubuntu-24.04`. Compare request order, exit code,
-warning reason, file and parent-directory presence, and exact output bytes for valid history, older-artifact
-fallback, no history, API failure, existing output, invalid configuration, relative output and write
-failure. Run the shared fixture through the real scheduler as well. **Stage B** follows only after Stage A
-matches. It removes the Python helper and test module together with the temporary comparison step, switches
-the existing workflow calls to the C# file app, and verifies contracts, scheduler behavior and final coverage
-collection on that revision. A skipped coverage job does not count as verification. The
-[revision-pinned script inventory](../../guides/script-inventory.md) retains the historical helper and caller references.
+Before the Python helper was retired, the
+[hosted Ubuntu comparison](https://github.com/forge-trust/AppSurface/actions/runs/45081126217/job/137389961156)
+ran both entry points against the same GitHub responses. It checked request order, exit codes, warnings,
+file and directory creation, and exact restored bytes. The permanent C# suite retains all 14 baseline
+tests and their subcases. For the original helper and its callers, see the
+[revision-pinned script inventory](../../guides/script-inventory.md).
 
 `package-checks` runs the existing [PackageIndex](../ForgeTrust.AppSurface.PackageIndex/README.md)
 `gate`, `verify` and `verify-packages` commands, using a fresh exact version and an isolated NuGet cache.

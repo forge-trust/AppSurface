@@ -422,6 +422,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var history = FindStep(steps, "Restore advisory coverage scheduling history");
         var contracts = FindStep(steps, "Test C# coverage scheduling history contracts");
         Assert.Equal("dotnet run --file tests/coverage-schedule-history/contracts.cs", contracts["run"].AsScalar());
+        Assert.Equal($"dotnet run --file .github/scripts/coverage-schedule-history.cs -- restore --output {timingFile}", history["run"].AsScalar());
         Assert.True(IndexOf(steps, contracts) < IndexOf(steps, history));
         Assert.True(IndexOf(steps, history) < IndexOf(steps, collect));
         Assert.Equal("${{ github.token }}", history["env"].AsMapping()["GH_TOKEN"].AsScalar());
