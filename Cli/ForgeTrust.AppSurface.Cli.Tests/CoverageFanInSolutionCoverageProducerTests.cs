@@ -941,6 +941,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                     Assert.Equal(NativeV3DiffBase, ValueAfter(request.Arguments, "--diff-base"));
                     Assert.Equal(settings.NativeCoverageDirectory, ValueAfter(request.Arguments, "--native-inputs"));
                     Assert.Equal("3", ValueAfter(request.Arguments, "--contract-version"));
+                    Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(request.Arguments, "--diff-policy-id"));
                     await fixture.WriteNativeV3ProofAsync(ValueAfter(request.Arguments, "--output"), scenario);
                 }
                 else await fixture.CompleteCommandAsync(request);
@@ -956,6 +957,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             var fanIn = Assert.Single(commands, command => command.Arguments.Contains("fanin"));
             Assert.Equal("3", ValueAfter(fanIn.Arguments, "--contract-version"));
             Assert.Equal(NativeV3DiffBase, ValueAfter(fanIn.Arguments, "--diff-base"));
+            Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(fanIn.Arguments, "--diff-policy-id"));
 
             var fanInOutput = Path.Join(fixture.Output, "coverage-fanin");
             using var applicability = JsonDocument.Parse(await File.ReadAllBytesAsync(
@@ -963,6 +965,9 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             var claim = applicability.RootElement;
             Assert.Equal(3, claim.GetProperty("schemaVersion").GetInt32());
             Assert.Equal("coverlet-collector-cobertura-v1", claim.GetProperty("reportProfileId").GetString());
+            using (var metadata = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                Path.Join(fanInOutput, "accepted", "diff-metadata.json"))))
+                Assert.Equal("appsurface-visual-baseline-png-v1", metadata.RootElement.GetProperty("diffPolicyId").GetString());
             if (scenario == "both-not-applicable")
                 foreach (var set in new[] { "primary", "composed" })
                     foreach (var metric in new[] { "line", "branch" }.Select(claim.GetProperty(set).GetProperty))
@@ -1036,6 +1041,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData("metadata-schema-version")]
     [InlineData("metadata-requested-base")]
     [InlineData("metadata-head-commit")]
+    [InlineData("wrong-diff-policy")]
     [InlineData("metadata-merge-base-short")]
     [InlineData("metadata-merge-base-invalid-hex")]
     [InlineData("metadata-diff-policy")]
@@ -1061,7 +1067,10 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             {
                 commands.Add(request);
                 if (request.Arguments.Contains("fanin"))
+                {
+                    Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(request.Arguments, "--diff-policy-id"));
                     await fixture.WriteNativeV3ProofAsync(ValueAfter(request.Arguments, "--output"), defect);
+                }
                 else await fixture.CompleteCommandAsync(request);
                 return Success();
             });
@@ -1072,6 +1081,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             Assert.Single(commands, command => command.Arguments.Contains("--solution"));
             var fanIn = Assert.Single(commands, command => command.Arguments.Contains("fanin"));
             Assert.Equal("3", ValueAfter(fanIn.Arguments, "--contract-version"));
+            Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(fanIn.Arguments, "--diff-policy-id"));
             Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "result");
         });
     }
@@ -1179,6 +1189,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             Assert.Equal(Path.Join(fixture.Output, "coverage", "coverage.cobertura.xml"), ValueAfter(fanIn.Arguments, "--primary"));
             Assert.Equal(Path.Join(fixture.Output, "coverage", "timings.json"), ValueAfter(fanIn.Arguments, "--timings"));
             Assert.Equal(nativeRoot, ValueAfter(fanIn.Arguments, "--native-inputs"));
+            Assert.DoesNotContain("--diff-policy-id", fanIn.Arguments);
             Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
             Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
             using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(
@@ -1368,7 +1379,12 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                     _ => NativeV3DiffBase,
                 },
                 headCommit = scenario == "metadata-head-commit" ? new string('f', 40) : Commit,
-                diffPolicyId = scenario == "metadata-diff-policy" ? "another-policy" : "appsurface-git-patch-v1",
+                diffPolicyId = scenario switch
+                {
+                    "wrong-diff-policy" => "appsurface-git-patch-v1",
+                    "metadata-diff-policy" => "another-policy",
+                    _ => "appsurface-visual-baseline-png-v1"
+                },
                 diffSha256 = scenario == "metadata-diff-sha256" ? new string('a', 64) : diffSha256,
                 empty = false,
                 changes = new[]

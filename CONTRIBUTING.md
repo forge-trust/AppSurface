@@ -51,6 +51,10 @@ Use `PathUnder` for dynamic repo-relative, temp-relative, or output-relative val
 
 Literal expected paths and tests intentionally exercising `Path.Join` or `Path.Combine` platform behavior may continue to use the BCL APIs directly. If the policy test flags an intentional case, add a reasoned entry to `tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml`; entries without reasons or entries that no longer match a violation fail validation.
 
+For tests that launch a child process, use a [CliWrap-backed helper](./ForgeTrust.AppSurface.Core/README.md#process-execution-utilities)
+that returns the exit code, stdout and stderr. Assert the expected exit code and include both output streams in the
+assertion’s failure message. Use `System.Diagnostics.Process` directly when the process wrapper itself is under test.
+
 ## Release contract
 
 - AppSurface releases the monorepo in unison. Packages, CLI tooling, examples, and docs-facing behavior all roll into the same next version.

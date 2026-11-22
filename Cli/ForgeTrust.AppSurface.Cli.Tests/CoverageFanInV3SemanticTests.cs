@@ -10,8 +10,223 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Hand-authored semantic oracles protect replay against rehashed writer claims, without claiming native execution.</summary>
 public sealed class CoverageFanInV3SemanticTests
 {
+    private const string VisualBaselineDiffPolicyId = "appsurface-visual-baseline-png-v1";
+    private const string StrictDiffPolicyId = "appsurface-git-patch-v1";
+    private const string VisualBaselinePath = "Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite/home.png";
+
     [Fact]
     public void HandAuthoredMeasuredClaimsPassIndependentReplay() => new Oracle().Verify();
+
+    [Fact]
+    public void IndependentReplayAcceptsQualifiedPngOnlyWithModifiedMetadataAndNoAddedRanges()
+    {
+        var oracle = new Oracle();
+        oracle.UseQualifiedPngOnly();
+
+        oracle.Verify();
+
+        var change = oracle.Metadata["changes"]![0]!;
+        Assert.Equal(VisualBaselineDiffPolicyId, oracle.Expected.DiffPolicyId);
+        Assert.Equal(VisualBaselineDiffPolicyId, oracle.Metadata["diffPolicyId"]!.GetValue<string>());
+        Assert.Equal("modified", change["kind"]!.GetValue<string>());
+        Assert.Equal(VisualBaselinePath, change["oldPath"]!.GetValue<string>());
+        Assert.Equal(VisualBaselinePath, change["newPath"]!.GetValue<string>());
+        Assert.Empty(change["addedRanges"]!.AsArray());
+    }
+
+    [Fact]
+    public void IndependentReplayAcceptsVisualBaselineAlongsideMeasuredSourceChanges()
+    {
+        var oracle = new Oracle();
+        oracle.UseMixedVisualBaselinePng();
+
+        oracle.Verify();
+
+        Assert.Equal(1, oracle.ComposedGate["patchLine"]!["changedLines"]!.GetValue<int>());
+        Assert.Equal(1, oracle.ComposedGate["patchLine"]!["measurable"]!.GetValue<int>());
+        Assert.Equal(2, oracle.ComposedGate["patchBranch"]!["measurable"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VisualBaselinePolicyRefusesNulInTextHunks()
+    {
+        var oracle = new Oracle();
+        oracle.UseMixedVisualBaselinePng();
+        var replacement = Encoding.UTF8.GetString(oracle.Input.Patch).Replace("+after", "+a\0fter", StringComparison.Ordinal);
+        oracle.Input = oracle.Input with { Patch = Encoding.UTF8.GetBytes(replacement) };
+        oracle.RehashDiffEvidence();
+
+        Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify);
+        Assert.Throws<CoverageFanInEvidenceException>(() => CoverageFanInDiffParser.Parse(oracle.Input));
+    }
+
+    [Fact]
+    public void IndependentReplayRetainsFailedMeasuredSourceGateWithVisualBaselineChange()
+    {
+        var oracle = new Oracle();
+        oracle.UseMixedVisualBaselinePng();
+        foreach (var report in new[] { oracle.Primary, oracle.Composed })
+        {
+            report.Root!.SetAttributeValue("lines-covered", 0);
+            report.Root.SetAttributeValue("branches-covered", 0);
+            var line = report.Descendants("line").Single();
+            line.SetAttributeValue("hits", 0);
+            line.SetAttributeValue("condition-coverage", "0% (0/2)");
+        }
+        foreach (var gate in new[] { oracle.PrimaryGate, oracle.ComposedGate })
+        {
+            gate["passed"] = false;
+            foreach (var dimension in new[] { "line", "branch", "patchLine", "patchBranch" })
+            {
+                gate[dimension]!["covered"] = 0;
+                gate[dimension]!["percent"] = 0;
+            }
+        }
+        foreach (var stage in new[] { "primary", "composed" })
+        {
+            foreach (var dimension in new[] { "line", "branch" })
+            {
+                oracle.Claim[stage]![dimension]!["covered"] = 0;
+                oracle.Claim[stage]![dimension]!["percent"] = 0;
+            }
+        }
+        oracle.RebindReports();
+
+        oracle.Verify();
+
+        Assert.False(oracle.ComposedGate["passed"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void StrictDefaultPolicyRefusesBinaryPngMarker()
+    {
+        var oracle = new Oracle();
+        oracle.UseUnqualifiedBinaryPngOnly();
+
+        Assert.Equal(StrictDiffPolicyId, oracle.Expected.DiffPolicyId);
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Fact]
+    public void IndependentReplayRejectsPolicyAndTrustedInputMismatch()
+    {
+        var oracle = new Oracle();
+        oracle.UseQualifiedPngOnly();
+        oracle.Input = oracle.Input with { DiffPolicyId = StrictDiffPolicyId };
+
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Fact]
+    public void IndependentReplayRejectsUnknownDiffPolicyEvenWhenTrustedInputAgrees()
+    {
+        const string unsupportedPolicyId = "appsurface-unrecognized-diff-v1";
+        var oracle = new Oracle();
+        oracle.UseUnknownDiffPolicy(unsupportedPolicyId);
+
+        Assert.Equal(unsupportedPolicyId, oracle.Expected.DiffPolicyId);
+        Assert.Equal(unsupportedPolicyId, oracle.Input.DiffPolicyId);
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Theory]
+    [InlineData("index-mode")]
+    [InlineData("index-object")]
+    [InlineData("missing-index-mode")]
+    [InlineData("marker-path")]
+    [InlineData("other-binary-marker")]
+    [InlineData("duplicate-marker")]
+    [InlineData("extra-header")]
+    [InlineData("extra-hunk")]
+    public void IndependentReplayRejectsTamperedQualifiedPngPatchArtifacts(string mutation)
+    {
+        var oracle = new Oracle();
+        oracle.UseQualifiedPngOnly();
+        var patch = Encoding.UTF8.GetString(oracle.Input.Patch);
+        var originalPatch = patch;
+        var marker = $"Binary files a/{VisualBaselinePath} and b/{VisualBaselinePath} differ";
+        switch (mutation)
+        {
+            case "index-mode": patch = patch.Replace(" 100644\n" + marker, " 100755\n" + marker, StringComparison.Ordinal); break;
+            case "index-object": patch = patch.Replace(new string('a', 20) + "0" + new string('a', 19), new string('c', 40), StringComparison.Ordinal); break;
+            case "missing-index-mode": patch = patch.Replace(".." + new string('b', 20) + "0" + new string('b', 19) + " 100644", ".." + new string('b', 20) + "0" + new string('b', 19), StringComparison.Ordinal); break;
+            case "marker-path": patch = patch.Replace(marker, marker.Replace("home.png", "elsewhere.png", StringComparison.Ordinal), StringComparison.Ordinal); break;
+            case "other-binary-marker": patch = patch.Replace(marker, marker.Replace("Binary files", "Binary file", StringComparison.Ordinal), StringComparison.Ordinal); break;
+            case "duplicate-marker": patch = patch.Replace(marker + "\n", marker + "\n" + marker + "\n", StringComparison.Ordinal); break;
+            case "extra-header": patch = patch.Replace(marker + "\n", marker + "\n--- a/home.png\n", StringComparison.Ordinal); break;
+            case "extra-hunk": patch = patch.Replace(marker + "\n", marker + "\n@@ -1 +1 @@\n-old\n+new\n", StringComparison.Ordinal); break;
+        }
+        Assert.NotEqual(originalPatch, patch);
+        oracle.Input = oracle.Input with { Patch = Encoding.UTF8.GetBytes(patch) };
+        oracle.RehashDiffEvidence();
+
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Fact]
+    public void IndependentReplayRejectsQualifiedPngMetadataWithAddedRanges()
+    {
+        var oracle = new Oracle();
+        oracle.UseQualifiedPngOnly();
+        oracle.Metadata["changes"]![0]!["addedRanges"] = new JsonArray(new JsonObject { ["start"] = 1, ["count"] = 1 });
+        oracle.RehashMetadata();
+
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Theory]
+    [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite/nested/home.png")]
+    [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsLight/home.PNG")]
+    [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsLight/caf\u00e9.png")]
+    [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/Other/home.png")]
+    public void IndependentReplayRejectsQualifiedPathsOutsideDirectPngBaselines(string path)
+    {
+        var oracle = new Oracle();
+        oracle.UseQualifiedPngOnly(path);
+
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Theory]
+    [InlineData("Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite/home.png", "Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite/HOME.PNG")]
+    public void IndependentReplayRejectsQualifiedReportPathAliasesWithoutLineRecords(string qualifiedPath, string reportPath)
+    {
+        var oracle = new Oracle();
+        oracle.UseQualifiedPngOnly(qualifiedPath);
+        foreach (var report in new[] { oracle.Primary, oracle.Composed })
+            report.Descendants("classes").Single().Add(new XElement("class",
+                new XAttribute("name", "reported screenshot"), new XAttribute("filename", reportPath), new XElement("lines")));
+        oracle.RebindReports();
+
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
+
+    [Theory]
+    [InlineData("added")]
+    [InlineData("deleted")]
+    [InlineData("mode-changed")]
+    [InlineData("executable")]
+    [InlineData("regular-to-executable")]
+    public void IndependentReplayRejectsStructuralChangesAtQualifiedPngPaths(string changeKind)
+    {
+        var oracle = new Oracle();
+        oracle.UseQualifiedPngOnly();
+        var oldId = new string('a', 20) + "0" + new string('a', 19);
+        var newId = new string('b', 20) + "0" + new string('b', 19);
+        var zeros = new string('0', 40);
+        var raw = changeKind switch
+        {
+            "added" => $":000000 100644 {zeros} {newId} A\0{VisualBaselinePath}\0",
+            "deleted" => $":100644 000000 {oldId} {zeros} D\0{VisualBaselinePath}\0",
+            "mode-changed" => $":100644 100755 {oldId} {oldId} M\0{VisualBaselinePath}\0",
+            "executable" => $":100755 100755 {oldId} {newId} M\0{VisualBaselinePath}\0",
+            "regular-to-executable" => $":100644 100755 {oldId} {newId} M\0{VisualBaselinePath}\0",
+            _ => throw new ArgumentOutOfRangeException(nameof(changeKind))
+        };
+        oracle.Input = oracle.Input with { Raw = raw };
+
+        Assert.Equal("applicability-mismatch", Assert.Throws<CoverageFanInEvidenceException>(oracle.Verify).Cause);
+    }
 
     [Fact]
     public void FailedLineThresholdCannotSkipBranchRecordValidation()
@@ -697,6 +912,105 @@ public sealed class CoverageFanInV3SemanticTests
 
         private static object Metric(int valid, int covered) => new
         { outcome = "measured", reason = "reported-points", changedLines = 1, measurable = valid, covered, percent = 100m };
+
+        internal void UseQualifiedPngOnly(string path = VisualBaselinePath)
+        {
+            SelectVisualBaselinePolicy();
+            var oldId = new string('a', 20) + "0" + new string('a', 19);
+            var newId = new string('b', 20) + "0" + new string('b', 19);
+            var patch = Encoding.UTF8.GetBytes(
+                $"diff --git a/{path} b/{path}\nindex {oldId}..{newId} 100644\nBinary files a/{path} and b/{path} differ\n");
+            Input = Input with
+            {
+                Raw = $":100644 100644 {oldId} {newId} M\0{path}\0",
+                Patch = patch,
+                DiffPolicyId = VisualBaselineDiffPolicyId,
+                QualifiedPngPaths = new HashSet<string>([path], StringComparer.Ordinal)
+            };
+            Metadata["diffPolicyId"] = VisualBaselineDiffPolicyId;
+            Metadata["changes"] = new JsonArray(Change("modified", path, path));
+            SetPatchNotApplicable(0);
+            RehashDiffEvidence();
+        }
+
+        internal void UseUnqualifiedBinaryPngOnly(string path = VisualBaselinePath)
+        {
+            var oldId = new string('a', 20) + "0" + new string('a', 19);
+            var newId = new string('b', 20) + "0" + new string('b', 19);
+            var patch = Encoding.UTF8.GetBytes(
+                $"diff --git a/{path} b/{path}\nindex {oldId}..{newId} 100644\nBinary files a/{path} and b/{path} differ\n");
+            Input = Input with
+            {
+                Raw = $":100644 100644 {oldId} {newId} M\0{path}\0",
+                Patch = patch,
+                DiffPolicyId = StrictDiffPolicyId,
+                QualifiedPngPaths = new HashSet<string>(StringComparer.Ordinal)
+            };
+            Metadata["diffPolicyId"] = StrictDiffPolicyId;
+            Metadata["changes"] = new JsonArray(Change("modified", path, path));
+            SetPatchNotApplicable(0);
+            RehashDiffEvidence();
+        }
+
+        internal void UseUnknownDiffPolicy(string diffPolicyId)
+        {
+            var policy = JsonNode.Parse(Expected.Policy.GetRawText())!.AsObject();
+            policy["diffPolicyId"] = diffPolicyId;
+            using var document = JsonDocument.Parse(policy.ToJsonString());
+            Expected = new(document.RootElement.Clone(), Expected.Digest);
+            Input = Input with { DiffPolicyId = diffPolicyId };
+        }
+
+        internal void UseMixedVisualBaselinePng(string path = VisualBaselinePath)
+        {
+            SelectVisualBaselinePolicy();
+            var oldId = new string('a', 20) + "0" + new string('a', 19);
+            var newId = new string('b', 20) + "0" + new string('b', 19);
+            var patch = Encoding.UTF8.GetString(Input.Patch)
+                + $"diff --git a/{path} b/{path}\nindex {oldId}..{newId} 100644\nBinary files a/{path} and b/{path} differ\n";
+            Input = Input with
+            {
+                Raw = Input.Raw + $":100644 100644 {oldId} {newId} M\0{path}\0",
+                Patch = Encoding.UTF8.GetBytes(patch),
+                DiffPolicyId = VisualBaselineDiffPolicyId,
+                QualifiedPngPaths = new HashSet<string>([path], StringComparer.Ordinal)
+            };
+            Metadata["diffPolicyId"] = VisualBaselineDiffPolicyId;
+            Metadata["changes"]!.AsArray().Add(Change("modified", path, path));
+            RehashDiffEvidence();
+        }
+
+        private void SelectVisualBaselinePolicy()
+        {
+            var policy = CoveragePolicyEncoding.Decode<CoverageFanInPolicy>(
+                Encoding.UTF8.GetBytes(Expected.Policy.GetRawText())) with
+            { DiffPolicyId = VisualBaselineDiffPolicyId };
+            Expected = new(CoveragePolicyEncoding.ToElement(policy), CoveragePolicyEncoding.Digest(policy));
+            Claim["policyDigest"] = Expected.Digest;
+        }
+
+        private void SetPatchNotApplicable(int changedLines)
+        {
+            var metric = JsonSerializer.SerializeToNode(new
+            {
+                outcome = "notApplicable",
+                reason = "no-reported-patch-points",
+                changedLines,
+                measurable = 0,
+                covered = 0,
+                percent = (decimal?)null
+            })!;
+            foreach (var gate in new[] { PrimaryGate, ComposedGate })
+            {
+                gate["patchLine"] = metric.DeepClone();
+                gate["patchBranch"] = metric.DeepClone();
+            }
+            foreach (var stage in new[] { "primary", "composed" })
+            {
+                Claim[stage]!["line"] = metric.DeepClone();
+                Claim[stage]!["branch"] = metric.DeepClone();
+            }
+        }
 
         internal void UseContextAndDisjointHunks()
         {

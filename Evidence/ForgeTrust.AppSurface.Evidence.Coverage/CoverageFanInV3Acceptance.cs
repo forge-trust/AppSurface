@@ -53,8 +53,8 @@ internal static partial class CoverageFanInEngine
             completedGates[PrimaryGateName] = GateJson(primaryGate);
             var composedGate = await GateAsync(r, composed.Coverage, CoverageName, false, false, null, token).ConfigureAwait(false);
             completedGates[ComposedGateName] = GateJson(composedGate);
-            var primaryMetrics = V3Metrics(composed.PrimaryDocument, changes, r);
-            var composedMetrics = V3Metrics(composed.Document, changes, r);
+            var primaryMetrics = V3Metrics(composed.PrimaryDocument, changes, r, input.QualifiedPngPaths);
+            var composedMetrics = V3Metrics(composed.Document, changes, r, input.QualifiedPngPaths);
             var primaryJson = V3Gate(primaryGate, primaryMetrics, input, r, isComposed: false);
             var composedJson = V3Gate(composedGate, composedMetrics, input, r, isComposed: true);
             var claim = CoverageFanInV3Encoding.Element(new
@@ -194,13 +194,14 @@ internal static partial class CoverageFanInEngine
             requestedBaseCommit = input.RequestedBase,
             mergeBaseCommit = input.MergeBase,
             headCommit = input.Head,
-            diffPolicyId = CoverageFanInDiffContext.PolicyId,
+            diffPolicyId = input.DiffPolicyId,
             diffSha256 = CoverageFanInIO.Hash(input.Patch),
             empty = input.Patch.Length == 0,
             changes = changes.Select(x => new { kind = x.Kind, oldPath = x.OldPath, newPath = x.NewPath, addedRanges = x.AddedRanges })
         });
 
-    private static JsonElement V3Metrics(XDocument report, IReadOnlyList<CoverageFanInDiffChange> changes, CoverageFanInEngineRequest r)
+    private static JsonElement V3Metrics(XDocument report, IReadOnlyList<CoverageFanInDiffChange> changes,
+        CoverageFanInEngineRequest r, IReadOnlySet<string> qualifiedPngPaths)
     {
         var points = new Dictionary<(string File, int Line), (bool Hit, int Covered, int Valid)>();
         var tracked = r.DiffContext!.TrackedPaths;
@@ -209,6 +210,9 @@ internal static partial class CoverageFanInEngine
         {
             var file = CoverageFanInDiffParser.Path(cls.Attribute("filename")?.Value ?? throw ReportInvalid());
             if (!tracked.Contains(file) && aliases[file.Normalize(NormalizationForm.FormC)].Any()) throw ReportInvalid();
+            if (qualifiedPngPaths.Contains(file))
+                throw new CoverageFanInEvidenceException("report-invalid", "report",
+                    "The collector identifies a changed screenshot as source. Resolve the conflicting report before retrying.");
             foreach (var line in cls.Descendants().Where(x => x.Name.LocalName == "line"))
             {
                 if (!int.TryParse(line.Attribute("number")?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) || number <= 0

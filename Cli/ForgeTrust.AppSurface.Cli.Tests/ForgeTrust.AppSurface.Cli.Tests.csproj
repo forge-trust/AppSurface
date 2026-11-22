@@ -42,6 +42,7 @@
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.Testing\ForgeTrust.AppSurface.Testing.csproj" />
     <ProjectReference Include="..\..\tools\ForgeTrust.AppSurface.Evidence.Validation\ForgeTrust.AppSurface.Evidence.Validation.csproj" />
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.CoverageLeaseProbe\ForgeTrust.AppSurface.CoverageLeaseProbe.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\tools\ForgeTrust.AppSurface.Coverage.Dogfood\ForgeTrust.AppSurface.Coverage.Dogfood.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

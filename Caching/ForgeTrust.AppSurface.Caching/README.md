@@ -21,15 +21,22 @@ for current release risk, migration guidance, and readiness.
 
 ## Usage
 
-Register the module in your application and inject `IMemo` where you want to cache repeated work:
+In the class that implements [`IAppSurfaceModule`](../../ForgeTrust.AppSurface.Core/IAppSurfaceModule.cs),
+register the caching dependency in `RegisterDependentModules`. `AppSurfaceCachingModule` calls
+`AddMemoryCache()` and registers `IMemo` for injection into application services.
 
 ```csharp
-public sealed class MyModule : AppSurfaceCachingModule
+public void RegisterDependentModules(ModuleDependencyBuilder builder)
 {
+    builder.AddModule<AppSurfaceCachingModule>();
 }
 ```
 
-Use memoization for expensive or repeated lookups:
+Use `IMemoryCache` directly inside caching infrastructure or at a framework integration point that cannot take
+`IMemo`. Keep one owner for each cached snapshot. In [AppSurface Docs](https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md),
+`DocAggregator` owns the document and search-index caches so controllers can read the same snapshot.
+
+For an expensive lookup, inject `IMemo` and choose how long to keep the result.
 
 ```csharp
 var result = await memo.GetAsync(

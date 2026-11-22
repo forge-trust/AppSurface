@@ -164,7 +164,13 @@ public sealed class CoverageFanInV3DiffTests
             CoverageFanInDiffContext.AdmitBlobSizes(objects, output, budget);
             Assert.Equal((1L << 32) - sizes.Sum(), budget.Remaining);
         }
-        else Assert.Equal("limit-exceeded", Assert.Throws<CoverageFanInEvidenceException>(() => CoverageFanInDiffContext.AdmitBlobSizes(objects, output, budget)).Cause);
+        else
+        {
+            var failure = Assert.Throws<CoverageFanInEvidenceException>(() => CoverageFanInDiffContext.AdmitBlobSizes(objects, output, budget));
+            Assert.Equal("limit-exceeded", failure.Cause);
+            Assert.Contains("20 MiB per blob", failure.Recovery);
+            Assert.Contains("256 MiB across distinct blobs", failure.Recovery);
+        }
     }
 
     [Fact]
