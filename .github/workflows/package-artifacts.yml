@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE: 6b972e792a38485234c6abb94d491f0ba30d194f
+  CANDIDATE: 15e79c1d2dfdcba5a00f3842682b7c4cc6600c2b
   CANDIDATE_BASE: 20433c7e166fa911323cbe065c8c503179462295
 
 jobs:
