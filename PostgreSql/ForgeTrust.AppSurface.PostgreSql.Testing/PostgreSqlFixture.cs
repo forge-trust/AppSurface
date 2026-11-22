@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Npgsql;
 
 namespace ForgeTrust.AppSurface.PostgreSql.Testing;
 
@@ -12,6 +11,9 @@ public sealed class PostgreSqlFixture
 {
     private readonly object gate = new();
     private readonly Dictionary<(string Connection, string Prefix), Template> templates = new();
+
+    private readonly HashSet<PostgreSqlDatabaseLease> failedFreshDrops = [];
+    private bool watchingProcessExit;
 
     /// <summary>Creates an empty database for the callback and drops it even when the callback fails or is canceled.</summary>
     public Task RunFreshAsync(string connectionString, string databaseNamePrefix, Func<string, CancellationToken, Task> action,
@@ -46,12 +48,8 @@ public sealed class PostgreSqlFixture
             {
                 template = new Template(connectionString, templateNamePrefix);
                 template.Preparation = new Lazy<Task>(() => PrepareAsync(template, initializeTemplateAsync));
-                if (templates.Count == 0)
-                {
-                    AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
-                }
-
                 templates.Add(key, template);
+                UpdateExitHandler();
             }
             else
             {
@@ -72,7 +70,7 @@ public sealed class PostgreSqlFixture
         try
         {
             await template.Preparation.Value.WaitAsync(cancellationToken);
-            await RunAsync(connectionString, databaseNamePrefix, template.Database.Name, action, cancellationToken);
+            await RunAsync(connectionString, databaseNamePrefix, template, action, cancellationToken);
         }
         finally
         {
@@ -94,7 +92,7 @@ public sealed class PostgreSqlFixture
         return PostgreSqlCatalog.WithClusterInitializationLockAsync(connectionString, action);
     }
 
-    /// <summary>Attempts every template registered to this instance. Inspect <see cref="TemplateCleanupException.Result"/> on partial failure.</summary>
+    /// <summary>Retries failed fresh database drops and cleans every template registered to this instance. Inspect <see cref="TemplateCleanupException.Result"/> on partial failure.</summary>
     public ValueTask<TemplateCleanupResult> CleanupAllAsync(CancellationToken cancellationToken = default) =>
         CleanupAsync(null, cancellationToken);
 
@@ -118,20 +116,52 @@ public sealed class PostgreSqlFixture
         return CleanupAsync(template => template.Connection == connectionString && prefixes.Contains(template.Prefix), cancellationToken);
     }
 
-    private static async Task RunAsync(string connectionString, string prefix, string? template, Func<string, CancellationToken, Task> action,
+    private async Task RunAsync(string connectionString, string prefix, Template? template, Func<string, CancellationToken, Task> action,
         CancellationToken token)
     {
-        token.ThrowIfCancellationRequested();
-        var database = new OwnedDatabase(connectionString, prefix);
+        PostgreSqlDatabaseLease database;
         try
         {
-            await database.CreateAsync(template, token);
-            await action(PostgreSqlCatalog.Target(connectionString, database.Name), token);
+            database = template == null
+                ? await PostgreSqlDatabaseLease.CreateAsync(connectionString, prefix, token)
+                : await template.Database!.CloneAsync(prefix, token);
+        }
+        catch (PostgreSqlDatabaseCleanupException failure)
+        {
+            RememberFailedDrop(template, failure.Database);
+            throw;
+        }
+
+        Exception? actionError = null;
+        try
+        {
+            await action(database.ConnectionString, token);
+        }
+        catch (Exception error)
+        {
+            actionError = error;
+            throw;
         }
         finally
         {
-            using var deadline = new CancellationTokenSource(PostgreSqlCatalog.Timeout);
-            await database.DropAsync(deadline.Token);
+            try
+            {
+                await database.DisposeAsync();
+            }
+            catch (Exception failure)
+            {
+                RememberFailedDrop(template, database);
+                throw new PostgreSqlDatabaseCleanupException(database, failure, actionError);
+            }
+        }
+    }
+
+    private void RememberFailedDrop(Template? template, PostgreSqlDatabaseLease database)
+    {
+        lock (gate)
+        {
+            (template?.FailedDrops ?? failedFreshDrops).Add(database);
+            UpdateExitHandler();
         }
     }
 
@@ -140,13 +170,21 @@ public sealed class PostgreSqlFixture
         using var deadline = new CancellationTokenSource(PostgreSqlCatalog.Timeout);
         try
         {
-            await template.Database.CreateAsync(null, deadline.Token);
-            await initialize(PostgreSqlCatalog.Target(template.Connection, template.Database.Name, disablePooling: true), deadline.Token);
+            template.Database = await PostgreSqlDatabaseLease.CreateNamedAsync(template.Connection, template.Name, null, deadline.Token);
+            await initialize(PostgreSqlCatalog.Target(template.Connection, template.Name, disablePooling: true), deadline.Token);
+        }
+        catch (PostgreSqlDatabaseCleanupException failure) when (template.Database is null)
+        {
+            template.Database = failure.Database;
+            throw;
         }
         catch
         {
-            using var cleanup = new CancellationTokenSource(PostgreSqlCatalog.Timeout);
-            await template.Database.DropAsync(cleanup.Token);
+            if (template.Database != null)
+            {
+                await template.Database.DisposeAsync();
+            }
+
             lock (gate)
             {
                 Forget(template);
@@ -160,15 +198,18 @@ public sealed class PostgreSqlFixture
     {
         var stopwatch = Stopwatch.StartNew();
         Template[] selected;
+        PostgreSqlDatabaseLease[] freshRetries;
         lock (gate)
         {
+            freshRetries = select == null ? failedFreshDrops.ToArray() : [];
             selected = (select == null ? templates.Values.AsEnumerable() : templates.Values.Where(select)).ToArray();
         }
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(PostgreSqlCatalog.Timeout);
         var outcomes = await Task.WhenAll(selected.Select(template => CleanupOneAsync(template, deadline.Token)));
-        var result = new TemplateCleanupResult(outcomes, stopwatch.Elapsed);
+        var freshOutcomes = await Task.WhenAll(freshRetries.Select(database => RetryDropAsync(database, failedFreshDrops, deadline.Token)));
+        var result = new TemplateCleanupResult(outcomes, stopwatch.Elapsed) { FreshDatabaseOutcomes = freshOutcomes };
         result.ThrowIfFailed();
         return result;
     }
@@ -180,7 +221,7 @@ public sealed class PostgreSqlFixture
         {
             if (template.Cleaning)
             {
-                return TemplateCleanupOutcome.AlreadyInProgress(template.Database.Name);
+                return TemplateCleanupOutcome.AlreadyInProgress(template.Name);
             }
 
             template.Cleaning = true;
@@ -196,27 +237,63 @@ public sealed class PostgreSqlFixture
             {
                 await preparation.WaitAsync(token);
             }
-            catch when (preparation.IsFaulted || preparation.IsCanceled)
+            catch when (preparation.IsCompleted && template.Database != null && !token.IsCancellationRequested)
             {
                 // Initialization already attempted teardown. Retry any drop that failed.
             }
 
-            await template.Database.DropAsync(token);
+            PostgreSqlDatabaseLease[] retries;
+            lock (gate)
+            {
+                retries = template.FailedDrops.ToArray();
+            }
+
+            var attempts = await Task.WhenAll(retries.Select(database => RetryDropAsync(database, template.FailedDrops, token)));
+            var incomplete = attempts.Where(outcome => outcome.Status == TemplateCleanupStatus.Failed).ToArray();
+            if (incomplete.Length != 0)
+            {
+                return TemplateCleanupOutcome.Failed(template.Name, new InvalidOperationException(string.Join(", ",
+                    incomplete.Select(outcome => $"{outcome.DatabaseName}: {outcome.Failure}"))));
+            }
+
+            await template.Database!.DropAsync(token);
             lock (gate)
             {
                 Forget(template);
             }
 
-            return TemplateCleanupOutcome.Removed(template.Database.Name);
+            return TemplateCleanupOutcome.Removed(template.Name);
         }
         catch (Exception failure)
+        {
+            return TemplateCleanupOutcome.Failed(template.Name, failure);
+        }
+        finally
         {
             lock (gate)
             {
                 template.Cleaning = false;
             }
+        }
+    }
 
-            return TemplateCleanupOutcome.Failed(template.Database.Name, failure);
+    private async Task<TemplateCleanupOutcome> RetryDropAsync(PostgreSqlDatabaseLease database,
+        HashSet<PostgreSqlDatabaseLease> failedDrops, CancellationToken token)
+    {
+        try
+        {
+            await database.DropAsync(token);
+            lock (gate)
+            {
+                failedDrops.Remove(database);
+                UpdateExitHandler();
+            }
+
+            return TemplateCleanupOutcome.Removed(database.Name);
+        }
+        catch (Exception error)
+        {
+            return TemplateCleanupOutcome.Failed(database.Name, error);
         }
     }
 
@@ -227,11 +304,29 @@ public sealed class PostgreSqlFixture
         if (templates.TryGetValue(key, out var current) && ReferenceEquals(current, template))
         {
             templates.Remove(key);
-            if (templates.Count == 0)
-            {
-                AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
-            }
+            UpdateExitHandler();
         }
+    }
+
+    // Called under gate. Failed fresh drops also need the process-exit fallback.
+    private void UpdateExitHandler()
+    {
+        var needed = templates.Count != 0 || failedFreshDrops.Count != 0;
+        if (needed == watchingProcessExit)
+        {
+            return;
+        }
+
+        if (needed)
+        {
+            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+        }
+        else
+        {
+            AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+        }
+
+        watchingProcessExit = needed;
     }
 
     private void OnProcessExit(object? sender, EventArgs args)
@@ -264,40 +359,12 @@ public sealed class PostgreSqlFixture
     {
         public string Connection { get; } = connection;
         public string Prefix { get; } = prefix;
-        public OwnedDatabase Database { get; } = new(connection, prefix);
+        public string Name { get; } = PostgreSqlDatabaseLease.NewName(prefix);
+        public PostgreSqlDatabaseLease? Database { get; set; }
+        public HashSet<PostgreSqlDatabaseLease> FailedDrops { get; } = [];
         public Lazy<Task> Preparation { get; set; } = null!;
         public int Users { get; set; }
         public TaskCompletionSource? Idle { get; set; }
         public bool Cleaning { get; set; }
-    }
-
-    private sealed class OwnedDatabase(string connection, string prefix)
-    {
-        // Preserve a random suffix even for prefixes longer than PostgreSQL's 63-byte identifier limit.
-        public string Name { get; } = $"{prefix[..Math.Min(prefix.Length, 46)]}_{Guid.NewGuid().ToString("N")[..16]}";
-        private bool mayExist;
-
-        public async Task CreateAsync(string? template, CancellationToken token)
-        {
-            try
-            {
-                await PostgreSqlCatalog.CreateAsync(connection, Name, template, () => mayExist = true, token);
-            }
-            catch (PostgresException error) when (error.SqlState == PostgresErrorCodes.DuplicateDatabase)
-            {
-                // A name collision does not transfer ownership of an existing database.
-                mayExist = false;
-                throw;
-            }
-        }
-
-        public async Task DropAsync(CancellationToken token)
-        {
-            if (mayExist)
-            {
-                await PostgreSqlCatalog.DropAsync(connection, Name, token);
-                mayExist = false;
-            }
-        }
     }
 }
