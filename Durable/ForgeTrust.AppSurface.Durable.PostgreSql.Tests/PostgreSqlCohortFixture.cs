@@ -253,17 +253,11 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
                 await _beforeCaseDatabaseCreateAsync();
             }
 
-            PostgreSqlIntegrationTestDatabase database;
-            if (_options.ConnectionString is { } connectionString)
-            {
-                database = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(
+            var database = _options.ConnectionString is { } connectionString
+                ? await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(
                     connectionString,
-                    template: _options.UsesTemplate && !empty ? _template : null);
-            }
-            else
-            {
-                database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-            }
+                    template: _options.UsesTemplate && !empty ? _template : null)
+                : await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
 
             var released = 0;
             database.ObserveTeardown = elapsed => _timings?.Record("database_teardown", elapsed);

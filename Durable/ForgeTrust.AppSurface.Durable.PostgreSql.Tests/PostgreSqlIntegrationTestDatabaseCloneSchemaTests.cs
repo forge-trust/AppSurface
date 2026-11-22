@@ -150,7 +150,8 @@ public sealed class PostgreSqlIntegrationTestDatabaseCloneSchemaTests
         await using var server = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var roleName = $"schema_guard_{Guid.NewGuid():N}";
         var password = Guid.NewGuid().ToString("N");
-        var quotedRole = new NpgsqlCommandBuilder().QuoteIdentifier(roleName);
+        using var builder = new NpgsqlCommandBuilder();
+        var quotedRole = builder.QuoteIdentifier(roleName);
         await ExecuteNonQueryAsync(
             server.DataSource,
             $"CREATE ROLE {quotedRole} LOGIN PASSWORD '{password}' CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS;");
@@ -159,7 +160,7 @@ public sealed class PostgreSqlIntegrationTestDatabaseCloneSchemaTests
         {
             await using var template = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(server.ConnectionString, isTemplate: true);
             await new PostgreSqlDurableRuntimeSchemaManager(template.DataSource).ApplyAsync();
-            var sentinelRelation = new NpgsqlCommandBuilder().QuoteIdentifier($"credential_{password}");
+            var sentinelRelation = builder.QuoteIdentifier($"credential_{password}");
             var templateStoreId = await template.PrepareTemplateAsync();
             await ExecuteNonQueryAsync(
                 template.DataSource,
@@ -294,7 +295,8 @@ public sealed class PostgreSqlIntegrationTestDatabaseCloneSchemaTests
         var maintenanceConnectionString = MaintenanceConnectionString(server.ConnectionString);
         var template = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(maintenanceConnectionString, isTemplate: true);
         var templateName = new NpgsqlConnectionStringBuilder(template.ConnectionString).Database!;
-        var quotedName = new NpgsqlCommandBuilder().QuoteIdentifier(templateName);
+        using var builder = new NpgsqlCommandBuilder();
+        var quotedName = builder.QuoteIdentifier(templateName);
         uint? replacementOid = null;
 
         try

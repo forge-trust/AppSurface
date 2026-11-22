@@ -346,9 +346,10 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
             }
         }
 
+        using var builder = new NpgsqlCommandBuilder();
         foreach (var relation in relations)
         {
-            var quotedRelation = new NpgsqlCommandBuilder().QuoteIdentifier(relation);
+            var quotedRelation = builder.QuoteIdentifier(relation);
             var qualifiedName = $"\"appsurface_durable\".{quotedRelation}";
             await using var probe = new NpgsqlCommand(
                 $"SELECT EXISTS (SELECT 1 FROM {qualifiedName} LIMIT 1);",

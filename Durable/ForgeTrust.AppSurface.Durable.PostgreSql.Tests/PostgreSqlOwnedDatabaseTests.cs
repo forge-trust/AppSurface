@@ -903,8 +903,11 @@ public sealed class PostgreSqlOwnedDatabaseTests
         Assert.Null(await ReadDatabaseOidAsync(observer, databaseName));
     }
 
-    private static string QuoteIdentifier(string identifier) =>
-        new NpgsqlCommandBuilder().QuoteIdentifier(identifier);
+    private static string QuoteIdentifier(string identifier)
+    {
+        using var builder = new NpgsqlCommandBuilder();
+        return builder.QuoteIdentifier(identifier);
+    }
 
     private static async Task<int> ReadBackendPidAsync(NpgsqlConnection connection)
     {

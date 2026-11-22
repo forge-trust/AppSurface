@@ -30,18 +30,18 @@ internal sealed class PostgreSqlFixtureTimingCsv : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         var displayPath = GetDisplayPath(path);
-        FileStream? stream = null;
         try
         {
-            stream = new FileStream(
+            var writer = new StreamWriter(
                 path,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.Read,
-                bufferSize: 4096,
-                FileOptions.SequentialScan);
-            var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            stream = null;
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                new FileStreamOptions
+                {
+                    Mode = FileMode.CreateNew,
+                    Access = FileAccess.Write,
+                    Share = FileShare.Read,
+                    Options = FileOptions.SequentialScan
+                });
             try
             {
                 writer.WriteLine("phase,elapsed_ms");
@@ -59,10 +59,6 @@ internal sealed class PostgreSqlFixtureTimingCsv : IAsyncDisposable
         {
             throw new PostgreSqlFixtureException(
                 $"Cannot create fixture timing CSV '{displayPath}'. {PostgreSqlFixtureException.Describe(exception)}");
-        }
-        finally
-        {
-            stream?.Dispose();
         }
     }
 
