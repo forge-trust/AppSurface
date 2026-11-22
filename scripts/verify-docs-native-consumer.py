@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -176,6 +177,59 @@ def assert_projection(output, graph, package_files, native_hashes, rid=None):
     return manifest, sorted(expected), sum((output / name).stat().st_size for name in expected)
 
 
+def rid_projection(output, assembly, rid, native_names):
+    manifest = read_json(output / f"{assembly}.deps.json")
+    target = manifest["runtimeTarget"]["name"]
+    require(target.endswith(f"/{rid}"), f"{output}: expected dependency target for {rid}, got {target}")
+    libraries = [library for name, library in manifest["targets"][target].items()
+                 if name.split("/")[0].casefold() == TREE_SITTER.casefold()]
+    require(len(libraries) == 1 and libraries[0].get("native"),
+            f"{output}: no RID-selected Tree-sitter native dependencies")
+    natives = {path.relative_to(output).as_posix(): digest(path)
+               for path in output.rglob("*") if path.name in native_names and path.is_file()}
+    require({Path(path).name for path in libraries[0]["native"]} <= {Path(path).name for path in natives},
+            f"{output}: missing Tree-sitter native files listed in the dependency manifest")
+    return manifest, natives
+
+
+def verify_rid_selection(args, cache, config, identity, graph, package_files):
+    assembly = f"DocsNative{graph}"
+    # Use a different explicit target so host-only selection cannot masquerade as cross-targeting.
+    foreign_rid = "linux-x64" if args.rid == "win-x64" else "win-x64"
+    cases = (
+        ("explicit", foreign_rid, ["--runtime", foreign_rid]),
+        ("inferred", args.rid, ["-p:UseCurrentRuntimeIdentifier=true"]),
+    )
+    native_names = {Path(name).name for name in package_files}
+    for mode, rid, arguments in cases:
+        with tempfile.TemporaryDirectory(prefix="rid-", dir=args.work) as directory:
+            snapshots = {}
+            for label, policy in (("sdk", [f"-p:{MODE_PROPERTY}=true"]), ("default", [])):
+                fixture = Path(directory) / label
+                shutil.copytree(args.fixture, fixture, ignore=shutil.ignore_patterns("bin", "obj"))
+                project = fixture / graph / f"{assembly}.csproj"
+                # These cases inspect framework-dependent outputs without a platform-specific apphost.
+                properties = [identity, *arguments, *policy, "-p:SelfContained=false", "-p:UseAppHost=false"]
+                run_dotnet(args.dotnet, ["restore", str(project), "--configfile", str(config),
+                                        "--packages", str(cache), *properties, "--verbosity", "quiet"], fixture)
+                release = ["--configuration", "Release", *properties, "--verbosity", "quiet"]
+                run_dotnet(args.dotnet, ["build", str(project), "--no-restore", *release], fixture)
+                build = project.parent / "bin" / "Release" / "net10.0" / rid
+                publish = fixture / "published"
+                run_dotnet(args.dotnet, ["publish", str(project), "--no-build", "--output", str(publish),
+                                        *release], fixture)
+                for stage, output in (("build", build), ("publish", publish)):
+                    manifest, natives = rid_projection(output, assembly, rid, native_names)
+                    if label == "sdk":
+                        snapshots[stage] = (manifest, natives)
+                    else:
+                        expected_manifest, expected_natives = snapshots[stage]
+                        context = f"{graph} {mode} RID {rid} {stage}"
+                        require(manifest == expected_manifest, f"{context}: SDK dependency manifest changed")
+                        require(natives == expected_natives, f"{context}: SDK native output changed")
+        print(f"{graph}: {mode} RID {rid} build and publish match SDK selection", file=sys.stderr)
+
+
 def exercise_graph(args, root, cache, config, version, graph):
     assembly = f"DocsNative{graph}"
     project = root / graph / f"{assembly}.csproj"
@@ -186,6 +240,7 @@ def exercise_graph(args, root, cache, config, version, graph):
     dependencies = manifest_for_restore["project"]["frameworks"]["net10.0"].get("dependencies", {})
     require((DOCS in dependencies) is (graph == "Direct"), f"Unexpected direct Docs reference in {graph}")
     files = package_native_files(cache)
+    verify_rid_selection(args, cache, config, identity, graph, files)
     native_hashes = {name: digest(path) for name, path in files.items()}
     build = project.parent / "bin" / "Release" / "net10.0"
     publish = root / f"published-{graph}"

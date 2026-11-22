@@ -142,6 +142,10 @@ adds a release proof requirement when the selected Docs archive contains its
 [verifier](https://github.com/forge-trust/AppSurface/blob/main/scripts/verify-docs-native-consumer.py) exercises separate direct and transitive
 C# project graphs. The required evidence covers eight SDK host RIDs and Windows x64 execution
 of the exact Linux x64 default and keep-all publish archives.
+On each host the verifier also builds and publishes each graph for an explicit foreign RID
+and for the host RID inferred by the SDK with `UseCurrentRuntimeIdentifier=true`.
+It compares the dependency manifests and Tree-sitter native paths and bytes in each output
+with a separate build and publish using `AppSurfaceDocsKeepAllTreeSitterRuntimes=true` as the SDK baseline.
 
 The [Docs evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/docs-native-evidence.yml) tries native Linux
 Arm32 execution on `ubuntu-24.04-arm` with the pinned Microsoft Arm32 SDK container. The host
