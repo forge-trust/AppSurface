@@ -139,11 +139,11 @@ The [package artifact workflow](https://github.com/forge-trust/AppSurface/blob/m
 The [Docs native asset policy](../../Web/ForgeTrust.AppSurface.Docs/README.md#tree-sitter-native-assets-in-build-and-publish-output)
 adds a release proof requirement when the selected Docs archive contains its
 `buildTransitive/ForgeTrust.AppSurface.Docs.targets` entry. The packed-consumer
-[verifier](../../scripts/verify-docs-native-consumer.py) exercises separate direct and transitive
+[verifier](https://github.com/forge-trust/AppSurface/blob/main/scripts/verify-docs-native-consumer.py) exercises separate direct and transitive
 C# project graphs. The required evidence covers eight SDK host RIDs and Windows x64 execution
 of the exact Linux x64 default and keep-all publish archives.
 
-The [Docs evidence workflow](../../.github/workflows/docs-native-evidence.yml) tries native Linux
+The [Docs evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/docs-native-evidence.yml) tries native Linux
 Arm32 execution on `ubuntu-24.04-arm` with the pinned Microsoft Arm32 SDK container. The host
 needs Arm32 userspace support and Docker on Arm hardware. Set the optional repository variable
 `APPSURFACE_DOCS_LINUX_ARM32_RUNNER` to a unique label for another trusted runner with those
