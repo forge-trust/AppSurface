@@ -295,3 +295,7 @@ Skoolit consumer implementation/adoption is separate future work in the [open ca
 **Priority:** P3.
 
 **Depends on / blocked by:** The #929 producer shipping, the V4 survey result, and a named adopter.
+
+## File-based CLI binding and heavier tooling (#928)
+
+Keep the explicit switch-to-key convention local. The [contributor exercise and canary comparison](guides/repository-tooling.md#canary-comparison-for-configuration-binding) found repeated key and lookup wiring, with validation on the final settings object. Revisit a small helper when a second implemented command repeats that wiring. A public proposal also needs an outside-checkout use case and a compatibility owner. [Ranked tooling candidates](guides/repository-tooling.md)
