@@ -314,7 +314,16 @@ public sealed class CoverageSolutionScriptTests
         Assert.Equal("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("uses")]).Value);
         var uploadWith = (YamlMappingNode)uploadDiagnostics.Children[new YamlScalarNode("with")];
         Assert.Equal("coverage-security-diagnostics-${{ matrix.os }}", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("name")]).Value);
-        Assert.Equal("${{ runner.temp }}/coverage-native-results", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("path")]).Value);
+        Assert.Equal(new[]
+        {
+            "${{ runner.temp }}/coverage-native-results",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/pack-*.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/source.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/proof.json",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/consumer-proof.log"
+        }, ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("path")]).Value!
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries));
         Assert.Equal("warn", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("if-no-files-found")]).Value);
         Assert.Equal("7", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("retention-days")]).Value);
         Assert.Contains(
