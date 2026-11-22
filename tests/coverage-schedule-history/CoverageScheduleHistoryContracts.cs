@@ -154,6 +154,8 @@ internal static class CoverageScheduleHistoryContracts
         {
             ("empty history", () => Runs(), "no successful completed build runs", false),
             ("gh authentication failure", () => [], "GitHub workflow history is unavailable", true),
+            ("integer exceeds JSON digit limit", () => Encoding.UTF8.GetBytes(
+                "{\"workflow_runs\":" + new string('1', 5000) + "}"), "GitHub workflow history is unavailable", false),
             ("oversized history JSON", () => new byte[MaxJsonBytes + 1], "GitHub workflow history is unavailable", false),
             ("invalid history JSON", () => Encoding.UTF8.GetBytes("{broken"), "GitHub workflow history is unavailable", false)
         };
@@ -161,7 +163,7 @@ internal static class CoverageScheduleHistoryContracts
         foreach (var testCase in cases)
         {
             using var temporary = NewTemporaryDirectory();
-            var output = Path.Combine(temporary.Path, testCase.Name.Replace(' ', '-'), "timings.json");
+            var output = Path.Combine(temporary.Path, "coverage-schedule", "timings.json");
             var result = await InvokeAsync(
                 temporary.Path,
                 output,
