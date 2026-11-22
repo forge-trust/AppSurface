@@ -33,7 +33,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 4b6313b6e45f87c84d73b2de19e390259ee81829
+          ref: f4447e00e23da3d3265b9ab16a1476f3616de033
           persist-credentials: false
           fetch-depth: 0 # Packed Cloud Tasks isolation proof archives the pinned baseline commit.
 
@@ -94,7 +94,7 @@ jobs:
         shell: bash
         env:
           PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number) }}
-          SOURCE_COMMIT: ${{ '4b6313b6e45f87c84d73b2de19e390259ee81829' }}
+          SOURCE_COMMIT: ${{ 'f4447e00e23da3d3265b9ab16a1476f3616de033' }}
           REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/rehearse-937-docs-native' && github.repository == 'forge-trust/AppSurface' }}
         run: |
           set -euo pipefail
@@ -161,7 +161,7 @@ jobs:
         id: validate-producer-binding
         if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/rehearse-937-docs-native' && github.repository == 'forge-trust/AppSurface' }}
         env:
-          SOURCE_COMMIT: ${{ '4b6313b6e45f87c84d73b2de19e390259ee81829' }}
+          SOURCE_COMMIT: ${{ 'f4447e00e23da3d3265b9ab16a1476f3616de033' }}
           PRODUCER_ATTEMPT: ${{ github.run_attempt }}
           PRODUCER_ID: ${{ steps.upload-package-artifacts.outputs.artifact-id }}
           EXPECTED_SUBJECT_SHA256: ${{ steps.producer-binding.outputs.expected_subject_sha256 }}
@@ -199,7 +199,7 @@ jobs:
     uses: ./.github/workflows/tailwind-native-host-evidence.yml
     with:
       package_version: ${{ inputs['package-version'] }}
-      source_commit: ${{ '4b6313b6e45f87c84d73b2de19e390259ee81829' }}
+      source_commit: ${{ 'f4447e00e23da3d3265b9ab16a1476f3616de033' }}
       producer_artifact_id: ${{ needs.package-artifacts.outputs.producer_artifact_id }}
       expected_subject_sha256: ${{ needs.package-artifacts.outputs.expected_subject_sha256 }}
       rehearsal: false
@@ -213,7 +213,7 @@ jobs:
     uses: ./.github/workflows/docs-native-evidence.yml
     with:
       package_version: ${{ needs.package-artifacts.outputs.package_version }}
-      source_commit: 4b6313b6e45f87c84d73b2de19e390259ee81829
+      source_commit: f4447e00e23da3d3265b9ab16a1476f3616de033
       producer_artifact_id: ${{ needs.package-artifacts.outputs.producer_artifact_id }}
       artifact_manifest_file: package-artifact-manifest.json
 
@@ -227,7 +227,7 @@ jobs:
       actions: read
       contents: read
     env:
-      SOURCE_COMMIT: ${{ '4b6313b6e45f87c84d73b2de19e390259ee81829' }}
+      SOURCE_COMMIT: ${{ 'f4447e00e23da3d3265b9ab16a1476f3616de033' }}
       PRODUCER_ARTIFACT_ID: ${{ needs.package-artifacts.outputs.producer_artifact_id }}
       EXPECTED_SUBJECT_SHA256: ${{ needs.package-artifacts.outputs.expected_subject_sha256 }}
       AGGREGATE_ARTIFACT_ID: ${{ needs.tailwind-native-rehearsal.outputs.aggregate_artifact_id }}
