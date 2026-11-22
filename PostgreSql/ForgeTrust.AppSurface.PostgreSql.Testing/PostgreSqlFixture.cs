@@ -124,7 +124,7 @@ public sealed class PostgreSqlFixture
         {
             database = template == null
                 ? await PostgreSqlDatabaseLease.CreateAsync(connectionString, prefix, token)
-                : await template.Database!.CloneAsync(prefix, token);
+                : await template.Database!.CloneAsync(prefix, null, token, disconnectTemplateSessions: true);
         }
         catch (PostgreSqlDatabaseCleanupException failure)
         {
