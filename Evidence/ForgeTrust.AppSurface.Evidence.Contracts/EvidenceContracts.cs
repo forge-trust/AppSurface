@@ -250,8 +250,9 @@ public sealed record EvidenceTestDeclaration(IReadOnlyList<EvidenceTestProject> 
 /// </summary>
 /// <remarks>
 /// The filter is public plan data: it appears in the policy, the plan, <c>explain</c>, and rerun hints.
-/// A filter that matches fewer tests than expected still passes as long as it matches at least
-/// <see cref="MinimumTests"/> tests (one when unset) and they all pass. A filter that matches no test always fails.
+/// A filter that matches fewer tests than expected can still pass if it matches at least
+/// <see cref="MinimumTests"/> tests (one when unset) and every selected test runs and passes. A filter that matches
+/// no test always fails.
 /// </remarks>
 /// <param name="Path">
 /// Repository-relative, forward-slash project file path ending in <c>.csproj</c>, <c>.fsproj</c>, or <c>.vbproj</c>.

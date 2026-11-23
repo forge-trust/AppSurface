@@ -90,7 +90,8 @@ internal static class TestEvidenceRunSupport
     /// </remarks>
     /// <exception cref="EvidenceCliException">
     /// <c>ASEVD216</c>: the <c>artifacts</c> directory or a producer directory to retire is a symbolic link or other
-    /// reparse point, so deleting through it could remove files outside the output directory.
+    /// reparse point, so deleting through it could remove files outside the output directory. Nothing is deleted
+    /// when this is thrown.
     /// </exception>
     public static void RetireOutputs(string outputDirectory, EvidencePlan plan)
     {
@@ -101,23 +102,28 @@ internal static class TestEvidenceRunSupport
             return;
         }
 
-        File.Delete(Path.Join(outputDirectory, "evidence-manifest.json"));
-        File.Delete(Path.Join(outputDirectory, "evidence-summary.json"));
+        // Every link check runs before anything is deleted, so a rejected run leaves the earlier outputs as they were.
         var artifactRoot = Path.Join(outputDirectory, "artifacts");
-        if (!Directory.Exists(artifactRoot))
+        string[] retired = [];
+        if (Directory.Exists(artifactRoot))
         {
-            return;
-        }
-
-        RejectLinkedDirectory(artifactRoot);
-        foreach (var producer in plan.Profile.Producers.Where(IsTestProducer))
-        {
-            var directory = Path.Join(artifactRoot, producer.Id);
-            if (Directory.Exists(directory))
+            RejectLinkedDirectory(artifactRoot);
+            retired = plan.Profile.Producers
+                .Where(IsTestProducer)
+                .Select(producer => Path.Join(artifactRoot, producer.Id))
+                .Where(Directory.Exists)
+                .ToArray();
+            foreach (var directory in retired)
             {
                 RejectLinkedDirectory(directory);
-                Directory.Delete(directory, recursive: true);
             }
+        }
+
+        File.Delete(Path.Join(outputDirectory, "evidence-manifest.json"));
+        File.Delete(Path.Join(outputDirectory, "evidence-summary.json"));
+        foreach (var directory in retired)
+        {
+            Directory.Delete(directory, recursive: true);
         }
     }
 
@@ -340,7 +346,7 @@ internal static class TestEvidenceRunSupport
         TestRunReason.ProjectNotFound => "Policy error: correct the declared project path. Rerunning unchanged cannot help.",
         TestRunReason.ToolchainUnavailable => "Install the SDK that global.json requires or put the right dotnet on PATH. Rerunning unchanged cannot help.",
         TestRunReason.MultiTargetUnsupported => "This preview runs single-target projects only; declare a single-target test project. Rerunning unchanged cannot help.",
-        TestRunReason.RunSettingsUnsupported => "Remove RunSettingsFilePath for this project or use other evidence; a run-settings file can select tests the policy does not name. Rerunning unchanged cannot help.",
+        TestRunReason.RunSettingsUnsupported => "Remove RunSettingsFilePath and VSTestSetting for this project or use other evidence; a run-settings file can select tests the policy does not name. Rerunning unchanged cannot help.",
         TestRunReason.UnsupportedRunner => "Microsoft.Testing.Platform is not supported in this preview (tracked in TODOS.md); use a VSTest project. Rerunning unchanged cannot help.",
         TestRunReason.RestoreFailed => "Run the printed dotnet restore command and fix the feed or package error. Rerunning unchanged can help after an outage.",
         TestRunReason.BuildFailed => "Run the printed command and fix the build errors. Rerunning unchanged cannot help.",

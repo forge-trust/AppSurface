@@ -272,6 +272,39 @@ public sealed class EvidenceRunTestProducerTests
         Assert.True(File.Exists(Path.Join(saved, ProducerId, "keep.txt")));
     }
 
+    /// <summary>
+    /// Regression: link checks ran one producer at a time, so an earlier producer's directory, the manifest and the
+    /// summary were already deleted when a later linked directory stopped the run.
+    /// </summary>
+    [Fact]
+    public void RetireOutputs_ShouldDeleteNothingWhenALaterProducerDirectoryIsLinked()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var directory = TestDirectory.Create();
+        var plan = Fixture.Plan(Fixture.Policy());
+        var first = plan.Profile.Producers[0];
+        plan = plan with { Profile = plan.Profile with { Producers = [first, first with { Id = "second-tests" }] } };
+        var output = Path.Join(directory.Path, "evidence");
+        var saved = Path.Join(directory.Path, "saved");
+        Directory.CreateDirectory(saved);
+        Directory.CreateDirectory(Path.Join(output, "artifacts", ProducerId));
+        File.WriteAllText(Path.Join(output, "artifacts", ProducerId, "receipt.json"), "{}");
+        File.WriteAllText(Path.Join(output, "evidence-manifest.json"), "{}");
+        File.WriteAllText(Path.Join(output, "evidence-summary.json"), "{}");
+        Directory.CreateSymbolicLink(Path.Join(output, "artifacts", "second-tests"), saved);
+
+        var exception = Assert.Throws<EvidenceCliException>(() => TestEvidenceRunSupport.RetireOutputs(output, plan));
+
+        Assert.Equal("ASEVD216", exception.Code);
+        Assert.True(File.Exists(Path.Join(output, "artifacts", ProducerId, "receipt.json")));
+        Assert.True(File.Exists(Path.Join(output, "evidence-manifest.json")));
+        Assert.True(File.Exists(Path.Join(output, "evidence-summary.json")));
+    }
+
     [Fact]
     public async Task EnforceArtifacts_ShouldDowngradeAProducerWhoseReceiptIsGone_SoTheObligationStaysOpen()
     {

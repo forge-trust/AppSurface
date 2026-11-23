@@ -161,7 +161,7 @@ Compiler and test output are not shown and not kept, because they can contain te
 
 1. Start with no filter. The producer then selects every test in the project.
 2. Add a filter only by fully qualified name prefix, for example `FullyQualifiedName~MyCompany.Tooling.Release`. The filter is a [VSTest filter expression](https://learn.microsoft.com/dotnet/core/testing/selective-unit-tests), passed as one argument and never through a shell. `&` and `|` inside a value need a backslash.
-3. Set `minimumTests` to the count the first passing receipt reports. Without it, a filter that starts matching fewer tests still passes as long as it matches at least one; a filter that matches no test always fails with `EmptyDiscovery`. `run` prints a notice when more than one test was discovered and no minimum is declared.
+3. Set `minimumTests` to the count the first passing receipt reports. Without it, a filter that starts matching fewer tests can still pass if it matches at least one test and every selected test runs and passes; a filter that matches no test always fails with `EmptyDiscovery`. `run` prints a notice when more than one test was discovered and no minimum is declared.
 
 The filter is public plan data: it appears in the policy, the plan, `explain` and rerun hints. Changing a project, a filter or a minimum changes `PlanDigest`.
 
@@ -186,7 +186,7 @@ Each project gets exactly one reason: the first in this table that applies. `Una
 | <a id="reason-projectnotfound"></a>`ProjectNotFound` | `Unavailable` | The declared project file does not exist, or resolves outside the repository. | Policy error: correct the declared project path. Rerunning unchanged cannot help. |
 | <a id="reason-toolchainunavailable"></a>`ToolchainUnavailable` | `Unavailable` | The `dotnet` host could not start or reported no compatible SDK. | Install the SDK that global.json requires or put the right dotnet on PATH. Rerunning unchanged cannot help. |
 | <a id="reason-multitargetunsupported"></a>`MultiTargetUnsupported` | `Unavailable` | The project evaluates to more than one target framework. | This preview runs single-target projects only; declare a single-target test project. Rerunning unchanged cannot help. |
-| <a id="reason-runsettingsunsupported"></a>`RunSettingsUnsupported` | `Unavailable` | The project evaluates `RunSettingsFilePath` or `VSTestSetting`. | Remove RunSettingsFilePath for this project or use other evidence; a run-settings file can select tests the policy does not name. Rerunning unchanged cannot help. |
+| <a id="reason-runsettingsunsupported"></a>`RunSettingsUnsupported` | `Unavailable` | The project evaluates `RunSettingsFilePath` or `VSTestSetting`. | Remove RunSettingsFilePath and VSTestSetting for this project or use other evidence; a run-settings file can select tests the policy does not name. Rerunning unchanged cannot help. |
 | <a id="reason-unsupportedrunner"></a>`UnsupportedRunner` | `Unavailable` | The nearest `global.json` or `TestingPlatformDotnetTestSupport` selects a runner other than VSTest. | Microsoft.Testing.Platform is not supported in this preview (tracked in TODOS.md); use a VSTest project. Rerunning unchanged cannot help. |
 | <a id="reason-restorefailed"></a>`RestoreFailed` | `Unavailable` | `dotnet restore` failed. | Run the printed dotnet restore command and fix the feed or package error. Rerunning unchanged can help after an outage. |
 | <a id="reason-buildfailed"></a>`BuildFailed` | `Failed` | `dotnet build` failed, or the project could not be evaluated. | Run the printed command and fix the build errors. Rerunning unchanged cannot help. |
@@ -286,13 +286,13 @@ Tested on 2026-11-22 with released CLI 0.2.0-preview.14 against a CLI that knows
 
 - The claim is "ran and passed", not "exercised the change". A test that returns early passes. Prefer an explicit skip, which leaves the assertion open.
 - A route that replaces broader evidence needs a replayed known regression that the selected tests catch. Selection completeness does not show the tests are the right ones.
-- A filter that matches fewer tests still passes as long as it matches at least `minimumTests` tests, or one when no minimum is set. Only a filter that matches nothing fails on its own.
+- A filter that matches fewer tests can still pass if it matches at least `minimumTests` tests, or one when no minimum is set, and every selected test runs and passes. A filter that matches nothing always fails.
 - Identity is the printed name, so two different tests that swap one name between the listing and the run are not detected.
 - A property supplied only by a restored package's build files is not seen by the evaluation step. A package that switches the runner still fails closed at the listing; a package that supplies a run-settings file would not be detected.
 - `run` builds and executes repository code with the caller's environment, and writes build output into the working tree. Do not run it beside another build of the same project. Producers run one at a time.
 - `run` deletes the earlier manifest, summary and the selected `test` producers' artifact directories before it starts. After a cancelled rerun, `verify` reports a missing manifest (`ASEVD208`).
 - A resource-backed profile that selects a `test` producer is rejected with `ASEVD214`. Two artifact-writing producers whose ids differ only by case are rejected with `ASEVD215`.
-- `run` refuses to start with `ASEVD216` when the `artifacts` directory or a `test` producer's directory under it is a symbolic link, because retiring earlier outputs would delete through the link. Only `test` producers' artifact directories are retired.
+- `run` refuses to start with `ASEVD216` when the `artifacts` directory or a `test` producer's directory under it is a symbolic link, because retiring earlier outputs would delete through the link. It checks every such directory before it deletes anything. It does not check the `--output` directory itself or its parents. Only `test` producers' artifact directories are retired.
 - The receipt slot must use `relativeRoot` `test`, and its `maximumBytes` must be at least 4096 plus, per project, 512 plus six bytes per character of the project path. The planner checks both (`ASEVD146`, `ASEVD147`) so a run never finishes its tests and then fails to write the receipt.
 
 ## Verifying evidence

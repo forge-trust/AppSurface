@@ -109,7 +109,7 @@ The [planner](https://github.com/forge-trust/AppSurface/blob/main/Evidence/Forge
 
 - Preview: the kind, the assertion id and this shape may change without a compatibility step until a real route has closed with them.
 - The filter is public plan data. Do not put anything confidential in it.
-- A filter that starts matching fewer tests still passes as long as it matches at least `minimumTests` tests, or one when no minimum is set. A filter that matches no test always fails.
+- A filter that starts matching fewer tests can still pass if it matches at least `minimumTests` tests, or one when no minimum is set, and every selected test runs and passes. A filter that matches no test always fails.
 - A reader that does not know the `test` property drops it and computes a different `PolicyDigest`. Upgrade every CLI that runs or verifies evidence before adding a `test` block to a shared policy, and remove the block before downgrading.
 
 ## Pitfalls
