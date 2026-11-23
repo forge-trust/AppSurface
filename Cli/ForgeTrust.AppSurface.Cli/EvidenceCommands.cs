@@ -159,6 +159,11 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     internal Func<string, TestEvidenceProducerOptions, TestEvidenceProducer> TestProducerFactory { get; set; } =
         static (id, options) => new TestEvidenceProducer(id, options);
 
+    /// <summary>Gets or sets the resolver for the GitHub step summary file; <see langword="null"/> or blank writes no step summary.</summary>
+    /// <remarks>Tests replace it so a test run never appends to the step summary of the CI job that runs the tests.</remarks>
+    internal Func<string?> StepSummaryPathResolver { get; set; } =
+        static () => Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
+
     /// <summary>Gets or sets the resolver for the repository root that declared test project paths are relative to.</summary>
     internal Func<string> RepositoryRootResolver { get; set; } =
         static () => GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory());
@@ -166,7 +171,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     /// <inheritdoc />
     /// <remarks>
     /// Order: resolve the plan; reject selections that cannot run truthfully (<c>ASEVD214</c>, <c>ASEVD215</c>);
-    /// retire the earlier manifest, summary and selected artifact directories; write the plan; run producers one at a
+    /// retire the earlier manifest, summary and selected <c>test</c> producer artifact directories (<c>ASEVD216</c> when one is a link); write the plan; run producers one at a
     /// time; confirm returned artifacts on disk and downgrade a producer whose artifact is not there; write the
     /// manifest and summary. Kinds <c>coverage</c> and <c>test</c> are built in; any other kind is <c>Unavailable</c>.
     /// </remarks>
@@ -230,7 +235,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             }
 
             await console.Output.WriteLineAsync($"Artifacts: {Path.Join(OutputDirectory, "evidence-plan.json")}, {Path.Join(OutputDirectory, "evidence-manifest.json")}, {Path.Join(OutputDirectory, "evidence-summary.json")}");
-            await WriteGitHubSummaryAsync(manifest, testReports, cancellationToken);
+            await WriteGitHubSummaryAsync(StepSummaryPathResolver(), manifest, testReports, cancellationToken);
             if (manifest.ClaimKind == EvidenceClaimKind.None)
             {
                 throw new CommandException(hasTestProducer
@@ -292,7 +297,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             await console.Error.WriteLineAsync(line);
         }
 
-        foreach (var notice in TestEvidenceRunSupport.FormatMinimumNotices(declaration.Test?.Projects ?? [], producer.LastProjects))
+        foreach (var notice in TestEvidenceRunSupport.FormatMinimumNotices(declaration.Test!.Projects, producer.LastProjects))
         {
             await console.Output.WriteLineAsync(notice);
         }
@@ -305,21 +310,20 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         return result;
     }
 
-    private static async Task WriteGitHubSummaryAsync(EvidenceManifest manifest, IReadOnlyList<string> testReports, CancellationToken cancellationToken)
+    private static async Task WriteGitHubSummaryAsync(string? summaryPath, EvidenceManifest manifest, IReadOnlyList<string> testReports, CancellationToken cancellationToken)
     {
-        var summaryPath = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
         if (string.IsNullOrWhiteSpace(summaryPath))
         {
             return;
         }
 
-        var markdown = $"## AppSurface Evidence{Environment.NewLine}{Environment.NewLine}- Claim: `{manifest.ClaimKind}`{Environment.NewLine}- Execution: `{manifest.ExecutionVerdict}`{Environment.NewLine}- Closed obligations: {manifest.ClosedObligationIds.Count}{Environment.NewLine}- Unmediated obligations: {manifest.UnmediatedObligationIds.Count}{Environment.NewLine}";
+        var markdown = new StringBuilder($"## AppSurface Evidence{Environment.NewLine}{Environment.NewLine}- Claim: `{manifest.ClaimKind}`{Environment.NewLine}- Execution: `{manifest.ExecutionVerdict}`{Environment.NewLine}- Closed obligations: {manifest.ClosedObligationIds.Count}{Environment.NewLine}- Unmediated obligations: {manifest.UnmediatedObligationIds.Count}{Environment.NewLine}");
         foreach (var report in testReports)
         {
-            markdown += Environment.NewLine + report + Environment.NewLine;
+            markdown.AppendLine().AppendLine(report);
         }
 
-        await File.AppendAllTextAsync(summaryPath, markdown, new UTF8Encoding(false), cancellationToken);
+        await File.AppendAllTextAsync(summaryPath, markdown.ToString(), new UTF8Encoding(false), cancellationToken);
     }
 }
 

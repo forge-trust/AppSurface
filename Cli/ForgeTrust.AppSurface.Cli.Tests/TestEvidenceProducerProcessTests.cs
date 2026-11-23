@@ -120,6 +120,23 @@ public sealed class TestEvidenceProducerProcessTests
     }
 
     [Fact]
+    public async Task Runner_ShouldThrowWhenCancellationArrivesAfterTheChildExited()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var directory = TestDirectory.Create();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+        // The child exits at once while a grandchild holds the output pipes, so cancellation lands during the drain.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new BoundedChildProcessRunner(TimeSpan.FromSeconds(3)).RunAsync(
+            Shell(directory.Path, "(sleep 30) & exit 0"),
+            cancellation.Token));
+    }
+
+    [Fact]
     public async Task Runner_ShouldTruncateOutputAtTheCap()
     {
         if (OperatingSystem.IsWindows())

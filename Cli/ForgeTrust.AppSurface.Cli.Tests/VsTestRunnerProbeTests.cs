@@ -123,7 +123,10 @@ public sealed class VsTestRunnerProbeTests
 
     private sealed class TempDirectory : IDisposable
     {
-        private TempDirectory(string path) => Path = path;
+        private TempDirectory(string path)
+        {
+            Path = path;
+        }
 
         public string Path { get; }
 
@@ -150,6 +153,7 @@ public sealed class VsTestRunnerProbeTests
             }
             catch (IOException)
             {
+                // Best-effort cleanup of a temporary directory; a leftover directory does not affect the test result.
             }
         }
     }

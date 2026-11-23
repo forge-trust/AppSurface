@@ -1,4 +1,5 @@
 using System.Text;
+using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
 
@@ -250,12 +251,14 @@ public sealed class EvidenceTestProducerPlannerTests
         AssertCode(CreateProducer() with { ArtifactSlots = [Slot(65536) with { LogicalName = "receipt" }] }, "ASEVD146", "test-receipt");
         AssertCode(CreateProducer() with { ArtifactSlots = [Slot(65536) with { MediaType = "text/plain" }] }, "ASEVD146", "application/json");
         AssertCode(CreateProducer() with { ArtifactSlots = [Slot(65536) with { Required = false }] }, "ASEVD146", "\"required\": true");
+        AssertCode(CreateProducer() with { ArtifactSlots = [Slot(65536) with { RelativeRoot = "receipts" }] }, "ASEVD146", "relativeRoot 'test'");
+        AssertCode(CreateProducer() with { ArtifactSlots = [Slot(65536) with { RelativeRoot = "test/nested" }] }, "ASEVD146", "\"relativeRoot\": \"test\"");
     }
 
     [Fact]
     public void ReceiptSlotSizeFloor_ShouldScaleWithProjectsAndPrintTheMinimum()
     {
-        var minimum = 4096 + 512 + Encoding.UTF8.GetByteCount(ProjectPath);
+        var minimum = 4096 + 512 + (6 * ProjectPath.Length);
 
         Assert.Equal(minimum, EvidenceTestProducerContract.GetMinimumReceiptBytes([new EvidenceTestProject(ProjectPath)]));
         EvidencePlanner.ValidatePolicy(CreatePolicy(CreateProducer() with { ArtifactSlots = [Slot(minimum)] }));
@@ -271,12 +274,42 @@ public sealed class EvidenceTestProducerPlannerTests
         var minimum = EvidenceTestProducerContract.GetMinimumReceiptBytes(projects);
 
         Assert.All(projects, static project => Assert.Equal(512, project.Path.Length));
-        Assert.Equal(4096 + (32 * (512 + 2 + (503 * 2) + 7)), minimum);
+        Assert.Equal(4096 + (32 * (512 + (6 * 512))), minimum);
         EvidencePlanner.ValidatePolicy(CreatePolicy(CreateProducer(projects) with { ArtifactSlots = [Slot(minimum)] }));
         var exception = Assert.Throws<EvidencePlanningException>(
             () => EvidencePlanner.ValidatePolicy(CreatePolicy(CreateProducer(projects) with { ArtifactSlots = [Slot(minimum - 1)] })));
         Assert.Equal("ASEVD147", exception.Code);
         Assert.Contains(minimum.ToString(System.Globalization.CultureInfo.InvariantCulture), exception.Fix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Regression: the receipt escapes non-ASCII and HTML-sensitive characters as six-byte sequences, so a floor
+    /// counted in raw UTF-8 let a valid policy fail to write its receipt after the tests ran.
+    /// </summary>
+    [Theory]
+    [InlineData('é')]
+    [InlineData('界')]
+    [InlineData('<')]
+    [InlineData('a')]
+    public void ReceiptSlotSizeFloor_ShouldHoldTheSerializedReceiptForThirtyTwoMaximumLengthPaths(char fill)
+    {
+        var projects = Enumerable.Range(0, 32)
+            .Select(index => new EvidenceTestProject($"{index:D2}" + new string(fill, 503) + ".csproj"))
+            .ToArray();
+        var outcomes = projects
+            .Select(static project => new TestProjectOutcome(
+                project.Path,
+                new string('f', 64),
+                int.MaxValue,
+                new TestRunCounts(int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue),
+                TestRunReason.MultiTargetUnsupported,
+                "ListingShapeUnrecognized",
+                "discover",
+                [],
+                null))
+            .ToArray();
+
+        Assert.True(TestEvidenceProducer.SerializeReceipt(outcomes).Length <= EvidenceTestProducerContract.GetMinimumReceiptBytes(projects));
     }
 
     [Fact]

@@ -21,16 +21,8 @@ public sealed class EvidenceRunTestProducerTests
         fixture.Source.Inventory = ["A.One", HiddenTestName];
         fixture.Source.Results = [new("A.One", TestCaseOutcome.Passed), new(HiddenTestName, TestCaseOutcome.Passed)];
         var stepSummary = Path.Join(fixture.Root, "step-summary.md");
-        var previous = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
-        Environment.SetEnvironmentVariable("GITHUB_STEP_SUMMARY", stepSummary);
-        try
-        {
-            await fixture.RunAsync();
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("GITHUB_STEP_SUMMARY", previous);
-        }
+        fixture.StepSummaryPath = stepSummary;
+        await fixture.RunAsync();
 
         var output = fixture.Console.ReadOutputString();
         Assert.Contains(TestEvidenceRunSupport.PreviewLine, output, StringComparison.Ordinal);
@@ -220,6 +212,66 @@ public sealed class EvidenceRunTestProducerTests
         Assert.True(Directory.Exists(Path.Join(output, "coverage")));
     }
 
+    /// <summary>
+    /// Regression: a producer of another kind may have an id such as <c>../../victim</c>; retiring outputs must never
+    /// join such an id into a path it deletes.
+    /// </summary>
+    [Fact]
+    public void RetireOutputs_ShouldNeverDeleteThroughAnUnvalidatedProducerId()
+    {
+        using var directory = TestDirectory.Create();
+        var output = Path.Join(directory.Path, "nested", "evidence");
+        Directory.CreateDirectory(Path.Join(output, "artifacts"));
+        var victim = Path.Join(directory.Path, "victim");
+        Directory.CreateDirectory(victim);
+        File.WriteAllText(Path.Join(victim, "keep.txt"), "keep");
+        var slot = new EvidenceArtifactSlot("report", "r", "text/plain", false, 10);
+        var profile = new EvidenceProfile(
+            "p",
+            EvidenceProfileScope.Targeted,
+            [],
+            [new EvidenceProducerDeclaration("../../../victim", "custom", "1", [], ["a@1"], [slot], 60)],
+            [new EvidenceObligation("o", "r", "why", ["../../../victim"], "a@1")]);
+        var plan = new EvidencePlanner().Resolve(new EvidencePolicy("s", "1", "p", [profile], []), [new NormalizedDiffPath("x")]);
+
+        TestEvidenceRunSupport.RetireOutputs(output, plan);
+
+        Assert.True(File.Exists(Path.Join(victim, "keep.txt")));
+    }
+
+    [Theory]
+    [InlineData("artifacts")]
+    [InlineData("producer")]
+    public void RetireOutputs_ShouldRefuseToDeleteThroughALinkedDirectory(string linked)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var directory = TestDirectory.Create();
+        var plan = Fixture.Plan(Fixture.Policy());
+        var output = Path.Join(directory.Path, "evidence");
+        var saved = Path.Join(directory.Path, "saved");
+        Directory.CreateDirectory(Path.Join(saved, ProducerId));
+        File.WriteAllText(Path.Join(saved, ProducerId, "keep.txt"), "keep");
+        Directory.CreateDirectory(output);
+        if (linked == "artifacts")
+        {
+            Directory.CreateSymbolicLink(Path.Join(output, "artifacts"), saved);
+        }
+        else
+        {
+            Directory.CreateDirectory(Path.Join(output, "artifacts"));
+            Directory.CreateSymbolicLink(Path.Join(output, "artifacts", ProducerId), Path.Join(saved, ProducerId));
+        }
+
+        var exception = Assert.Throws<EvidenceCliException>(() => TestEvidenceRunSupport.RetireOutputs(output, plan));
+
+        Assert.Equal("ASEVD216", exception.Code);
+        Assert.True(File.Exists(Path.Join(saved, ProducerId, "keep.txt")));
+    }
+
     [Fact]
     public async Task EnforceArtifacts_ShouldDowngradeAProducerWhoseReceiptIsGone_SoTheObligationStaysOpen()
     {
@@ -312,6 +364,12 @@ public sealed class EvidenceRunTestProducerTests
         var unsafeQuote = TestEvidenceRunSupport.FormatRerunHint(["dotnet", "test", "--filter", "Name=it's"]);
         Assert.DoesNotContain(unsafeQuote, static line => line.StartsWith("as one POSIX shell line", StringComparison.Ordinal));
         Assert.Contains("    Name=it's", unsafeQuote);
+        Assert.Equal(
+            "as one POSIX shell line: a-b_c.d/e:f=g,h Z9 'x y' 'a~b' 'a;b' 'a$b'",
+            TestEvidenceRunSupport.FormatRerunHint(["a-b_c.d/e:f=g,h", "Z9", "x y", "a~b", "a;b", "a$b"])[^1]);
+        Assert.DoesNotContain(
+            TestEvidenceRunSupport.FormatRerunHint(["dotnet", "a\nb"]),
+            static line => line.StartsWith("as one POSIX shell line", StringComparison.Ordinal));
         Assert.Empty(TestEvidenceRunSupport.FormatRerunHint([]));
         Assert.Throws<ArgumentNullException>(() => TestEvidenceRunSupport.FormatRerunHint(null!));
     }
@@ -351,6 +409,8 @@ public sealed class EvidenceRunTestProducerTests
         public string PolicyPath { get; }
 
         public FakeSource Source { get; } = new();
+
+        public string? StepSummaryPath { get; set; }
 
         public FakeInMemoryConsole Console { get; } = new();
 
@@ -396,6 +456,7 @@ public sealed class EvidenceRunTestProducerTests
                 Paths = ["scripts/build.sh"],
                 OutputDirectory = Output,
                 RepositoryRootResolver = () => Path.Join(Root, "repo"),
+                StepSummaryPathResolver = () => StepSummaryPath,
                 TestProducerFactory = (id, options) => new TestEvidenceProducer(id, options with { ScratchRoot = Path.Join(Root, "scratch") }, Source),
             };
             await command.ExecuteAsync(Console);

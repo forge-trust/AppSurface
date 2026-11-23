@@ -136,6 +136,7 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
         var started = context.TimeProvider.GetTimestamp();
         var scratch = _options.ScratchRoot ?? Path.Join(Path.GetTempPath(), "appsurface-test-evidence-" + Guid.NewGuid().ToString("N"));
         var outcomes = new TestProjectOutcome?[declared.Count];
+        var discovered = new int[declared.Count];
         LastProjects = [];
         LastTracePath = null;
         try
@@ -146,13 +147,16 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
             var inFlight = -1;
             try
             {
-                await RunProjectsAsync(declared, outcomes, scratch, index => inFlight = index, linked.Token).ConfigureAwait(false);
+                await RunProjectsAsync(declared, outcomes, discovered, scratch, index => inFlight = index, linked.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
                 for (var index = 0; index < declared.Count; index++)
                 {
-                    outcomes[index] ??= Outcome(declared[index], index == inFlight ? TestRunReason.DeadlineExceeded : TestRunReason.NotRun, "deadline");
+                    // A project whose listing finished before the deadline keeps its discovered count in the receipt.
+                    var reason = index == inFlight ? TestRunReason.DeadlineExceeded : TestRunReason.NotRun;
+                    var counts = new TestRunCounts(discovered[index], 0, 0, 0, 0);
+                    outcomes[index] ??= Outcome(declared[index], reason, "deadline") with { Counts = counts };
                 }
             }
 
@@ -188,6 +192,7 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
     private async Task RunProjectsAsync(
         IReadOnlyList<EvidenceTestProject> declared,
         TestProjectOutcome?[] outcomes,
+        int[] discovered,
         string scratch,
         Action<int> setInFlight,
         CancellationToken cancellationToken)
@@ -232,7 +237,7 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
             }
 
             setInFlight(index);
-            outcomes[index] = await RunProjectAsync(declared[index], project, index, declared.Count, scratch, cancellationToken).ConfigureAwait(false);
+            outcomes[index] = await RunProjectAsync(declared[index], project, index, declared.Count, discovered, scratch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -241,6 +246,7 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
         TestRunProject project,
         int index,
         int count,
+        int[] discovered,
         string scratch,
         CancellationToken cancellationToken)
     {
@@ -266,6 +272,7 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
         }
 
         var minimum = declared.MinimumTests ?? 1;
+        discovered[index] = inventory.Identities.Count;
         if (inventory.Identities.Count == 0)
         {
             return Outcome(declared, TestRunReason.EmptyDiscovery, inventory.Step);
@@ -426,9 +433,8 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
             Directory.CreateDirectory(directory);
             var path = Path.Join(directory, $"test-producer-trace-{Id}.txt");
             var text = new StringBuilder().AppendLine(exception.GetType().FullName);
-            foreach (var frame in new StackTrace(exception, fNeedFileInfo: false).GetFrames())
+            foreach (var method in new StackTrace(exception, fNeedFileInfo: false).GetFrames().Select(static frame => frame.GetMethod()))
             {
-                var method = frame.GetMethod();
                 text.Append("   at ").Append(method?.DeclaringType?.FullName).Append('.').AppendLine(method?.Name);
             }
 
@@ -443,14 +449,17 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
 
     private static bool IsInside(string root, string path)
     {
-        var prefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
-        return path.StartsWith(prefix, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        var prefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        // macOS volumes can be case-sensitive, so only Windows compares without regard to case. On a case-insensitive
+        // macOS volume a link whose target is spelled in another case is rejected, which fails closed.
+        return path.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
     /// <summary>Resolves every symbolic link on a path, so containment is judged on the real location.</summary>
     private static string ResolveRealPath(string fullPath, int depth = 0)
     {
-        var pathRoot = Path.GetPathRoot(fullPath) ?? string.Empty;
+        var pathRoot = Path.GetPathRoot(fullPath)!;
         var current = pathRoot;
         foreach (var segment in fullPath[pathRoot.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {

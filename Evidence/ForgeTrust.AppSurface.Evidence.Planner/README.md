@@ -107,8 +107,8 @@ The planner does not classify C# semantics or infer that a getter, constructor, 
 | `ASEVD143` | A producer of another kind declares a `test` block. | Remove the block or set `kind` to `test`. |
 | `ASEVD144` | A `test` producer declares `coverageGate`, `coverageExecution` or a non-default `coverageArtifactRetention`. | Remove the coverage fields; a `test` producer makes no coverage claim. Use kind `coverage` for coverage evidence. |
 | `ASEVD145` | A `test` producer's `assertionIds` is not exactly `["appsurface/test/discovery-complete@1"]`. | Paste the array printed in the message. |
-| `ASEVD146` | A `test` producer does not declare exactly one required `test-receipt` slot with media type `application/json`. | Paste the `artifactSlots` value printed in the message. |
-| `ASEVD147` | The `test-receipt` slot's `maximumBytes` is below 4096 plus, per project, 512 plus the UTF-8 length of its path. | Set `maximumBytes` to at least the minimum printed in the message. |
+| `ASEVD146` | A `test` producer does not declare exactly one required `test-receipt` slot with media type `application/json` and `relativeRoot` `test`. | Paste the `artifactSlots` value printed in the message. |
+| `ASEVD147` | The `test-receipt` slot's `maximumBytes` is below 4096 plus, per project, 512 plus six bytes per character of its path (the worst case of the receipt's JSON escaping). | Set `maximumBytes` to at least the minimum printed in the message. |
 | `ASEVD148` | A `test` producer's `timeoutSeconds` is below 30. | Use 30 or more so the producer keeps time to write its receipt. |
 | `ASEVD149` | A `test` producer id is not one safe path segment (`A-Z a-z 0-9 . _ -`, and not `.` or `..`). | Rename the producer; its id names the artifact directory. Other kinds keep the general identifier rule (`ASEVD121`). |
 

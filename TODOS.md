@@ -226,7 +226,7 @@ Skoolit consumer implementation/adoption is separate future work in the [open ca
 
 ### First repository route for the built-in test producer
 
-**What:** Choose and build the first route in [`.github/evidence.policy.json`](.github/evidence.policy.json) that uses the built-in `test` producer from the [#929 design](docs/designs/issue-929-test-producer.md).
+**What:** Choose and build the first route in [`.github/evidence.policy.json`](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) that uses the built-in `test` producer from the [#929 design](docs/designs/issue-929-test-producer.md).
 
 **Why:** The producer ships proven by fixture tests only. A route in this repository's own CI would exercise it for real.
 

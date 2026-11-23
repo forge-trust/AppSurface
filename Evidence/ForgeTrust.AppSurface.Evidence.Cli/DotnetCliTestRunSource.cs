@@ -120,7 +120,7 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
         [
             "msbuild", Path.GetFileName(project.FullPath), $"-property:Configuration={_configuration}",
             "-getProperty:TargetFrameworks", "-getProperty:TargetFramework", "-getProperty:RunSettingsFilePath",
-            "-getProperty:TestingPlatformDotnetTestSupport", "-nologo",
+            "-getProperty:VSTestSetting", "-getProperty:TestingPlatformDotnetTestSupport", "-nologo",
         ];
         var step = new TestRunStep("evaluate", Command(arguments));
         var result = await _runner.RunAsync(new ChildProcessRequest(_dotnetPath, arguments, project.Directory), cancellationToken).ConfigureAwait(false);
@@ -129,7 +129,7 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
             return step with { Failure = TestRunReason.ToolchainUnavailable, Detail = $"dotnet host '{_dotnetPath}'" };
         }
 
-        if (result.ExitCode != 0 || !TryReadProperties(result.StandardOutput, out var properties))
+        if (result.ExitCode != 0 || !TryReadProperties(result.StandardOutput, out var properties, out var usesVsTestSetting))
         {
             return step with { Failure = TestRunReason.BuildFailed, Detail = "the project could not be evaluated" };
         }
@@ -139,9 +139,14 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
             return step with { Failure = TestRunReason.MultiTargetUnsupported, Detail = string.Join(';', properties.TargetFrameworks) };
         }
 
-        if (properties.RunSettingsFilePath is not null)
+        // VSTest reads VSTestSetting first and falls back to RunSettingsFilePath, so either one selects a settings file.
+        if (properties.RunSettingsFilePath is not null || usesVsTestSetting)
         {
-            return step with { Failure = TestRunReason.RunSettingsUnsupported, Detail = "RunSettingsFilePath is set" };
+            return step with
+            {
+                Failure = TestRunReason.RunSettingsUnsupported,
+                Detail = usesVsTestSetting ? "VSTestSetting is set" : "RunSettingsFilePath is set",
+            };
         }
 
         var globalJson = VsTestRunnerProbe.ClassifyGlobalJson(project.Directory);
@@ -157,7 +162,12 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
 
     /// <inheritdoc />
     public Task<TestRunStep> RestoreAsync(TestRunProject project, CancellationToken cancellationToken) =>
-        RunStepAsync(project, "restore", ["restore", Path.GetFileName(project.FullPath), .. BuildServerFlags], TestRunReason.RestoreFailed, cancellationToken);
+        RunStepAsync(
+            project,
+            "restore",
+            ["restore", Path.GetFileName(project.FullPath), $"-property:Configuration={_configuration}", .. BuildServerFlags],
+            TestRunReason.RestoreFailed,
+            cancellationToken);
 
     /// <inheritdoc />
     public Task<TestRunStep> BuildAsync(TestRunProject project, CancellationToken cancellationToken) =>
@@ -224,9 +234,8 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
         var names = new List<string>();
         identities = names;
         var markers = 0;
-        foreach (var rawLine in standardOutput.Split('\n'))
+        foreach (var line in standardOutput.Split('\n').Select(static rawLine => rawLine.EndsWith('\r') ? rawLine[..^1] : rawLine))
         {
-            var line = rawLine.EndsWith('\r') ? rawLine[..^1] : rawLine;
             if (string.Equals(line, ListingMarker, StringComparison.Ordinal))
             {
                 markers++;
@@ -262,15 +271,16 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
     /// <param name="resultsDirectory">The results directory of one project.</param>
     /// <param name="results">Top-level results; empty on failure.</param>
     /// <returns>
-    /// False when the directory does not hold exactly one file named <see cref="ResultsFileName"/>, or the file is too
-    /// large, malformed, uses a DTD, or its <c>total</c> counter differs from the parsed count.
+    /// False when the directory does not hold exactly one file, named <see cref="ResultsFileName"/>, or the file is too
+    /// large, malformed, uses a DTD, or its <c>total</c> counter differs from the parsed count. Subdirectories, which
+    /// test frameworks create for result attachments, are neither counted nor opened.
     /// </returns>
     internal static bool TryReadResults(string resultsDirectory, out IReadOnlyList<TestCaseResult> results)
     {
         results = [];
         try
         {
-            var entries = Directory.GetFileSystemEntries(resultsDirectory);
+            var entries = Directory.GetFiles(resultsDirectory);
             var path = Path.Join(resultsDirectory, ResultsFileName);
             if (entries.Length != 1 || !string.Equals(Path.GetFileName(entries[0]), ResultsFileName, StringComparison.Ordinal) || !File.Exists(path))
             {
@@ -380,9 +390,10 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
         result.StandardOutput.Contains(text, StringComparison.OrdinalIgnoreCase)
         || result.StandardError.Contains(text, StringComparison.OrdinalIgnoreCase);
 
-    private static bool TryReadProperties(string standardOutput, out VsTestEvaluatedProperties properties)
+    private static bool TryReadProperties(string standardOutput, out VsTestEvaluatedProperties properties, out bool usesVsTestSetting)
     {
         properties = new VsTestEvaluatedProperties(false, [], false, null);
+        usesVsTestSetting = false;
         try
         {
             using var document = JsonDocument.Parse(standardOutput);
@@ -394,6 +405,9 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
             }
 
             properties = VsTestRunnerProbe.ReadEvaluatedProperties(element);
+            usesVsTestSetting = element.TryGetProperty("VSTestSetting", out var setting)
+                && setting.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(setting.GetString());
             return true;
         }
         catch (JsonException)

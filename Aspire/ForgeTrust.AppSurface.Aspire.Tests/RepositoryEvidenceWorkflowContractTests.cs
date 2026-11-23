@@ -152,7 +152,19 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
         Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
         Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", testCommand);
-        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests'", testCommand);
+        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|", testCommand);
+
+        // The native captures instrument the Evidence CLI assemblies, and composed patch coverage counts every capture.
+        // The built-in test producer's tests therefore run in each native lane as well as in the full Linux suite.
+        foreach (var testClass in new[]
+        {
+            "EvidenceTestProducerPlannerTests", "EvidenceArtifactFileValidationTests", "EvidenceRunTestProducerTests", "TestRunReconcilerTests",
+            "DotnetCliTestRunSourceTests", "TestEvidenceProducerTests", "TestEvidenceProducerProcessTests", "VsTestRunnerProbeTests",
+        })
+        {
+            Assert.Contains($"|FullyQualifiedName~{testClass}", testCommand);
+        }
+
         Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
         Assert.Contains("SolutionCoverageHandoffTests", testCommand);
 

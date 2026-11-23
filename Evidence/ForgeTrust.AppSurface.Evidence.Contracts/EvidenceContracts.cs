@@ -250,7 +250,8 @@ public sealed record EvidenceTestDeclaration(IReadOnlyList<EvidenceTestProject> 
 /// </summary>
 /// <remarks>
 /// The filter is public plan data: it appears in the policy, the plan, <c>explain</c>, and rerun hints.
-/// A filter that matches fewer tests than expected still passes unless <see cref="MinimumTests"/> is set.
+/// A filter that matches fewer tests than expected still passes as long as it matches at least
+/// <see cref="MinimumTests"/> tests (one when unset) and they all pass. A filter that matches no test always fails.
 /// </remarks>
 /// <param name="Path">
 /// Repository-relative, forward-slash project file path ending in <c>.csproj</c>, <c>.fsproj</c>, or <c>.vbproj</c>.
@@ -286,6 +287,9 @@ public static class EvidenceTestProducerContract
     /// <summary>The logical name of the single required receipt artifact slot.</summary>
     public const string ReceiptSlotLogicalName = "test-receipt";
 
+    /// <summary>The required <c>relativeRoot</c> of the receipt artifact slot; the receipt is written to <c>test/test-receipt.json</c>.</summary>
+    public const string ReceiptRelativeRoot = "test";
+
     /// <summary>The required media type of the receipt artifact slot.</summary>
     public const string ReceiptMediaType = "application/json";
 
@@ -303,8 +307,13 @@ public static class EvidenceTestProducerContract
 
     /// <summary>
     /// Computes the smallest <c>maximumBytes</c> the receipt slot may declare for a set of projects:
-    /// 4096 bytes, plus 512 bytes and the UTF-8 length of the path for each project.
+    /// 4096 bytes, plus for each project 512 bytes and six bytes per character of its path.
     /// </summary>
+    /// <remarks>
+    /// Six bytes per character is the worst case of the receipt's JSON encoding, which writes a non-ASCII or
+    /// HTML-sensitive character as a <c>\uXXXX</c> escape. Sizing by raw UTF-8 would let a policy with long
+    /// non-ASCII paths pass planning and then fail to write its receipt after the tests ran.
+    /// </remarks>
     /// <param name="projects">Declared projects; a <see langword="null"/> path counts as empty.</param>
     /// <returns>The minimum receipt slot size in bytes.</returns>
     public static long GetMinimumReceiptBytes(IReadOnlyList<EvidenceTestProject> projects)
@@ -313,7 +322,7 @@ public static class EvidenceTestProducerContract
         long total = 4096;
         foreach (var project in projects)
         {
-            total += 512 + System.Text.Encoding.UTF8.GetByteCount(project?.Path ?? string.Empty);
+            total += 512 + (6L * (project?.Path?.Length ?? 0));
         }
 
         return total;
@@ -618,7 +627,9 @@ public sealed class EvidenceArtifactWriter
         {
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             // Write beside the destination and move into place, so a reader never sees a partial artifact.
-            var temporary = destination + ".tmp-" + Guid.NewGuid().ToString("N");
+            // The temporary name is short and independent of the destination name, so a destination near the
+            // file-name length limit of its volume can still be written.
+            var temporary = Path.Join(Path.GetDirectoryName(destination)!, ".tmp-" + Guid.NewGuid().ToString("N"));
             try
             {
                 await File.WriteAllBytesAsync(temporary, contents, cancellationToken).ConfigureAwait(false);
@@ -910,7 +921,7 @@ public static class EvidenceArtifactFileValidation
     /// <param name="cancellationToken">Cancellation token observed while hashing.</param>
     /// <returns>
     /// <see cref="EvidenceArtifactFileStatus.Valid"/> only for an unlinked regular file whose length and digest match.
-    /// Length is compared before hashing, and at most the recorded length is hashed.
+    /// Length is compared before hashing, and the file is opened without write sharing while it is hashed.
     /// </returns>
     public static async Task<EvidenceArtifactFileStatus> CheckAsync(
         string artifactRoot,
@@ -964,24 +975,14 @@ public static class EvidenceArtifactFileValidation
                 return EvidenceArtifactFileStatus.LengthMismatch;
             }
 
+            // The length matched above and the file is open without write sharing, so hashing the stream reads the
+            // recorded number of bytes. A file changed underneath the read simply fails the digest comparison.
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var buffer = new byte[64 * 1024];
-            long remaining = artifact.LengthBytes;
-            while (remaining > 0)
+            int read;
+            while ((read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
             {
-                var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false);
-                if (read == 0)
-                {
-                    return EvidenceArtifactFileStatus.LengthMismatch;
-                }
-
                 hash.AppendData(buffer, 0, read);
-                remaining -= read;
-            }
-
-            if (await stream.ReadAsync(buffer.AsMemory(0, 1), cancellationToken).ConfigureAwait(false) != 0)
-            {
-                return EvidenceArtifactFileStatus.LengthMismatch;
             }
 
             return string.Equals(Convert.ToHexString(hash.GetHashAndReset()), artifact.Sha256, StringComparison.OrdinalIgnoreCase)

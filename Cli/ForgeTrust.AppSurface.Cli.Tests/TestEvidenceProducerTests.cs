@@ -172,6 +172,25 @@ public sealed class TestEvidenceProducerTests
     }
 
     [Fact]
+    public async Task InternalDeadlineDuringTheRun_ShouldKeepTheDiscoveredCount()
+    {
+        using var fixture = Fixture.Create("tests/A/A.csproj", "tests/B/B.csproj");
+        fixture.Source.Inventory["tests/A/A.csproj"] = ["A.One", "A.Two", "A.Three", "A.Four"];
+        fixture.Source.HangAt = "run:tests/A/A.csproj";
+        fixture.Source.OnHang = fixture.Clock.FireTimers;
+
+        var result = await fixture.ProduceAsync();
+
+        Assert.Equal(EvidenceProducerOutcome.TimedOut, result.Outcome);
+        Assert.Equal(new TestRunCounts(4, 0, 0, 0, 0), fixture.Producer.LastProjects[0].Counts);
+        Assert.Equal(TestRunCounts.Zero, fixture.Producer.LastProjects[1].Counts);
+        Assert.Equal("2 project(s), 4 discovered, 0 executed. No coverage claim was made.", result.Diagnostic);
+        using var receipt = fixture.ReadReceipt();
+        Assert.Equal(4, receipt.RootElement.GetProperty("projects")[0].GetProperty("discovered").GetInt32());
+        Assert.Equal("DeadlineExceeded", receipt.RootElement.GetProperty("projects")[0].GetProperty("reason").GetString());
+    }
+
+    [Fact]
     public async Task InternalDeadlineDuringEvaluation_ShouldLeaveUnreachedProjectsNotRun()
     {
         using var fixture = Fixture.Create("tests/A/A.csproj", "tests/B/B.csproj");
@@ -410,9 +429,8 @@ public sealed class TestEvidenceProducerTests
             Repository = Path.Join(Root, "repo");
             Output = Path.Join(Root, "output");
             Scratch = Path.Join(Root, "scratch");
-            foreach (var project in projects)
+            foreach (var path in projects.Select(project => TestPathUtils.PathUnder(Repository, project.Path)))
             {
-                var path = TestPathUtils.PathUnder(Repository, project.Path);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 File.WriteAllText(path, "<Project />");
             }

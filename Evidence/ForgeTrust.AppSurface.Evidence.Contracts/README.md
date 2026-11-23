@@ -97,7 +97,7 @@ A producer of kind `test` declares the test projects it lists, runs and reconcil
 | `EvidenceTestProject.Path` | string | Repository-relative, forward slashes, at most 512 characters, ends in `.csproj`, `.fsproj` or `.vbproj`. |
 | `EvidenceTestProject.Filter` | `string?`, `null` | VSTest filter, at most 1024 characters, one line. Omitted when `null`. |
 | `EvidenceTestProject.MinimumTests` | `int?`, `null` meaning 1 | 1 or greater. Omitted when `null`. |
-| `EvidenceTestProducerContract` | constants | The kind, the single assertion id, the receipt slot name and media type, the limits above, the 30-second minimum timeout, and `GetMinimumReceiptBytes(projects)`. |
+| `EvidenceTestProducerContract` | constants | The kind, the single assertion id, the receipt slot name, media type and required `relativeRoot` (`test`), the limits above, the 30-second minimum timeout, and `GetMinimumReceiptBytes(projects)`: 4096 bytes plus, per project, 512 bytes and six bytes per character of its path. |
 
 The [planner](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#test-producer-rules-preview) enforces every constraint with its own diagnostic, `ASEVD137` through `ASEVD149`.
 
@@ -109,7 +109,7 @@ The [planner](https://github.com/forge-trust/AppSurface/blob/main/Evidence/Forge
 
 - Preview: the kind, the assertion id and this shape may change without a compatibility step until a real route has closed with them.
 - The filter is public plan data. Do not put anything confidential in it.
-- A filter that starts matching fewer tests still passes unless `minimumTests` is set.
+- A filter that starts matching fewer tests still passes as long as it matches at least `minimumTests` tests, or one when no minimum is set. A filter that matches no test always fails.
 - A reader that does not know the `test` property drops it and computes a different `PolicyDigest`. Upgrade every CLI that runs or verifies evidence before adding a `test` block to a shared policy, and remove the block before downgrading.
 
 ## Pitfalls

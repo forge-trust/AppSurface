@@ -97,7 +97,7 @@ public sealed class EvidenceTestProducerReadmeContractTests
         Assert.Contains("it does not scan consumer assemblies, discover test projects,", Readme, StringComparison.Ordinal);
         Assert.DoesNotContain("A skipped test project, filtered test suite, unavailable browser", Readme, StringComparison.Ordinal);
         Assert.Contains("**`verify` proves integrity, not that the gate passed.**", Readme, StringComparison.Ordinal);
-        foreach (var code in new[] { "ASEVD203", "ASEVD208", "ASEVD209", "ASEVD213", "ASEVD214", "ASEVD215" })
+        foreach (var code in new[] { "ASEVD203", "ASEVD208", "ASEVD209", "ASEVD213", "ASEVD214", "ASEVD215", "ASEVD216" })
         {
             Assert.Contains(code, Readme, StringComparison.Ordinal);
         }

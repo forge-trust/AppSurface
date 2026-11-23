@@ -105,8 +105,26 @@ public sealed class DotnetCliTestRunSourceTests
         Assert.False(DotnetCliTestRunSource.TryReadResults(results, out _));
         File.Move(Path.Join(results, "other.trx"), TestPathUtils.PathUnder(results, DotnetCliTestRunSource.ResultsFileName));
         Assert.True(DotnetCliTestRunSource.TryReadResults(results, out _));
+        // Test frameworks keep result attachments in subdirectories; those are neither counted nor opened.
+        Directory.CreateDirectory(Path.Join(results, "attachments"));
+        File.WriteAllText(Path.Join(results, "attachments", "inner.trx"), "not a results file");
+        Assert.True(DotnetCliTestRunSource.TryReadResults(results, out _));
         File.WriteAllText(Path.Join(results, "extra.txt"), "x");
         Assert.False(DotnetCliTestRunSource.TryReadResults(results, out _));
+    }
+
+    [Fact]
+    public void TryReadResults_ShouldRejectAResultsFileOverTheSizeBound()
+    {
+        using var directory = TestDirectory.Create();
+        using (var stream = File.Create(TestPathUtils.PathUnder(directory.Path, DotnetCliTestRunSource.ResultsFileName)))
+        {
+            // Setting the length does not write the bytes, so this stays cheap.
+            stream.SetLength(DotnetCliTestRunSource.MaximumResultsBytes + 1);
+        }
+
+        Assert.False(DotnetCliTestRunSource.TryReadResults(directory.Path, out var results));
+        Assert.Empty(results);
     }
 
     [Fact]
@@ -139,6 +157,11 @@ public sealed class DotnetCliTestRunSourceTests
         Assert.Equal(
             TestRunReason.RunSettingsUnsupported,
             (await Evaluate(project, Ok("""{ "Properties": { "TargetFrameworks": "net10.0", "RunSettingsFilePath": "x", "TestingPlatformDotnetTestSupport": "true" } }"""))).Failure);
+        var vsTestSetting = await Evaluate(project, Ok("""{ "Properties": { "TargetFramework": "net10.0", "RunSettingsFilePath": "", "VSTestSetting": "ci.runsettings", "TestingPlatformDotnetTestSupport": "true" } }"""));
+        Assert.Equal(TestRunReason.RunSettingsUnsupported, vsTestSetting.Failure);
+        Assert.Equal("VSTestSetting is set", vsTestSetting.Detail);
+        Assert.Null((await Evaluate(project, Ok("""{ "Properties": { "TargetFramework": "net10.0", "VSTestSetting": "  " } }"""))).Failure);
+        Assert.Null((await Evaluate(project, Ok("""{ "Properties": { "TargetFramework": "net10.0", "VSTestSetting": 5 } }"""))).Failure);
         Assert.Equal(
             TestRunReason.UnsupportedRunner,
             (await Evaluate(project, Ok("""{ "Properties": { "TargetFramework": "net10.0", "TestingPlatformDotnetTestSupport": "true" } }"""))).Failure);
@@ -146,7 +169,7 @@ public sealed class DotnetCliTestRunSourceTests
         Assert.Null(supported.Failure);
         Assert.Equal("evaluate", supported.Phase);
         Assert.Equal(
-            ["dotnet-x", "msbuild", "A.Tests.csproj", "-property:Configuration=Debug", "-getProperty:TargetFrameworks", "-getProperty:TargetFramework", "-getProperty:RunSettingsFilePath", "-getProperty:TestingPlatformDotnetTestSupport", "-nologo"],
+            ["dotnet-x", "msbuild", "A.Tests.csproj", "-property:Configuration=Debug", "-getProperty:TargetFrameworks", "-getProperty:TargetFramework", "-getProperty:RunSettingsFilePath", "-getProperty:VSTestSetting", "-getProperty:TestingPlatformDotnetTestSupport", "-nologo"],
             supported.Command);
 
         File.WriteAllText(Path.Join(project.Directory, "global.json"), """{ "test": { "runner": "Microsoft.Testing.Platform" } }""");
@@ -169,7 +192,7 @@ public sealed class DotnetCliTestRunSourceTests
         Assert.Null(build.Failure);
         Assert.Equal(TestRunReason.BuildFailed, (await source.BuildAsync(project, CancellationToken.None)).Failure);
 
-        Assert.Equal(["restore", "A.Tests.csproj", "--disable-build-servers", "-nodeReuse:false", "-tl:off", "--nologo"], runner.Requests[0].Arguments);
+        Assert.Equal(["restore", "A.Tests.csproj", "-property:Configuration=Release", "--disable-build-servers", "-nodeReuse:false", "-tl:off", "--nologo"], runner.Requests[0].Arguments);
         Assert.Equal(["dotnet-x", "build", "A.Tests.csproj", "-c", "Release", "--no-restore", "--disable-build-servers", "-nodeReuse:false", "-tl:off", "--nologo"], build.Command);
         Assert.All(runner.Requests, request => Assert.Equal(project.Directory, request.WorkingDirectory));
         Assert.All(runner.Requests, static request => Assert.Equal("dotnet-x", request.FileName));

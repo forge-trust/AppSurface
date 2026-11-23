@@ -73,14 +73,25 @@ internal static class TestEvidenceRunSupport
     }
 
     /// <summary>
-    /// Deletes the manifest, the summary and the selected producers' artifact directories of an earlier run.
+    /// Deletes the manifest, the summary and the selected <c>test</c> producers' artifact directories of an earlier run.
     /// </summary>
     /// <param name="outputDirectory">The evidence output directory.</param>
     /// <param name="plan">The plan about to run.</param>
     /// <remarks>
+    /// <para>
     /// Without this, a rerun that is cancelled after the plan is rewritten would leave the earlier passing manifest in
     /// place, still bound to an identical plan. After a cancelled rerun, <c>verify</c> now reports a missing manifest.
+    /// </para>
+    /// <para>
+    /// Only <c>test</c> producers have artifact directories retired: they are the only producers the CLI gives an
+    /// artifact writer, and the planner guarantees their ids are one safe path segment. A producer of another kind may
+    /// have an id such as <c>../../x</c>, so its id is never joined into a path that is deleted.
+    /// </para>
     /// </remarks>
+    /// <exception cref="EvidenceCliException">
+    /// <c>ASEVD216</c>: the <c>artifacts</c> directory or a producer directory to retire is a symbolic link or other
+    /// reparse point, so deleting through it could remove files outside the output directory.
+    /// </exception>
     public static void RetireOutputs(string outputDirectory, EvidencePlan plan)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
@@ -92,13 +103,32 @@ internal static class TestEvidenceRunSupport
 
         File.Delete(Path.Join(outputDirectory, "evidence-manifest.json"));
         File.Delete(Path.Join(outputDirectory, "evidence-summary.json"));
-        foreach (var producer in plan.Profile.Producers.Where(static producer => producer.ArtifactSlots.Count > 0))
+        var artifactRoot = Path.Join(outputDirectory, "artifacts");
+        if (!Directory.Exists(artifactRoot))
         {
-            var directory = Path.Join(outputDirectory, "artifacts", producer.Id);
+            return;
+        }
+
+        RejectLinkedDirectory(artifactRoot);
+        foreach (var producer in plan.Profile.Producers.Where(IsTestProducer))
+        {
+            var directory = Path.Join(artifactRoot, producer.Id);
             if (Directory.Exists(directory))
             {
+                RejectLinkedDirectory(directory);
                 Directory.Delete(directory, recursive: true);
             }
+        }
+    }
+
+    private static void RejectLinkedDirectory(string directory)
+    {
+        if (File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw new EvidenceCliException(
+                "ASEVD216",
+                $"Evidence artifact directory '{directory}' is a symbolic link or other reparse point.",
+                "Replace it with an ordinary directory inside the evidence output directory, or choose another --output; run never deletes through a link.");
         }
     }
 
@@ -144,7 +174,8 @@ internal static class TestEvidenceRunSupport
         foreach (var producer in plan.Profile.Producers.Where(IsTestProducer))
         {
             lines.Add($"Test producer '{producer.Id}' (timeout {producer.TimeoutSeconds.ToString(CultureInfo.InvariantCulture)}s):");
-            foreach (var project in producer.Test?.Projects ?? [])
+            // The planner guarantees a test producer carries its test block.
+            foreach (var project in producer.Test!.Projects)
             {
                 lines.Add(string.Create(
                     CultureInfo.InvariantCulture,
@@ -169,7 +200,7 @@ internal static class TestEvidenceRunSupport
         {
             id = producer.Id,
             preview = true,
-            projects = (producer.Test?.Projects ?? []).Select(static project => new
+            projects = producer.Test!.Projects.Select(static project => new
             {
                 path = project.Path,
                 filter = project.Filter,

@@ -27,7 +27,7 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 | `init --sample` | Creates a marked, non-overwriting policy, host skeleton, and local README. `--force` may replace only previously marked starter files. |
 | `doctor` | Resolves policy and reports policy, diff, Docker, browser, and release-envelope prerequisites without starting anything. |
 | `explain` | Writes the resolved plan and a human-readable summary without running producers. |
-| `run` | Runs selected built-in `coverage` and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. It first deletes the earlier manifest, summary and the selected producers' artifact directories, so a cancelled rerun cannot leave an old passing manifest behind. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
+| `run` | Runs selected built-in `coverage` and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. It first deletes the earlier manifest, summary and the selected `test` producers' artifact directories, so a cancelled rerun cannot leave an old passing manifest behind. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
 | `verify` | Recomputes binding and digest verification and checks every manifest-listed artifact on disk, without running any producer. See [Verifying evidence](#verifying-evidence). |
 
 ## Incomplete profiles are not complete evidence
@@ -161,7 +161,7 @@ Compiler and test output are not shown and not kept, because they can contain te
 
 1. Start with no filter. The producer then selects every test in the project.
 2. Add a filter only by fully qualified name prefix, for example `FullyQualifiedName~MyCompany.Tooling.Release`. The filter is a [VSTest filter expression](https://learn.microsoft.com/dotnet/core/testing/selective-unit-tests), passed as one argument and never through a shell. `&` and `|` inside a value need a backslash.
-3. Set `minimumTests` to the count the first passing receipt reports. Without it, a filter that starts matching fewer tests still passes; `run` prints a notice when more than one test was discovered and no minimum is declared.
+3. Set `minimumTests` to the count the first passing receipt reports. Without it, a filter that starts matching fewer tests still passes as long as it matches at least one; a filter that matches no test always fails with `EmptyDiscovery`. `run` prints a notice when more than one test was discovered and no minimum is declared.
 
 The filter is public plan data: it appears in the policy, the plan, `explain` and rerun hints. Changing a project, a filter or a minimum changes `PlanDigest`.
 
@@ -170,7 +170,7 @@ The filter is public plan data: it appears in the policy, the plan, `explain` an
 For every declared project, in declaration order:
 
 1. **File check, no process.** The project file must exist and stay inside the repository after links are resolved.
-2. **Evaluate** with `dotnet msbuild -getProperty`: toolchain present, one target framework, no run-settings file, VSTest runner.
+2. **Evaluate** with `dotnet msbuild -getProperty`: toolchain present, one target framework, no run-settings file (`RunSettingsFilePath` or `VSTestSetting`), VSTest runner.
 3. **Restore**, then **build** with `--no-restore`.
 4. **Discover** with `dotnet test --no-build --list-tests`. A listing with no test skips the run.
 5. **Run** with a TRX logger into a private scratch directory, then **reconcile** the listing with the results by test name.
@@ -186,7 +186,7 @@ Each project gets exactly one reason: the first in this table that applies. `Una
 | <a id="reason-projectnotfound"></a>`ProjectNotFound` | `Unavailable` | The declared project file does not exist, or resolves outside the repository. | Policy error: correct the declared project path. Rerunning unchanged cannot help. |
 | <a id="reason-toolchainunavailable"></a>`ToolchainUnavailable` | `Unavailable` | The `dotnet` host could not start or reported no compatible SDK. | Install the SDK that global.json requires or put the right dotnet on PATH. Rerunning unchanged cannot help. |
 | <a id="reason-multitargetunsupported"></a>`MultiTargetUnsupported` | `Unavailable` | The project evaluates to more than one target framework. | This preview runs single-target projects only; declare a single-target test project. Rerunning unchanged cannot help. |
-| <a id="reason-runsettingsunsupported"></a>`RunSettingsUnsupported` | `Unavailable` | The project evaluates `RunSettingsFilePath`. | Remove RunSettingsFilePath for this project or use other evidence; a run-settings file can select tests the policy does not name. Rerunning unchanged cannot help. |
+| <a id="reason-runsettingsunsupported"></a>`RunSettingsUnsupported` | `Unavailable` | The project evaluates `RunSettingsFilePath` or `VSTestSetting`. | Remove RunSettingsFilePath for this project or use other evidence; a run-settings file can select tests the policy does not name. Rerunning unchanged cannot help. |
 | <a id="reason-unsupportedrunner"></a>`UnsupportedRunner` | `Unavailable` | The nearest `global.json` or `TestingPlatformDotnetTestSupport` selects a runner other than VSTest. | Microsoft.Testing.Platform is not supported in this preview (tracked in TODOS.md); use a VSTest project. Rerunning unchanged cannot help. |
 | <a id="reason-restorefailed"></a>`RestoreFailed` | `Unavailable` | `dotnet restore` failed. | Run the printed dotnet restore command and fix the feed or package error. Rerunning unchanged can help after an outage. |
 | <a id="reason-buildfailed"></a>`BuildFailed` | `Failed` | `dotnet build` failed, or the project could not be evaluated. | Run the printed command and fix the build errors. Rerunning unchanged cannot help. |
@@ -215,7 +215,7 @@ Each project gets exactly one reason: the first in this table that applies. `Una
 | `projects[].path` | The declared project path. |
 | `projects[].filterSha256` | Lower-case SHA-256 of the UTF-8 filter text, or `null` without a filter. It binds the receipt to the plan; it is not confidentiality. |
 | `projects[].minimumTests` | The effective minimum. |
-| `projects[].discovered` | Tests the listing selected. |
+| `projects[].discovered` | Tests the listing selected. Kept when the deadline passes after the listing finished. |
 | `projects[].executed` | Results that passed or failed. |
 | `projects[].passed`, `failed`, `skipped` | Results by outcome. Zero where a step never ran. |
 | `projects[].reason` | One of `ProjectNotFound`, `ToolchainUnavailable`, `MultiTargetUnsupported`, `RunSettingsUnsupported`, `UnsupportedRunner`, `RestoreFailed`, `BuildFailed`, `DiscoveryFailed`, `RunAborted`, `ResultsMissingOrStale`, `EmptyDiscovery`, `BelowMinimum`, `AmbiguousIdentity`, `MissingResult`, `UnexpectedResult`, `TestsFailed`, `TestsSkipped`, `Complete`, `DeadlineExceeded`, `NotRun`. |
@@ -249,7 +249,7 @@ jq -e '.ClaimKind == "TargetedComplete" and .Eligibility == "PullRequestGate"' T
 
 ### What closes in this preview
 
-- **Proven:** xunit v2 projects on VSTest, single target framework. Other frameworks are unproven and fail closed.
+- **Proven:** xunit v2 projects on VSTest, single target framework. Other frameworks are unproven and are not rejected by name: an NUnit or MSTest project whose listing and results match the supported shape can reach `Complete`. A project whose listing or results do not match that shape fails closed.
 - **Identity is the printed test name.** In a survey of this repository, 41 of 59 measured test projects reconciled complete with no filter. Projects where two tests print the same name, or where a theory lists once and reports several rows, cannot close unfiltered; those include the largest suites. Narrow the filter to avoid such rows.
 - **Not supported:** more than one target framework, a run-settings file, Microsoft.Testing.Platform, resource-backed profiles.
 
@@ -286,12 +286,14 @@ Tested on 2026-11-22 with released CLI 0.2.0-preview.14 against a CLI that knows
 
 - The claim is "ran and passed", not "exercised the change". A test that returns early passes. Prefer an explicit skip, which leaves the assertion open.
 - A route that replaces broader evidence needs a replayed known regression that the selected tests catch. Selection completeness does not show the tests are the right ones.
-- A filter that matches fewer tests still passes unless `minimumTests` is set.
+- A filter that matches fewer tests still passes as long as it matches at least `minimumTests` tests, or one when no minimum is set. Only a filter that matches nothing fails on its own.
 - Identity is the printed name, so two different tests that swap one name between the listing and the run are not detected.
 - A property supplied only by a restored package's build files is not seen by the evaluation step. A package that switches the runner still fails closed at the listing; a package that supplies a run-settings file would not be detected.
 - `run` builds and executes repository code with the caller's environment, and writes build output into the working tree. Do not run it beside another build of the same project. Producers run one at a time.
-- `run` deletes the earlier manifest, summary and selected artifact directories before it starts. After a cancelled rerun, `verify` reports a missing manifest (`ASEVD208`).
+- `run` deletes the earlier manifest, summary and the selected `test` producers' artifact directories before it starts. After a cancelled rerun, `verify` reports a missing manifest (`ASEVD208`).
 - A resource-backed profile that selects a `test` producer is rejected with `ASEVD214`. Two artifact-writing producers whose ids differ only by case are rejected with `ASEVD215`.
+- `run` refuses to start with `ASEVD216` when the `artifacts` directory or a `test` producer's directory under it is a symbolic link, because retiring earlier outputs would delete through the link. Only `test` producers' artifact directories are retired.
+- The receipt slot must use `relativeRoot` `test`, and its `maximumBytes` must be at least 4096 plus, per project, 512 plus six bytes per character of the project path. The planner checks both (`ASEVD146`, `ASEVD147`) so a run never finishes its tests and then fails to write the receipt.
 
 ## Verifying evidence
 

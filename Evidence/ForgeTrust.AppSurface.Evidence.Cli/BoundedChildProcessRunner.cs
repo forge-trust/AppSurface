@@ -64,7 +64,10 @@ internal sealed class BoundedChildProcessRunner : IChildProcessRunner
 
     /// <summary>Creates a runner.</summary>
     /// <param name="drainTimeout">Longest wait for output after exit or kill; defaults to <see cref="DrainTimeout"/>.</param>
-    public BoundedChildProcessRunner(TimeSpan? drainTimeout = null) => _drainTimeout = drainTimeout ?? DrainTimeout;
+    public BoundedChildProcessRunner(TimeSpan? drainTimeout = null)
+    {
+        _drainTimeout = drainTimeout ?? DrainTimeout;
+    }
 
     /// <summary>Longest wait for output streams to close after the child exits or is killed: 5 seconds.</summary>
     public static TimeSpan DrainTimeout { get; } = TimeSpan.FromSeconds(5);
@@ -124,6 +127,10 @@ internal sealed class BoundedChildProcessRunner : IChildProcessRunner
         }
 
         var drained = await DrainAsync(drain).ConfigureAwait(false);
+
+        // Cancellation can arrive after the child exits and during the drain; honor it so the caller never treats a
+        // cancelled step as a completed one.
+        cancellationToken.ThrowIfCancellationRequested();
         return new ChildProcessResult(
             true,
             process.ExitCode,

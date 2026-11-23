@@ -183,11 +183,7 @@ internal static class RepositoryEvidenceWorkflow
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var status = await EvidenceArtifactFileValidation.CheckAsync(artifactRoot, producer.ProducerId, artifact, cancellationToken);
-                if (status == EvidenceArtifactFileStatus.InvalidPath)
-                {
-                    throw new ArgumentException("Retained artifact path is not a normalized relative path.", nameof(manifest));
-                }
-
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.InvalidPath, "normalized retained artifact path");
                 ValidationProof.Require(status != EvidenceArtifactFileStatus.Linked, "unlinked retained artifact path");
                 ValidationProof.Require(status != EvidenceArtifactFileStatus.Missing, "retained artifact present");
                 ValidationProof.Require(status != EvidenceArtifactFileStatus.LengthMismatch, "retained artifact length");

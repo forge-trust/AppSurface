@@ -432,7 +432,7 @@ public sealed class EvidencePlanner
     /// <remarks>
     /// Check order, first failure wins: block on another kind (143), producer id (149), block and project count (137, 138),
     /// per project path, duplicate, filter and minimum (139 through 142), coverage fields (144), assertion id (145),
-    /// receipt slot shape and size (146, 147), timeout (148).
+    /// receipt slot shape, including its root, and size (146, 147), timeout (148).
     /// </remarks>
     private static void ValidateTestProducer(EvidenceProducerDeclaration producer)
     {
@@ -532,15 +532,16 @@ public sealed class EvidencePlanner
         }
 
         var minimumBytes = EvidenceTestProducerContract.GetMinimumReceiptBytes(projects);
-        var slotJson = $"\"artifactSlots\": [ {{ \"logicalName\": \"{EvidenceTestProducerContract.ReceiptSlotLogicalName}\", \"relativeRoot\": \"test\", \"mediaType\": \"{EvidenceTestProducerContract.ReceiptMediaType}\", \"required\": true, \"maximumBytes\": {Math.Max(65536, minimumBytes)} }} ]";
+        var slotJson = $"\"artifactSlots\": [ {{ \"logicalName\": \"{EvidenceTestProducerContract.ReceiptSlotLogicalName}\", \"relativeRoot\": \"{EvidenceTestProducerContract.ReceiptRelativeRoot}\", \"mediaType\": \"{EvidenceTestProducerContract.ReceiptMediaType}\", \"required\": true, \"maximumBytes\": {Math.Max(65536, minimumBytes)} }} ]";
         if (producer.ArtifactSlots.Count != 1
             || !string.Equals(producer.ArtifactSlots[0].LogicalName, EvidenceTestProducerContract.ReceiptSlotLogicalName, StringComparison.Ordinal)
             || !string.Equals(producer.ArtifactSlots[0].MediaType, EvidenceTestProducerContract.ReceiptMediaType, StringComparison.Ordinal)
-            || !producer.ArtifactSlots[0].Required)
+            || !producer.ArtifactSlots[0].Required
+            || !string.Equals(producer.ArtifactSlots[0].RelativeRoot, EvidenceTestProducerContract.ReceiptRelativeRoot, StringComparison.Ordinal))
         {
             throw new EvidencePlanningException(
                 "ASEVD146",
-                $"Test producer '{producer.Id}' must declare exactly one required '{EvidenceTestProducerContract.ReceiptSlotLogicalName}' artifact slot with media type {EvidenceTestProducerContract.ReceiptMediaType}; it declares {producer.ArtifactSlots.Count} slot(s).",
+                $"Test producer '{producer.Id}' must declare exactly one required '{EvidenceTestProducerContract.ReceiptSlotLogicalName}' artifact slot with media type {EvidenceTestProducerContract.ReceiptMediaType} and relativeRoot '{EvidenceTestProducerContract.ReceiptRelativeRoot}', where the receipt is written; it declares {producer.ArtifactSlots.Count} slot(s).",
                 $"Use {slotJson}.");
         }
 
