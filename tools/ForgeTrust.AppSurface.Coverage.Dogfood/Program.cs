@@ -17,7 +17,7 @@ return args.Length > 0 && args[0] == "--package-proof"
 
 internal static class CoverageDogfood
 {
-    internal const string NativeFilter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn";
+    internal const string NativeFilter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests";
     private const string ReportProfileId = "coverlet-collector-cobertura-v1";
     private const string CollectorPackageVersion = "10.0.1";
     private const string ShadowProofFileName = "shadow-proof.json";
