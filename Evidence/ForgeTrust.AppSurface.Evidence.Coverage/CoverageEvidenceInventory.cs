@@ -44,6 +44,8 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     /// <param name="result">A successful collection and passing gate; other results are ineligible.</param>
     /// <param name="publications">Complete writer-owned publications; the 128-file total also includes any current-run sidecar.</param>
     /// <param name="token">Producer cancellation/deadline, propagated rather than treated as optional ineligibility.</param>
+    /// <param name="afterSidecarParsed">Optional per-call scheduling seam used to verify that parsing and hashing
+    /// consume one immutable, bounded byte snapshot. Production omits it.</param>
     /// <returns>A complete validated receipt inventory, including an eligible current-run sidecar when present.</returns>
     /// <remarks>Includes the current-run history sidecar when the managed session published one. That sidecar is
     /// optional in the existing retention workflow; receipt eligibility does not enable or require history storage.
@@ -52,7 +54,7 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     /// representable 32-bit values equal to the supported version; malformed numbers refuse receipt capture
     /// without replacing the actual fresh collection and gate outcome.</remarks>
     internal static CoverageEvidenceInventory Capture(string outputRoot, CoverageEvidenceExecutionResult result,
-        IReadOnlyList<CoverageArtifactInventoryEntry> publications, CancellationToken token)
+        IReadOnlyList<CoverageArtifactInventoryEntry> publications, CancellationToken token, Action? afterSidecarParsed = null)
     {
         if (!result.Run.Success || result.Gate is null || !result.Gate.Passed)
             throw new CoverageEvidenceInventoryException("inventory-result-not-passed");
@@ -69,11 +71,23 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
             using (var manifest = Open(root, manifestPath))
             {
                 if (manifest.Length > MaximumMetadataBytes) throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
-                var run = CoverageArtifactSession.ReadCurrent(manifest);
+                var bytes = new byte[MaximumMetadataBytes + 1];
+                var count = 0;
+                while (count < bytes.Length)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var read = manifest.Read(bytes, count, Math.Min(64 * 1024, bytes.Length - count));
+                    if (read == 0) break;
+                    count += read;
+                }
+                if (count > MaximumMetadataBytes) throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
+                using var snapshot = new MemoryStream(bytes, 0, count, writable: false);
+                var run = CoverageArtifactSession.ReadCurrent(snapshot);
                 if (run.ManifestBase.Outcome != "success" || !run.Inventory.SequenceEqual(publications))
                     throw new CoverageEvidenceInventoryException("inventory-run-manifest-mismatch");
-                manifest.Position = 0;
-                paths.Add(new(manifestPath, manifest.Length, Hash(manifest, token)));
+                afterSidecarParsed?.Invoke();
+                token.ThrowIfCancellationRequested();
+                paths.Add(new(manifestPath, count, Convert.ToHexStringLower(SHA256.HashData(bytes.AsSpan(0, count)))));
             }
         var inventory = new CoverageEvidenceInventory(CurrentVersion, paths.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray());
         inventory.Validate(root, token);
@@ -169,10 +183,7 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     {
         ArgumentNullException.ThrowIfNull(writer);
         Validate(outputRoot, cancellationToken);
-        if (slot.LogicalName != LogicalName || slot.RelativeRoot != "coverage" || slot.MaximumFiles is null
-            || slot.MaximumFiles > MaximumFiles || slot.MaximumFiles < Files.Count || slot.MaximumBytes < Files.Sum(file => file.LengthBytes)
-            || writer.WrittenArtifacts.Count != 0)
-            throw new CoverageEvidenceInventoryException("inventory-slot-ineligible");
+        ValidateSlot(writer, slot);
         var results = new List<EvidenceArtifactResult>(Files.Count);
         foreach (var file in Files)
         {
@@ -181,6 +192,43 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
             if (artifact.LengthBytes != file.LengthBytes || artifact.Sha256 != file.Sha256)
                 throw new CoverageEvidenceInventoryException("inventory-file-changed");
             results.Add(artifact);
+        }
+        return results;
+    }
+
+    /// <summary>Checks complete custody bounds before any optional file is copied or registered.</summary>
+    /// <param name="writer">Fresh bounded custody writer.</param>
+    /// <param name="slot">Explicit report slot with sufficient count and aggregate byte capacity.</param>
+    /// <exception cref="CoverageEvidenceInventoryException">The complete set cannot fit the declared custody slot.</exception>
+    internal void ValidateSlot(EvidenceArtifactWriter writer, EvidenceArtifactSlot slot)
+    {
+        if (slot.LogicalName != LogicalName || slot.RelativeRoot != "coverage" || slot.MaximumFiles is null
+            || slot.MaximumFiles > MaximumFiles || slot.MaximumFiles < Files.Count || slot.MaximumBytes < Files.Sum(file => file.LengthBytes)
+            || writer.WrittenArtifacts.Count != 0)
+            throw new CoverageEvidenceInventoryException("inventory-slot-ineligible");
+    }
+
+    /// <summary>Adopts a complete set of already delivered reports without rewriting their canonical paths.</summary>
+    /// <param name="writer">Fresh bounded writer for the exact controlled report root.</param>
+    /// <param name="slot">Explicit complete report-custody slot.</param>
+    /// <param name="outputRoot">Root already populated by atomic ordinary delivery.</param>
+    /// <param name="token">Cancels complete-set validation; partial registration never authorizes a receipt.</param>
+    /// <returns>Complete bounded metadata after native no-follow validation of every report.</returns>
+    /// <remarks>All slot and aggregate bounds are checked before registration. The coordinator must still verify
+    /// the writer and final source bytes during receipt admission. This operation writes no report bytes.</remarks>
+    internal IReadOnlyList<EvidenceArtifactResult> AdoptDelivered(EvidenceArtifactWriter writer,
+        EvidenceArtifactSlot slot, string outputRoot, CancellationToken token)
+    {
+        if (Path.GetFullPath(outputRoot) != writer.RootPath)
+            throw new CoverageEvidenceInventoryException("inventory-custody-root-mismatch");
+        Validate(outputRoot, token);
+        ValidateSlot(writer, slot);
+        var results = Files.Select(file => new EvidenceArtifactResult(slot.LogicalName, file.RelativePath,
+            slot.MediaType, file.LengthBytes, file.Sha256)).ToArray();
+        foreach (var artifact in results)
+        {
+            token.ThrowIfCancellationRequested();
+            writer.RecordVerifiedExistingArtifact(artifact);
         }
         return results;
     }

@@ -19,7 +19,7 @@ public sealed class EvidenceReuseCommandTests
         File.WriteAllText(sentinel, "caller-owned sentinel");
         var root = Path.GetPathRoot(temporary.Path)!;
 
-        var failure = Assert.Throws<InvalidOperationException>(() =>
+        var failure = Assert.Throws<ArgumentException>(() =>
             EvidenceReuseOutput.CreateFreshRoot(root, temporary.Path));
 
         Assert.Contains("reuse.output_invalid", failure.Message, StringComparison.Ordinal);

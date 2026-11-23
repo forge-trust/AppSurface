@@ -65,20 +65,23 @@ public sealed class EvidenceReceiptAcquisitionFailureCoverageTests
             {
                 var failures = new List<Exception>();
                 Attempt(cancellation.Cancel);
-                Attempt(() => heldSecondKey?.Dispose());
-                if (acquisition is not null)
+                try
                 {
-                    try
+                    Attempt(() => heldSecondKey?.Dispose());
+                    if (acquisition is not null)
                     {
-                        var acquired = await acquisition;
-                        foreach (var lease in acquired.Reverse()) Attempt(lease.Dispose);
+                        try
+                        {
+                            var acquired = await acquisition;
+                            foreach (var lease in acquired.Reverse()) Attempt(lease.Dispose);
+                        }
+                        catch (OperationCanceledException) when (acquisition.IsCompleted) { }
+                        catch (Exception exception) { failures.Add(exception); }
                     }
-                    catch (OperationCanceledException) when (acquisition.IsCompleted) { }
-                    catch (Exception exception) { failures.Add(exception); }
+                    if (returnedLeases is not null)
+                        foreach (var lease in returnedLeases.Reverse()) Attempt(lease.Dispose);
                 }
-                if (returnedLeases is not null)
-                    foreach (var lease in returnedLeases.Reverse()) Attempt(lease.Dispose);
-                Attempt(cancellation.Dispose);
+                finally { Attempt(cancellation.Dispose); }
                 if (failures.Count != 0)
                 {
                     throw new AggregateException($"Cleanup failed; the private fixture is retained at {root}.", failures);
@@ -157,16 +160,27 @@ public sealed class EvidenceReceiptAcquisitionFailureCoverageTests
             nativeHolder?.Dispose();
             if (acquisition is not null)
             {
+                IReadOnlyList<EvidenceReceiptStore.EvidenceReceiptKeyLease>? acquired = null;
                 try
                 {
-                    var acquired = await acquisition.WaitAsync(TimeSpan.FromSeconds(20));
-                    foreach (var lease in acquired.Reverse()) lease.Dispose();
+                    acquired = await acquisition.WaitAsync(TimeSpan.FromSeconds(20));
                 }
                 catch (TimeoutException) when (!acquisition.IsCompleted)
                 {
                     throw new TimeoutException($"Actual acquisition still owns the retained fixture at {root}.");
                 }
                 catch (Exception) when (acquisition.IsCompleted) { }
+                if (acquired is not null)
+                {
+                    var failures = new List<Exception>();
+                    foreach (var lease in acquired.Reverse())
+                    {
+                        try { lease.Dispose(); }
+                        catch (Exception failure) { failures.Add(failure); }
+                    }
+                    if (failures.Count != 0)
+                        throw new AggregateException($"Lease cleanup failed; retained fixture at {root}.", failures);
+                }
             }
             if (reservationIndexBytes is not null)
             {

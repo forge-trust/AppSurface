@@ -252,11 +252,19 @@ internal sealed class EvidenceReceiptStore
             ?? throw new IOException("Receipt store root is unavailable.");
     }
 
-    private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-    private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    private static StringComparer PathComparer => StringComparer.OrdinalIgnoreCase;
+    private static StringComparison PathComparison => StringComparison.OrdinalIgnoreCase;
     private static bool PathsOverlap(string left, string right) => IsWithin(left, right) || IsWithin(right, left);
-    private static bool IsWithin(string parent, string candidate) => string.Equals(parent, candidate, PathComparison)
-        || candidate.StartsWith(parent + Path.DirectorySeparatorChar, PathComparison);
+    private static bool IsWithin(string parent, string candidate)
+    {
+        var normalizedParent = Path.TrimEndingDirectorySeparator(parent);
+        var normalizedCandidate = Path.TrimEndingDirectorySeparator(candidate);
+        if (string.Equals(normalizedParent, normalizedCandidate, PathComparison)) return true;
+        var parentPrefix = Path.EndsInDirectorySeparator(normalizedParent)
+            ? normalizedParent
+            : normalizedParent + Path.DirectorySeparatorChar;
+        return normalizedCandidate.StartsWith(parentPrefix, PathComparison);
+    }
 
     private static string EnsureChild(string parentPath, string name)
     {
@@ -360,20 +368,21 @@ internal sealed class EvidenceReceiptStore
             foreach (var candidate in candidates)
             {
                 var verified = Peek(candidate.Key);
-                if (!verified.IsCandidate || verified.Result?.ProducerId != producerId || verified.InputIdentity is not { } identity)
+                if (!verified.IsCandidate || verified.Result?.ProducerId != producerId
+                    || verified.InputIdentity is not { } identity || verified.OriginCompletedAt is not { } verifiedCompletedAt)
                     continue;
                 var differingPath = EvidenceProducerIdentityBuilder.FirstDifferingPath(
                     current.Files.Select(static file => new EvidenceProducerInputFile(file.RelativePath, file.Mode, file.LengthBytes, file.Sha256)).ToArray(),
                     identity.Files.Select(static file => new EvidenceProducerInputFile(
                         file.RelativePath, file.Mode, file.LengthBytes, file.Sha256)).ToArray());
                 if (differingPath is not null)
-                    return EvidenceReceiptComparableResult.Candidate("input-files-differ", differingPath, null, candidate.OriginCompletedAt);
+                    return EvidenceReceiptComparableResult.Candidate("input-files-differ", differingPath, null, verifiedCompletedAt);
                 var component = currentIdentity.ComponentHashes.Keys.Union(identity.ComponentHashes.Keys, StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal).FirstOrDefault(name =>
                         currentIdentity.ComponentHashes.GetValueOrDefault(name) != identity.ComponentHashes.GetValueOrDefault(name));
                 return component is null
-                    ? EvidenceReceiptComparableResult.Candidate("identity-matches", null, null, candidate.OriginCompletedAt)
-                    : EvidenceReceiptComparableResult.Candidate("identity-component-differs", null, component, candidate.OriginCompletedAt);
+                    ? EvidenceReceiptComparableResult.Candidate("identity-matches", null, null, verifiedCompletedAt)
+                    : EvidenceReceiptComparableResult.Candidate("identity-component-differs", null, component, verifiedCompletedAt);
             }
             return EvidenceReceiptComparableResult.Miss("no-comparable-receipt");
         }
@@ -675,12 +684,14 @@ internal sealed class EvidenceReceiptStore
         /// Production callers omit this callback. It does not run for artifacts refused during preflight.
         /// Any exception escaping staging attempts cleanup of all earlier staged requests before propagation;
         /// unconfirmed cleanup retains its quota reservation.</param>
+        /// <param name="beforeAuthorityCommitForTests">Optional per-call fault seam invoked after staging and before the atomic authority commit. Production callers omit this callback.</param>
         /// <returns>A publication result for each requested producer.</returns>
         internal static async Task<IReadOnlyDictionary<string, EvidenceReceiptPublicationResult>> PublishInvocationCoreAsync(
             string storeRoot, string repositoryNamespace, string executionId, EvidencePlan originPlan,
             EvidenceManifest originManifest, IReadOnlyList<EvidenceReceiptPublicationRequest> requests,
             CancellationToken cancellationToken, Action? afterAuthorityCommitForTests = null,
-            Action<EvidenceReceiptPublicationRequest, EvidenceArtifactResult>? beforeArtifactCopyForTests = null)
+            Action<EvidenceReceiptPublicationRequest, EvidenceArtifactResult>? beforeArtifactCopyForTests = null,
+            Action? beforeAuthorityCommitForTests = null)
         {
             var outputs = new Dictionary<string, EvidenceReceiptPublicationResult>(StringComparer.Ordinal);
             var auditBatch = requests.Any(request => request.Lease.ReadState()?.AuditIntentExecutionId == executionId);
@@ -720,6 +731,7 @@ internal sealed class EvidenceReceiptStore
                 var commits = staged.Select(stage => new EvidenceReceiptBatchCommit(repositoryNamespace, stage.Lease.Key,
                     stage.ProducerId, executionId, stage.NextState, stage.StateBytes, stage.PayloadName, stage.CompletedAt,
                     stage.PayloadBytes, stage.ReservationBytes, stage.Lease.EssentialReservationId)).ToArray();
+                beforeAuthorityCommitForTests?.Invoke();
                 EvidenceReceiptQuota.CommitInvocation(storeRoot, commits);
                 afterAuthorityCommitForTests?.Invoke();
                 foreach (var stage in staged)
@@ -730,13 +742,13 @@ internal sealed class EvidenceReceiptStore
                         foreach (var retiredPayload in EvidenceReceiptQuota.ReadRetiredPayloadNames(storeRoot,
                                      repositoryNamespace, stage.Lease.Key))
                         {
-                            var deleted = EvidenceReceiptKeyLease.TryDeleteOwnedPayload(stage.Lease.DirectoryPath, retiredPayload);
+                            var deleted = EvidenceReceiptKeyLease.TryDeleteOwnedPayload(stage.Lease.DirectoryPath, retiredPayload, recoverCommittedStage: true);
                             EvidenceReceiptQuota.ReleaseRetiredPayload(storeRoot, repositoryNamespace,
                                 stage.Lease.Key, retiredPayload, deleted);
                         }
                     }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-                        or InvalidOperationException or NotSupportedException)
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
+                        or JsonException or ArgumentException or InvalidOperationException or NotSupportedException or KeyNotFoundException)
                     {
                         // Keep unconfirmed retired bytes charged; later maintenance can safely retry under a free key lease.
                     }
@@ -746,12 +758,26 @@ internal sealed class EvidenceReceiptStore
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
                 or JsonException or ArgumentException or InvalidOperationException or KeyNotFoundException or CoverageEvidenceInventoryException)
             {
-                // Publication can fail after its atomic rename becomes visible (for example, directory fsync).
-                // Retain every final payload and its accounting: authority may already reference the new batch.
-                // A later key-lease owner can reconcile exact bound reservations without deleting committed bytes.
+                if (IsConfirmedNotCommitted(staged))
+                    await CleanupStagedAsync(staged).ConfigureAwait(false);
+                // A failed or unreadable authority snapshot is indeterminate. Preserve every final payload and
+                // reservation because the atomic index replacement may already be visible.
                 foreach (var item in staged)
                     outputs[item.ProducerId] = EvidenceReceiptPublicationResult.Refused("invocation-batch-commit-failed");
                 return outputs;
+            }
+        }
+
+        private static bool IsConfirmedNotCommitted(IReadOnlyList<StagedReceiptPublication> staged)
+        {
+            try
+            {
+                return staged.All(item => item.Lease.ReadState() == item.PreviousState);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
+                or JsonException or ArgumentException or InvalidOperationException or KeyNotFoundException or NotSupportedException)
+            {
+                return false;
             }
         }
 
@@ -778,7 +804,7 @@ internal sealed class EvidenceReceiptStore
                     || result.ProducerKey is not null || !EvidenceArtifactValidation.AreValid(producer, result.Artifacts))
                     return StagePublicationOutcome.Refused("producer-not-reusable-passed-result");
                 var sourceRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.SourceArtifactRoot));
-                if (IsSameOrNested(sourceRoot, storeRoot) || IsSameOrNested(storeRoot, sourceRoot))
+                if (EvidenceReceiptStore.IsWithin(sourceRoot, storeRoot) || EvidenceReceiptStore.IsWithin(storeRoot, sourceRoot))
                     return StagePublicationOutcome.Refused("source-root-overlaps-receipt-store");
                 var artifacts = result.Artifacts ?? [];
                 await VerifySourceArtifactsAsync(sourceRoot, artifacts, cancellationToken).ConfigureAwait(false);
@@ -787,6 +813,10 @@ internal sealed class EvidenceReceiptStore
                 var planBytes = EvidenceCanonicalJson.Serialize(originPlan);
                 var manifestBytes = EvidenceCanonicalJson.Serialize(originManifest);
                 var producerBytes = EvidenceCanonicalJson.Serialize(result);
+                // The authority reader bounds the Base64 producer record to MaximumStateBytes characters.
+                // Bound the raw bytes before reserving payload capacity or creating a staging directory.
+                if (producerBytes.Length > MaximumStateBytes / 4 * 3)
+                    return StagePublicationOutcome.Refused("producer-result-too-large");
                 var identity = request.Identity is null
                     ? EvidenceReceiptInputIdentity.Create(request.ComponentHashes, request.Files)
                     : EvidenceReceiptInputIdentity.Create(request.Identity);
@@ -851,8 +881,10 @@ internal sealed class EvidenceReceiptStore
                         InputIdentityDigest = identityBytes.Length == 0 ? null : Hash(identityBytes)
                     };
                     var encodedStateBytes = JsonSerializer.SerializeToUtf8Bytes(next).Length;
+                    if (encodedStateBytes > MaximumStateBytes)
+                        throw new IOException("Serialized receipt authority exceeds its encoded-byte bound.");
                     return StagePublicationOutcome.Ready(new(this, request.ProducerId, payloadName, request.CompletedAt,
-                        reservationId, reservation, payloadBytes, encodedStateBytes, next, state.PayloadDirectoryName));
+                        reservationId, reservation, payloadBytes, encodedStateBytes, next, state, state.PayloadDirectoryName));
                 }
                 catch
                 {
@@ -884,18 +916,22 @@ internal sealed class EvidenceReceiptStore
         /// <param name="keyDirectory">The retained private key-directory path.</param>
         /// <param name="name">The generated stage or payload component name.</param>
         /// <param name="identity">The previously retained directory identity when available.</param>
-        /// <returns>True only when the named entry is confirmed absent.</returns>
-        internal static bool TryDeleteOwnedPayload(string keyDirectory, string name, string? identity = null)
+        /// <param name="recoverCommittedStage">Whether committed or retired authority permits recovery of the exact
+        /// generated paired stage. Defaults false; precommit cleanup keeps its explicit stage identity.</param>
+        /// <returns>True only when every authorized entry is confirmed absent.</returns>
+        internal static bool TryDeleteOwnedPayload(string keyDirectory, string name, string? identity = null,
+            bool recoverCommittedStage = false)
         {
             try
             {
                 using var root = CoverageRunOutputLease.AcquireArtifactDirectory(keyDirectory, false, true);
                 if (root is null) return false;
-                var item = root.EnumerateArtifactEntries(MaximumPayloadFiles + 8).SingleOrDefault(entry => entry.Name == name);
+                if (recoverCommittedStage) return EvidenceReceiptQuota.DeleteOwnedPayloadIfPresent(root, name, identity);
+                var item = root.EnumerateArtifactEntries(MaximumPayloadFiles * 4 + 8).SingleOrDefault(entry => entry.Name == name);
                 if (item is null) return true;
                 if (item is not { IsDirectory: true }) return false;
-                root.DeleteArtifactEntry(name, MaximumPayloadFiles + 8, identity ?? item.Identity);
-                return root.EnumerateArtifactEntries(MaximumPayloadFiles + 8).All(entry => entry.Name != name);
+                root.DeleteArtifactEntry(name, MaximumPayloadFiles * 4 + 8, identity ?? item.Identity);
+                return root.EnumerateArtifactEntries(MaximumPayloadFiles * 4 + 8).All(entry => entry.Name != name);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or NotSupportedException)
             { return false; }
@@ -936,7 +972,7 @@ internal sealed class EvidenceReceiptStore
 
         private sealed record StagedReceiptPublication(EvidenceReceiptKeyLease Lease, string ProducerId,
             string PayloadName, DateTimeOffset CompletedAt, string ReservationId, long ReservationBytes, long PayloadBytes, int StateBytes,
-            EvidenceReceiptState NextState, string? PreviousPayloadName);
+            EvidenceReceiptState NextState, EvidenceReceiptState PreviousState, string? PreviousPayloadName);
 
         private sealed record StagePublicationOutcome(StagedReceiptPublication? Stage, EvidenceReceiptPublicationResult? Result)
         {
@@ -968,7 +1004,7 @@ internal sealed class EvidenceReceiptStore
                 EvidenceReceiptQuota.InvalidatePayload(this, current, invalidated);
                 foreach (var retiredPayload in EvidenceReceiptQuota.ReadRetiredPayloadNames(storeRoot, repositoryNamespace, Key))
                 {
-                    var deleted = TryDeleteOwnedPayload(directory, retiredPayload);
+                    var deleted = TryDeleteOwnedPayload(directory, retiredPayload, recoverCommittedStage: true);
                     EvidenceReceiptQuota.ReleaseRetiredPayload(storeRoot, repositoryNamespace, Key, retiredPayload, deleted);
                 }
             }
@@ -1152,8 +1188,11 @@ internal sealed class EvidenceReceiptStore
             {
                 try { _ = EvidenceArtifactValidation.NormalizePortableRelativePath(artifact.RelativePath); }
                 catch (ArgumentException exception) { throw new InvalidDataException("Receipt artifact path is not portable.", exception); }
+                var parts = artifact.RelativePath.Split('/');
+                // The payload's artifacts container adds one directory to the exact-tree depth.
+                if (parts.Length > 32) throw new InvalidDataException("Receipt artifact path exceeds its depth bound.");
                 var prefix = string.Empty;
-                foreach (var part in artifact.RelativePath.Split('/'))
+                foreach (var part in parts)
                 {
                     prefix = prefix.Length == 0 ? part : prefix + "/" + part;
                     if (components.TryGetValue(prefix, out var spelling) && spelling != prefix)
@@ -1161,6 +1200,9 @@ internal sealed class EvidenceReceiptStore
                     components[prefix] = prefix;
                 }
             }
+            // Four metadata files and the artifacts container also consume exact-tree entries.
+            if (components.Count + 5 > MaximumPayloadFiles * 4)
+                throw new InvalidDataException("Receipt artifact tree exceeds its bounded entry count.");
         }
 
         private static void ValidateCoverageReceiptInventory(EvidenceProducerDeclaration producer,
@@ -1280,7 +1322,7 @@ internal sealed class EvidenceReceiptStore
                 {
                     if (item.Prefix.Count(static character => character == '/') >= 32)
                         throw new InvalidDataException("Receipt payload nesting exceeds its bound.");
-                    foreach (var entry in item.Root.EnumerateArtifactEntries(MaximumPayloadFiles + 8))
+                    foreach (var entry in item.Root.EnumerateArtifactEntries(MaximumPayloadFiles * 4 + 8))
                     {
                         if (++entryCount > maximumTreeEntries) throw new InvalidDataException("Receipt payload tree exceeds its bound.");
                         var path = item.Prefix.Length == 0 ? entry.Name : item.Prefix + "/" + entry.Name;
@@ -1298,13 +1340,6 @@ internal sealed class EvidenceReceiptStore
                 if (!actualFiles.SetEquals(expectedFiles)) throw new InvalidDataException("Receipt payload inventory differs from its manifest.");
             }
             finally { foreach (var item in owned.AsEnumerable().Reverse()) item.Dispose(); }
-        }
-
-        private static bool IsSameOrNested(string parent, string candidate)
-        {
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            return string.Equals(parent, candidate, comparison)
-                || candidate.StartsWith(parent + Path.DirectorySeparatorChar, comparison);
         }
 
         private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();

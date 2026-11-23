@@ -389,6 +389,44 @@ public sealed class EvidenceReceiptStoreTests
         finally { DeleteIfPresent(storeRoot); DeleteIfPresent(sourceRoot); }
     }
 
+    [Theory]
+    [InlineData(49_153, "producer-result-too-large")]
+    [InlineData(49_152, "payload-publication-failed")]
+    public async Task OversizedProducerAuthorityIsRejectedBeforePublication(int rawBytes, string expectedReason)
+    {
+        var storeRoot = NewRoot();
+        var sourceRoot = NewRoot();
+        try
+        {
+            var producer = ReceiptProducer();
+            var plan = CreatePlan(producer);
+            var writer = new EvidenceArtifactWriter(producer, sourceRoot);
+            await writer.WriteAsync("report", "reports/result.txt", "report"u8.ToArray());
+            var result = new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed,
+                ["assertion"], string.Empty, writer.WrittenArtifacts);
+            var overhead = EvidenceCanonicalJson.Serialize(result).Length;
+            result = result with { Diagnostic = new string('x', rawBytes - overhead) };
+            Assert.Equal(rawBytes, EvidenceCanonicalJson.Serialize(result).Length);
+            var manifest = EvidenceManifestBuilder.Build(plan, [result]);
+            var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+            { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") });
+            using var lease = Assert.Single(await store.AcquireAsync([Hash("producer")], CancellationToken.None));
+            lease.EstablishAuthority("oversized-authority");
+            var before = lease.ReadState();
+
+            var publication = await lease.PublishAsync("oversized-authority", plan, manifest, producer.Id,
+                sourceRoot, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            Assert.False(publication.Published);
+            Assert.Equal(expectedReason, publication.Reason);
+            Assert.Equal(before, lease.ReadState());
+            Assert.DoesNotContain(Directory.EnumerateDirectories(lease.DirectoryPath), path =>
+                Path.GetFileName(path).StartsWith("payload", StringComparison.Ordinal));
+            Assert.Equal("report", await File.ReadAllTextAsync(Path.Combine(sourceRoot, "reports/result.txt")));
+        }
+        finally { DeleteIfPresent(storeRoot); DeleteIfPresent(sourceRoot); }
+    }
+
     [Fact]
     public async Task FailedSecondAuditStageLeavesBothAuthorityRowsQuarantined()
     {
@@ -416,29 +454,35 @@ public sealed class EvidenceReceiptStoreTests
             var keyA = Hash("key-a");
             var keyB = Hash("key-b");
             var leases = await store.AcquireAsync([keyA, keyB], CancellationToken.None);
-            var byKey = leases.ToDictionary(static lease => lease.Key, StringComparer.OrdinalIgnoreCase);
-            foreach (var lease in leases) lease.EstablishAuthority("audit-exec", auditIntent: true, expectedAssertions: "assertion");
-
-            var outcomes = await store.PublishInvocationAsync("audit-exec", plan, manifest,
-            [
-                new(byKey[keyA], producerA.Id, sourceA, DateTimeOffset.UtcNow),
-                new(byKey[keyB], producerB.Id, Path.Combine(sourceB, "missing-source-root"), DateTimeOffset.UtcNow)
-            ], CancellationToken.None);
-
-            Assert.All(outcomes.Values, static outcome => Assert.False(outcome.Published));
-            Assert.Equal(2, outcomes.Count);
-            foreach (var lease in leases)
+            try
             {
-                var state = lease.ReadState();
-                Assert.Equal("audit-exec", state?.InFlightExecutionId);
-                Assert.Equal("audit-exec", state?.AuditIntentExecutionId);
-                Assert.Equal("assertion", state?.AuditExpectedAssertions);
-                Assert.True(EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
-                { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") }).Peek(lease.Key).IsUnavailable);
-                Assert.DoesNotContain(Directory.EnumerateDirectories(lease.DirectoryPath), path =>
-                    Path.GetFileName(path).StartsWith("payload-", StringComparison.Ordinal));
+                var byKey = leases.ToDictionary(static lease => lease.Key, StringComparer.OrdinalIgnoreCase);
+                foreach (var lease in leases) lease.EstablishAuthority("audit-exec", auditIntent: true, expectedAssertions: "assertion");
+
+                var outcomes = await store.PublishInvocationAsync("audit-exec", plan, manifest,
+                [
+                    new(byKey[keyA], producerA.Id, sourceA, DateTimeOffset.UtcNow),
+                    new(byKey[keyB], producerB.Id, Path.Combine(sourceB, "missing-source-root"), DateTimeOffset.UtcNow)
+                ], CancellationToken.None);
+
+                Assert.All(outcomes.Values, static outcome => Assert.False(outcome.Published));
+                Assert.Equal(2, outcomes.Count);
+                foreach (var lease in leases)
+                {
+                    var state = lease.ReadState();
+                    Assert.Equal("audit-exec", state?.InFlightExecutionId);
+                    Assert.Equal("audit-exec", state?.AuditIntentExecutionId);
+                    Assert.Equal("assertion", state?.AuditExpectedAssertions);
+                    Assert.True(EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
+                    { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") }).Peek(lease.Key).IsUnavailable);
+                    Assert.DoesNotContain(Directory.EnumerateDirectories(lease.DirectoryPath), path =>
+                        Path.GetFileName(path).StartsWith("payload-", StringComparison.Ordinal));
+                }
             }
-            foreach (var lease in leases) lease.Dispose();
+            finally
+            {
+                foreach (var lease in leases.Reverse()) lease.Dispose();
+            }
         }
         finally { DeleteIfPresent(storeRoot); DeleteIfPresent(sourceA); DeleteIfPresent(sourceB); }
     }
@@ -592,13 +636,13 @@ public sealed class EvidenceReceiptStoreTests
 
                 var state = lease.ReadState();
                 Assert.Null(state?.InFlightExecutionId);
-                Assert.NotNull(state?.PayloadDirectoryName);
-                var payloadDirectory = Path.Combine(lease.DirectoryPath, state!.PayloadDirectoryName!);
+                var payloadDirectoryName = Assert.IsType<string>(state?.PayloadDirectoryName);
+                var payloadDirectory = Path.Combine(lease.DirectoryPath, payloadDirectoryName);
                 Assert.True(Directory.Exists(payloadDirectory));
 
                 var quotaEntry = Assert.Single(ReadQuotaEntries(storeRoot),
                     entry => entry.GetProperty("Key").GetString() == key);
-                Assert.Equal(state.PayloadDirectoryName, quotaEntry.GetProperty("PayloadDirectoryName").GetString());
+                Assert.Equal(payloadDirectoryName, quotaEntry.GetProperty("PayloadDirectoryName").GetString());
                 Assert.Equal(0, quotaEntry.GetProperty("ReservedPayloadBytes").GetInt64());
                 Assert.Empty(quotaEntry.GetProperty("PayloadReservations").EnumerateArray());
                 using (var payloadRoot = CoverageRunOutputLease.AcquireArtifactDirectory(payloadDirectory,

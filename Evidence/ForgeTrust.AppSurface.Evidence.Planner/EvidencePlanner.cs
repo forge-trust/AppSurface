@@ -305,9 +305,11 @@ public sealed class EvidencePlanner
                 try
                 {
                     var normalizedRoot = EvidenceArtifactValidation.NormalizeRelativePath(slot.RelativeRoot);
-                    if (slot.MaximumFiles is not null && !string.Equals(normalizedRoot, slot.RelativeRoot, StringComparison.Ordinal))
+                    if (slot.MaximumFiles is not null)
                     {
-                        throw new ArgumentException("Multi-file roots must already be canonical.");
+                        EvidenceArtifactValidation.ValidatePathForSlot(slot, slot.RelativeRoot);
+                        if (!string.Equals(normalizedRoot, slot.RelativeRoot, StringComparison.Ordinal))
+                            throw new ArgumentException("Multi-file roots must already be canonical.");
                     }
                 }
                 catch (ArgumentException)

@@ -45,20 +45,25 @@ public sealed class EvidenceHostResourceScope : IAsyncDisposable
     /// <summary>Stops and joins readiness ownership and the application exactly once.</summary>
     /// <returns>The actual cleanup task; concurrent callers join the same operation.</returns>
     public ValueTask DisposeAsync()
+        => DisposeAsync(new HashSet<object>(ReferenceEqualityComparer.Instance));
+
+    /// <summary>Stops and joins scope ownership while sharing deduplication with another owner set.</summary>
+    /// <param name="disposedOwners">Caller-owned reference-identity set updated for each owner attempted by cleanup.</param>
+    /// <remarks>The cleanup task is queued while the lock is held, allowing synchronous reentrant calls to join the published operation.</remarks>
+    internal ValueTask DisposeAsync(ISet<object> disposedOwners)
     {
+        ArgumentNullException.ThrowIfNull(disposedOwners);
         lock (_sync)
-            return new ValueTask(_cleanup ??= CleanAsync());
+            return new ValueTask(_cleanup ??= Task.Run(() => CleanAsync(disposedOwners)));
     }
 
-    private async Task CleanAsync()
+    private async Task CleanAsync(ISet<object> disposedOwners)
     {
         Exception? firstFailure = null;
         Exception? fatalFailure = null;
-        var owned = Resources.Values.Reverse().Cast<object>()
-            .Append(_applicationOwner)
-            .Distinct(ReferenceEqualityComparer.Instance);
-        foreach (var owner in owned)
+        foreach (var owner in Resources.Values.Reverse().Cast<object>().Append(_applicationOwner))
         {
+            if (!disposedOwners.Add(owner)) continue;
             try
             {
                 if (owner is IAsyncDisposable asynchronous)

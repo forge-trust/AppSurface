@@ -6,6 +6,18 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class EvidenceReuseContractTests
 {
+    [Fact]
+    public void ContainedPathCanResolveAnArtifactBeforeItExists()
+    {
+        using var directory = TempDirectory.Create();
+        var expected = Path.Join(directory.Path, "reports", "result.txt");
+
+        var actual = EvidenceArtifactValidation.GetContainedPath(directory.Path, "reports/result.txt");
+
+        Assert.Equal(expected, actual);
+        Assert.False(File.Exists(expected));
+    }
+
     public enum ConsumerEvidenceState
     {
         Ready,
@@ -32,6 +44,23 @@ public sealed class EvidenceReuseContractTests
         {
             if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData(false, "reports/result.txt", true)]
+    [InlineData(false, "reports\\result.txt", true)]
+    [InlineData(true, "reports/result.txt", true)]
+    [InlineData(true, "reports\\result.txt", false)]
+    public void ArtifactPathValidationPreservesLegacyNormalization(bool multiFile, string path, bool expected)
+    {
+        var slot = new EvidenceArtifactSlot("report", "reports", "text/plain", true, 32)
+        {
+            MaximumFiles = multiFile ? 2 : null
+        };
+        var producer = new EvidenceProducerDeclaration("p", "kind", "1", [], [], [slot], 30);
+        var artifact = new EvidenceArtifactResult("report", path, "text/plain", 1, new string('a', 64));
+
+        Assert.Equal(expected, EvidenceArtifactValidation.AreValid(producer, [artifact]));
     }
 
     [Fact]
@@ -411,6 +440,23 @@ public sealed class EvidenceReuseContractTests
         Assert.False(EvidenceManifestBuilder.Verify(legacy, fresh));
     }
 
+    [Fact]
+    public void LegacyVersionRefusesCooperativeLifetimeWithoutAnInputDeclaration()
+    {
+        var profile = ReusePlan().Profile;
+        var producer = profile.Producers[0] with
+        {
+            Inputs = null,
+            CoverageExecution = new EvidenceCoverageExecutionOptions { CooperativeChildLifetime = true },
+        };
+        var legacy = CreatePlan(profile with { Producers = [producer] }, "1.0");
+        var manifest = EvidenceManifestBuilder.Build(legacy,
+            [new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, producer.AssertionIds)]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.False(EvidenceManifestBuilder.Verify(legacy, manifest));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -423,7 +469,11 @@ public sealed class EvidenceReuseContractTests
         await writer.WriteAsync("report", "reports/first", new byte[] { 1, 2 });
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            if (stream) await writer.WriteAsync("report", "reports/second", new MemoryStream([3, 4, 5]));
+            if (stream)
+            {
+                using var contents = new MemoryStream([3, 4, 5]);
+                await writer.WriteAsync("report", "reports/second", contents);
+            }
             else await writer.WriteAsync("report", "reports/second", new byte[] { 3, 4, 5 });
         });
         Assert.False(File.Exists(Path.Join(directory.Path, "reports/second")));
@@ -497,13 +547,38 @@ public sealed class EvidenceReuseContractTests
     {
         using var directory = TempDirectory.Create();
         using var outside = TempDirectory.Create();
-        Directory.CreateSymbolicLink(Path.Join(directory.Path, "reports"), outside.Path);
+        TestFileSystem.CreateDirectoryLinkOrSkip(Path.Join(directory.Path, "reports"), outside.Path);
         var producer = new EvidenceProducerDeclaration("p", "kind", "1", [], [],
             [new EvidenceArtifactSlot("report", "reports", "text/plain", false, 10) { MaximumFiles = 2 }], 30);
         var writer = new EvidenceArtifactWriter(producer, directory.Path);
         await Assert.ThrowsAsync<ArgumentException>(() => writer.WriteAsync("report", "reports/file", new byte[] { 1 }).AsTask());
         Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
         Assert.Empty(writer.WrittenArtifacts);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyWriterRetainsSupportForConsumerLinkedOutput(bool stream)
+    {
+        using var directory = TempDirectory.Create();
+        using var target = TempDirectory.Create();
+        TestFileSystem.CreateDirectoryLinkOrSkip(Path.Join(directory.Path, "reports"), target.Path);
+        var producer = new EvidenceProducerDeclaration("p", "kind", "1", [], [],
+            [new EvidenceArtifactSlot("report", "reports", "text/plain", true, 10)], 30);
+        var writer = new EvidenceArtifactWriter(producer, directory.Path);
+        var bytes = new byte[] { 1, 2 };
+        if (stream)
+        {
+            using var contents = new MemoryStream(bytes);
+            await writer.WriteAsync("report", "reports/file", contents);
+        }
+        else
+        {
+            await writer.WriteAsync("report", "reports/file", bytes);
+        }
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Join(target.Path, "file")));
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
     }
 
     [Fact]

@@ -117,6 +117,7 @@ public sealed class EvidenceReusePlannerTests
     [Theory]
     [InlineData(" reports")]
     [InlineData("reports\\nested")]
+    [InlineData("reports/CON")]
     public void MultiFileSlotRootMustAlreadyBeCanonicalDuringPlanning(string root)
     {
         var producer = CreateProducer() with { ArtifactSlots = [new EvidenceArtifactSlot("report", root, "text/plain", false, 10) { MaximumFiles = 2 }] };

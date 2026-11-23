@@ -137,7 +137,11 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
         try
         {
             var cancellationToken = console.RegisterCancellationHandler();
-            if (Reuse) EvidenceRunCommand.ValidateReuseOptions(true, false, ReceiptWaitTimeout);
+            if (Reuse)
+            {
+                EvidenceRunCommand.ValidateReuseOptions(true, false, ReceiptWaitTimeout);
+                ValidateReadOnlyOutput(OutputDirectory, ReceiptStore);
+            }
             var resolution = Reuse
                 ? await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken)
                 : null;
@@ -161,6 +165,35 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
         catch (EvidenceCliException exception)
         {
             throw new CommandException(exception.Message);
+        }
+    }
+
+    /// <summary>Rejects overlapping plan output and effective receipt-store roots before read-only inspection.</summary>
+    /// <param name="outputDirectory">Directory that will receive the plan and summary.</param>
+    /// <param name="receiptStore">Explicit store override; null uses the normal environment/user-local precedence.</param>
+    /// <remarks>Comparison is deliberately case-insensitive on every platform so portable spelling aliases cannot
+    /// bypass this pre-write guard. It does not create either directory or acquire receipt ownership.</remarks>
+    /// <exception cref="CommandException">The roots overlap or cannot be resolved safely.</exception>
+    internal static void ValidateReadOnlyOutput(string outputDirectory, string? receiptStore)
+    {
+        try
+        {
+            var store = Path.TrimEndingDirectorySeparator(Path.GetFullPath(EvidenceReceiptStore.ResolveRoot(
+                receiptStore, Environment.GetEnvironmentVariable("APPSURFACE_EVIDENCE_RECEIPT_STORE"),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))));
+            var output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDirectory));
+            using var outputLease = CoverageRunOutputLease.AcquireArtifactDirectory(output, false, false);
+            using var storeLease = CoverageRunOutputLease.AcquireArtifactDirectory(store, false, false);
+            static bool Within(string parent, string candidate) => candidate.Equals(parent, StringComparison.OrdinalIgnoreCase)
+                || candidate.StartsWith(Path.EndsInDirectorySeparator(parent) ? parent : parent + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase);
+            if (Within(store, output) || Within(output, store))
+                throw new CommandException("ASEVD217: Read-only reuse explain requires output outside the receipt store. Choose a separate --output directory. Code: reuse.explain_output_overlaps_store. No plan artifacts or receipt state were written.");
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or NotSupportedException
+            or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            throw new CommandException("ASEVD217: Read-only reuse explain paths could not be resolved. Choose valid, separate --output and --receipt-store directories. Code: reuse.explain_output_unavailable. No plan artifacts or receipt state were written.");
         }
     }
 }
@@ -225,7 +258,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
                         Path.Join("TestResults", "evidence"))
                     : OutputDirectory;
             }
-            catch (Exception exception) when (Reuse && exception is (IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException))
+            catch (Exception exception) when (Reuse && exception is (IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidDataException))
             {
                 throw new CommandException($"ASEVD217: A fresh Evidence output root could not be claimed ({exception.GetType().Name}). Choose a new --output path or repair access to TestResults/evidence/runs. Code: reuse.output_unavailable.");
             }

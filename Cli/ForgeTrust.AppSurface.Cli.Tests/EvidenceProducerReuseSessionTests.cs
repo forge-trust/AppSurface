@@ -88,6 +88,53 @@ public sealed class EvidenceProducerReuseSessionTests
         Assert.Empty(next.ReusedResults);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptionalSettlementFailurePreservesFreshVerdictAndAuditFailure(bool verifyReuse)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        if (verifyReuse) await fixture.PublishFreshAsync();
+        fixture.Producer.ReceiptIneligibilityReason = "inventory-slot-ineligible";
+
+        await using var session = await fixture.PrepareAsync(verifyReuse: verifyReuse);
+        Assert.True(await session.BeginExecutionAsync(CancellationToken.None));
+        var produced = await fixture.Producer.ProduceAsync(new EvidenceProducerContext(fixture.Plan,
+            fixture.ProducerDeclaration, TimeProvider.System, session.GetWriter(fixture.ProducerDeclaration)), CancellationToken.None);
+        Assert.Equal(EvidenceProducerOutcome.Passed, produced.Outcome);
+        Assert.True(await session.BeforeCleanupAsync(true, CancellationToken.None));
+        var manifest = EvidenceManifestBuilder.Build(fixture.Plan, [produced],
+            metrics: new EvidenceExecutionMetrics { CleanupCompleted = true });
+
+        var indexPath = Path.Combine(fixture.StoreRoot, "quota-index.json");
+        var savedIndexPath = Path.Combine(fixture.Root, "quota-index.saved.json");
+        Assert.True(File.Exists(indexPath));
+        var originalIndex = await File.ReadAllBytesAsync(indexPath);
+        File.Move(indexPath, savedIndexPath);
+        Directory.CreateDirectory(indexPath);
+        try
+        {
+            var completed = await session.CompleteAsync(manifest, CancellationToken.None);
+
+            if (verifyReuse)
+            {
+                Assert.NotEqual(EvidenceExecutionVerdict.Passed, completed.ExecutionVerdict);
+                Assert.Contains("reuse.audit_finalization_failed",
+                    Assert.Single(completed.ProducerResults).Diagnostic ?? string.Empty, StringComparison.Ordinal);
+            }
+            else
+                Assert.Equal(EvidenceExecutionVerdict.Passed, completed.ExecutionVerdict);
+
+            Assert.Equal(Convert.ToHexString(originalIndex),
+                Convert.ToHexString(await File.ReadAllBytesAsync(savedIndexPath)));
+        }
+        finally
+        {
+            if (Directory.Exists(indexPath)) Directory.Delete(indexPath);
+            if (File.Exists(savedIndexPath)) File.Move(savedIndexPath, indexPath);
+        }
+    }
+
     [Fact]
     public async Task KeyMaterialResultIsAnImmutableSnapshotDistinctFromProducerOwnedDictionary()
     {
@@ -151,11 +198,53 @@ public sealed class EvidenceProducerReuseSessionTests
             var worktreeFixture = await Fixture.CreateForExistingRepositoryAsync(fixture, worktree);
             await using (worktreeFixture)
             await using (var linkedSession = await worktreeFixture.PrepareAsync())
+            {
                 Assert.Contains(worktreeFixture.ProducerDeclaration.Id, linkedSession.ReusedResults.Keys);
+                Assert.True(await linkedSession.BeginExecutionAsync(CancellationToken.None));
+            }
         }
         finally
         {
             await fixture.GitAsync("worktree", "remove", "--force", worktree);
+        }
+    }
+
+    [Fact]
+    public async Task IndependentRepositoryNamespaceChangeBeforeExecutionDoesNotAdmitProducer()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.CommitAsync("baseline");
+        var preparedIdentity = await fixture.BuildIdentityAsync(fixture.ProducerDeclaration);
+        var replacementRepository = Path.Combine(fixture.Root, "replacement-repository");
+        await RunGitAtAsync(fixture.Root, "clone", "--no-hardlinks", fixture.RepositoryRoot, replacementRepository);
+        await using var session = await fixture.PrepareAsync();
+
+        var gitDirectory = Path.Combine(fixture.RepositoryRoot, ".git");
+        var originalGitDirectory = Path.Combine(fixture.Root, "original-git-directory");
+        try
+        {
+            Directory.Move(gitDirectory, originalGitDirectory);
+            await File.WriteAllTextAsync(gitDirectory,
+                $"gitdir: {Path.Combine(replacementRepository, ".git")}{Environment.NewLine}");
+            await RunGitAtAsync(replacementRepository, "config", "core.worktree", fixture.RepositoryRoot);
+
+            var replacementIdentity = await fixture.BuildIdentityAsync(fixture.ProducerDeclaration);
+            Assert.Equal(preparedIdentity.Key, replacementIdentity.Key);
+            Assert.NotEqual(preparedIdentity.RepositoryNamespace, replacementIdentity.RepositoryNamespace);
+
+            Assert.False(await session.BeginExecutionAsync(CancellationToken.None));
+            Assert.True(session.IsUnavailable);
+            Assert.Equal("reuse.prepared_inputs_changed", Assert.Single(session.Decisions).Reason);
+            Assert.Equal(0, fixture.Producer.ExecutionCount);
+            Assert.Null(EvidenceReceiptQuota.ReadAuthority(fixture.StoreRoot,
+                preparedIdentity.RepositoryNamespace, preparedIdentity.Key)?.InFlightExecutionId);
+            Assert.Null(EvidenceReceiptQuota.ReadAuthority(fixture.StoreRoot,
+                replacementIdentity.RepositoryNamespace, replacementIdentity.Key)?.InFlightExecutionId);
+        }
+        finally
+        {
+            if (File.Exists(gitDirectory)) File.Delete(gitDirectory);
+            if (Directory.Exists(originalGitDirectory)) Directory.Move(originalGitDirectory, gitDirectory);
         }
     }
 
@@ -443,6 +532,28 @@ public sealed class EvidenceProducerReuseSessionTests
         Assert.Contains(ordinary.Decisions, decision => decision.ProducerKey == firstKey && decision.Reason == "reuse.audit_required");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AuditComparisonSignalRequiresAnActualVerifiedReceiptAndCompletedComparison(bool seedReceipt)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        if (seedReceipt) await fixture.PublishFreshAsync();
+        await using var session = await fixture.PrepareAsync(verifyReuse: true);
+        Assert.False(session.HasMatchedVerifiedAudit(fixture.ProducerDeclaration.Id));
+        Assert.True(await session.BeginExecutionAsync(CancellationToken.None));
+        var produced = await fixture.Producer.ProduceAsync(new EvidenceProducerContext(fixture.Plan,
+            fixture.ProducerDeclaration, TimeProvider.System, session.GetWriter(fixture.ProducerDeclaration)), CancellationToken.None);
+        Assert.True(await session.BeforeCleanupAsync(true, CancellationToken.None));
+        Assert.False(session.HasMatchedVerifiedAudit(fixture.ProducerDeclaration.Id));
+
+        var completed = await session.CompleteAsync(EvidenceManifestBuilder.Build(fixture.Plan, [produced],
+            metrics: new EvidenceExecutionMetrics { CleanupCompleted = true }), CancellationToken.None);
+
+        Assert.Equal(EvidenceExecutionVerdict.Passed, completed.ExecutionVerdict);
+        Assert.Equal(seedReceipt, session.HasMatchedVerifiedAudit(fixture.ProducerDeclaration.Id));
+    }
+
     [Fact]
     public async Task AuditFinalizationFailurePreservesObservationAndEnvelopeFields()
     {
@@ -606,6 +717,86 @@ public sealed class EvidenceProducerReuseSessionTests
         Assert.NotEqual(Path.GetFullPath(origin), Path.GetFullPath(current));
         Assert.Equal("origin artifact", await File.ReadAllTextAsync(Path.Combine(origin, "reports", "report.txt")));
         Assert.Equal("origin artifact", await File.ReadAllTextAsync(Path.Combine(current, "reports", "report.txt")));
+    }
+
+    private static async Task RunGitAtAsync(string workingDirectory, params string[] arguments)
+    {
+        var isolationRoot = Path.Combine(Path.GetTempPath(), "evidence-reuse-git-" + Guid.NewGuid().ToString("N"));
+        var hooksPath = Path.Combine(isolationRoot, "no-hooks");
+        Directory.CreateDirectory(hooksPath);
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo("git")
+            {
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            },
+        };
+        var environment = process.StartInfo.Environment;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var name in environment.Keys.Where(name => name.StartsWith("GIT_", comparison)).ToArray())
+            environment.Remove(name);
+        var nullDevice = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+        environment["GIT_CONFIG_NOSYSTEM"] = "1";
+        environment["GIT_CONFIG_GLOBAL"] = Path.Combine(isolationRoot, "absent-global-config");
+        environment["GIT_CONFIG_SYSTEM"] = nullDevice;
+        environment["GIT_ATTR_NOSYSTEM"] = "1";
+        environment["GIT_TERMINAL_PROMPT"] = "0";
+        environment["GIT_OPTIONAL_LOCKS"] = "0";
+        environment["GIT_NO_LAZY_FETCH"] = "1";
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("commit.gpgsign=false");
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("core.hooksPath=" + hooksPath);
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("user.name=Evidence Reuse Test");
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("user.email=evidence-reuse@example.invalid");
+        foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
+        try
+        {
+            if (!process.Start()) throw new InvalidOperationException("Git did not start.");
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            try
+            {
+                await process.WaitForExitAsync(deadline.Token);
+            }
+            catch (OperationCanceledException exception) when (deadline.IsCancellationRequested)
+            {
+                await KillAndJoinGitAsync(process, stdout, stderr);
+                throw new TimeoutException("Git fixture command exceeded its 20-second deadline.", exception);
+            }
+            await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(5));
+            var output = await stdout;
+            var error = await stderr;
+            if (process.ExitCode != 0) throw new InvalidOperationException(error + output);
+        }
+        finally
+        {
+            Directory.Delete(isolationRoot, recursive: true);
+        }
+    }
+
+    private static async Task KillAndJoinGitAsync(Process process, Task stdout, Task stderr)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException) when (process.HasExited)
+        {
+            // The process exited between the check and kill; still join it and drain both streams.
+        }
+        finally
+        {
+            using var reapDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync(reapDeadline.Token);
+            await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     private sealed class Fixture : IAsyncDisposable

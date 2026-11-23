@@ -234,12 +234,16 @@ public sealed class EvidencePreparedHostCoverageTests
     {
         using var fixture = new Fixture();
         var producer = new Producer("check");
-        var readiness = new Readiness("changed-database");
+        var readiness = new MutableReadiness("database");
         var owner = new Owner();
         await using var prepared = await fixture.PrepareAsync(producer);
 
-        var failure = await Assert.ThrowsAsync<EvidenceHostException>(() => prepared.RunAsync((_, _) => ValueTask.FromResult(
-            new EvidenceHostResourceScope([readiness], owner))));
+        var failure = await Assert.ThrowsAsync<EvidenceHostException>(() => prepared.RunAsync((_, _) =>
+        {
+            var scope = new EvidenceHostResourceScope([readiness], owner);
+            readiness.Id = "changed-database";
+            return ValueTask.FromResult(scope);
+        }));
         await prepared.DisposeAsync();
 
         Assert.Equal("reuse.resource_scope_invalid", failure.Code);
@@ -406,8 +410,14 @@ public sealed class EvidencePreparedHostCoverageTests
         finally
         {
             releaseFactory.TrySetResult();
-            await execution.WaitAsync(TimeSpan.FromSeconds(10));
-            await prepared.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            try
+            {
+                await execution.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                await prepared.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            }
         }
 
         Assert.Equal(1, producer.Disposals);
@@ -681,6 +691,14 @@ public sealed class EvidencePreparedHostCoverageTests
             Disposals++;
             return disposalFailure is null ? ValueTask.CompletedTask : ValueTask.FromException(disposalFailure);
         }
+    }
+
+    private sealed class MutableReadiness(string id) : IEvidenceResourceReadiness, IDisposable
+    {
+        public string Id { get; set; } = id;
+        internal int Disposals { get; private set; }
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public void Dispose() => Disposals++;
     }
 
     private sealed class Owner(Exception? disposalFailure = null) : IAsyncDisposable

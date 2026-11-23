@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
 using Xunit.Abstractions;
 using ValidationProgram = ForgeTrust.AppSurface.Evidence.Validation.Program;
@@ -31,6 +32,35 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
             Path.Join(Path.GetTempPath(), "missing-diagnostics-" + Guid.NewGuid().ToString("N"))));
         Assert.Throws<ArgumentException>(() => CreateScratchDirectory(repository, repository));
         Assert.Throws<ArgumentException>(() => CreateScratchDirectory(repository, AppContext.BaseDirectory));
+    }
+
+    [Fact]
+    public void DiagnosticsContainmentUsesDirectoryIdentityOnTheActualVolume()
+    {
+        var root = Directory.CreateTempSubdirectory("packed-case-containment-").FullName;
+        try
+        {
+            var checkout = Directory.CreateDirectory(Path.Join(root, "CheckoutMixedCase")).FullName;
+            var alias = Directory.CreateDirectory(Path.Join(root, "checkoutmixedcase")).FullName;
+            using var checkoutLease = CoverageRunOutputLease.AcquireArtifactDirectory(checkout, false, false)!;
+            using var aliasLease = CoverageRunOutputLease.AcquireArtifactDirectory(alias, false, false)!;
+            if (checkoutLease.ArtifactDirectoryIdentity == aliasLease.ArtifactDirectoryIdentity)
+            {
+                Assert.Throws<ArgumentException>(() => CreateScratchDirectory(checkout, alias));
+                var child = Directory.CreateDirectory(Path.Join(alias, "nested")).FullName;
+                Assert.Throws<ArgumentException>(() => CreateScratchDirectory(checkout, child));
+            }
+            else
+            {
+                var scratch = CreateScratchDirectory(checkout, alias);
+                Assert.True(Directory.Exists(scratch));
+                NativeEvidenceTestDirectory.Delete(scratch);
+            }
+        }
+        finally
+        {
+            NativeEvidenceTestDirectory.Delete(root);
+        }
     }
 
     [Fact]
@@ -191,9 +221,15 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
                 throw new ArgumentException("Packed journey diagnostics require an existing absolute parent.", nameof(diagnosticsParent));
             parent = PhysicalDirectory(new DirectoryInfo(diagnosticsParent));
             var checkout = Path.TrimEndingDirectorySeparator(PhysicalDirectory(new DirectoryInfo(repository)));
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            if (parent.Equals(checkout, comparison) || parent.StartsWith(checkout + Path.DirectorySeparatorChar, comparison))
-                throw new ArgumentException("Packed journey diagnostics must be outside the checkout.", nameof(diagnosticsParent));
+            using var checkoutLease = CoverageRunOutputLease.AcquireArtifactDirectory(checkout, false, false)
+                ?? throw new IOException("The checkout identity is unavailable.");
+            for (var ancestor = new DirectoryInfo(parent); ancestor is not null; ancestor = ancestor.Parent)
+            {
+                using var ancestorLease = CoverageRunOutputLease.AcquireArtifactDirectory(ancestor.FullName, false, false)
+                    ?? throw new IOException("A diagnostics ancestor identity is unavailable.");
+                if (ancestorLease.ArtifactDirectoryIdentity == checkoutLease.ArtifactDirectoryIdentity)
+                    throw new ArgumentException("Packed journey diagnostics must be outside the checkout.", nameof(diagnosticsParent));
+            }
         }
 
         if (parent is null) return PhysicalDirectory(Directory.CreateTempSubdirectory("evidence-packed-journey-"));

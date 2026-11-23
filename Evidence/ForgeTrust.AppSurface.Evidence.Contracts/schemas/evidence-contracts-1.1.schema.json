@@ -152,10 +152,7 @@
         },
         "PatchLineMode": {
           "type": "string",
-          "enum": [
-            "measurable",
-            "codecov"
-          ]
+          "pattern": "^(?:[mM][eE][aA][sS][uU][rR][aA][bB][lL][eE]|[cC][oO][dD][eE][cC][oO][vV])$"
         },
         "TolerancePercent": {
           "type": "number",
@@ -566,33 +563,7 @@
         "Artifacts",
         "ElapsedMilliseconds"
       ],
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "Outcome": {
-                "const": "Reused"
-              }
-            },
-            "required": [
-              "Outcome"
-            ]
-          },
-          "then": {
-            "required": [
-              "ProducerKey",
-              "OriginManifestDigest",
-              "OriginCompletedAt"
-            ],
-            "properties": {
-              "ElapsedMilliseconds": {
-                "const": 0
-              }
-            }
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "ResourceResult": {
       "type": "object",
@@ -807,6 +778,54 @@
             "properties": {
               "Eligibility": {
                 "const": "Informational"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "ExecutionVerdict": {
+                "not": {
+                  "const": "Invalid"
+                }
+              }
+            },
+            "required": [
+              "ExecutionVerdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ProducerResults": {
+                "items": {
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "Outcome": {
+                            "const": "Reused"
+                          }
+                        },
+                        "required": [
+                          "Outcome"
+                        ]
+                      },
+                      "then": {
+                        "required": [
+                          "ProducerKey",
+                          "OriginManifestDigest",
+                          "OriginCompletedAt"
+                        ],
+                        "properties": {
+                          "ElapsedMilliseconds": {
+                            "const": 0
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
               }
             }
           }

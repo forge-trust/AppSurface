@@ -92,9 +92,10 @@ The coordinated package compatibility table above is unchanged. The reviewed inv
 `tests/FirstDurableWorker.Tests/FirstWorkFailureMarker.cs`; `FirstDurableWorkTests.cs` now calls that
 internal helper to format the same failure marker. No file is removed or renamed. This separates
 formatting from execution so the repository can test the actual marker with its bounded receipt reader.
-It changes no Docker prerequisite, timeout, cleanup or proof assertion. Existing projects that adopt
-this diagnostic update must copy the helper together with the changed call in `FirstDurableWorkTests.cs`;
-copying only that call will not compile. Preserve application-owned edits and follow the comparison
+It changes no Docker prerequisite, timeout, cleanup or proof assertion. The update also adds `PostgreSqlFixture.DockerPrerequisiteException` and the corresponding
+`RequireDockerAsync` wrapping in `PostgreSqlFixture.cs`. Existing projects that adopt this diagnostic
+update must coordinate all three files: `FirstWorkFailureMarker.cs`, `FirstDurableWorkTests.cs`, and
+`PostgreSqlFixture.cs`. Copying the updated test without the helper or fixture changes will not compile. Preserve application-owned edits and follow the comparison
 and execution steps below. The [PackageIndex diagnostic reference](../tools/ForgeTrust.AppSurface.PackageIndex/README.md)
 describes the independently validated fields; diagnostic text never establishes proof success.
 

@@ -47,6 +47,47 @@ public sealed class EvidenceReuseRunCommandCoverageTests
         }
     }
 
+    [Theory]
+    [InlineData("filesystem-root")]
+    [InlineData("reserved-component")]
+    public async Task ReuseRunMapsInvalidOutputPathsToAsevd217WithoutTouchingCallerFiles(string defect)
+    {
+        using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        await WriteEmptyPolicyAsync(repository);
+        var sentinel = TestPathUtils.PathUnder(repository.Root, "caller-owned.txt");
+        await File.WriteAllTextAsync(sentinel, "caller-owned bytes");
+        var output = defect == "filesystem-root"
+            ? Path.GetPathRoot(repository.Root)!
+            : TestPathUtils.PathUnder(repository.Root, "CON");
+        var store = TestPathUtils.PathUnder(repository.Root, "private-store");
+        var context = SyntheticLocalContext.Capture();
+
+        try
+        {
+            context.Enter(repository.Root);
+            using var console = new FakeInMemoryConsole();
+            var command = CreateRunCommand(out var runner);
+            command.PolicyPath = TestPathUtils.PathUnder(repository.Root, "evidence.policy.json");
+            command.Paths = ["src/input.txt"];
+            command.OutputDirectory = output;
+            command.ReceiptStore = store;
+            command.Reuse = true;
+
+            var error = await Assert.ThrowsAsync<CommandException>(() => command.ExecuteAsync(console).AsTask());
+
+            Assert.Contains("ASEVD217", error.Message, StringComparison.Ordinal);
+            Assert.Contains("reuse.output_unavailable", error.Message, StringComparison.Ordinal);
+            Assert.Equal("caller-owned bytes", await File.ReadAllTextAsync(sentinel));
+            Assert.Equal(0, runner.InvocationCount);
+            Assert.False(Directory.Exists(store));
+            if (defect == "reserved-component") Assert.False(Directory.Exists(output));
+        }
+        finally
+        {
+            context.Restore();
+        }
+    }
+
     [Fact]
     public async Task ReuseRunWithAnEmptyProfileClaimsDefaultFreshChildAndWritesSuccessfulNoEvidenceManifest()
     {

@@ -103,14 +103,18 @@ public sealed class EvidenceIdentityCoverageTests
         Assert.NotEqual(baseline, await BuildKey("compiler-v1", "database-v1", "mode-a"));
     }
 
-    [Fact]
-    public async Task PatchGateRequiresTwoValidMatchingDigestsAndNormalizesHexCase()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PatchGateRequiresTwoValidMatchingDigestsAndNormalizesHexCase(bool branchOnly)
     {
         using var repository = await TestRepository.CreateAsync();
         await repository.WriteAsync("src/input.txt", "stable input");
         await repository.CommitAsync();
-        var producer = new EvidenceProducerDeclaration("producer", "coverage", "1", [], [], [], 10,
-            new EvidenceCoverageGateRequirements(95, 85, MinPatchLinePercent: 95))
+        var gate = branchOnly
+            ? new EvidenceCoverageGateRequirements(95, 85, MinPatchBranchPercent: 85)
+            : new EvidenceCoverageGateRequirements(95, 85, MinPatchLinePercent: 95);
+        var producer = new EvidenceProducerDeclaration("producer", "coverage", "1", [], [], [], 10, gate)
         { Inputs = new EvidenceProducerInputs(["src/**"], []) };
 
         async Task<EvidenceProducerIdentityResult> Build(string? planned, string? captured)
@@ -237,7 +241,7 @@ public sealed class EvidenceIdentityCoverageTests
     }
 
     [Fact]
-    public async Task MaterialUtf8AccountingHandlesPairedAndUnpairedSurrogatesWithoutLeakingValues()
+    public async Task MaterialAcceptsPairedSurrogatesAndRejectsMalformedUtf16WithoutLeakingValues()
     {
         using var repository = await TestRepository.CreateAsync();
         await repository.WriteAsync("src/input.txt", "stable input");
@@ -246,15 +250,15 @@ public sealed class EvidenceIdentityCoverageTests
         { Inputs = new EvidenceProducerInputs(["src/**"], []) };
         var validBoundary = await BuildIdentityAsync(repository, producer, [], new Dictionary<string, string>(),
             material: new Dictionary<string, string> { ["mode"] = string.Concat(Enumerable.Repeat("😀", 1024)) });
-        var unpairedSurrogates = new string('\ud800', 1366);
-        var unpairedOverLimit = await BuildIdentityAsync(repository, producer, [], new Dictionary<string, string>(),
-            material: new Dictionary<string, string> { ["mode"] = unpairedSurrogates });
+        const string malformed = "private-material-\ud800";
+        var invalidMaterial = await BuildIdentityAsync(repository, producer, [], new Dictionary<string, string>(),
+            material: new Dictionary<string, string> { ["mode"] = malformed });
 
         Assert.True(validBoundary.IsEligible, validBoundary.Diagnostic);
-        Assert.Null(unpairedOverLimit.Identity);
-        Assert.Equal("reuse.identity.material_invalid", unpairedOverLimit.Reason);
-        Assert.Contains("4098", unpairedOverLimit.Diagnostic, StringComparison.Ordinal);
-        Assert.DoesNotContain(unpairedSurrogates, unpairedOverLimit.Diagnostic, StringComparison.Ordinal);
+        Assert.Null(invalidMaterial.Identity);
+        Assert.Equal("reuse.identity.material_invalid", invalidMaterial.Reason);
+        Assert.Contains("malformed UTF-16", invalidMaterial.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-material", invalidMaterial.Diagnostic, StringComparison.Ordinal);
     }
 
     [Theory]

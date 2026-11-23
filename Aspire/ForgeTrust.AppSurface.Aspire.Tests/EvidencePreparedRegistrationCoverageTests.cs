@@ -171,6 +171,46 @@ public sealed class EvidencePreparedRegistrationCoverageTests
     }
 
     [Fact]
+    public async Task ReadinessTimeoutException_ShouldNotMasqueradeAsCleanupGraceExpiry()
+    {
+        using var fixture = new Fixture();
+        var producer = new Producer("check");
+        var readiness = new Readiness("database", readinessFailure: new TimeoutException("controlled probe timeout"));
+        var owner = new Owner();
+        await using var prepared = await fixture.PrepareAsync(registration =>
+        {
+            registration.AddProducer(producer, "fixture-v1");
+            registration.AddResource("database", "database@sha256:fixture");
+        });
+
+        var result = await prepared.RunAsync((_, _) =>
+            ValueTask.FromResult(new EvidenceHostResourceScope([readiness], owner)));
+
+        Assert.True(result.Metrics.CleanupCompleted);
+        Assert.Equal(1, producer.Disposals);
+        Assert.Equal(1, readiness.Disposals);
+        Assert.Equal(1, owner.Disposals);
+    }
+
+    [Fact]
+    public async Task ProducerAndReadinessSharingOneOwner_ShouldDisposeItOnce()
+    {
+        using var fixture = new Fixture();
+        var owner = new SharedProducerReadinessOwner();
+        await using var prepared = await fixture.PrepareAsync(registration =>
+        {
+            registration.AddProducer(owner, "fixture-v1");
+            registration.AddResource("database", "database@sha256:fixture");
+        });
+
+        var result = await prepared.RunAsync((_, _) =>
+            ValueTask.FromResult(new EvidenceHostResourceScope([owner], new Owner())));
+
+        Assert.True(result.Metrics.CleanupCompleted);
+        Assert.Equal(1, owner.Disposals);
+    }
+
+    [Fact]
     public async Task CyclicDeclaredResourceGraph_ShouldRejectPreparationBeforeAnyExecution()
     {
         using var fixture = new Fixture();
@@ -667,6 +707,10 @@ public sealed class EvidencePreparedRegistrationCoverageTests
     {
         var registration = new EvidenceHostPreparationRegistration();
         Assert.Throws<ArgumentException>(() => registration.AddResource("database", "bad\nidentity"));
+        Assert.Throws<ArgumentException>(() => registration.AddProducer(new Producer("invalid-high"), "\uD800"));
+        Assert.Throws<ArgumentException>(() => registration.AddProducer(new Producer("invalid-low"), "\uD801"));
+        registration.AddProducer(new Producer("replacement"), "\uFFFD");
+        registration.AddResource("supplementary", string.Concat(new string('a', 4092), "\U0001F600"));
         registration.SetEnvelopeVerifier(new EnvelopeVerifier());
         Assert.Throws<InvalidOperationException>(() => registration.SetEnvelopeVerifier(new EnvelopeVerifier()));
         Assert.Throws<ArgumentException>(() => registration.AddResource("database", ""));
@@ -708,12 +752,14 @@ public sealed class EvidencePreparedRegistrationCoverageTests
             var path = TestPathUtils.PathUnder(root, "reports", "result.txt");
             var writer = new EvidenceArtifactWriter(declaration, root);
 
+            using var oversizedInput = new MemoryStream(new byte[] { 1, 2, 3, 4 });
             await Assert.ThrowsAsync<InvalidOperationException>(async () => await writer.WriteAsync(
-                "report", "reports/result.txt", new MemoryStream(new byte[] { 1, 2, 3, 4 })));
+                "report", "reports/result.txt", oversizedInput));
 
             Assert.Empty(writer.WrittenArtifacts);
             Assert.False(File.Exists(path));
-            var written = await writer.WriteAsync("report", "reports/result.txt", new MemoryStream(new byte[] { 1, 2, 3 }));
+            using var validInput = new MemoryStream(new byte[] { 1, 2, 3 });
+            var written = await writer.WriteAsync("report", "reports/result.txt", validInput);
             Assert.Equal(3, written.LengthBytes);
             Assert.Equal("text/plain", written.MediaType);
             Assert.True(await writer.VerifyWrittenArtifactsAsync());
@@ -811,7 +857,7 @@ public sealed class EvidencePreparedRegistrationCoverageTests
         }
     }
 
-    private sealed class Readiness(string id, Exception? disposalFailure = null) : IEvidenceResourceReadiness, IAsyncDisposable
+    private sealed class Readiness(string id, Exception? disposalFailure = null, Exception? readinessFailure = null) : IEvidenceResourceReadiness, IAsyncDisposable
     {
         public string Id => id;
         internal int ReadinessCalls { get; private set; }
@@ -820,7 +866,7 @@ public sealed class EvidencePreparedRegistrationCoverageTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             ReadinessCalls++;
-            return Task.CompletedTask;
+            return readinessFailure is null ? Task.CompletedTask : Task.FromException(readinessFailure);
         }
         public ValueTask DisposeAsync()
         {
@@ -837,6 +883,24 @@ public sealed class EvidencePreparedRegistrationCoverageTests
         {
             Disposals++;
             return failure is null ? ValueTask.CompletedTask : ValueTask.FromException(failure);
+        }
+    }
+
+    private sealed class SharedProducerReadinessOwner : IEvidenceProducer, IEvidenceResourceReadiness, IAsyncDisposable
+    {
+        internal int Disposals { get; private set; }
+        string IEvidenceProducer.Id => "check";
+        string IEvidenceResourceReadiness.Id => "database";
+
+        public ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new EvidenceProducerResult("check", EvidenceProducerOutcome.Passed, ["valid"]));
+
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync()
+        {
+            Disposals++;
+            return ValueTask.CompletedTask;
         }
     }
 

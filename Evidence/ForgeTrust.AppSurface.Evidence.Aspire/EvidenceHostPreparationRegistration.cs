@@ -54,6 +54,7 @@ public sealed record EvidenceReuseWaitProgress(string ProducerKeyPrefix, TimeSpa
 /// </remarks>
 public sealed class EvidenceHostPreparationRegistration
 {
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
     private readonly Dictionary<string, PreparedProducerRegistration> _producers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _resources = new(StringComparer.Ordinal);
     private bool _frozen;
@@ -139,7 +140,17 @@ public sealed class EvidenceHostPreparationRegistration
     private static void ValidateIdentity(string value, string parameterName, int maximumBytes)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
-        if (Encoding.UTF8.GetByteCount(value) > maximumBytes || value.Any(char.IsControl))
+        int byteCount;
+        try
+        {
+            byteCount = StrictUtf8.GetByteCount(value);
+        }
+        catch (EncoderFallbackException exception)
+        {
+            throw new ArgumentException("Identity must contain valid Unicode.", parameterName, exception);
+        }
+
+        if (byteCount > maximumBytes || value.Any(char.IsControl))
             throw new ArgumentException($"Identity must contain no control characters and at most {maximumBytes} UTF-8 bytes.", parameterName);
     }
 }

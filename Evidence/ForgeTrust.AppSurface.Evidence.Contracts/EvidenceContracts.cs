@@ -505,7 +505,9 @@ public sealed record EvidenceProducerContext(
     /// Pass this capability to EvidenceOwnedChild's explicit-environment overload or copy it into an owned child
     /// process environment. Never mutate the process-global environment or persist this opaque channel in artifacts,
     /// key material or logs. Null means this producer has no cooperative channel. Key-material callbacks receive no
-    /// execution capability. This is cooperative enrollment, not OS containment of unregistered children.
+    /// execution capability. Version 1 supplies this channel only to eligible built-in coverage workloads; custom
+    /// producers receive null and must own and join their children themselves. This is cooperative enrollment,
+    /// not OS containment of unregistered children.
     /// </remarks>
     [JsonIgnore]
     public IReadOnlyDictionary<string, string>? OwnedChildEnvironment { get; init; }
@@ -560,6 +562,7 @@ public sealed class EvidenceArtifactWriter
 
     private readonly EvidenceProducerDeclaration _producer;
     private readonly string _rootPath;
+    private readonly bool _requireUnlinkedPaths;
     private readonly object _sync = new();
     private readonly Dictionary<string, EvidenceArtifactResult?> _artifacts = new(StringComparer.Ordinal);
     private readonly HashSet<string> _destinations;
@@ -573,10 +576,19 @@ public sealed class EvidenceArtifactWriter
     /// <param name="producer">Closed producer declaration that owns allowed artifact slots.</param>
     /// <param name="rootPath">Controlled evidence artifact root.</param>
     public EvidenceArtifactWriter(EvidenceProducerDeclaration producer, string rootPath)
+        : this(producer, rootPath, requireUnlinkedPaths: false) { }
+
+    /// <summary>Creates a writer that can enforce unlinked receipt custody even for single-file slots.</summary>
+    /// <param name="producer">Closed declaration that owns the slots.</param>
+    /// <param name="rootPath">Controlled evidence artifact root.</param>
+    /// <param name="requireUnlinkedPaths">Whether every slot requires the unlinked path preflight.</param>
+    /// <remarks>Use this for reuse custody. The caller still owns the root for the entire write and verification.</remarks>
+    internal EvidenceArtifactWriter(EvidenceProducerDeclaration producer, string rootPath, bool requireUnlinkedPaths)
     {
         _producer = producer ?? throw new ArgumentNullException(nameof(producer));
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         _rootPath = Path.GetFullPath(rootPath);
+        _requireUnlinkedPaths = requireUnlinkedPaths;
         _destinations = new(producer.ArtifactSlots.Any(static slot => slot.MaximumFiles is not null)
             ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     }
@@ -595,6 +607,31 @@ public sealed class EvidenceArtifactWriter
                     .ToArray();
             }
         }
+    }
+
+    /// <summary>Gets the controlled root for first-party adoption of already delivered, verified reports.</summary>
+    /// <remarks>This private capability does not grant filesystem or receipt authority.</remarks>
+    internal string RootPath => _rootPath;
+
+    /// <summary>Records one already delivered artifact after the first-party adapter verifies its exact bytes.</summary>
+    /// <param name="artifact">Complete metadata bound to the same controlled root as this writer.</param>
+    /// <remarks>The caller must validate the complete file set through no-follow readers before recording it.
+    /// This method enforces the same destination, count and byte reservations as writing, changes no files,
+    /// and does not waive later writer verification, required-slot validation or receipt admission.</remarks>
+    /// <exception cref="ArgumentException">The metadata does not match a declared slot or canonical path.</exception>
+    /// <exception cref="InvalidOperationException">The declaration's existing reservation limits are exceeded.</exception>
+    internal void RecordVerifiedExistingArtifact(EvidenceArtifactResult artifact)
+    {
+        ArgumentNullException.ThrowIfNull(artifact);
+        var slot = _producer.ArtifactSlots.SingleOrDefault(slot => slot.LogicalName == artifact.LogicalName)
+            ?? throw new ArgumentException("The verified artifact slot is not declared.", nameof(artifact));
+        var normalized = EvidenceArtifactValidation.NormalizeRelativePath(artifact.RelativePath);
+        EvidenceArtifactValidation.ValidatePathForSlot(slot, artifact.RelativePath);
+        if (normalized != artifact.RelativePath || artifact.MediaType != slot.MediaType || artifact.LengthBytes < 0
+            || artifact.Sha256.Length != 64 || artifact.Sha256.Any(static value => !char.IsAsciiHexDigitLower(value)))
+            throw new ArgumentException("The verified artifact metadata is invalid.", nameof(artifact));
+        ReserveArtifact(artifact.LogicalName, normalized, artifact.LengthBytes, slot.MaximumBytes);
+        lock (_sync) _artifacts[normalized] = artifact;
     }
 
     /// <summary>
@@ -618,7 +655,8 @@ public sealed class EvidenceArtifactWriter
 
         var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
         EvidenceArtifactValidation.ValidatePathForSlot(slot, relativePath);
-        var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath);
+        var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath,
+            _requireUnlinkedPaths || slot.MaximumFiles is not null);
         ReserveArtifact(logicalName, normalizedPath, contents.Length, slot.MaximumBytes);
         var created = false;
         try
@@ -681,7 +719,8 @@ public sealed class EvidenceArtifactWriter
 
         var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
         EvidenceArtifactValidation.ValidatePathForSlot(slot, relativePath);
-        var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath);
+        var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath,
+            _requireUnlinkedPaths || slot.MaximumFiles is not null);
         ReserveArtifact(logicalName, normalizedPath, 0, slot.MaximumBytes);
 
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
@@ -752,7 +791,9 @@ public sealed class EvidenceArtifactWriter
             string path;
             try
             {
-                path = EvidenceArtifactValidation.GetContainedPath(_rootPath, artifact.RelativePath);
+                var slot = _producer.ArtifactSlots.First(slot => slot.LogicalName == artifact.LogicalName);
+                path = EvidenceArtifactValidation.GetContainedPath(_rootPath, artifact.RelativePath,
+                    _requireUnlinkedPaths || slot.MaximumFiles is not null);
                 await using var input = new FileStream(path, new FileStreamOptions
                 {
                     Mode = FileMode.Open,
@@ -925,7 +966,7 @@ public static class EvidenceArtifactValidation
             try
             {
                 var normalizedPath = NormalizeRelativePath(artifact.RelativePath);
-                if (!string.Equals(normalizedPath, artifact.RelativePath, StringComparison.Ordinal)
+                if ((slot.MaximumFiles is not null && !string.Equals(normalizedPath, artifact.RelativePath, StringComparison.Ordinal))
                     || !destinations.Add(normalizedPath))
                 {
                     return false;
@@ -1010,17 +1051,26 @@ public static class EvidenceArtifactValidation
     }
 
     /// <summary>
-    /// Returns an absolute path contained beneath a controlled artifact root, rejecting existing linked entries.
-    /// The caller must retain exclusive root custody; this preflight is not an atomic filesystem sandbox.
+    /// Resolves a root-relative path and checks lexical containment beneath the controlled artifact root.
     /// </summary>
     /// <param name="rootPath">Controlled artifact root.</param>
     /// <param name="relativePath">Validated root-relative artifact path.</param>
     /// <returns>Contained absolute destination path.</returns>
     public static string GetContainedPath(string rootPath, string relativePath)
+        => GetContainedPath(rootPath, relativePath, requireUnlinkedPaths: false);
+
+    /// <summary>Resolves a contained path and optionally rejects existing links at and below the root.</summary>
+    /// <param name="rootPath">Controlled artifact root.</param>
+    /// <param name="relativePath">Validated root-relative artifact path.</param>
+    /// <param name="requireUnlinkedPaths">Whether the root and descendant paths must be unlinked.</param>
+    /// <returns>Contained absolute destination path.</returns>
+    /// <remarks>The link check is a preflight. The caller must retain exclusive root custody.</remarks>
+    internal static string GetContainedPath(string rootPath, string relativePath, bool requireUnlinkedPaths)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         var root = Path.GetFullPath(rootPath);
-        var destination = Path.GetFullPath(Path.Join(root, NormalizeRelativePath(relativePath)));
+        var normalizedPath = NormalizeRelativePath(relativePath);
+        var destination = Path.GetFullPath(Path.Join(root, normalizedPath));
         var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
             ? root
             : root + Path.DirectorySeparatorChar;
@@ -1029,10 +1079,10 @@ public static class EvidenceArtifactValidation
             throw new ArgumentException("Evidence artifact path escapes the controlled artifact root.", nameof(relativePath));
         }
 
-        // This preflight rejects existing links; exclusive run-root custody remains the caller's responsibility.
+        if (!requireUnlinkedPaths) return destination;
         var current = root;
         RejectLinkedPath(current);
-        foreach (var segment in NormalizeRelativePath(relativePath).Split('/'))
+        foreach (var segment in normalizedPath.Split('/'))
         {
             current = Path.Join(current, segment);
             RejectLinkedPath(current);

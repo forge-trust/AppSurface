@@ -595,12 +595,13 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
         State = EvidenceHostState.Cleaning;
         // A producer can still be stopping an owned child after its execution deadline.
         // Never delete its workspace or dependencies while that task remains active.
-        var producers = Task.WhenAll(_producerExecutions.Concat(_readinessExecutions));
+        var callbackTasks = _producerExecutions.Concat(_readinessExecutions).ToArray();
+        var producers = Task.WhenAll(callbackTasks);
         try
         {
             await producers.WaitAsync(_options.ProducerCleanupTimeout, _timeProvider).ConfigureAwait(false);
         }
-        catch (TimeoutException)
+        catch (TimeoutException) when (!producers.IsCompleted)
         {
             _ = producers.ContinueWith(static task => _ = task.Exception,
                 CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -618,11 +619,17 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
             if (_beforePreparedCleanup is null) _cleaned = true;
             throw;
         }
+        var fatalCallback = FirstFatalCallbackFailure(callbackTasks);
+        if (fatalCallback is not null)
+        {
+            if (_beforePreparedCleanup is null) _cleaned = true;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatalCallback).Throw();
+        }
         if (_beforePreparedCleanup is not null)
         {
             if (!await _beforePreparedCleanup(true, _preparedCancellation).ConfigureAwait(false))
                 return "reuse.material_unsettled: An actual key callback remains active; registrations and key ownership are preserved.";
-            _preparedRegistrationCleanup ??= DisposePreparedRegistrationsAsync();
+            _preparedRegistrationCleanup ??= Task.Run(DisposePreparedRegistrationsAsync);
             try
             {
                 _cleanupFailure = await _preparedRegistrationCleanup.WaitAsync(_options.ProducerCleanupTimeout, _timeProvider).ConfigureAwait(false);
@@ -669,9 +676,10 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
     {
         Exception? failure = null;
         Exception? fatal = null;
-        var resources = _resourceScope is null ? _registration.Resources.Values.Reverse().Cast<object>() : [_resourceScope];
-        foreach (var owner in _registration.Producers.Values.Reverse().Cast<object>().Concat(resources).Distinct(ReferenceEqualityComparer.Instance))
+        var disposedOwners = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        foreach (var owner in _registration.Producers.Values.Reverse().Cast<object>())
         {
+            if (!disposedOwners.Add(owner)) continue;
             try
             {
                 if (owner is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
@@ -680,8 +688,38 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
             catch (Exception exception) when (IsNonFatalException(exception)) { failure ??= exception; }
             catch (Exception exception) { fatal ??= exception; }
         }
+        if (_resourceScope is not null)
+        {
+            try { await _resourceScope.DisposeAsync(disposedOwners).ConfigureAwait(false); }
+            catch (Exception exception) when (IsNonFatalException(exception)) { failure ??= exception; }
+            catch (Exception exception) { fatal ??= exception; }
+        }
+        else
+        {
+            foreach (var owner in _registration.Resources.Values.Reverse().Cast<object>())
+            {
+                if (!disposedOwners.Add(owner)) continue;
+                try
+                {
+                    if (owner is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
+                    else if (owner is IDisposable synchronous) synchronous.Dispose();
+                }
+                catch (Exception exception) when (IsNonFatalException(exception)) { failure ??= exception; }
+                catch (Exception exception) { fatal ??= exception; }
+            }
+        }
         if (fatal is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
         return failure is null ? null : $"reuse.cleanup_failed: Owned cleanup failed with {failure.GetType().Name}; execution settlement is unknown.";
+    }
+
+    private static Exception? FirstFatalCallbackFailure(IEnumerable<Task> callbackTasks)
+    {
+        foreach (var exception in callbackTasks.Where(static task => task.IsFaulted)
+                     .SelectMany(static task => task.Exception!.Flatten().InnerExceptions))
+        {
+            if (!IsNonFatalException(exception)) return exception;
+        }
+        return null;
     }
 
     /// <summary>Classifies failures that the host and readiness adapters may summarize or retain as secondary errors.</summary>
@@ -699,23 +737,26 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
             ? reused : new EvidenceProducerResult(producer.Id, outcome, [], diagnostic)).ToArray();
 
     /// <summary>Joins actual callbacks and cleanup before a prepared coordinator can release execution leases.</summary>
-    /// <param name="childSettlementKnown">Whether all admitted children confirmed completion after their handlers joined.</param>
+    /// <param name="isChildSettlementKnown">Checks whether all admitted children confirmed completion after callback tasks join.</param>
     /// <returns>True only when all actual tasks and owned disposals completed successfully.</returns>
     /// <remarks>Unknown children retain registrations and resources, including when a fatal callback is propagated.</remarks>
-    internal async Task<bool> JoinPreparedOwnershipAsync(bool childSettlementKnown)
+    internal async Task<bool> JoinPreparedOwnershipAsync(Func<bool> isChildSettlementKnown)
     {
+        ArgumentNullException.ThrowIfNull(isChildSettlementKnown);
+        var callbackTasks = _producerExecutions.Concat(_readinessExecutions).ToArray();
         Exception? fatal = null;
         try
         {
-            await Task.WhenAll(_producerExecutions.Concat(_readinessExecutions)).ConfigureAwait(false);
+            await Task.WhenAll(callbackTasks).ConfigureAwait(false);
         }
         catch (Exception exception) when (IsNonFatalException(exception))
         {
             // The terminal result already records a completed nonfatal callback failure.
         }
         catch (Exception exception) { fatal = exception; }
+        fatal ??= FirstFatalCallbackFailure(callbackTasks);
 
-        if (!childSettlementKnown)
+        if (!isChildSettlementKnown())
         {
             if (fatal is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
             return false;
@@ -728,7 +769,7 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
             {
                 if (_beforePreparedCleanup is not null)
                 {
-                    _preparedRegistrationCleanup ??= DisposePreparedRegistrationsAsync();
+                    _preparedRegistrationCleanup ??= Task.Run(DisposePreparedRegistrationsAsync);
                     try { _cleanupFailure = await _preparedRegistrationCleanup.ConfigureAwait(false); }
                     catch (Exception) { /* Preserve the original fatal callback after all cleanup owners were attempted. */ }
                     _cleaned = true;

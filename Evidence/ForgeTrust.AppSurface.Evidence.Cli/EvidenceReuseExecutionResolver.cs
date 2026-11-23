@@ -142,6 +142,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 .Select(decision => producerRoots.TryGetValue(decision.ProducerId, out var roots)
                     ? decision with
                     {
+                        VerifiedReceiptCompared = session.HasMatchedVerifiedAudit(decision.ProducerId),
                         ExecutionRoot = Path.GetRelativePath(outputDirectory, roots.Execution).Replace(Path.DirectorySeparatorChar, '/'),
                         ArtifactRoot = Path.GetRelativePath(outputDirectory, roots.Artifacts).Replace(Path.DirectorySeparatorChar, '/'),
                     }
@@ -195,13 +196,18 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             static _ => throw new InvalidOperationException("Read-only explain cannot allocate producer output."), cancellationToken).ConfigureAwait(false);
         var resolvedSdks = registrations.ToDictionary(static pair => pair.Key,
             static pair => pair.Value.EffectiveToolIdentity.GetValueOrDefault("sdk", "not-applicable"), StringComparer.Ordinal);
-        return ToSummaryDecisions(plan, session.Decisions, solutionPath, resolvedSdks);
+        return ToSummaryDecisions(plan, session.Decisions, solutionPath, resolvedSdks, readOnly: true);
     }
 
     /// <summary>Projects coordinator decisions without replacing an ownership failure with identity ineligibility.</summary>
+    /// <param name="plan">Resolved producer declarations.</param>
+    /// <param name="decisions">Coordinator decisions for this invocation.</param>
+    /// <param name="solutionPath">Explicit built-in coverage solution identity.</param>
+    /// <param name="sdkVersions">Resolved per-producer SDK identities.</param>
+    /// <param name="readOnly">Whether hits are inspected candidates rather than restored files. Defaults false for execution.</param>
     internal static IReadOnlyList<EvidenceReuseSummaryDecision> ToSummaryDecisions(
         EvidencePlan plan, IReadOnlyList<EvidenceProducerReuseDecision> decisions, string? solutionPath,
-        IReadOnlyDictionary<string, string> sdkVersions) => decisions
+        IReadOnlyDictionary<string, string> sdkVersions, bool readOnly = false) => decisions
         .Select(decision =>
         {
             var producer = plan.Profile.Producers.Single(item => item.Id == decision.ProducerId);
@@ -228,7 +234,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 var value when value.Contains("publication_suppressed", StringComparison.Ordinal)
                     || value.Contains("publication", StringComparison.Ordinal) => "suppressed",
                 _ when decision.Status == EvidenceProducerReuseStatus.Ineligible => "suppressed",
-                _ => decision.Status == EvidenceProducerReuseStatus.Hit ? "restored" : "not-published",
+                _ => decision.Status == EvidenceProducerReuseStatus.Hit && !readOnly ? "restored" : "not-published",
             };
             return new EvidenceReuseSummaryDecision(decision.ProducerId,
                 missingSolution && decision.Status == EvidenceProducerReuseStatus.Ineligible ? "Ineligible" : decision.Status.ToString(),
@@ -358,22 +364,25 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         process.StartInfo.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
         try { if (!process.Start()) return "unavailable"; }
         catch (System.ComponentModel.Win32Exception) { return "unavailable"; }
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
+        var stdout = process.StandardOutput.ReadToEndAsync(deadline.Token);
+        var stderr = process.StandardError.BaseStream.CopyToAsync(Stream.Null, deadline.Token);
         try
         {
-            await process.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
+            await Task.WhenAll(process.WaitForExitAsync(deadline.Token), stdout, stderr)
+                .WaitAsync(deadline.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
+            try { await Task.WhenAll(stdout, stderr).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }
             if (cancellationToken.IsCancellationRequested) throw;
             return "unavailable";
         }
         var version = (await stdout.ConfigureAwait(false)).Trim();
-        _ = await stderr.ConfigureAwait(false);
+        await stderr.ConfigureAwait(false);
         return process.ExitCode == 0 && version.Length is > 0 and <= 128 ? version : "unavailable";
     }
 
@@ -479,4 +488,11 @@ internal sealed record EvidenceReuseSummaryDecision(
     long? OriginElapsedMilliseconds,
     string Publication,
     string? ExecutionRoot = null,
-    string? ArtifactRoot = null);
+    string? ArtifactRoot = null)
+{
+    /// <summary>Gets whether fresh outcome/assertions matched an actually verified receipt in this invocation.</summary>
+    /// <remarks>False for ordinary fresh execution, read-only candidates, and an audit without a comparable receipt.
+    /// A true value records only comparison; the completed manifest and publication decision remain independent.</remarks>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool VerifiedReceiptCompared { get; init; }
+}

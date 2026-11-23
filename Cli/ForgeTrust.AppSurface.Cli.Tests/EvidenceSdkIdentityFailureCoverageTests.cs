@@ -57,6 +57,80 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
         Assert.True(File.Exists(TestPathUtils.PathUnder(output, "coverage", "coverage.cobertura.xml")));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SdkPipeDrainHonorsDeadlineAndCancellationAfterTheRootExits(bool cancelCaller)
+    {
+        var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        var (plan, solution) = await CreatePlanAsync(repository);
+        var fixture = new SdkProcessFixture(repository.Root, "root-exits-with-pipe-child");
+        using var cancellation = new CancellationTokenSource();
+        using var readiness = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Process? child = null;
+        var settled = false;
+        var explaining = Resolver(out _, fixture.ExecutablePath).ExplainAsync(plan, null, solution,
+            TestPathUtils.PathUnder(repository.Root, "receipts"), TimeSpan.FromSeconds(3), cancellation.Token);
+        try
+        {
+            var childPid = TestPathUtils.PathUnder(repository.Root, "sdk-probe.child-pid");
+            var rootPid = TestPathUtils.PathUnder(repository.Root, "sdk-probe.root-pid");
+            while (!File.Exists(childPid) || !File.Exists(rootPid))
+            {
+                // gstack-timing-ok: readiness waits for published PIDs, not elapsed-time evidence.
+                await Task.Delay(TimeSpan.FromMilliseconds(20), readiness.Token);
+            }
+            child = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(childPid, readiness.Token)));
+            try
+            {
+                using var root = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(rootPid, readiness.Token)));
+                await root.WaitForExitAsync(readiness.Token);
+            }
+            catch (ArgumentException) { /* The independently identified root already exited. */ }
+            Assert.False(child.HasExited);
+            Assert.False(explaining.IsCompleted);
+
+            if (cancelCaller)
+            {
+                cancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => explaining.WaitAsync(TimeSpan.FromSeconds(5)));
+            }
+            else
+            {
+                var decision = Assert.Single(await explaining.WaitAsync(TimeSpan.FromSeconds(40)));
+                Assert.Equal("reuse.sdk_unavailable", decision.Reason);
+            }
+            Assert.False(child.HasExited); // Returning unavailable is not a claim that an unregistered child settled.
+            Assert.False(Directory.Exists(TestPathUtils.PathUnder(repository.Root, "receipts")));
+        }
+        finally
+        {
+            try
+            {
+                cancellation.Cancel();
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(repository.Root, "stop-sdk-probe"), "stop");
+                if (child is not null)
+                {
+                    try { await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                    catch (TimeoutException)
+                    {
+                        if (!child.HasExited) child.Kill(entireProcessTree: true);
+                        await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                }
+                try { await explaining.WaitAsync(TimeSpan.FromSeconds(5)); }
+                catch (OperationCanceledException) when (explaining.IsCompleted) { }
+                settled = explaining.IsCompleted && (child?.HasExited ?? true);
+            }
+            finally
+            {
+                fixture.Dispose();
+                child?.Dispose();
+                if (settled) repository.Dispose();
+            }
+        }
+    }
+
     [Fact]
     public async Task ExplainMapsFailedSdkQueryToSafeUnavailableSummary()
     {
@@ -84,10 +158,23 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
     {
         using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
         var (plan, solution) = await CreatePlanAsync(repository);
-        using var fixture = new SdkProcessFixture(repository.Root, "change");
+        using var fixture = new SdkProcessFixture(repository.Root, "stable");
         var resolver = Resolver(out var runner, fixture.ExecutablePath);
         var first = await RunAsync("first-run");
+        var seededTestCount = runner.TestInvocationCount;
+        var stableA = await RunAsync("stable-a-control");
+        Assert.Equal(EvidenceClaimKind.LocalReusedComplete, stableA.Manifest.ClaimKind);
+        Assert.Equal(Assert.Single(first.Decisions).ProducerKey, Assert.Single(stableA.Decisions).ProducerKey);
+        Assert.Equal(seededTestCount, runner.TestInvocationCount);
+
+        fixture.SetMode("change");
         var second = await RunAsync("second-run");
+        Assert.True(runner.TestInvocationCount > seededTestCount);
+        Assert.Equal(EvidenceProducerOutcome.Passed, Assert.Single(second.Manifest.ProducerResults).Outcome);
+        // The transition itself cannot authorize reuse or publication. Seed a stable B execution
+        // before asserting that the subsequent B invocation restores that receipt.
+        var stableB = await RunAsync("stable-b-control");
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, stableB.Manifest.ClaimKind);
         var freshTestCount = runner.TestInvocationCount;
         var restored = await RunAsync("restored-run");
 
@@ -97,7 +184,8 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
         var secondKey = Assert.IsType<string>(Assert.Single(second.Decisions).ProducerKey);
         Assert.NotEqual(firstKey, secondKey);
         Assert.Equal(EvidenceClaimKind.LocalReusedComplete, restored.Manifest.ClaimKind);
-        Assert.Equal(secondKey, Assert.Single(restored.Decisions).ProducerKey);
+        Assert.Equal(Assert.Single(stableB.Decisions).ProducerKey, Assert.Single(restored.Decisions).ProducerKey);
+        Assert.NotEqual(firstKey, Assert.Single(stableB.Decisions).ProducerKey);
         Assert.Equal("restored", Assert.Single(restored.Decisions).Publication);
         Assert.Equal(freshTestCount, runner.TestInvocationCount);
         Assert.True(File.Exists(TestPathUtils.PathUnder(repository.Root, "sdk-probe.first-query")));
@@ -371,6 +459,8 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
             Directory.SetCurrentDirectory(_directory);
             foreach (var (name, value) in _environment) Environment.SetEnvironmentVariable(name, value);
         }
+
+        internal void SetMode(string mode) => Environment.SetEnvironmentVariable("APPSURFACE_IDENTITY_SDK_PROBE_MODE", mode);
     }
 
     private sealed class ThrowOnProgressWriter : TextWriter

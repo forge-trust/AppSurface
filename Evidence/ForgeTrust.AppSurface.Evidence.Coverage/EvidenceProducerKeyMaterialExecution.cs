@@ -52,7 +52,12 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
         _deadline = new CancellationTokenSource(timeout, _clock);
         _cancellation = CancellationTokenSource.CreateLinkedTokenSource(callerCancellation, _deadline.Token);
         // Calling an arbitrary ValueTask method can itself block before it returns its awaitable. Own that work too.
-        _actualTask = Task.Run(async () => CaptureMaterial(await callback.GetKeyMaterialAsync(context, _cancellation.Token).ConfigureAwait(false)));
+        var callbackToken = _cancellation.Token;
+        _actualTask = Task.Run(async () =>
+        {
+            callbackToken.ThrowIfCancellationRequested();
+            return CaptureMaterial(await callback.GetKeyMaterialAsync(context, callbackToken).ConfigureAwait(false));
+        }, callbackToken);
         _ = _actualTask.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
@@ -100,7 +105,7 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
             {
                 await _actualTask.WaitAsync(_cleanupTimeout, _clock).ConfigureAwait(false);
             }
-            catch (TimeoutException)
+            catch (TimeoutException) when (!_actualTask.IsCompleted)
             {
                 return new EvidenceProducerKeyMaterialPreparation(null, false, _callerCancellation.IsCancellationRequested,
                     _callerCancellation.IsCancellationRequested ? "reuse.material_cancelled_active" : "reuse.material_unsettled");
@@ -186,8 +191,12 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
             if (pair.Key.Length > EvidenceProducerIdentityBuilder.MaximumMaterialKeyLength)
                 throw new KeyMaterialValidationException(
                     $"A key-material key name is {FormatNumber(pair.Key.Length)} UTF-16 code units; limit is {FormatNumber(EvidenceProducerIdentityBuilder.MaximumMaterialKeyLength)}. Shorten key names and retry.");
+            if (!EvidenceProducerIdentityBuilder.IsWellFormedUtf16(pair.Key))
+                throw new KeyMaterialValidationException("A key-material key name contains malformed UTF-16. Use well-formed Unicode text.");
             if (pair.Value is null)
                 throw new KeyMaterialValidationException("A key-material entry has a null value. Return non-null values within the declared limits.");
+            if (!EvidenceProducerIdentityBuilder.IsWellFormedUtf16(pair.Value))
+                throw new KeyMaterialValidationException("A key-material value contains malformed UTF-16. Use well-formed Unicode text.");
             if (snapshot.ContainsKey(pair.Key))
                 throw new KeyMaterialValidationException("Key-material key names must be unique. Return a map with unique key names.");
 
@@ -212,7 +221,7 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
             var character = value[index];
             if (character <= 0x7f) bytes++;
             else if (character <= 0x7ff) bytes += 2;
-            else if (char.IsHighSurrogate(character) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1]))
+            else if (char.IsHighSurrogate(character))
             {
                 bytes += 4;
                 index++;

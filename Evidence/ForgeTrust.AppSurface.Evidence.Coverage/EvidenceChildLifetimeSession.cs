@@ -26,6 +26,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     private const int MaximumPipeInstances = EvidenceOwnedChild.MaximumChildren + MaximumPendingBegins + 1;
     private static readonly TimeSpan BeginDeadline = TimeSpan.FromSeconds(5);
     private readonly object _gate = new();
+    private readonly object _stopSourceGate = new();
     private readonly string _nonce;
     private readonly string _pipeName;
     private readonly TimeProvider _clock;
@@ -33,6 +34,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     private readonly Func<NamedPipeServerStream, CancellationToken, Task>? _waitForConnectionForTests;
     private readonly CancellationTokenSource _acceptStop = new();
     private readonly CancellationTokenSource _pendingStop = new();
+    private readonly TaskCompletionSource _stopCancellationCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<long, Task> _handlers = new();
     private readonly ConcurrentDictionary<long, NamedPipeServerStream> _pendingPipes = new();
     private readonly ConcurrentDictionary<long, NamedPipeServerStream> _activePipes = new();
@@ -89,6 +91,9 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     /// <summary>Controlled unexpected handler failure seam for lifecycle tests.</summary>
     internal Action? BeforeChildAcknowledgementForTests { get; set; }
 
+    /// <summary>Controlled pause between closing enrollment and canceling stop sources for lifecycle tests.</summary>
+    internal Action? BeforeStopSourceCancellationForTests { get; set; }
+
     /// <summary>Starts the current-user-only local child enrollment channel.</summary>
     /// <param name="executionId">A unique printable ID for the execution; it is never part of a producer key.</param>
     /// <param name="clock">Optional time provider for bounded settlement waits.</param>
@@ -124,8 +129,19 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
             _pending = 0;
             UpdateSettlementLocked();
         }
-        _acceptStop.Cancel();
-        _pendingStop.Cancel();
+        try
+        {
+            BeforeStopSourceCancellationForTests?.Invoke();
+            lock (_stopSourceGate)
+            {
+                _acceptStop.Cancel();
+                _pendingStop.Cancel();
+            }
+        }
+        finally
+        {
+            _stopCancellationCompleted.TrySetResult();
+        }
         listener?.Dispose();
         foreach (var pipe in pending) pipe.Dispose();
     }
@@ -243,9 +259,12 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
         try
         {
             using var beginCancellation = CancellationTokenSource.CreateLinkedTokenSource(_pendingStop.Token);
-            using var beginTimer = _clock.CreateTimer(static state => ((CancellationTokenSource)state!).Cancel(),
-                beginCancellation, BeginDeadline, Timeout.InfiniteTimeSpan);
-            var begin = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, beginCancellation.Token).ConfigureAwait(false);
+            string? begin;
+            await using (var beginTimer = _clock.CreateTimer(static state => ((CancellationTokenSource)state!).Cancel(),
+                beginCancellation, BeginDeadline, Timeout.InfiniteTimeSpan))
+            {
+                begin = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, beginCancellation.Token).ConfigureAwait(false);
+            }
             var parts = begin?.Split('|');
             var valid = parts is { Length: 3 }
                 && string.Equals(parts[0], "BEGIN", StringComparison.Ordinal)
@@ -277,7 +296,6 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
                 return;
             }
 
-            beginTimer.Dispose();
             BeforeChildAcknowledgementForTests?.Invoke();
             await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe, $"ACK|{childId:N}", CancellationToken.None).ConfigureAwait(false);
             var complete = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, CancellationToken.None).ConfigureAwait(false);
@@ -343,6 +361,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     private async Task DisposeCoreAsync()
     {
         CloseEnrollment();
+        await _stopCancellationCompleted.Task.ConfigureAwait(false);
         try { await _acceptTask.ConfigureAwait(false); }
         catch (OperationCanceledException) when (_acceptStop.IsCancellationRequested) { }
         catch (Exception exception) { RecordFatal(exception); }
@@ -356,8 +375,11 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
                 catch (Exception exception) { RecordFatal(exception); }
             }
         }
-        _acceptStop.Dispose();
-        _pendingStop.Dispose();
+        lock (_stopSourceGate)
+        {
+            _acceptStop.Dispose();
+            _pendingStop.Dispose();
+        }
         Volatile.Read(ref _fatalFailure)?.Throw();
     }
 

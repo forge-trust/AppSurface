@@ -10,6 +10,31 @@ if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "do
 {
     var mode = Environment.GetEnvironmentVariable("APPSURFACE_IDENTITY_SDK_PROBE_MODE");
     await File.WriteAllTextAsync(Path.Join(sdkProbeRoot, "sdk-probe.observed"), mode);
+    if (mode == "pipe-holder")
+    {
+        var pid = Path.Join(sdkProbeRoot, "sdk-probe.child-pid");
+        await File.WriteAllTextAsync(pid + ".part", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        File.Move(pid + ".part", pid);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        while (!File.Exists(Path.Join(sdkProbeRoot, "stop-sdk-probe")))
+        {
+            // gstack-timing-ok: bounded independently owned probe, released and joined by its fixture.
+            await Task.Delay(TimeSpan.FromMilliseconds(20), stop.Token);
+        }
+        return 0;
+    }
+    if (mode == "root-exits-with-pipe-child")
+    {
+        var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
+        start.Environment["APPSURFACE_IDENTITY_SDK_PROBE_MODE"] = "pipe-holder";
+        using var child = Process.Start(start) ?? throw new InvalidOperationException("The SDK pipe-holder probe did not start.");
+        var rootPid = Path.Join(sdkProbeRoot, "sdk-probe.root-pid");
+        await File.WriteAllTextAsync(rootPid + ".part",
+            Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        File.Move(rootPid + ".part", rootPid);
+        await Console.Out.WriteLineAsync("10.0.402");
+        return 0;
+    }
     if (mode == "deadline")
     {
         var attempted = Path.Join(sdkProbeRoot, "sdk-probe.deadline-started");
@@ -34,6 +59,14 @@ if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "do
     {
         await Console.Error.WriteAsync("private-sdk-probe-error-marker");
         return 17;
+    }
+    if (mode is "excessive-stdout" or "excessive-stderr")
+    {
+        var writer = mode == "excessive-stdout" ? Console.Out : Console.Error;
+        var block = new string('x', 64 * 1024);
+        for (var index = 0; index < 66; index++)
+            await writer.WriteAsync(block);
+        return 0;
     }
     if (mode == "blank") return 0;
     if (mode == "long")
@@ -149,6 +182,9 @@ if (args.Length > 0 && args[0].StartsWith("settlement-", StringComparison.Ordina
         "settlement-contender" when args.Length == 5 => await RunContenderAsync(args[1], args[2], args[3], args[4]),
         "settlement-fresh-domain" when args.Length == 5 => await RunFreshDomainAsync(args[1], args[2], args[3], args[4]),
         "settlement-child-client" when args.Length == 2 => await RunChildClientAsync(args[1]),
+        "settlement-independent-heartbeat-root" when args.Length == 2 => await RunIndependentHeartbeatRootAsync(args[1]),
+        "settlement-independent-heartbeat-root-exits" when args.Length == 2 => await RunIndependentHeartbeatRootAsync(args[1], exitBeforeChild: true),
+        "settlement-enrolled-heartbeat" when args.Length == 2 => await RunEnrolledHeartbeatAsync(args[1]),
         "settlement-heartbeat-child" when args.Length == 2 => await RunHeartbeatChildAsync(args[1]),
         _ => Usage(),
     };
@@ -296,6 +332,24 @@ static async Task<int> RunChildClientAsync(string recordRoot)
     WriteJson(Path.Join(recordRoot, "child-client-completed.json"), new ClientCompletion(
         Environment.ProcessId, executionId, nonce, heartbeatExitCode, channelFailure));
     return heartbeatExitCode is 0 or -1 ? 0 : 4;
+}
+
+static async Task<int> RunIndependentHeartbeatRootAsync(string recordRoot, bool exitBeforeChild = false)
+{
+    WriteJson(Path.Join(recordRoot, "root-process.json"), new { ProcessId = Environment.ProcessId });
+    // The descendant owns its own enrollment connection, which survives this root being terminated.
+    using var child = Process.Start(StartProbe("settlement-enrolled-heartbeat", recordRoot))
+        ?? throw new InvalidOperationException("The independently enrolled descendant did not start.");
+    if (exitBeforeChild) return 0;
+    await child.WaitForExitAsync();
+    return child.ExitCode;
+}
+
+static async Task<int> RunEnrolledHeartbeatAsync(string recordRoot)
+{
+    var exitCode = -1;
+    await EvidenceOwnedChild.RunAsync(async _ => exitCode = await RunHeartbeatChildAsync(recordRoot), CancellationToken.None);
+    return exitCode;
 }
 
 static async Task<int> RunHeartbeatChildAsync(string recordRoot)

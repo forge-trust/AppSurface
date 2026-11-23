@@ -97,7 +97,7 @@ internal static class EvidenceProducerIdentityBuilder
             cancellationToken.ThrowIfCancellationRequested();
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(PreparationBudget);
-            ValidateRequest(request);
+            ValidateRequest(request, deadline.Token);
             var root = CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(request.RepositoryRoot));
             stage = "repository";
             var repositoryRoot = await GitAsync(root, ["rev-parse", "--show-toplevel"], deadline.Token).ConfigureAwait(false);
@@ -122,13 +122,20 @@ internal static class EvidenceProducerIdentityBuilder
             var indexedPaths = await GitAsync(root, ["ls-files", "--stage", "-z"], deadline.Token, raw: true).ConfigureAwait(false);
             if (HasSelectedNestedRepository(root, paths, indexedPaths, includes, deadline.Token))
                 return Ineligible("reuse.identity.nested_repository", "A declared include pattern may select files inside a nested Git repository or submodule.");
+            if (HasSelectedLinkedDirectory(root, paths, includes, deadline.Token))
+                return Ineligible("reuse.identity.linked_input", "A declared include pattern may select files through a linked directory.");
             var selected = paths.Where(path => includes.Any(pattern => Matches(pattern, path, deadline.Token))
                 && !excludes.Any(pattern => Matches(pattern, path, deadline.Token))).Order(StringComparer.Ordinal).ToArray();
             if (CheckFileCountLimit(selected.Length) is { } fileCountLimit) return fileCountLimit;
             if (selected.Length == 0) return Ineligible("reuse.identity.empty", "The declared input patterns select no files.");
-            var metadataBytes = selected.Sum(static path => (long)Encoding.UTF8.GetByteCount(path) + 64);
+            long metadataBytes = 0;
+            foreach (var path in selected)
+            {
+                deadline.Token.ThrowIfCancellationRequested();
+                metadataBytes += (long)Encoding.UTF8.GetByteCount(path) + 64;
+            }
             if (CheckEstimatedMetadataLimit(selected.Length, metadataBytes) is { } estimatedMetadataLimit) return estimatedMetadataLimit;
-            if (HasIdentityCollision(selected)) return Ineligible("reuse.identity.path_collision", "Selected paths have ambiguous filesystem identity.");
+            if (HasIdentityCollision(selected, deadline.Token)) return Ineligible("reuse.identity.path_collision", "Selected paths have ambiguous filesystem identity.");
 
             var files = new List<EvidenceProducerInputFile>(selected.Length);
             long encodedMetadataBytes = 2;
@@ -161,7 +168,7 @@ internal static class EvidenceProducerIdentityBuilder
             if (!paths.SequenceEqual(ExistingPaths(root, ParsePaths(finalListing)), StringComparer.Ordinal))
                 return Ineligible("reuse.identity.changed_during_read", "The repository input inventory changed during identity preparation.");
 
-            var materialError = ValidateMaterial(request.ExtraMaterial);
+            var materialError = ValidateMaterial(request.ExtraMaterial, deadline.Token);
             stage = "key";
             if (materialError is not null) return Ineligible("reuse.identity.material_invalid", materialError);
             if (RequiresPatch(request.Producer) && (!ValidDigest(request.CapturedPatchSha256) || !ValidDigest(request.Plan.PatchSha256)))
@@ -170,19 +177,29 @@ internal static class EvidenceProducerIdentityBuilder
                 && !string.Equals(request.Plan.PatchSha256, request.CapturedPatchSha256, StringComparison.OrdinalIgnoreCase))
                 return Ineligible("reuse.identity.patch_mismatch", "The captured patch digest does not match the planned patch.");
 
-            var resourceDeclarations = request.Plan.Profile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
+            var resourceDeclarations = new Dictionary<string, EvidenceResourceDeclaration>(StringComparer.Ordinal);
+            foreach (var resource in request.Plan.Profile.Resources)
+            {
+                deadline.Token.ThrowIfCancellationRequested();
+                resourceDeclarations.Add(resource.Id, resource);
+            }
             var requiredIds = new HashSet<string>(StringComparer.Ordinal);
             var pending = new Stack<string>(request.Producer.RequiredResources);
             while (pending.TryPop(out var id))
             {
                 if (!requiredIds.Add(id)) continue;
                 if (!resourceDeclarations.TryGetValue(id, out var declaration)) return Ineligible("reuse.identity.resource_unavailable", "A required resource declaration is unavailable.");
-                foreach (var dependency in declaration.Requires) pending.Push(dependency);
+                foreach (var dependency in declaration.Requires)
+                {
+                    deadline.Token.ThrowIfCancellationRequested();
+                    pending.Push(dependency);
+                }
             }
             var resources = request.Plan.Profile.Resources
                 .Where(resource => requiredIds.Contains(resource.Id))
                 .OrderBy(static resource => resource.Id, StringComparer.Ordinal)
                 .Select(resource => new { declaration = resource with { Requires = resource.Requires.Order(StringComparer.Ordinal).ToArray() }, identity = request.ResourceIdentities.GetValueOrDefault(resource.Id) }).ToArray();
+            deadline.Token.ThrowIfCancellationRequested();
             if (resources.Any(static resource => string.IsNullOrWhiteSpace(resource.identity)))
                 return Ineligible("reuse.identity.resource_unavailable", "An effective required-resource identity is unavailable.");
 
@@ -198,6 +215,7 @@ internal static class EvidenceProducerIdentityBuilder
                 ["files"] = Hash(JsonSerializer.SerializeToUtf8Bytes(files, CanonicalJson))
             };
             var key = Hash(JsonSerializer.SerializeToUtf8Bytes(new { version = 1, components }, CanonicalJson));
+            deadline.Token.ThrowIfCancellationRequested();
             return new EvidenceProducerIdentityResult(new EvidenceProducerIdentity(key, namespaceId, files, components), "reuse.identity.ready", null);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -268,20 +286,65 @@ internal static class EvidenceProducerIdentityBuilder
         return path.Split('/').All(static segment => segment.Length > 0 && segment is not "." and not "..");
     }
 
-    private static void ValidateRequest(EvidenceProducerIdentityRequest request)
+    private static void ValidateRequest(EvidenceProducerIdentityRequest request, CancellationToken token)
     {
         if (request.Producer.Inputs is null) throw new InvalidOperationException("Inputs are not declared.");
         if (string.IsNullOrWhiteSpace(request.ImplementationIdentity)) throw new InvalidOperationException("Implementation identity is required.");
+        if (!IsWellFormedUtf16(request.ImplementationIdentity, token)) throw new ArgumentException("Implementation identity contains malformed UTF-16.");
         if (request.Producer.Inputs.Include is null || request.Producer.Inputs.Include.Count == 0) throw new InvalidOperationException("At least one include pattern is required.");
-        foreach (var pattern in request.Producer.Inputs.Include.Concat(request.Producer.Inputs.Exclude ?? [])) ValidatePattern(pattern);
+        var producer = request.Producer;
+        if (!IsWellFormedUtf16(producer.Id, token) || !IsWellFormedUtf16(producer.Kind, token)
+            || !IsWellFormedUtf16(producer.Version, token))
+            throw new ArgumentException("Producer declaration contains malformed UTF-16.");
+        foreach (var value in producer.RequiredResources.Concat(producer.AssertionIds))
+        {
+            token.ThrowIfCancellationRequested();
+            if (!IsWellFormedUtf16(value, token)) throw new ArgumentException("Producer declaration contains malformed UTF-16.");
+        }
+
+        foreach (var slot in producer.ArtifactSlots)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!IsWellFormedUtf16(slot.LogicalName, token) || !IsWellFormedUtf16(slot.RelativeRoot, token)
+                || !IsWellFormedUtf16(slot.MediaType, token))
+                throw new ArgumentException("Producer declaration contains malformed UTF-16.");
+        }
+
+        if (producer.CoverageGate?.PatchLineMode is { } patchLineMode && !IsWellFormedUtf16(patchLineMode, token))
+            throw new ArgumentException("Producer declaration contains malformed UTF-16.");
+        if (producer.CoverageExecution?.Configuration is { } configuration && !IsWellFormedUtf16(configuration, token))
+            throw new ArgumentException("Producer declaration contains malformed UTF-16.");
+        if (producer.CoverageArtifactRetention is { } retention && !IsWellFormedUtf16(retention, token))
+            throw new ArgumentException("Producer declaration contains malformed UTF-16.");
+        foreach (var (key, value) in request.ResourceIdentities.Concat(request.EffectiveToolIdentity))
+        {
+            token.ThrowIfCancellationRequested();
+            if (key is null || !IsWellFormedUtf16(key, token) || value is null || !IsWellFormedUtf16(value, token))
+                throw new ArgumentException("Execution identity contains malformed UTF-16.");
+        }
+
+        foreach (var pattern in request.Producer.Inputs.Include.Concat(request.Producer.Inputs.Exclude ?? []))
+        {
+            token.ThrowIfCancellationRequested();
+            ValidatePattern(pattern, token);
+        }
+
+        foreach (var resource in request.Plan.Profile.Resources)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!IsWellFormedUtf16(resource.Id, token) || !IsWellFormedUtf16(resource.Readiness, token)
+                || resource.Requires.Any(dependency => !IsWellFormedUtf16(dependency, token)))
+                throw new ArgumentException("Resource declaration contains malformed UTF-16.");
+        }
     }
 
-    private static void ValidatePattern(string pattern)
+    private static void ValidatePattern(string pattern, CancellationToken token)
     {
         if (string.IsNullOrEmpty(pattern) || pattern.StartsWith('/') || pattern.Contains('\\') || Path.IsPathRooted(pattern)) throw new ArgumentException("Invalid path pattern.");
         var segments = pattern.Split('/');
         if (segments.Any(static segment => segment.Length == 0 || segment is "." or ".." || (segment.Contains("**", StringComparison.Ordinal) && segment != "**"))) throw new ArgumentException("Invalid path pattern.");
         if (pattern.Any(static c => c is '\0' or '?' or '[' or ']')) throw new ArgumentException("Invalid path pattern.");
+        if (!IsWellFormedUtf16(pattern, token)) throw new ArgumentException("Invalid path pattern.");
     }
 
     private static bool Matches(string pattern, string path, CancellationToken token)
@@ -345,11 +408,16 @@ internal static class EvidenceProducerIdentityBuilder
         return full;
     }
 
-    private static bool HasIdentityCollision(string[] paths)
+    private static bool HasIdentityCollision(string[] paths, CancellationToken token)
     {
         var comparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        var identities = paths.Select(path => path.Normalize(NormalizationForm.FormC));
-        return identities.Distinct(comparer).Count() != paths.Length;
+        var identities = new HashSet<string>(comparer);
+        foreach (var path in paths)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!identities.Add(path.Normalize(NormalizationForm.FormC))) return true;
+        }
+        return false;
     }
 
     private static bool HasSelectedNestedRepository(string root, IReadOnlyList<string> listedPaths, string indexedPaths,
@@ -396,10 +464,33 @@ internal static class EvidenceProducerIdentityBuilder
         foreach (var nestedRoot in nestedRoots)
         {
             token.ThrowIfCancellationRequested();
-            if (includePatterns.Any(pattern => CouldSelectDescendant(pattern, nestedRoot, token))) return true;
+            if (IncludeMaySelectPathOrDescendant(nestedRoot, includePatterns, token)) return true;
         }
         return false;
     }
+
+    private static bool HasSelectedLinkedDirectory(string root, IReadOnlyList<string> listedPaths,
+        IReadOnlyList<string> includePatterns, CancellationToken token)
+    {
+        foreach (var path in listedPaths)
+        {
+            token.ThrowIfCancellationRequested();
+            var fullPath = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(fullPath) || (File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) == 0)
+                continue;
+            if (IncludeMaySelectPathOrDescendant(path, includePatterns, token))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Determines whether an include pattern selects a path or could select content beneath it.</summary>
+    /// <param name="path">Repository-relative path to test, such as a gitlink or directory link.</param>
+    /// <param name="includePatterns">Validated producer include patterns.</param>
+    /// <param name="token">Cancellation token for bounded pattern matching.</param>
+    /// <returns><see langword="true"/> when a pattern selects the path or a possible descendant.</returns>
+    internal static bool IncludeMaySelectPathOrDescendant(string path, IReadOnlyList<string> includePatterns, CancellationToken token)
+        => includePatterns.Any(pattern => Matches(pattern, path, token) || CouldSelectDescendant(pattern, path, token));
 
     private static bool CouldSelectDescendant(string pattern, string directory, CancellationToken token)
     {
@@ -448,14 +539,16 @@ internal static class EvidenceProducerIdentityBuilder
     private static string Hash(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     private static bool ValidDigest(string? digest) => digest is { Length: 64 } && digest.All(Uri.IsHexDigit);
     private static bool RequiresPatch(EvidenceProducerDeclaration producer) => producer.CoverageGate is { MinPatchLinePercent: not null } or { MinPatchBranchPercent: not null };
-    private static string? ValidateMaterial(IReadOnlyDictionary<string, string> values)
+    private static string? ValidateMaterial(IReadOnlyDictionary<string, string> values, CancellationToken token = default)
     {
+        ArgumentNullException.ThrowIfNull(values);
         if (values.Count > MaximumMaterialKeys)
             return $"Producer key material contains {FormatNumber(values.Count)} keys; limit is {FormatNumber(MaximumMaterialKeys)}. Remove keys and retry.";
         var observedCount = 0;
         var total = 0L;
         foreach (var (key, value) in values)
         {
+            token.ThrowIfCancellationRequested();
             observedCount++;
             if (observedCount > MaximumMaterialKeys)
                 return $"More than {FormatNumber(MaximumMaterialKeys)} producer key-material entries were observed ({FormatNumber(observedCount)} observed). Remove keys and retry.";
@@ -463,23 +556,47 @@ internal static class EvidenceProducerIdentityBuilder
                 return "A producer key-material key name has length 0; minimum is 1. Provide a non-empty key name.";
             if (key.Length > MaximumMaterialKeyLength)
                 return $"A producer key-material key name is {FormatNumber(key.Length)} UTF-16 code units; limit is {FormatNumber(MaximumMaterialKeyLength)}. Shorten key names and retry.";
+            if (!IsWellFormedUtf16(key, token))
+                return "A producer key-material key name contains malformed UTF-16. Use well-formed Unicode text.";
             if (value is null)
                 return "A producer key-material entry has a null value. Return non-null values within the declared limits.";
-            var size = GetUtf8ByteCount(value);
+            if (!IsWellFormedUtf16(value, token))
+                return "A producer key-material value contains malformed UTF-16. Use well-formed Unicode text.";
+            var size = GetUtf8ByteCount(value, token);
             if (size > MaximumMaterialValueBytes)
                 return $"A producer key-material value is {FormatNumber(size)} UTF-8 bytes; limit is {FormatNumber(MaximumMaterialValueBytes)}. Reduce the value and retry.";
-            total += GetUtf8ByteCount(key) + size;
+            total += GetUtf8ByteCount(key, token) + size;
             if (total > MaximumMaterialTotalBytes)
                 return $"Producer key material totals {FormatNumber(total)} UTF-8 bytes; limit is {FormatNumber(MaximumMaterialTotalBytes)}. Reduce key and value sizes and retry.";
         }
         return null;
     }
 
-    private static long GetUtf8ByteCount(string value)
+    /// <summary>Checks whether a string contains only Unicode scalar values encoded as well-formed UTF-16.</summary>
+    /// <param name="value">String to inspect.</param>
+    /// <param name="token">Optional cancellation token checked during long inputs.</param>
+    /// <returns><see langword="true"/> when every surrogate belongs to a valid pair or is absent.</returns>
+    internal static bool IsWellFormedUtf16(string value, CancellationToken token = default)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (char.IsHighSurrogate(value[index]))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1])) return false;
+                index++;
+            }
+            else if (char.IsLowSurrogate(value[index])) return false;
+        }
+        return true;
+    }
+
+    private static long GetUtf8ByteCount(string value, CancellationToken token)
     {
         long bytes = 0;
         for (var index = 0; index < value.Length; index++)
         {
+            token.ThrowIfCancellationRequested();
             var character = value[index];
             if (character <= 0x7f) bytes++;
             else if (character <= 0x7ff) bytes += 2;

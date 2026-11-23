@@ -394,6 +394,85 @@ public sealed class EvidenceReuseCliCoverageTests
     }
 
     [Fact]
+    public void ReadOnlyCandidateSummaryDoesNotClaimFilesWereRestored()
+    {
+        var producer = new EvidenceProducerDeclaration("custom", "custom", "1", [], [], [], 10);
+        var plan = CreatePlan(new EvidenceProfile("local", EvidenceProfileScope.Targeted, [], [producer], []));
+        var candidate = new EvidenceProducerReuseDecision(producer.Id, EvidenceProducerReuseStatus.Hit,
+            "reuse.hit", "Read-only candidate", new string('a', 64));
+        var sdks = new Dictionary<string, string>();
+
+        var inspected = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [candidate], null,
+            sdks, readOnly: true));
+        var restored = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [candidate], null, sdks));
+
+        Assert.Equal("Hit", inspected.Status);
+        Assert.Equal("not-published", inspected.Publication);
+        Assert.Equal("restored", restored.Publication);
+        Assert.Equal(inspected.ProducerKey, restored.ProducerKey);
+    }
+
+    [Fact]
+    public async Task ExplainRejectsOverlappingOutputBeforePlanningOrCreatingAStore()
+    {
+        using var directory = TestDirectory.Create();
+        var store = TestPathUtils.PathUnder(directory.Path, "store");
+        using var console = new FakeInMemoryConsole();
+        var command = new EvidenceExplainCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageProducer())
+        {
+            Reuse = true,
+            ReceiptStore = store,
+            OutputDirectory = store,
+            PolicyPath = TestPathUtils.PathUnder(directory.Path, "missing-policy.json"),
+        };
+
+        var error = await Assert.ThrowsAsync<CommandException>(() => command.ExecuteAsync(console).AsTask());
+
+        Assert.Contains("reuse.explain_output_overlaps_store", error.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
+    }
+
+    [Theory]
+    [InlineData("store", "store")]
+    [InlineData("store/plan", "store")]
+    [InlineData("store", "store/nested")]
+    [InlineData("STORE", "store")]
+    public void ExplainOutputGuardRejectsEitherContainmentDirectionWithoutWrites(string output, string store)
+    {
+        using var directory = TestDirectory.Create();
+
+        var error = Assert.Throws<CommandException>(() => EvidenceExplainCommand.ValidateReadOnlyOutput(
+            TestPathUtils.PathUnder(directory.Path, output), TestPathUtils.PathUnder(directory.Path, store)));
+
+        Assert.Contains("reuse.explain_output_overlaps_store", error.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
+    }
+
+    [Fact]
+    public void ExplainOutputGuardAcceptsSeparateDirectoriesWithACommonNamePrefix()
+    {
+        using var directory = TestDirectory.Create();
+
+        EvidenceExplainCommand.ValidateReadOnlyOutput(TestPathUtils.PathUnder(directory.Path, "store-plan"),
+            TestPathUtils.PathUnder(directory.Path, "store"));
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
+    }
+
+    [Fact]
+    public void ExplainOutputGuardReportsAnInvalidExplicitStoreWithoutWrites()
+    {
+        using var directory = TestDirectory.Create();
+        var output = TestPathUtils.PathUnder(directory.Path, "plan");
+
+        var error = Assert.Throws<CommandException>(() => EvidenceExplainCommand.ValidateReadOnlyOutput(output, " "));
+
+        Assert.Contains("ASEVD217", error.Message, StringComparison.Ordinal);
+        Assert.Contains("reuse.explain_output_unavailable", error.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
+    }
+
+    [Fact]
     public async Task ExplainCommandWritesReadOnlyCustomProducerDecisionWithoutCreatingAStore()
     {
         using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();

@@ -104,6 +104,7 @@ internal sealed class CoverageEvidenceProducer
     /// <param name="artifactWriter">Optional bounded receipt-custody writer.</param>
     /// <param name="childLifetime">Optional explicitly cooperative child coordinator.</param>
     /// <param name="finalReportRoot">Optional current-run root for ordinary reports; receipt bounds never change the gate outcome.</param>
+    /// <param name="beforeCustodyForTests">Optional scheduling seam after required report delivery and before optional custody; production omits it.</param>
     internal async Task<CoverageEvidenceProducerExecutionResult> RunWithInventoryAsync(
         EvidenceProducerDeclaration producer,
         string? solutionPath,
@@ -113,7 +114,8 @@ internal sealed class CoverageEvidenceProducer
         CancellationToken cancellationToken,
         EvidenceArtifactWriter? artifactWriter = null,
         EvidenceChildLifetimeSession? childLifetime = null,
-        string? finalReportRoot = null)
+        string? finalReportRoot = null,
+        Action? beforeCustodyForTests = null)
     {
         ArgumentNullException.ThrowIfNull(producer);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
@@ -174,8 +176,8 @@ internal sealed class CoverageEvidenceProducer
                 CreateRunRequest(solutionPath, outputDirectory, producer.CoverageExecution) with { ProducerDeadline = producerDeadline, ArtifactRetention = producer.CoverageArtifactRetention },
                 CreateGateRequest(outputDirectory, diffSnapshot, producer.CoverageGate),
                 writers,
-                executionCancellation.Token, captureInventory: captureInventory,
-                captureOrdinaryPublications: finalReportRoot is not null).ConfigureAwait(false);
+                executionCancellation.Token, captureInventory: false,
+                captureOrdinaryPublications: finalReportRoot is not null || captureInventory).ConfigureAwait(false);
             if (!result.Run.Success)
             {
                 return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], "The existing AppSurface coverage workflow reported a failed test, merge, or artifact step."));
@@ -185,26 +187,6 @@ internal sealed class CoverageEvidenceProducer
             var ordinary = gateResult.Passed
                 ? new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, producer.AssertionIds, $"Coverage gate passed: {gateResult.MarkdownReportPath}")
                 : new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"Coverage gate did not meet its declared threshold. See {gateResult.MarkdownReportPath}.");
-            inventory = result.Inventory;
-            inventoryReason = result.InventoryIneligibilityReason ?? inventoryReason;
-            if (gateResult.Passed && artifactWriter is not null && inventory is not null)
-            {
-                try
-                {
-                    var slot = producer.ArtifactSlots.SingleOrDefault(slot => slot.LogicalName == CoverageEvidenceInventory.LogicalName)
-                        ?? throw new CoverageEvidenceInventoryException("inventory-slot-missing");
-                    var artifacts = await inventory.WriteAsync(artifactWriter, slot, outputDirectory,
-                        executionCancellation.Token).ConfigureAwait(false);
-                    ordinary = ordinary with { Artifacts = artifacts };
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception exception) when (IsNonFatal(exception))
-                {
-                    inventory = null;
-                    inventoryReason = exception is CoverageEvidenceInventoryException failure
-                        ? failure.Reason : "inventory-custody-unavailable";
-                }
-            }
             if (finalReportRoot is not null)
             {
                 if (result.OrdinaryPublications is { } ordinaryPublications
@@ -234,6 +216,51 @@ internal sealed class CoverageEvidenceProducer
                     // original reports and their actionable diagnostic; no receipt or artifact subset is admitted.
                     inventory = null;
                     inventoryReason = result.OrdinaryPublicationIneligibilityReason ?? "ordinary-publications-unavailable";
+                }
+            }
+            if (captureInventory && gateResult.Passed && ordinary.Outcome == EvidenceProducerOutcome.Passed)
+            {
+                // Ordinary delivery has already completed. Optional custody consumes only the original remaining
+                // producer budget, using its own cancellation source so expiration cannot replace that fresh result.
+                var custodyBudget = producerDeadline.Remaining;
+                using var custodyDeadline = new CancellationTokenSource(custodyBudget, _clock);
+                if (custodyBudget == TimeSpan.Zero) custodyDeadline.Cancel();
+                using var custodyCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, custodyDeadline.Token);
+                try
+                {
+                    beforeCustodyForTests?.Invoke();
+                    var publications = result.OrdinaryPublications
+                        ?? throw new CoverageEvidenceInventoryException(result.OrdinaryPublicationIneligibilityReason ?? "inventory-unavailable");
+                    inventory = CoverageEvidenceInventory.Capture(outputDirectory, result, publications, custodyCancellation.Token);
+                    var slot = producer.ArtifactSlots.SingleOrDefault(slot => slot.LogicalName == CoverageEvidenceInventory.LogicalName)
+                        ?? throw new CoverageEvidenceInventoryException("inventory-slot-missing");
+                    inventory.ValidateSlot(artifactWriter!, slot);
+                    IReadOnlyList<EvidenceArtifactResult> artifacts;
+                    if (finalReportRoot is not null)
+                    {
+                        // Required reports already exist here. Atomic, non-overwriting delivery adds only missing
+                        // optional metadata; rejected custody can never overwrite or poison an ordinary report.
+                        await PreserveOrdinaryReportsAsync(outputDirectory, finalReportRoot, result,
+                            inventory.Files.Select(file => new CoverageArtifactInventoryEntry(
+                                file.RelativePath["coverage/".Length..], file.LengthBytes, file.Sha256)).ToArray(),
+                            custodyCancellation.Token).ConfigureAwait(false);
+                        artifacts = inventory.AdoptDelivered(artifactWriter!, slot, finalReportRoot, custodyCancellation.Token);
+                    }
+                    else
+                        artifacts = await inventory.WriteAsync(artifactWriter!, slot, outputDirectory, custodyCancellation.Token).ConfigureAwait(false);
+                    ordinary = ordinary with { Artifacts = artifacts };
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && custodyDeadline.IsCancellationRequested)
+                {
+                    inventory = null;
+                    inventoryReason = "inventory-deadline";
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception exception) when (IsNonFatal(exception))
+                {
+                    inventory = null;
+                    inventoryReason = exception is CoverageEvidenceInventoryException failure
+                        ? failure.Reason : "inventory-custody-unavailable";
                 }
             }
             return Finish(ordinary);
@@ -359,12 +386,16 @@ internal sealed class CoverageEvidenceProducer
     /// <param name="execution">Successful collection and completed gate decision identifying required reports.</param>
     /// <param name="publications">Complete writer-owned publication inventory, relative to the coverage directory.</param>
     /// <param name="cancellationToken">Cancels validation, hashing, and copying; every opened handle is disposed.</param>
+    /// <param name="beforeReportPromotion">Optional per-call scheduling seam after a report is closed and verified;
+    /// production omits it. Cancellation is checked again before the atomic, non-overwriting promotion.</param>
     /// <remarks>
     /// This internal boundary is intentionally available to contract tests without reflection. Production calls it
     /// through the producer's failure-reporting wrapper. It checks canonical paths, case collisions, required aggregate
     /// and project reports, lengths, and digests before claiming successful delivery. Existing destination files are
     /// accepted only when their bytes match; differing or linked files are preserved and rejected. Cancellation or an
-    /// I/O failure can leave already copied destination files, so callers must withhold completion on any exception.
+    /// I/O failure can leave already completed destination files, so callers must withhold completion on any exception.
+    /// Incomplete reports remain in private temporary files and never occupy a canonical report path; a failed
+    /// delivery removes only its own temporary file, allowing a later delivery to retry safely.
     /// This operation has no receipt-size limit and does not publish a receipt or change the coverage gate verdict.
     /// </remarks>
     /// <exception cref="InvalidDataException">The execution or closed publication metadata is incomplete or invalid.</exception>
@@ -375,7 +406,8 @@ internal sealed class CoverageEvidenceProducer
         string finalRoot,
         CoverageEvidenceExecutionResult execution,
         IReadOnlyList<CoverageArtifactInventoryEntry> publications,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? beforeReportPromotion = null)
     {
         if (!execution.Run.Success || execution.Gate is null)
             throw new InvalidDataException("Ordinary reports require successful collection and a completed gate decision.");
@@ -415,21 +447,41 @@ internal sealed class CoverageEvidenceProducer
                 continue;
             }
 
-            using var destination = destinationParent.OpenArtifactFile(destinationName, createNew: true);
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            long copied = 0;
-            int read;
-            while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+            var stagingName = $".report-{Guid.NewGuid():N}.tmp";
+            string? stagedIdentity = null;
+            try
             {
+                using (var destination = destinationParent.OpenArtifactFile(stagingName, createNew: true))
+                {
+                    stagedIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(destination.SafeFileHandle);
+                    using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                    long copied = 0;
+                    int read;
+                    while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        copied = checked(copied + read);
+                        if (copied > file.LengthBytes)
+                            throw new IOException("A managed coverage report grew while it was being promoted.");
+                        hash.AppendData(buffer, 0, read);
+                        await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    }
+                    await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    var digest = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+                    if (copied != file.LengthBytes || input.Length != file.LengthBytes || digest != file.Sha256)
+                        throw new IOException("A managed coverage report changed while it was being promoted.");
+                }
+                beforeReportPromotion?.Invoke();
                 cancellationToken.ThrowIfCancellationRequested();
-                copied = checked(copied + read);
-                hash.AppendData(buffer, 0, read);
-                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                destinationParent.MoveArtifactEntry(stagingName, destinationParent, destinationName,
+                    expectedSourceIdentity: stagedIdentity);
+                stagedIdentity = null;
             }
-            await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-            var digest = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
-            if (copied != file.LengthBytes || input.Length != file.LengthBytes || digest != file.Sha256)
-                throw new IOException("A managed coverage report changed while it was being promoted.");
+            finally
+            {
+                if (stagedIdentity is not null)
+                    destinationParent.DeleteArtifactEntry(stagingName, 1, stagedIdentity);
+            }
         }
     }
 

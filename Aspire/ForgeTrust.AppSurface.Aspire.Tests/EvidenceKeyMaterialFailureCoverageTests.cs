@@ -254,16 +254,30 @@ public sealed class EvidenceKeyMaterialFailureCoverageTests
         await using var exact = EvidenceProducerKeyMaterialExecution.Start(
             new Callback(() => new Dictionary<string, string> { ["mode"] = value }), Context(), TimeSpan.FromSeconds(1), CancellationToken.None);
         var accepted = await exact.WaitAsync();
-        Assert.Equal("reuse.material_ready", accepted.Reason);
-        Assert.Equal(value, accepted.Material!["mode"]);
+        var malformed = shape is "unpaired-surrogate" or "terminal-surrogate";
+        if (malformed)
+        {
+            Assert.Equal("reuse.material_invalid", accepted.Reason);
+            Assert.Null(accepted.Material);
+            Assert.Contains("malformed UTF-16", accepted.Diagnostic, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Equal("reuse.material_ready", accepted.Reason);
+            Assert.Equal(value, accepted.Material!["mode"]);
+        }
 
         await using var over = EvidenceProducerKeyMaterialExecution.Start(
             new Callback(() => new Dictionary<string, string> { ["mode"] = value + "a" }), Context(), TimeSpan.FromSeconds(1), CancellationToken.None);
         var rejected = await over.WaitAsync();
         Assert.Equal("reuse.material_invalid", rejected.Reason);
         Assert.Null(rejected.Material);
-        Assert.Contains("4097", rejected.Diagnostic, StringComparison.Ordinal);
-        Assert.Contains("4096", rejected.Diagnostic, StringComparison.Ordinal);
+        if (malformed) Assert.Contains("malformed UTF-16", rejected.Diagnostic, StringComparison.Ordinal);
+        else
+        {
+            Assert.Contains("4097", rejected.Diagnostic, StringComparison.Ordinal);
+            Assert.Contains("4096", rejected.Diagnostic, StringComparison.Ordinal);
+        }
     }
 
     [Theory]

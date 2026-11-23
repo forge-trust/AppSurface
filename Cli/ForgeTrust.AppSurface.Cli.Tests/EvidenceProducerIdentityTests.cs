@@ -226,7 +226,7 @@ public sealed class EvidenceProducerIdentityTests
     }
 
     [Fact]
-    public async Task BuildAsync_ShouldRejectAnIncludedGitlinkWithoutRequiringItsCheckoutContents()
+    public async Task BuildAsync_ShouldRejectAnExactIncludedGitlinkWhenItsCheckoutIsMissing()
     {
         using var repo = await TestRepository.CreateAsync();
         await repo.WriteAsync("src/file.cs", "outer");
@@ -240,11 +240,20 @@ public sealed class EvidenceProducerIdentityTests
         await nested.CommitAsync("nested base");
         var nestedCommit = await nested.GitOutputAsync("rev-parse", "HEAD");
         await repo.GitAsync("update-index", "--add", "--cacheinfo", $"160000,{nestedCommit},module");
+        Directory.Delete(nested.Root, recursive: true);
 
-        var selected = await BuildAsync(repo, ["module/**/*.cs"]);
+        var selected = await BuildAsync(repo, ["src/**", "module"]);
 
         Assert.Null(selected.Identity);
         Assert.Equal("reuse.identity.nested_repository", selected.Reason);
+    }
+
+    [Fact]
+    public void IncludeMaySelectPathOrDescendant_ShouldMatchExactGitlinksAndLinkedDirectoryPatterns()
+    {
+        Assert.True(EvidenceProducerIdentityBuilder.IncludeMaySelectPathOrDescendant("module", ["module"], CancellationToken.None));
+        Assert.True(EvidenceProducerIdentityBuilder.IncludeMaySelectPathOrDescendant("linked", ["linked/**/*.cs"], CancellationToken.None));
+        Assert.False(EvidenceProducerIdentityBuilder.IncludeMaySelectPathOrDescendant("linked", ["src/**"], CancellationToken.None));
     }
 
     [Fact]
@@ -314,6 +323,61 @@ public sealed class EvidenceProducerIdentityTests
         Assert.Contains("Reduce key and value sizes", totalDiagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain("k00", totalDiagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain(new string('v', 32), totalDiagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ShouldRejectMalformedUtf16AcrossIdentityInputsAndPreserveValidReplacementCharacters()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.WriteAsync("src/file", "data");
+        await repo.CommitAsync("base");
+        var malformed = new string((char)0xD800, 1);
+
+        var malformedMaterialKey = await BuildAsync(repo, materialValues: new Dictionary<string, string> { [malformed] = "value" });
+        var malformedMaterialValue = await BuildAsync(repo, materialValues: new Dictionary<string, string> { ["key"] = malformed });
+        var malformedImplementation = await BuildAsync(repo, implementation: malformed);
+        var malformedTool = await BuildAsync(repo, tool: malformed);
+        var malformedResource = await BuildAsync(repo, resource: malformed);
+        var validUnicode = await BuildAsync(repo, implementation: "implementation-\U0001F600", tool: "\U0001F600",
+            resource: "\uFFFD", materialValues: new Dictionary<string, string> { ["\U0001F600"] = "\uFFFD" });
+
+        Assert.Equal("reuse.identity.material_invalid", malformedMaterialKey.Reason);
+        Assert.Equal("reuse.identity.material_invalid", malformedMaterialValue.Reason);
+        Assert.Equal("reuse.identity.unavailable", malformedImplementation.Reason);
+        Assert.Equal("reuse.identity.unavailable", malformedTool.Reason);
+        Assert.Equal("reuse.identity.unavailable", malformedResource.Reason);
+        Assert.True(validUnicode.IsEligible, validUnicode.Diagnostic);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ShouldRejectMalformedUtf16InHashedProducerDeclarationFields()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.WriteAsync("src/file", "data");
+        await repo.CommitAsync("base");
+        var malformed = new string((char)0xD800, 1);
+        var producer = new EvidenceProducerDeclaration("producer", "coverage", "1", ["db"], ["assert"],
+            [new EvidenceArtifactSlot("report", "reports", "text/plain", false, 10)], 30)
+        {
+            Inputs = new EvidenceProducerInputs(["src/**"], []),
+        };
+        EvidenceProducerDeclaration[] invalidDeclarations =
+        [
+            producer with { Id = malformed },
+            producer with { Kind = malformed },
+            producer with { Version = malformed },
+            producer with { AssertionIds = [malformed] },
+            producer with { ArtifactSlots = [producer.ArtifactSlots[0] with { LogicalName = malformed }] },
+            producer with { ArtifactSlots = [producer.ArtifactSlots[0] with { RelativeRoot = malformed }] },
+            producer with { ArtifactSlots = [producer.ArtifactSlots[0] with { MediaType = malformed }] },
+        ];
+
+        foreach (var invalidDeclaration in invalidDeclarations)
+        {
+            var result = await BuildAsync(repo, producerOverride: invalidDeclaration);
+            Assert.Equal("reuse.identity.unavailable", result.Reason);
+            Assert.Null(result.Identity);
+        }
     }
 
     [Fact]
@@ -391,9 +455,10 @@ public sealed class EvidenceProducerIdentityTests
     private static async Task<EvidenceProducerIdentityResult> BuildAsync(TestRepository repo,
         string[]? include = null, string[]? exclude = null, string tool = "tool-v1", string resource = "image-v1",
         string? material = "flag-a", IReadOnlyDictionary<string, string>? materialValues = null,
-        bool patchGate = false, string? patch = null, string? planPatch = null)
+        bool patchGate = false, string? patch = null, string? planPatch = null, string implementation = "implementation-v1",
+        EvidenceProducerDeclaration? producerOverride = null)
     {
-        var producer = new EvidenceProducerDeclaration("producer", "coverage", "1", ["db"], [], [], 30,
+        var producer = producerOverride ?? new EvidenceProducerDeclaration("producer", "coverage", "1", ["db"], [], [], 30,
             patchGate ? new EvidenceCoverageGateRequirements(MinLinePercent: 0, MinBranchPercent: 0, MinPatchLinePercent: 1) : null)
         {
             Inputs = new EvidenceProducerInputs(include ?? ["src/**"], exclude ?? [])
@@ -404,7 +469,7 @@ public sealed class EvidenceProducerIdentityTests
         { PatchSha256 = planPatch };
         var materialMap = materialValues ?? new Dictionary<string, string> { ["mode"] = material ?? "" };
         return await EvidenceProducerIdentityBuilder.BuildAsync(new EvidenceProducerIdentityRequest(repo.Root, plan, producer,
-            "implementation-v1", new Dictionary<string, string> { ["db"] = resource }, new Dictionary<string, string> { ["tool"] = tool }, materialMap, patch),
+            implementation, new Dictionary<string, string> { ["db"] = resource }, new Dictionary<string, string> { ["tool"] = tool }, materialMap, patch),
             CancellationToken.None);
     }
 
@@ -425,6 +490,8 @@ public sealed class EvidenceProducerIdentityTests
             await repository.GitAsync("init", "--quiet");
             await repository.GitAsync("config", "user.email", "test@example.invalid");
             await repository.GitAsync("config", "user.name", "Identity Test");
+            await repository.GitAsync("config", "commit.gpgsign", "false");
+            await repository.GitAsync("config", "core.hooksPath", TestPathUtils.PathUnder(repository.Root, "no-hooks"));
             return repository;
         }
         internal async Task WriteAsync(string relative, string contents)
@@ -440,23 +507,42 @@ public sealed class EvidenceProducerIdentityTests
         }
         internal async Task GitAsync(params string[] arguments)
         {
-            using var process = new Process { StartInfo = new ProcessStartInfo("git") { WorkingDirectory = Root, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false } };
-            foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-            process.Start();
-            await process.WaitForExitAsync();
-            if (process.ExitCode != 0) throw new InvalidOperationException(await process.StandardError.ReadToEndAsync());
+            _ = await RunGitAsync(captureOutput: false, arguments);
         }
-        internal async Task<string> GitOutputAsync(params string[] arguments)
+
+        internal Task<string> GitOutputAsync(params string[] arguments)
+            => RunGitAsync(captureOutput: true, arguments);
+
+        private async Task<string> RunGitAsync(bool captureOutput, params string[] arguments)
         {
             using var process = new Process { StartInfo = new ProcessStartInfo("git") { WorkingDirectory = Root, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false } };
+            foreach (var name in process.StartInfo.Environment.Keys.Where(name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray())
+                process.StartInfo.Environment.Remove(name);
+            process.StartInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+            process.StartInfo.Environment["GIT_CONFIG_GLOBAL"] = TestPathUtils.PathUnder(Root, "absent-global-config");
             foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
             process.Start();
-            var stdout = process.StandardOutput.ReadToEndAsync();
-            var stderr = process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var stdout = process.StandardOutput.ReadToEndAsync(deadline.Token);
+            var stderr = process.StandardError.ReadToEndAsync(deadline.Token);
+            try
+            {
+                await process.WaitForExitAsync(deadline.Token);
+                await Task.WhenAll(stdout, stderr).WaitAsync(deadline.Token);
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+            {
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try { await process.WaitForExitAsync(cleanup.Token); } catch (OperationCanceledException) { }
+                try { await Task.WhenAll(stdout, stderr).WaitAsync(cleanup.Token); } catch (OperationCanceledException) { }
+                throw new TimeoutException("Git fixture command exceeded its 20-second deadline.");
+            }
+
             var output = await stdout;
-            if (process.ExitCode != 0) throw new InvalidOperationException(await stderr);
-            return output.TrimEnd('\r', '\n');
+            var error = await stderr;
+            if (process.ExitCode != 0) throw new InvalidOperationException(error);
+            return captureOutput ? output.TrimEnd('\r', '\n') : string.Empty;
         }
         public void Dispose() => new TestDirectory(Root).Dispose();
     }

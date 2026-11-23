@@ -29,6 +29,8 @@ public static class EvidenceOwnedChild
     private const string PipeVariable = "APPSURFACE_EVIDENCE_CHILD_PIPE";
     private const string ExecutionVariable = "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID";
     private const string NonceVariable = "APPSURFACE_EVIDENCE_CHILD_NONCE";
+    private const string StartupCompletionFailureDataKey = "EvidenceOwnedChild.StartupCompletionFailure";
+    private static readonly TimeSpan ProtocolIoDeadline = TimeSpan.FromSeconds(5);
 
     /// <summary>Enrolls before invoking <paramref name="work"/> and reports completion after its task settles.</summary>
     /// <param name="work">Cooperative work that must await all child work and cleanup it owns.</param>
@@ -75,7 +77,9 @@ public static class EvidenceOwnedChild
     /// <returns>The root process exit code after the completion message is acknowledged.</returns>
     /// <remarks>
     /// Descendants must independently enroll through this protocol; killing or observing the root does not settle them.
-    /// Redirected standard output and error are drained to prevent a pipe deadlock; redirected standard input is closed.
+    /// Redirected standard output and error are drained while the root runs; redirected standard input is closed.
+    /// After caller cancellation, pending drains are canceled and joined after the root exits, so descendants holding
+    /// inherited output handles do not block this call. Independently enrolled descendants remain active in the invocation session.
     /// This API returns only the exit code and does not expose redirected stream contents.
     /// </remarks>
     /// <exception cref="InvalidOperationException">A partially configured, invalid, unreachable, closed, or full invocation channel is present. The process has not been started.</exception>
@@ -104,14 +108,15 @@ public static class EvidenceOwnedChild
         }
         Enrollment? enrollment = enrolled ? await EnrollAsync(pipeName!, executionId!, nonce!, cancellationToken).ConfigureAwait(false) : null;
         await using var ownedEnrollment = enrollment;
-        var ownedStartInfo = Clone(startInfo);
+        var copyEnvironment = !OperatingSystem.IsWindows() || !startInfo.UseShellExecute || enrolled;
+        var ownedStartInfo = Clone(startInfo, copyEnvironment);
         if (enrolled)
         {
             ownedStartInfo.Environment[PipeVariable] = pipeName;
             ownedStartInfo.Environment[ExecutionVariable] = executionId;
             ownedStartInfo.Environment[NonceVariable] = nonce;
         }
-        else
+        else if (copyEnvironment)
         {
             ownedStartInfo.Environment.Remove(PipeVariable);
             ownedStartInfo.Environment.Remove(ExecutionVariable);
@@ -124,13 +129,25 @@ public static class EvidenceOwnedChild
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            if (enrollment is not null) await enrollment.CompleteAsync(CancellationToken.None).ConfigureAwait(false);
+            if (enrollment is not null)
+            {
+                try { await enrollment.CompleteAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch (InvalidOperationException completionFailure)
+                {
+                    exception.Data[StartupCompletionFailureDataKey] = completionFailure;
+                }
+            }
             throw;
         }
 
         if (ownedStartInfo.RedirectStandardInput) process.StandardInput.Close();
-        var stdoutDrain = ownedStartInfo.RedirectStandardOutput ? process.StandardOutput.BaseStream.CopyToAsync(Stream.Null) : Task.CompletedTask;
-        var stderrDrain = ownedStartInfo.RedirectStandardError ? process.StandardError.BaseStream.CopyToAsync(Stream.Null) : Task.CompletedTask;
+        using var drainCancellation = new CancellationTokenSource();
+        var stdoutDrain = ownedStartInfo.RedirectStandardOutput
+            ? process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, drainCancellation.Token)
+            : Task.CompletedTask;
+        var stderrDrain = ownedStartInfo.RedirectStandardError
+            ? process.StandardError.BaseStream.CopyToAsync(Stream.Null, drainCancellation.Token)
+            : Task.CompletedTask;
 
         var cancelled = false;
         try { await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false); }
@@ -140,9 +157,15 @@ public static class EvidenceOwnedChild
             try { if (!process.HasExited) process.Kill(); }
             catch (Exception exception) when (exception is InvalidOperationException or Win32Exception) { }
             await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            drainCancellation.Cancel();
         }
 
-        await Task.WhenAll(stdoutDrain, stderrDrain).ConfigureAwait(false);
+        // The actual root is joined. Cancellation must still reach drains when it arrives after root exit.
+        using var drainRegistration = cancellationToken.Register(drainCancellation.Cancel);
+        try { await Task.WhenAll(stdoutDrain, stderrDrain).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && drainCancellation.IsCancellationRequested)
+        { cancelled = true; }
+        cancelled |= cancellationToken.IsCancellationRequested;
 
         var exitCode = process.ExitCode;
         if (enrollment is not null) await enrollment.CompleteAsync(CancellationToken.None).ConfigureAwait(false);
@@ -158,7 +181,7 @@ public static class EvidenceOwnedChild
         return environment;
     }
 
-    private static ProcessStartInfo Clone(ProcessStartInfo source)
+    private static ProcessStartInfo Clone(ProcessStartInfo source, bool copyEnvironment)
     {
         var clone = new ProcessStartInfo
         {
@@ -178,7 +201,7 @@ public static class EvidenceOwnedChild
             StandardErrorEncoding = source.StandardErrorEncoding,
             UserName = source.UserName,
         };
-        clone.Environment.Clear();
+        if (copyEnvironment) clone.Environment.Clear();
         if (OperatingSystem.IsWindows())
         {
             clone.LoadUserProfile = source.LoadUserProfile;
@@ -186,18 +209,20 @@ public static class EvidenceOwnedChild
             clone.Password = source.Password;
         }
         foreach (var argument in source.ArgumentList) clone.ArgumentList.Add(argument);
-        foreach (var (key, value) in source.Environment) clone.Environment[key] = value;
+        if (copyEnvironment)
+            foreach (var (key, value) in source.Environment) clone.Environment[key] = value;
         return clone;
     }
 
     private static bool TryGetChannel(IReadOnlyDictionary<string, string> environment,
         out string? pipeName, out string? executionId, out string? nonce)
     {
-        environment.TryGetValue(PipeVariable, out pipeName);
-        environment.TryGetValue(ExecutionVariable, out executionId);
-        environment.TryGetValue(NonceVariable, out nonce);
-        if (pipeName is null && executionId is null && nonce is null) return false;
-        if (!IsProtocolToken(pipeName, 180) || !IsProtocolToken(executionId, 128) || !IsProtocolToken(nonce, 128))
+        var hasPipe = environment.TryGetValue(PipeVariable, out pipeName);
+        var hasExecution = environment.TryGetValue(ExecutionVariable, out executionId);
+        var hasNonce = environment.TryGetValue(NonceVariable, out nonce);
+        if (!hasPipe && !hasExecution && !hasNonce) return false;
+        if (!hasPipe || !hasExecution || !hasNonce
+            || !IsProtocolToken(pipeName, 180) || !IsProtocolToken(executionId, 128) || !IsProtocolToken(nonce, 128))
             throw new InvalidOperationException("Cooperative child enrollment requires a valid current-user Evidence invocation channel.");
         return true;
     }
@@ -205,17 +230,24 @@ public static class EvidenceOwnedChild
     private static async Task<Enrollment> EnrollAsync(string pipeName, string executionId, string nonce, CancellationToken cancellationToken)
     {
         var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        using var protocolDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        protocolDeadline.CancelAfter(ProtocolIoDeadline);
         try
         {
-            await pipe.ConnectAsync(5000, cancellationToken).ConfigureAwait(false);
-            await WriteFrameAsync(pipe, $"BEGIN|{executionId}|{nonce}", cancellationToken).ConfigureAwait(false);
-            var response = await ReadFrameAsync(pipe, cancellationToken).ConfigureAwait(false);
+            await pipe.ConnectAsync((int)ProtocolIoDeadline.TotalMilliseconds, protocolDeadline.Token).ConfigureAwait(false);
+            await WriteFrameAsync(pipe, $"BEGIN|{executionId}|{nonce}", protocolDeadline.Token).ConfigureAwait(false);
+            var response = await ReadFrameAsync(pipe, protocolDeadline.Token).ConfigureAwait(false);
             if (response is null || !response.StartsWith("ACK|", StringComparison.Ordinal)
                 || !Guid.TryParseExact(response.AsSpan(4), "N", out var childId))
                 throw new InvalidOperationException("Cooperative child enrollment was rejected or the invocation channel was unavailable.");
             return new Enrollment(pipe, childId);
         }
         catch (InvalidOperationException) { pipe.Dispose(); throw; }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            pipe.Dispose();
+            throw new InvalidOperationException("Cooperative child enrollment did not complete before its protocol deadline.");
+        }
         catch (OperationCanceledException) { pipe.Dispose(); throw; }
         catch (Exception exception) when (exception is IOException or TimeoutException or UnauthorizedAccessException or ArgumentException)
         {
@@ -257,12 +289,18 @@ public static class EvidenceOwnedChild
         {
             if (_completed) return;
             _completed = true;
+            using var protocolDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            protocolDeadline.CancelAfter(ProtocolIoDeadline);
             try
             {
-                await WriteFrameAsync(pipe, $"COMPLETE|{childId:N}", cancellationToken).ConfigureAwait(false);
-                var response = await ReadFrameAsync(pipe, cancellationToken).ConfigureAwait(false);
+                await WriteFrameAsync(pipe, $"COMPLETE|{childId:N}", protocolDeadline.Token).ConfigureAwait(false);
+                var response = await ReadFrameAsync(pipe, protocolDeadline.Token).ConfigureAwait(false);
                 if (!string.Equals(response, $"DONE|{childId:N}", StringComparison.Ordinal))
                     throw new InvalidOperationException("The invocation did not acknowledge cooperative child completion.");
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new InvalidOperationException("The invocation channel did not acknowledge cooperative child completion before its protocol deadline.");
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception exception) when (exception is IOException or ObjectDisposedException)

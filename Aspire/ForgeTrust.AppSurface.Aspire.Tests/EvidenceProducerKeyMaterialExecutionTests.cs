@@ -189,6 +189,56 @@ public sealed class EvidenceProducerKeyMaterialExecutionTests
         Assert.DoesNotContain(new string('v', 32), totalDiagnostic, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task MalformedUtf16MaterialIsRejectedButValidPairsAndReplacementCharactersAreAccepted()
+    {
+        var malformed = new string((char)0xD800, 1);
+        var malformedKey = await PrepareMaterialAsync(new Dictionary<string, string> { [malformed] = "value" });
+        var malformedValue = await PrepareMaterialAsync(new Dictionary<string, string> { ["key"] = malformed });
+        var valid = await PrepareMaterialAsync(new Dictionary<string, string> { ["\U0001F600"] = "\uFFFD" });
+
+        Assert.Equal("reuse.material_invalid", malformedKey.Reason);
+        Assert.Equal("reuse.material_invalid", malformedValue.Reason);
+        Assert.DoesNotContain(malformed, malformedKey.Diagnostic ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(malformed, malformedValue.Diagnostic ?? string.Empty, StringComparison.Ordinal);
+        Assert.True(valid.Settled);
+        Assert.Equal("reuse.material_ready", valid.Reason);
+        Assert.Equal("\uFFFD", valid.Material!["\U0001F600"]);
+    }
+
+    [Fact]
+    public async Task CallbackTimeoutExceptionDuringCleanupGraceIsReportedAsSettled()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var execution = EvidenceProducerKeyMaterialExecution.Start(new Callback(async (_, token) =>
+        {
+            entered.SetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            }
+            catch (OperationCanceledException)
+            {
+                cancellationObserved.SetResult();
+                await release.Task;
+                throw new TimeoutException("callback timeout");
+            }
+            return new Dictionary<string, string>();
+        }), Context(timeoutSeconds: 1), TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        var wait = execution.WaitAsync();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        release.SetResult();
+        var result = await wait.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(result.Settled);
+        Assert.Equal("reuse.material_timed_out", result.Reason);
+        Assert.Null(result.Material);
+    }
+
     private static EvidenceProducerKeyMaterialContext Context(int timeoutSeconds = 30)
     {
         var producer = new EvidenceProducerDeclaration("tests", "custom", "1", [], [], [], timeoutSeconds);

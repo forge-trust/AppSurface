@@ -35,6 +35,49 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
     }
 
     [Fact]
+    public async Task UnchannelledWindowsShellLaunchKeepsItsEnvironmentUninitialized()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var startInfo = new ProcessStartInfo("cmd.exe", "/d /c exit 0") { UseShellExecute = true };
+
+        Assert.Equal(0, await EvidenceOwnedChild.RunProcessAsync(startInfo,
+            new Dictionary<string, string>(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UnenrolledWindowsLaunchStripsCopiedChannelVariablesWithoutMutatingTheCaller()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var directory = TestDirectory.Create();
+        var scriptPath = TestPathUtils.PathUnder(directory.Path, "check-channel-environment.cmd");
+        File.WriteAllLines(scriptPath,
+        [
+            "@echo off",
+            $"if defined {EvidenceChildLifetimeSession.PipeEnvironmentName} exit /b 9",
+            $"if defined {EvidenceChildLifetimeSession.ExecutionEnvironmentName} exit /b 10",
+            $"if defined {EvidenceChildLifetimeSession.NonceEnvironmentName} exit /b 11",
+            "exit /b 0"
+        ]);
+
+        var startInfo = new ProcessStartInfo("cmd.exe") { UseShellExecute = false };
+        startInfo.ArgumentList.Add("/d");
+        startInfo.ArgumentList.Add("/c");
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.Environment[EvidenceChildLifetimeSession.PipeEnvironmentName] = "unused-pipe";
+        startInfo.Environment[EvidenceChildLifetimeSession.ExecutionEnvironmentName] = Guid.NewGuid().ToString("N");
+        startInfo.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName] = Guid.NewGuid().ToString("N");
+
+        Assert.Equal(0, await EvidenceOwnedChild.RunProcessAsync(startInfo,
+            new Dictionary<string, string>(), CancellationToken.None));
+
+        Assert.Equal("unused-pipe", startInfo.Environment[EvidenceChildLifetimeSession.PipeEnvironmentName]);
+        Assert.Contains(EvidenceChildLifetimeSession.ExecutionEnvironmentName, startInfo.Environment.Keys);
+        Assert.Contains(EvidenceChildLifetimeSession.NonceEnvironmentName, startInfo.Environment.Keys);
+    }
+
+    [Fact]
     public async Task ImplicitUnenrolledWorkStillReportsCancellationAfterActualCallbackCompletion()
     {
         using var environment = new AbsentChannelEnvironment();
@@ -118,6 +161,32 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
         Assert.DoesNotContain(EvidenceChildLifetimeSession.NonceEnvironmentName, info.Environment.Keys);
     }
 
+    [Fact]
+    public async Task ProcessStartFailureRemainsPrimaryWhenCompletionAcknowledgementFails()
+    {
+        using var directory = TestDirectory.Create();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var pipeName = "start-failure-done-" + Guid.NewGuid().ToString("N")[..12];
+        var server = Server(pipeName);
+        var serverTask = Task.Run(async () =>
+        {
+            await using (server)
+            {
+                await server.WaitForConnectionAsync(deadline.Token);
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + Guid.NewGuid().ToString("N"), deadline.Token);
+                Assert.StartsWith("COMPLETE|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+            }
+        }, deadline.Token);
+        var info = new ProcessStartInfo(TestPathUtils.PathUnder(directory.Path, "absent-executable")) { UseShellExecute = false };
+
+        var failure = await Assert.ThrowsAsync<Win32Exception>(() =>
+            EvidenceOwnedChild.RunProcessAsync(info, Channel(pipeName), deadline.Token));
+        await serverTask.WaitAsync(deadline.Token);
+
+        Assert.IsType<InvalidOperationException>(failure.Data["EvidenceOwnedChild.StartupCompletionFailure"]);
+    }
+
     [Theory]
     [InlineData("empty")]
     [InlineData("wrong-prefix")]
@@ -165,7 +234,8 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
         var pipeName = "work-failure-" + Guid.NewGuid().ToString("N")[..12];
         var childId = Guid.NewGuid().ToString("N");
         var server = Server(pipeName);
-        var completionReceived = false;
+        var completionReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCompletionAcknowledgement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var serverTask = Task.Run(async () =>
         {
             await using (server)
@@ -175,7 +245,8 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
                 await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
                 Assert.Equal("COMPLETE|" + childId,
                     await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                completionReceived = true;
+                completionReceived.TrySetResult();
+                await releaseCompletionAcknowledgement.Task.WaitAsync(deadline.Token);
                 await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "DONE|" + childId, deadline.Token);
             }
         }, deadline.Token);
@@ -190,15 +261,19 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
                 return Task.FromException(workFailure);
             }, Channel(pipeName), deadline.Token);
 
+            await completionReceived.Task.WaitAsync(deadline.Token);
+            Assert.False(childTask.IsCompleted);
+            releaseCompletionAcknowledgement.TrySetResult();
             var actual = await Assert.ThrowsAsync<ListenerFailure>(() => childTask.WaitAsync(deadline.Token));
             await serverTask.WaitAsync(deadline.Token);
 
             Assert.Same(workFailure, actual);
             Assert.True(workInvoked);
-            Assert.True(completionReceived);
+            Assert.True(completionReceived.Task.IsCompletedSuccessfully);
         }
         finally
         {
+            releaseCompletionAcknowledgement.TrySetResult();
             deadline.Cancel();
             await server.DisposeAsync();
             try
@@ -255,6 +330,44 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
     }
 
     [Fact]
+    public async Task StalledCompletionAcknowledgementFailsAndClosesTheClientPipe()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var pipeName = "stalled-done-" + Guid.NewGuid().ToString("N")[..12];
+        var server = Server(pipeName);
+        var completionReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var peerObservedClose = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverTask = Task.Run(async () =>
+        {
+            await using (server)
+            {
+                await server.WaitForConnectionAsync(deadline.Token);
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + Guid.NewGuid().ToString("N"), deadline.Token);
+                Assert.StartsWith("COMPLETE|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                completionReceived.TrySetResult();
+                Assert.Null(await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                peerObservedClose.TrySetResult();
+            }
+        }, deadline.Token);
+        var workInvoked = false;
+
+        var childTask = EvidenceOwnedChild.RunAsync(_ =>
+        {
+            workInvoked = true;
+            return Task.CompletedTask;
+        }, Channel(pipeName), deadline.Token);
+        await completionReceived.Task.WaitAsync(deadline.Token);
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => childTask.WaitAsync(deadline.Token));
+        await serverTask.WaitAsync(deadline.Token);
+
+        Assert.Contains("protocol deadline", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(workInvoked);
+        Assert.True(peerObservedClose.Task.IsCompletedSuccessfully);
+    }
+
+    [Fact]
     public async Task CancellationWhileAwaitingAcknowledgementCannotStartWork()
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -277,6 +390,95 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => child.WaitAsync(deadline.Token));
         await serverTask;
         Assert.False(invoked);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationJoinsRootAndDrainWhileEnrolledDescendantRemainsActive(bool rootExitsBeforeCancellation)
+    {
+        using var directory = TestDirectory.Create();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var caller = new CancellationTokenSource();
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent!.Name;
+        var probe = TestPathUtils.PathUnder(repository, "tests", "ForgeTrust.AppSurface.CoverageLeaseProbe", "bin",
+            configuration, "net10.0", "ForgeTrust.AppSurface.CoverageLeaseProbe.dll");
+        Assert.True(File.Exists(probe));
+        var session = EvidenceChildLifetimeSession.Start("drain-descendant-" + Guid.NewGuid().ToString("N"));
+        var heartbeatPath = TestPathUtils.PathUnder(directory.Path, "heartbeat.jsonl");
+        var stopPath = TestPathUtils.PathUnder(directory.Path, "stop-child.txt");
+        Process? heartbeat = null;
+        Task<int>? ownedRoot = null;
+        try
+        {
+            var startInfo = new ProcessStartInfo("dotnet")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            startInfo.ArgumentList.Add(probe);
+            startInfo.ArgumentList.Add(rootExitsBeforeCancellation
+                ? "settlement-independent-heartbeat-root-exits" : "settlement-independent-heartbeat-root");
+            startInfo.ArgumentList.Add(directory.Path);
+            ownedRoot = EvidenceOwnedChild.RunProcessAsync(startInfo, session.Environment, caller.Token);
+            heartbeat = Process.GetProcessById(await HeartbeatPidAsync(heartbeatPath, deadline.Token));
+            if (rootExitsBeforeCancellation)
+            {
+                using var rootRecord = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                    TestPathUtils.PathUnder(directory.Path, "root-process.json"), deadline.Token));
+                try
+                {
+                    using var root = Process.GetProcessById(rootRecord.RootElement.GetProperty("ProcessId").GetInt32());
+                    await root.WaitForExitAsync(deadline.Token);
+                }
+                catch (ArgumentException) { /* The actual root has already exited. */ }
+                Assert.False(ownedRoot.IsCompleted);
+            }
+
+            caller.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ownedRoot.WaitAsync(TimeSpan.FromSeconds(5), deadline.Token));
+
+            Assert.False(heartbeat.HasExited);
+            Assert.False(await session.WaitForSettlementAsync(TimeSpan.FromMilliseconds(100), deadline.Token));
+
+            await File.WriteAllTextAsync(stopPath,
+                session.ExecutionId + "|" + session.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName], deadline.Token);
+            await heartbeat.WaitForExitAsync(deadline.Token).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(5), deadline.Token));
+            Assert.True(session.IsSettled);
+            Assert.False(session.IsUnknown);
+        }
+        finally
+        {
+            caller.Cancel();
+            try
+            {
+                await File.WriteAllTextAsync(stopPath,
+                    session.ExecutionId + "|" + session.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName]);
+                if (ownedRoot is not null)
+                {
+                    try { await ownedRoot.WaitAsync(TimeSpan.FromSeconds(5)); }
+                    catch (OperationCanceledException) when (caller.IsCancellationRequested) { }
+                    catch (InvalidOperationException) when (caller.IsCancellationRequested) { }
+                }
+                if (heartbeat is not null)
+                {
+                    try { await heartbeat.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                    catch (TimeoutException)
+                    {
+                        if (!heartbeat.HasExited) heartbeat.Kill();
+                        await heartbeat.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                }
+            }
+            finally
+            {
+                heartbeat?.Dispose();
+                await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        }
     }
 
     [Fact]

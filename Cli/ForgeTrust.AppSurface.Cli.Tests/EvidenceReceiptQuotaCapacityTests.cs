@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -205,6 +206,57 @@ public sealed class EvidenceReceiptQuotaCapacityTests
     }
 
     [Fact]
+    public void EssentialReservationDoesNotPublishAuthorityWhenKeyDirectoryCannotBeCreated()
+    {
+        var root = NewRoot();
+        try
+        {
+            var repositoryNamespace = Hash("quota-blocked-directory-repository");
+            var key = Hash("quota-blocked-directory-producer");
+            using (var rootLease = CoverageRunOutputLease.AcquireArtifactDirectory(root, true, true)!)
+            using (var namespaceLease = rootLease.CreateArtifactDirectory(repositoryNamespace))
+                File.WriteAllText(Path.Combine(namespaceLease.ArtifactDirectoryPath, key), "blocks-key-directory");
+
+            Assert.ThrowsAny<IOException>(() => EvidenceReceiptQuota.ReserveEssential(root,
+                repositoryNamespace, [key], DateTimeOffset.UtcNow));
+
+            Assert.False(File.Exists(Path.Combine(root, "quota-index.json")));
+        }
+        finally { DeleteIfPresent(root); }
+    }
+
+    [Fact]
+    public async Task BytePressureStopsSelectingVictimsAfterOneDurableTombstoneCanSatisfyTheRequest()
+    {
+        var root = NewRoot();
+        try
+        {
+            var repository = Hash("byte-pressure-repository");
+            var store = OpenStore(root, repository);
+            var now = DateTimeOffset.UtcNow;
+            var victims = Enumerable.Range(0, 3).Select(index => Hash("byte-pressure-" + index)).ToArray();
+            for (var index = 0; index < victims.Length; index++)
+                await AddReceiptStateAsync(store, root, repository, victims[index], "payload-pressure-" + index,
+                    now.AddMinutes(-3 + index));
+            using var requester = Assert.Single(await store.AcquireAsync([Hash("requester")], CancellationToken.None));
+            requester.EstablishAuthority("byte-pressure-request");
+            var indexPath = Path.Combine(root, "quota-index.json");
+            var indexDocument = JsonNode.Parse(await File.ReadAllTextAsync(indexPath))!;
+            foreach (var row in indexDocument["Entries"]!.AsArray())
+                if (victims.Contains(row!["Key"]!.GetValue<string>())) row["PayloadBytes"] = 700_000_000;
+            await File.WriteAllTextAsync(indexPath, indexDocument.ToJsonString());
+
+            Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, requester.Key, 100_000_000, now));
+
+            Assert.False(Directory.Exists(Path.Combine(root, repository, victims[0], "payload-pressure-0")));
+            Assert.True(Directory.Exists(Path.Combine(root, repository, victims[1], "payload-pressure-1")));
+            Assert.True(Directory.Exists(Path.Combine(root, repository, victims[2], "payload-pressure-2")));
+            Assert.Equal(100_000_000, ReadEntry(root, requester.Key).GetProperty("ReservedPayloadBytes").GetInt64());
+        }
+        finally { DeleteIfPresent(root); }
+    }
+
+    [Fact]
     public async Task EssentialReservationHonorsRootIndexWaitBudgetAndCancellation()
     {
         var root = NewRoot();
@@ -265,6 +317,7 @@ public sealed class EvidenceReceiptQuotaCapacityTests
     public async Task StoreAcquisitionPassesCumulativeBudgetAndCancellationToRootIndexWait()
     {
         var root = NewRoot();
+        var cleanupCompleted = false;
         try
         {
             var repositoryNamespace = Hash("quota-store-wait-repository");
@@ -275,7 +328,7 @@ public sealed class EvidenceReceiptQuotaCapacityTests
 
             var rootLease = CoverageArtifactOperationLease.Acquire(root, exclusive: true);
             using var cancellation = new CancellationTokenSource();
-            var ownedTasks = new List<Task>();
+            var ownedTasks = new List<Task<IReadOnlyList<EvidenceReceiptStore.EvidenceReceiptKeyLease>>>();
             try
             {
                 var budgetOperation = Task.Run(() => store.AcquireAsync(keys,
@@ -297,9 +350,22 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 try { await Task.WhenAll(ownedTasks); }
                 catch (EvidenceReceiptQuotaUnavailableException) { }
                 catch (OperationCanceledException) { }
+                var cleanupFailures = new List<Exception>();
+                foreach (var task in ownedTasks.Where(static task => task.IsCompletedSuccessfully))
+                {
+                    var acquired = await task;
+                    foreach (var lease in acquired.Reverse())
+                    {
+                        try { lease.Dispose(); }
+                        catch (Exception failure) { cleanupFailures.Add(failure); }
+                    }
+                }
+                if (cleanupFailures.Count != 0)
+                    throw new AggregateException($"Lease cleanup failed; retained fixture at {root}.", cleanupFailures);
             }
+            cleanupCompleted = true;
         }
-        finally { DeleteIfPresent(root); }
+        finally { if (cleanupCompleted) DeleteIfPresent(root); }
     }
 
     [Fact]
@@ -339,6 +405,53 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 () => EvidenceReceiptQuota.CommitInvocation(root, [commit]));
             Assert.Equal(200, ReadEntry(root, key).GetProperty("ReservedPayloadBytes").GetInt64());
             Assert.Equal(2, ReadEntry(root, key).GetProperty("PayloadReservations").GetArrayLength());
+        }
+        finally { DeleteIfPresent(root); }
+    }
+
+    [Theory]
+    [InlineData(65_536, "receipt-state-capacity-unavailable")]
+    [InlineData(65_540, "receipt-passed-producer-record-capacity-unavailable")]
+    public async Task BatchCommitRejectsPassedProducerRecordOutsideReaderBounds(int encodedRecordCharacters,
+        string expectedReason)
+    {
+        var root = NewRoot();
+        try
+        {
+            var repositoryNamespace = Hash("quota-state-bound-repository");
+            var key = Hash("quota-state-bound-producer");
+            var store = OpenStore(root, repositoryNamespace);
+            var now = DateTimeOffset.UtcNow;
+            const string executionId = "quota-state-bound-execution";
+            using var lease = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
+            lease.EstablishAuthority(executionId);
+            var reservationId = Guid.NewGuid().ToString("N");
+            var payloadName = "payload-" + reservationId;
+            Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repositoryNamespace, key, 128, now,
+                reservationId, "payload-stage-" + reservationId, payloadName));
+
+            var priorState = lease.ReadState()
+                ?? throw new InvalidOperationException("The test key must retain its established execution authority.");
+            var committedState = priorState with
+            {
+                InFlightExecutionId = null,
+                OriginCompletedAt = now,
+                PayloadDirectoryName = payloadName,
+                PassedProducerRecord = new string('A', encodedRecordCharacters)
+            };
+            var commit = new EvidenceReceiptBatchCommit(repositoryNamespace, key, "quota-state-bound-producer-id",
+                executionId, committedState, JsonSerializer.SerializeToUtf8Bytes(committedState).Length,
+                payloadName, now, 0, 128, lease.EssentialReservationId);
+
+            var failure = Assert.Throws<EvidenceReceiptQuotaUnavailableException>(
+                () => EvidenceReceiptQuota.CommitInvocation(root, [commit]));
+
+            Assert.Equal(expectedReason, failure.Message);
+            Assert.Equal(executionId, lease.ReadState()?.InFlightExecutionId);
+            var unchanged = ReadEntry(root, key);
+            Assert.Equal(128, unchanged.GetProperty("ReservedPayloadBytes").GetInt64());
+            Assert.Single(unchanged.GetProperty("PayloadReservations").EnumerateArray());
+            Assert.Null(unchanged.GetProperty("PayloadDirectoryName").GetString());
         }
         finally { DeleteIfPresent(root); }
     }

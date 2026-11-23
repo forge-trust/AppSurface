@@ -415,6 +415,37 @@ public sealed class EvidencePreparedFailureCoverageTests
     }
 
     [Fact]
+    public async Task NestedFatalReadinessFailureIsPreservedAfterPreparedOwnersAreJoined()
+    {
+        using var directory = TempDirectory.Create("evidence-nested-fatal-readiness-");
+        var fatal = new OutOfMemoryException("synthetic nested readiness failure");
+        var readinessFailure = new AggregateException(new IOException("ordinary readiness detail"), fatal);
+        var producer = new LifecycleProducer();
+        var prepared = await EvidenceHostBootstrap.PrepareAsync(PlanWithResource(), registration =>
+        {
+            registration.AddProducer(producer, "fixture-v1");
+            registration.AddResource("database", "database-v1");
+        }, new EvidenceHostOptions
+        {
+            RepositoryRoot = directory.Path,
+            ArtifactDirectory = TestPathUtils.PathUnder(directory.Path, "artifacts"),
+            EnvironmentReader = _ => null
+        });
+        var cleanupOrder = new List<string>();
+
+        var runFailure = await Record.ExceptionAsync(() => prepared.RunAsync((_, _) => ValueTask.FromResult(
+            new EvidenceHostResourceScope([new AggregateFatalReadiness(readinessFailure, cleanupOrder)],
+                new ApplicationOwner(cleanupOrder)))));
+        var disposalFailure = await Record.ExceptionAsync(() => prepared.DisposeAsync().AsTask());
+
+        Assert.Same(fatal, runFailure);
+        Assert.Same(fatal, disposalFailure);
+        Assert.Equal(["readiness", "application"], cleanupOrder);
+        Assert.Equal(0, producer.Runs);
+        Assert.Equal(1, producer.Disposals);
+    }
+
+    [Fact]
     public async Task FatalPreparedOwnerDisposalIsPropagatedAfterEveryOwnerWasAttempted()
     {
         using var directory = TempDirectory.Create("evidence-fatal-disposal-");
@@ -577,6 +608,13 @@ public sealed class EvidencePreparedFailureCoverageTests
     {
         public string Id => "readiness";
         public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public void Dispose() => order.Add("readiness");
+    }
+
+    private sealed class AggregateFatalReadiness(Exception failure, List<string> order) : IEvidenceResourceReadiness, IDisposable
+    {
+        public string Id => "database";
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.FromException(failure);
         public void Dispose() => order.Add("readiness");
     }
 

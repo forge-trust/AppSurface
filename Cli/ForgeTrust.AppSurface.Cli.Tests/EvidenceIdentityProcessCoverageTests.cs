@@ -64,6 +64,8 @@ public sealed class EvidenceIdentityProcessCoverageTests
             new Dictionary<string, string>(), options, declaration => TestPathUtils.PathUnder(artifacts, declaration.Id),
             CancellationToken.None))
         {
+            Assert.Equal(declarations.Select(static declaration => declaration.Id).Order(StringComparer.Ordinal),
+                session.Decisions.Select(static decision => decision.ProducerId).Order(StringComparer.Ordinal));
             Assert.All(session.Decisions, decision => Assert.Equal(refusal, decision.Reason));
             if (mode == "common-loss")
             {

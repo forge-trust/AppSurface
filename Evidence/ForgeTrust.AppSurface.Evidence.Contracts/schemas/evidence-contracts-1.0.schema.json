@@ -476,7 +476,7 @@
         },
         "Sha256": {
           "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
+          "pattern": "^[0-9A-Fa-f]{64}$"
         }
       },
       "required": [
@@ -655,7 +655,8 @@
           "enum": [
             "None",
             "PullRequestGate",
-            "ReleaseGate"
+            "ReleaseGate",
+            "Informational"
           ]
         },
         "EnvelopeStatus": {

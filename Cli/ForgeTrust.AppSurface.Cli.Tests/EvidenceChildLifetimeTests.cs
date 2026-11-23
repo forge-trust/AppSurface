@@ -24,6 +24,39 @@ public sealed class EvidenceChildLifetimeTests
     }
 
     [Fact]
+    public async Task DisposeAsyncWaitsForCloseEnrollmentStopSourceCancellation()
+    {
+        var session = EvidenceChildLifetimeSession.Start("close-dispose-race-" + Guid.NewGuid().ToString("N"),
+            beforeListenerCreation: () => throw new IOException("Controlled listener creation failure."));
+        var cancellationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.BeforeStopSourceCancellationForTests = () =>
+        {
+            cancellationStarted.TrySetResult();
+            releaseCancellation.Task.GetAwaiter().GetResult();
+        };
+        var closeTask = Task.Run(session.CloseEnrollment);
+        try
+        {
+            await cancellationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var disposeTask = Task.Run(() => session.DisposeAsync().AsTask());
+
+            Assert.False(disposeTask.IsCompleted);
+            releaseCancellation.TrySetResult();
+            await closeTask.WaitAsync(TimeSpan.FromSeconds(5));
+            await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(session.IsSettled);
+        }
+        finally
+        {
+            releaseCancellation.TrySetResult();
+            await closeTask.WaitAsync(TimeSpan.FromSeconds(5));
+            await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
     public async Task LaterListenerFailureStillJoinsKnownAdmittedWorkWithoutInventingAnEscape()
     {
         using var admitted = new ManualResetEventSlim();
@@ -192,6 +225,24 @@ public sealed class EvidenceChildLifetimeTests
         Assert.False(invoked);
     }
 
+    [Theory]
+    [InlineData(EvidenceChildLifetimeSession.PipeEnvironmentName)]
+    [InlineData(EvidenceChildLifetimeSession.ExecutionEnvironmentName)]
+    [InlineData(EvidenceChildLifetimeSession.NonceEnvironmentName)]
+    public async Task RunAsync_WithPresentNullChannelValue_ShouldRejectBeforeInvokingWork(string key)
+    {
+        var environment = new Dictionary<string, string> { [key] = null! };
+        var invoked = false;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(_ =>
+        {
+            invoked = true;
+            return Task.CompletedTask;
+        }, CancellationToken.None, environment));
+
+        Assert.False(invoked);
+    }
+
     [Fact]
     public async Task RunAsync_WithWrongNonce_ShouldRejectBeforeInvokingWork()
     {
@@ -250,14 +301,22 @@ public sealed class EvidenceChildLifetimeTests
             started.SetResult();
             await release.Task;
         }, CancellationToken.None, session.Environment);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        session.CloseEnrollment();
-        Assert.False(await session.WaitForSettlementAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None));
-        Assert.False(session.IsSettled);
-        release.SetResult();
-        await child;
-        Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
-        Assert.True(session.IsSettled);
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            session.CloseEnrollment();
+            Assert.False(await session.WaitForSettlementAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None));
+            Assert.False(session.IsSettled);
+            release.SetResult();
+            await child;
+            Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
+            Assert.True(session.IsSettled);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await child;
+        }
     }
 
     [Fact]
@@ -272,14 +331,23 @@ public sealed class EvidenceChildLifetimeTests
             started.SetResult();
             await release.Task;
         }, cancellation.Token, session.Environment);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        session.CloseEnrollment();
-        cancellation.Cancel();
-        Assert.False(child.IsCompleted);
-        Assert.False(await session.WaitForSettlementAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None));
-        release.SetResult();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => child);
-        Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            session.CloseEnrollment();
+            cancellation.Cancel();
+            Assert.False(child.IsCompleted);
+            Assert.False(await session.WaitForSettlementAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None));
+            release.SetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => child);
+            Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
+        }
+        finally
+        {
+            release.TrySetResult();
+            try { await child; }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        }
     }
 
     [Fact]
@@ -401,18 +469,27 @@ public sealed class EvidenceChildLifetimeTests
                 if (Interlocked.Increment(ref entered) == EvidenceOwnedChild.MaximumChildren) allEntered.TrySetResult();
                 await release.Task;
             }, CancellationToken.None, session.Environment)).ToArray();
-        await allEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var rejectedWork = false;
-        await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(_ =>
+        try
         {
-            rejectedWork = true;
-            return Task.CompletedTask;
-        }, CancellationToken.None, session.Environment));
-        Assert.False(rejectedWork);
-        session.CloseEnrollment();
-        release.SetResult();
-        await Task.WhenAll(children);
-        Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
+            await allEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var rejectedWork = false;
+            await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(_ =>
+            {
+                rejectedWork = true;
+                return Task.CompletedTask;
+            }, CancellationToken.None, session.Environment));
+            Assert.False(rejectedWork);
+            session.CloseEnrollment();
+            release.SetResult();
+            await Task.WhenAll(children);
+            Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
+        }
+        finally
+        {
+            release.TrySetResult();
+            try { await Task.WhenAll(children); }
+            catch (Exception) { }
+        }
     }
 
     [Fact]

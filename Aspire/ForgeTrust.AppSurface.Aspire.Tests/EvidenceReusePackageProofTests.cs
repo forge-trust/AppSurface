@@ -32,6 +32,19 @@ public sealed class EvidenceReusePackageProofTests
         }
     }
 
+    [Fact]
+    public async Task SeparateEvidenceCliMustMatchTheToolBundleBeforeOutputAdmission()
+    {
+        using var fixture = new FeedFixture("separate-cli-skew");
+        var output = TestPathUtils.PathUnder(fixture.Root, "proof-output");
+
+        Assert.Equal(1, await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
+            typeof(EvidenceReusePackageProofTests).Assembly.Location, Commit, CancellationToken.None));
+
+        Assert.False(Directory.Exists(output));
+        Assert.False(File.Exists(output));
+    }
+
     [Theory]
     [InlineData("flat-dependencies")]
     [InlineData("external-dependency")]
@@ -191,13 +204,14 @@ public sealed class EvidenceReusePackageProofTests
             }
             joined = (run?.IsCompleted ?? true) && processJoined;
             process?.Dispose();
+            probe?.Dispose();
             if (joined)
             {
-                probe?.Dispose();
                 feed.Dispose();
                 outputRoot.Delete(recursive: true);
             }
-            // If joining fails, retain feed, output, and probe files and keep their environment available for diagnosis.
+            Assert.True(joined, "The proof task and its owned SDK probe must both be joined before the test exits.");
+            // If joining fails, retain feed, output, and probe files for diagnosis.
         }
     }
 
@@ -276,6 +290,48 @@ public sealed class EvidenceReusePackageProofTests
             if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
             else if (File.Exists(output)) File.Delete(output);
         }
+    }
+
+    [Theory]
+    [InlineData("repository")]
+    [InlineData("feed")]
+    public async Task OutputThroughAnExternalSymlinkIntoProtectedRootsIsRejected(string targetKind)
+    {
+        using var fixture = new FeedFixture();
+        var externalRoot = Directory.CreateTempSubdirectory("packed-output-link-");
+        var target = targetKind == "repository" ? FindSourceRepository() : fixture.Root;
+        var link = TestPathUtils.PathUnder(externalRoot.FullName, "protected");
+        Directory.CreateSymbolicLink(link, target);
+        var output = TestPathUtils.PathUnder(link, "proof-output");
+        try
+        {
+            Assert.Equal(1, await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
+                typeof(EvidenceReusePackageProofTests).Assembly.Location, Commit, CancellationToken.None));
+            Assert.False(Directory.Exists(output));
+            Assert.False(File.Exists(output));
+        }
+        finally { externalRoot.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public async Task ExistingExclusiveOutputClaimPreventsASecondInvocationFromWriting()
+    {
+        using var fixture = new FeedFixture();
+        var scratch = Directory.CreateTempSubdirectory("packed-output-claim-");
+        var output = TestPathUtils.PathUnder(scratch.FullName, "proof-output");
+        var claimPath = output + ".packed-reuse.claim";
+        const string marker = "another invocation owns this output";
+        Directory.CreateDirectory(scratch.FullName);
+        await File.WriteAllTextAsync(claimPath, marker);
+        try
+        {
+            Assert.Equal(1, await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
+                typeof(EvidenceReusePackageProofTests).Assembly.Location, Commit, CancellationToken.None));
+
+            Assert.False(Directory.Exists(output));
+            Assert.Equal(marker, await File.ReadAllTextAsync(claimPath));
+        }
+        finally { scratch.Delete(recursive: true); }
     }
 
     [Theory]
@@ -528,6 +584,35 @@ public sealed class EvidenceReusePackageProofTests
         finally { Directory.Delete(scratch.FullName, recursive: true); }
     }
 
+    [Theory]
+    [InlineData("excessive-stdout")]
+    [InlineData("excessive-stderr")]
+    public async Task ExcessiveSdkOutputRetainsBoundedFailureProofWithoutStartingConsumers(string mode)
+    {
+        using var fixture = new FeedFixture();
+        using var probe = new SdkCancellationProbeFixture(fixture.Root, mode);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var scratch = Directory.CreateTempSubdirectory("packed-sdk-output-limit-");
+        var output = TestPathUtils.PathUnder(scratch.FullName, "new-parent", "output");
+        try
+        {
+            var result = await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
+                probe.ExecutablePath, Commit, deadline.Token);
+
+            Assert.Equal(1, result);
+            using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(
+                TestPathUtils.PathUnder(output, "proof.json"), deadline.Token));
+            Assert.False(proof.RootElement.GetProperty("passed").GetBoolean());
+            Assert.Equal("InvalidDataException", proof.RootElement.GetProperty("failureType").GetString());
+            Assert.Equal("sdk", Assert.Single(proof.RootElement.GetProperty("stages").EnumerateArray())
+                .GetProperty("Stage").GetString());
+            var sdkLog = new FileInfo(TestPathUtils.PathUnder(output, "sdk.log"));
+            Assert.InRange(sdkLog.Length, 1, 4 * 1024 * 1024);
+            Assert.False(Directory.Exists(TestPathUtils.PathUnder(output, "installed-tool")));
+        }
+        finally { Directory.Delete(scratch.FullName, recursive: true); }
+    }
+
     private sealed class FeedFixture : IDisposable
     {
         internal string Root { get; } = Directory.CreateTempSubdirectory("evidence-packed-admission-").FullName;
@@ -577,6 +662,19 @@ public sealed class EvidenceReusePackageProofTests
                     using var writer = new StreamWriter(archive.CreateEntry(dllPath + id + ".deps.json").Open());
                     writer.Write(JsonSerializer.Serialize(new { libraries }));
                 }
+            }
+            if (failure == "separate-cli-skew")
+            {
+                const string id = "ForgeTrust.AppSurface.Evidence.Cli";
+                var document = new XDocument(new XElement("package", new XElement("metadata",
+                    new XElement("id", id), new XElement("version", Version),
+                    new XElement("repository", new XAttribute("commit", Commit)),
+                    new XElement("dependencies", new XElement("group", new XAttribute("targetFramework", "net10.0"),
+                        new XElement("dependency", new XAttribute("id", "ForgeTrust.AppSurface.Evidence.Coverage"),
+                            new XAttribute("version", $"[{Version}]")))))));
+                using var archive = ZipFile.Open(Path.Join(Root, $"{id}.{Version}.nupkg"), ZipArchiveMode.Create);
+                using (var writer = new StreamWriter(archive.CreateEntry(id + ".nuspec").Open())) writer.Write(document);
+                using (var writer = new StreamWriter(archive.CreateEntry($"lib/net10.0/{id}.dll").Open())) writer.Write("separate-cli");
             }
         }
         public void Dispose() => Directory.Delete(Root, recursive: true);

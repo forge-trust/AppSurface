@@ -218,7 +218,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                 return FailureManifest(_session.IsCancelled ? EvidenceProducerOutcome.Cancelled : EvidenceProducerOutcome.Unavailable,
                     "reuse.preparation_unavailable: Preparation could not safely authorize execution; inspect Decisions before retrying.", observationOnly);
             executionStarted = true;
-            using var cancellation = cancellationToken.Register(_factoryCancellation.Cancel);
+            using var cancellation = cancellationToken.Register(RequestFactoryCancellation);
             if (RequiredResourceIds.Count != 0)
             {
                 // Own synchronous factory work before its ValueTask is returned as well as asynchronous startup.
@@ -243,11 +243,15 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                     id => _session.GetChildLifetime(id)?.Environment);
             }
             var manifest = await _host.RunAsync(observationOnly, cancellationToken).ConfigureAwait(false);
-            return await _session.CompleteAsync(manifest, CancellationToken.None).ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested)
+                return FailureManifest(EvidenceProducerOutcome.Cancelled,
+                    "reuse.cancelled: The invocation was cancelled; no receipt is published.", observationOnly,
+                    manifest.ResourceResults, manifest.Metrics);
+            return await _session.CompleteAsync(manifest, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _factoryCancellation.IsCancellationRequested)
         {
-            _factoryCancellation.Cancel();
+            RequestFactoryCancellation();
             return FailureManifest(EvidenceProducerOutcome.Cancelled, "reuse.cancelled: The invocation was cancelled; actual factory and cleanup ownership remains retained.", observationOnly);
         }
         catch (Exception exception) when (executionStarted && EvidenceHostBootstrap.IsNonFatalException(exception) && exception is not EvidenceHostException)
@@ -262,21 +266,22 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         }
     }
 
-    private EvidenceManifest FailureManifest(EvidenceProducerOutcome outcome, string diagnostic, bool observationOnly)
+    private EvidenceManifest FailureManifest(EvidenceProducerOutcome outcome, string diagnostic, bool observationOnly,
+        IReadOnlyList<EvidenceResourceResult>? actualResources = null, EvidenceExecutionMetrics? actualMetrics = null)
     {
         var results = _plan.Profile.Producers.Select(producer => _session.ReusedResults.GetValueOrDefault(producer.Id)
             ?? new EvidenceProducerResult(producer.Id, outcome, [], diagnostic)).ToArray();
         var resources = _plan.Profile.Resources.Select(resource => new EvidenceResourceResult(resource.Id,
             RequiredResourceIds.Contains(resource.Id, StringComparer.Ordinal) ? EvidenceResourceOutcome.Unavailable : EvidenceResourceOutcome.NotRequiredForExecution,
             0, RequiredResourceIds.Contains(resource.Id, StringComparer.Ordinal) ? diagnostic : null)).ToArray();
-        return EvidenceManifestBuilder.Build(_plan, results, observationOnly, _envelopeStatus, resources,
-            new EvidenceExecutionMetrics(CleanupCompleted: false, CleanupDiagnostic: "Actual owned work is retained until settlement; inspect Decisions."));
+        return EvidenceManifestBuilder.Build(_plan, results, observationOnly, _envelopeStatus, actualResources ?? resources,
+            actualMetrics ?? new EvidenceExecutionMetrics(CleanupCompleted: false, CleanupDiagnostic: "Actual owned work is retained until settlement; inspect Decisions."));
     }
 
     private void ObserveCleanup()
     {
         Task<bool> cleanup;
-        lock (_cleanupSync) cleanup = _cleanup ??= CleanupAsync();
+        lock (_cleanupSync) cleanup = _cleanup ??= Task.Run(CleanupAsync);
         _ = cleanup.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
@@ -299,11 +304,13 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         catch (Exception exception) { primary ??= exception; settled = false; }
         try
         {
-            if (_host is not null) settled &= await _host.JoinPreparedOwnershipAsync(_session.AreChildrenSettled).ConfigureAwait(false);
+            if (_host is not null) settled &= await _host.JoinPreparedOwnershipAsync(() => _session.AreChildrenSettled).ConfigureAwait(false);
             else if (_session.AreChildrenSettled)
             {
-                foreach (var owner in _producers.Values.Select(static producer => (object)producer.Producer).Distinct(ReferenceEqualityComparer.Instance))
+                var disposedOwners = new HashSet<object>(ReferenceEqualityComparer.Instance);
+                foreach (var owner in _producers.Values.Select(static producer => (object)producer.Producer))
                 {
+                    if (!disposedOwners.Add(owner)) continue;
                     try
                     {
                         if (owner is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
@@ -311,7 +318,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                     }
                     catch (Exception exception) { primary ??= exception; settled = false; }
                 }
-                if (_scope is not null) await _scope.DisposeAsync().ConfigureAwait(false);
+                if (_scope is not null) await _scope.DisposeAsync(disposedOwners).ConfigureAwait(false);
             }
         }
         catch (Exception exception) { primary ??= exception; settled = false; }
@@ -327,15 +334,16 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     /// while actual factory and owner cleanup are joined, then rethrown; cleanup failures remain primary.</remarks>
     public async ValueTask DisposeAsync()
     {
+        var requestCancellation = false;
         lock (_cleanupSync)
         {
             if (!_disposed)
             {
                 _disposed = true;
-                try { _factoryCancellation.Cancel(); }
-                catch (Exception exception) { _factoryCancellationFailure = exception; }
+                requestCancellation = true;
             }
         }
+        if (requestCancellation) RequestFactoryCancellation();
         await _execution.WaitAsync().ConfigureAwait(false);
         try { ObserveCleanup(); }
         finally { _execution.Release(); }
@@ -343,6 +351,15 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         finally { lock (_cleanupSync) _factoryCancellation.Dispose(); }
         if (_factoryCancellationFailure is not null)
             ExceptionDispatchInfo.Capture(_factoryCancellationFailure).Throw();
+    }
+
+    private void RequestFactoryCancellation()
+    {
+        try { _factoryCancellation.Cancel(); }
+        catch (Exception exception)
+        {
+            lock (_cleanupSync) _factoryCancellationFailure ??= exception;
+        }
     }
 
     private static void ValidateRegistrations(EvidencePlan plan, EvidenceHostPreparationRegistration registration,

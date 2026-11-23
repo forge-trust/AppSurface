@@ -10,6 +10,49 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidenceChildProtocolCoverageTests
 {
     [Fact]
+    public async Task BeginHandlerJoinsTimerCallbackBeforeDisposingItsCancellationSource()
+    {
+        var clock = new ControlledTimerProvider();
+        var session = EvidenceChildLifetimeSession.Start("begin-timer-join-" + Guid.NewGuid().ToString("N"), clock);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        ControlledTimer? timer = null;
+        try
+        {
+            await using var pipe = new NamedPipeClientStream(".",
+                session.Environment[EvidenceChildLifetimeSession.PipeEnvironmentName], PipeDirection.InOut,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await pipe.ConnectAsync(3000, deadline.Token);
+            timer = await clock.TimerCreated.Task.WaitAsync(deadline.Token);
+            timer.StartBlockedCallback();
+            await timer.CallbackStarted.Task.WaitAsync(deadline.Token);
+
+            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+                $"BEGIN|{session.ExecutionId}|{session.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}", deadline.Token);
+            var acknowledgementTask = EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, deadline.Token);
+            await timer.DisposeStarted.Task.WaitAsync(deadline.Token);
+
+            Assert.False(acknowledgementTask.IsCompleted);
+
+            timer.ReleaseCallback.TrySetResult();
+            await timer.CallbackTask.WaitAsync(deadline.Token);
+            var acknowledgement = await acknowledgementTask;
+            Assert.StartsWith("ACK|", acknowledgement ?? string.Empty, StringComparison.Ordinal);
+            var childId = acknowledgement!["ACK|".Length..];
+            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe, $"COMPLETE|{childId}", deadline.Token);
+            Assert.Equal($"DONE|{childId}", await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, deadline.Token));
+
+            Assert.Equal(1, timer.DisposeAsyncCalls);
+            Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(5), deadline.Token));
+        }
+        finally
+        {
+            timer?.ReleaseCallback.TrySetResult();
+            deadline.Cancel();
+            await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
     public async Task ListenerCreationIoFailureDisablesEnrollmentWithoutInventingUnknownWork()
     {
         await using var session = EvidenceChildLifetimeSession.Start("listener-io-failure-" + Guid.NewGuid().ToString("N"),
@@ -254,7 +297,7 @@ public sealed class EvidenceChildProtocolCoverageTests
         Task<int>? processTask = null;
         try
         {
-            var startInfo = new ProcessStartInfo("dotnet")
+            var startInfo = new ProcessStartInfo(OperatingSystem.IsWindows() ? "cmd.exe" : "sh")
             {
                 UseShellExecute = false,
                 RedirectStandardInput = redirectInput,
@@ -264,7 +307,31 @@ public sealed class EvidenceChildProtocolCoverageTests
                 StandardErrorEncoding = Encoding.UTF8,
                 CreateNoWindow = true
             };
-            startInfo.ArgumentList.Add("--version");
+            if (redirectInput)
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    startInfo.ArgumentList.Add("/d");
+                    startInfo.ArgumentList.Add("/c");
+                    startInfo.ArgumentList.Add("more >nul");
+                }
+                else
+                {
+                    startInfo.ArgumentList.Add("-c");
+                    startInfo.ArgumentList.Add("cat >/dev/null");
+                }
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                startInfo.ArgumentList.Add("/d");
+                startInfo.ArgumentList.Add("/c");
+                startInfo.ArgumentList.Add("exit 0");
+            }
+            else
+            {
+                startInfo.ArgumentList.Add("-c");
+                startInfo.ArgumentList.Add("exit 0");
+            }
             processTask = EvidenceOwnedChild.RunProcessAsync(startInfo, Channel(pipeName), deadline.Token);
 
             Assert.Equal(0, await processTask.WaitAsync(deadline.Token));
@@ -388,14 +455,15 @@ public sealed class EvidenceChildProtocolCoverageTests
     public async Task DisconnectAfterAcknowledgementBecomesStickyUnknownState()
     {
         await using var session = EvidenceChildLifetimeSession.Start("disconnect-" + Guid.NewGuid().ToString("N"));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await using (var pipe = new NamedPipeClientStream(".",
             session.Environment[EvidenceChildLifetimeSession.PipeEnvironmentName], PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
         {
-            await pipe.ConnectAsync(3000);
+            await pipe.ConnectAsync(3000, deadline.Token);
             await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
-                $"BEGIN|{session.ExecutionId}|{session.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}", CancellationToken.None);
-            var acknowledgement = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, CancellationToken.None);
+                $"BEGIN|{session.ExecutionId}|{session.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}", deadline.Token);
+            var acknowledgement = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, deadline.Token);
             Assert.StartsWith("ACK|", acknowledgement ?? string.Empty, StringComparison.Ordinal);
         }
 
@@ -676,6 +744,53 @@ public sealed class EvidenceChildProtocolCoverageTests
     };
 
     private sealed class ChildListenerProbeException : Exception { }
+
+    private sealed class ControlledTimerProvider : TimeProvider
+    {
+        internal TaskCompletionSource<ControlledTimer> TimerCreated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ControlledTimer(callback, state);
+            TimerCreated.TrySetResult(timer);
+            return timer;
+        }
+    }
+
+    private sealed class ControlledTimer(TimerCallback callback, object? state) : ITimer
+    {
+        private Task? _callbackTask;
+        private int _disposeAsyncCalls;
+
+        internal TaskCompletionSource CallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource DisposeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseCallback { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int DisposeAsyncCalls => Volatile.Read(ref _disposeAsyncCalls);
+        internal Task CallbackTask => Volatile.Read(ref _callbackTask) ?? Task.CompletedTask;
+
+        internal void StartBlockedCallback()
+        {
+            var task = Task.Run(() =>
+            {
+                CallbackStarted.TrySetResult();
+                ReleaseCallback.Task.GetAwaiter().GetResult();
+                callback(state);
+            });
+            if (Interlocked.CompareExchange(ref _callbackTask, task, null) is not null)
+                throw new InvalidOperationException("The controlled timer callback was already started.");
+        }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period) => false;
+
+        public void Dispose() { }
+
+        public ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposeAsyncCalls);
+            DisposeStarted.TrySetResult();
+            return new ValueTask(Volatile.Read(ref _callbackTask) ?? Task.CompletedTask);
+        }
+    }
 
     private sealed class ThrowingWriteStream(Exception failure) : Stream
     {

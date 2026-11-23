@@ -44,15 +44,29 @@ internal static class EvidenceReusePackageProof
     {
         var stage = "admission";
         string? admittedOutput = null;
+        FileStream? outputClaim = null;
         var stages = new List<StageResult>();
         try
         {
             var packages = await InspectFeedAsync(feed, version, expectedSourceCommit, cancellationToken).ConfigureAwait(false);
-            var repository = FindRepository();
+            var repository = ResolveExistingPath(FindRepository());
+            var feedRoot = ResolveExistingPath(feed);
             output = Path.GetFullPath(output);
+            var resolvedOutput = ResolveExistingPath(output);
             dotnet = Path.GetFullPath(dotnet);
-            Require(File.Exists(dotnet) && !Directory.Exists(output) && !File.Exists(output), "fresh-output-and-sdk");
-            Require(!Within(repository, output) && !Within(Path.GetFullPath(feed), output), "scratch-outside-source-and-feed");
+            Require(File.Exists(dotnet) && !PathEntryExists(output), "fresh-output-and-sdk");
+            // Scratch admission is conservatively case-insensitive on all platforms. Assembly provenance below
+            // retains its exact platform path comparison; this guard only rejects ambiguous output locations.
+            static bool ScratchWithin(string root, string candidate) => candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
+                || candidate.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase);
+            Require(!ScratchWithin(repository, resolvedOutput) && !ScratchWithin(feedRoot, resolvedOutput), "scratch-outside-source-and-feed");
+            output = resolvedOutput;
+            var outputParent = Path.GetDirectoryName(output) ?? throw new ArgumentException("Output must have a parent directory.");
+            Directory.CreateDirectory(outputParent);
+            outputClaim = new FileStream(output + ".packed-reuse.claim", FileMode.CreateNew, FileAccess.ReadWrite,
+                FileShare.None, 1, FileOptions.DeleteOnClose);
+            Require(!PathEntryExists(output), "fresh-output-and-sdk");
             Directory.CreateDirectory(output);
             admittedOutput = output;
             var runner = new ProofRunner(output, dotnet, stages);
@@ -98,7 +112,7 @@ internal static class EvidenceReusePackageProof
             return 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException
             or JsonException or XmlException or UnauthorizedAccessException or TimeoutException or OperationCanceledException
             or KeyNotFoundException or System.ComponentModel.Win32Exception or NotSupportedException)
         {
@@ -117,6 +131,7 @@ internal static class EvidenceReusePackageProof
             Console.Error.WriteLine($"ASEVD917 Packed reuse proof failed at {stage}: {reason}. Inspect retained stage logs and candidate closure.");
             return 1;
         }
+        finally { outputClaim?.Dispose(); }
     }
 
     /// <summary>Reads actual archive bytes and validates all framework-group private edges before any consumer output exists.</summary>
@@ -127,6 +142,7 @@ internal static class EvidenceReusePackageProof
         Require(version.Length is > 0 and <= 128 && version.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '+'), "candidate-version");
         Require(expectedSourceCommit.Length is 40 or 64 && expectedSourceCommit.All(char.IsAsciiHexDigit), "source-commit-pin");
         var result = new Dictionary<string, PackageProof>(StringComparer.Ordinal);
+        var bundledAssemblyHashes = new Dictionary<string, string>(StringComparer.Ordinal);
         var ids = RequiredPackageIds.ToList();
         if (File.Exists(Path.Join(feed, $"{Prefix}Evidence.Cli.{version}.nupkg"))) ids.Add(Prefix + "Evidence.Cli");
         foreach (var id in ids)
@@ -135,7 +151,9 @@ internal static class EvidenceReusePackageProof
             var path = Path.GetFullPath(Path.Join(feed, $"{id}.{version}.nupkg"));
             Require(File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0
                 && new FileInfo(path).Length <= 512L * 1024 * 1024, "bounded-regular-candidate-archive");
-            using var archive = ZipFile.OpenRead(path);
+            var archiveBytes = await ReadArchiveBytesAsync(path, cancellationToken).ConfigureAwait(false);
+            using var archiveStream = new MemoryStream(archiveBytes, writable: false);
+            using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read, leaveOpen: false);
             Require(archive.Entries.Count <= 10000 && archive.Entries.Select(entry => entry.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Count() == archive.Entries.Count,
                 "bounded-unambiguous-archive");
             var specification = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
@@ -201,18 +219,76 @@ internal static class EvidenceReusePackageProof
                         && library.Name.EndsWith("/" + componentVersions[0], StringComparison.Ordinal), "tool-bundled-graph-version");
                 foreach (var required in new[] { ToolId, SupportId, Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner", Prefix + "Evidence.Cli", Prefix + "Coverage" })
                     Require(libraries.Any(library => library.Name == required + "/" + (required == ToolId ? buildVersion : componentVersions[0])), "tool-required-bundled-graph");
+                var bundledIds = new List<string> { SupportId, Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner", Prefix + "Coverage" };
+                if (ids.Contains(Prefix + "Evidence.Cli", StringComparer.Ordinal)) bundledIds.Add(Prefix + "Evidence.Cli");
+                foreach (var bundledId in bundledIds)
+                {
+                    var bundled = archive.Entries.Single(entry => entry.FullName.StartsWith("tools/", StringComparison.Ordinal)
+                        && Path.GetFileName(entry.FullName) == bundledId + ".dll");
+                    bundledAssemblyHashes.Add(bundledId, await HashEntryAsync(bundled, cancellationToken).ConfigureAwait(false));
+                }
             }
-            result.Add(id, new(id, version, expectedSourceCommit, path, await HashAsync(path, cancellationToken).ConfigureAwait(false), assemblyEntry.FullName, assemblySha));
+            result.Add(id, new(id, version, expectedSourceCommit, path,
+                Convert.ToHexStringLower(SHA256.HashData(archiveBytes)), assemblyEntry.FullName, assemblySha));
         }
-        using (var tool = ZipFile.OpenRead(result[ToolId].Archive))
+        foreach (var (id, hash) in bundledAssemblyHashes)
         {
-            foreach (var id in new[] { SupportId, Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner", Prefix + "Coverage" })
-            {
-                var bundled = tool.Entries.Single(entry => entry.FullName.StartsWith("tools/", StringComparison.Ordinal) && Path.GetFileName(entry.FullName) == id + ".dll");
-                Require(await HashEntryAsync(bundled, cancellationToken).ConfigureAwait(false) == result[id].AssemblySha256, "tool-bundled-candidate-sha-before-output");
-            }
+            Require(hash == result[id].AssemblySha256,
+                id == Prefix + "Evidence.Cli" ? "tool-bundled-cli-candidate-sha-before-output" : "tool-bundled-candidate-sha-before-output");
         }
         return result;
+    }
+
+    private static async Task<byte[]> ReadArchiveBytesAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        Require(input.Length <= 512L * 1024 * 1024, "bounded-regular-candidate-archive");
+        var bytes = new byte[checked((int)input.Length)];
+        await input.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
+        Require(input.ReadByte() == -1, "stable-candidate-archive-length");
+        return bytes;
+    }
+
+    private static bool PathEntryExists(string path)
+    {
+        try
+        {
+            _ = File.GetAttributes(path);
+            return true;
+        }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+    }
+
+    private static string ResolveExistingPath(string path, int linkDepth = 0)
+    {
+        if (linkDepth > 64) throw new IOException("Path link resolution exceeds its bound.");
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath) ?? throw new ArgumentException("Path has no filesystem root.", nameof(path));
+        var resolved = root;
+        foreach (var component in fullPath[root.Length..].Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Join(resolved, component);
+            try
+            {
+                var attributes = File.GetAttributes(candidate);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    FileSystemInfo link = attributes.HasFlag(FileAttributes.Directory)
+                        ? new DirectoryInfo(candidate) : new FileInfo(candidate);
+                    var target = link.ResolveLinkTarget(returnFinalTarget: true)?.FullName
+                        ?? throw new IOException("Path link has no resolvable target.");
+                    // A final link target can itself name symlinked ancestors (for example /var on macOS).
+                    candidate = ResolveExistingPath(target, linkDepth + 1);
+                }
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+            resolved = Path.GetFullPath(candidate);
+        }
+        return resolved;
     }
 
     private static async Task<object> ProveNegativeAdmissionAsync(IReadOnlyDictionary<string, PackageProof> packages,
@@ -422,6 +498,14 @@ internal static class EvidenceReusePackageProof
             var producer = manifest.ProducerResults.Single();
             var expected = mode == "warm" ? EvidenceProducerOutcome.Reused : EvidenceProducerOutcome.Passed;
             Require(producer.Outcome == expected, "cli-fresh-warm-audit-outcome");
+            if (mode == "audit")
+            {
+                using var summary = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, "evidence-summary.json"), token).ConfigureAwait(false));
+                Require(summary.RootElement.GetProperty("reuseDecisions").EnumerateArray().Any(decision =>
+                    decision.GetProperty("ProducerId").GetString() == producer.ProducerId
+                    && decision.TryGetProperty("VerifiedReceiptCompared", out var compared) && compared.GetBoolean()),
+                    "cli-audit-compared-verified-receipt");
+            }
             if (mode == "warm")
             {
                 Require(manifest.ClaimKind == EvidenceClaimKind.LocalReusedComplete
@@ -446,7 +530,8 @@ internal static class EvidenceReusePackageProof
             }
             Require(bytes <= 256L * 1024 * 1024, "cli-existing-aggregate-limit");
             foreach (var required in new[] { "coverage.cobertura.xml", "coverage-gate.json", "coverage-gate.md", "timings.json" })
-                Require(File.Exists(Path.Join(root, "coverage", required)), "cli-required-managed-reports");
+                Require(artifacts.Any(artifact => artifact.RelativePath == "coverage/" + required)
+                    && File.Exists(Path.Join(root, "coverage", required)), "cli-required-managed-reports-in-inventory");
             using var gate = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, "coverage", "coverage-gate.json"), token).ConfigureAwait(false));
             var thresholds = gate.RootElement.GetProperty("thresholds");
             var effectiveThresholds = gate.RootElement.GetProperty("effectiveThresholds");
@@ -584,6 +669,15 @@ internal static class EvidenceReusePackageProof
             environment["MSBUILDDISABLENODEREUSE"] = "1";
             environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
             foreach (var key in new[] { "APPSURFACE_EVIDENCE_CHILD_PIPE", "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID", "APPSURFACE_EVIDENCE_CHILD_NONCE" }) environment.Remove(key);
+            var gitOverrides = new HashSet<string>([
+                "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+                "GIT_OBJECT_DIRECTORY_RELATIVE", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
+                "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_PREFIX", "GIT_CONFIG",
+                "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"
+            ], StringComparer.OrdinalIgnoreCase);
+            foreach (var key in environment.Keys.Where(key => gitOverrides.Contains(key)
+                || key.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase)).ToArray()) environment.Remove(key);
             if (syntheticLocal) environment.Remove("GITHUB_ACTIONS");
             await File.WriteAllTextAsync(Path.Join(root, stage + ".log"), JsonSerializer.Serialize(new
             {
@@ -604,21 +698,33 @@ internal static class EvidenceReusePackageProof
             }
             var outputCapture = new StringBuilder();
             var errorCapture = new StringBuilder();
-            var stdout = DrainAsync(process.StandardOutput, outputCapture, timeout.Token);
-            var stderr = DrainAsync(process.StandardError, errorCapture, timeout.Token);
+            using var drainCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+            var stdout = DrainAsync(process.StandardOutput, outputCapture, drainCancellation.Token);
+            var stderr = DrainAsync(process.StandardError, errorCapture, drainCancellation.Token);
             string output = "", error = "";
             try
             {
-                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                var processExit = process.WaitForExitAsync(timeout.Token);
+                while (!processExit.IsCompleted)
+                {
+                    if (stdout.IsFaulted || stdout.IsCanceled) await stdout.ConfigureAwait(false);
+                    if (stderr.IsFaulted || stderr.IsCanceled) await stderr.ConfigureAwait(false);
+                    var pending = new List<Task> { processExit };
+                    if (!stdout.IsCompleted) pending.Add(stdout);
+                    if (!stderr.IsCompleted) pending.Add(stderr);
+                    await Task.WhenAny(pending).ConfigureAwait(false);
+                }
+                await processExit.ConfigureAwait(false);
                 output = await stdout.ConfigureAwait(false);
                 error = await stderr.ConfigureAwait(false);
             }
             catch
             {
+                drainCancellation.Cancel();
                 if (!process.HasExited) process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-                try { output = await stdout.ConfigureAwait(false); } catch (OperationCanceledException) { }
-                try { error = await stderr.ConfigureAwait(false); } catch (OperationCanceledException) { }
+                try { await Task.WhenAll(stdout, stderr).ConfigureAwait(false); }
+                catch (Exception) { }
                 throw;
             }
             finally

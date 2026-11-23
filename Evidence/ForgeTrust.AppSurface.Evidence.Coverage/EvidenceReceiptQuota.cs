@@ -21,7 +21,9 @@ internal static class EvidenceReceiptQuota
     internal const long MaximumBytes = 2L * 1024 * 1024 * 1024;
     internal const int MaximumEntries = 4096;
     internal const int EssentialReservationBytes = 64 * 1024;
+    internal const int MaximumStateBytes = 64 * 1024;
     internal const int IndexMaximumBytes = 16 * 1024 * 1024;
+    private const int MaximumPassedProducerRecordCharacters = 64 * 1024;
     private const int IndexSchemaVersion = 4;
     private const int MaximumPayloadTreeEntries = 1200;
     private const int MaximumRetiredPayloadsPerKey = 64;
@@ -37,6 +39,7 @@ internal static class EvidenceReceiptQuota
     /// <param name="now">The current time used by ordinary quota maintenance.</param>
     /// <param name="waitTimeout">Remaining caller-owned wait budget; this root-index wait is capped at 30 seconds.</param>
     /// <param name="cancellationToken">Cancels a bounded wait for the root-index native lease.</param>
+    /// <param name="unixDirectoryFsyncForTests">Optional directory-sync failure seam; production omits it.</param>
     /// <remarks>
     /// A null timeout preserves the historical 30-second wait. Larger or infinite timeouts are capped at 30 seconds;
     /// zero permits one immediate acquisition attempt but does not wait if the index is busy, and other negative
@@ -44,7 +47,8 @@ internal static class EvidenceReceiptQuota
     /// index authority is read or changed.
     /// </remarks>
     internal static string ReserveEssential(string rootPath, string repositoryNamespace, IReadOnlyList<string> keys,
-        DateTimeOffset now, TimeSpan? waitTimeout = null, CancellationToken cancellationToken = default)
+        DateTimeOffset now, TimeSpan? waitTimeout = null, CancellationToken cancellationToken = default,
+        Func<int, int>? unixDirectoryFsyncForTests = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var reservationId = Guid.NewGuid().ToString("N");
@@ -52,17 +56,24 @@ internal static class EvidenceReceiptQuota
         using var indexLease = AcquireIndexLease(rootPath, waitTimeout, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var index = ReadIndex(root);
-        MaintainLocked(root, rootPath, index, requiredBytes: 0, now,
-            cleanupEvictionTombstonesOnly: true);
+        if (index.Entries.Any(static entry => entry.EvictionPending))
+        {
+            // Re-publish under the index lease before tombstone cleanup. A previous rename may be visible
+            // even though its directory sync failed; cleanup must not treat that ambiguous state as durable.
+            PublishIndex(root, index, unixDirectoryFsyncForTests);
+            if (MaintainLocked(root, rootPath, index, requiredBytes: 0, now,
+                    cleanupEvictionTombstonesOnly: true))
+                PublishIndex(root, index, unixDirectoryFsyncForTests);
+        }
         var protectedKeys = keys.Select(key => EntryIdentity(repositoryNamespace, key)).ToHashSet(StringComparer.Ordinal);
         var missingKeyCount = keys.Distinct(StringComparer.Ordinal)
             .Count(key => Find(index, repositoryNamespace, key) is null);
         var requiresEntryCapacity = index.Entries.Count + missingKeyCount > MaximumEntries;
         MaintainLocked(root, rootPath, index, requiredBytes: checked((long)keys.Count * EssentialReservationBytes),
-            now, requireEntryCapacity: requiresEntryCapacity, protectedKeys: protectedKeys);
+            now, requiredEntryCount: requiresEntryCapacity ? missingKeyCount : 0, protectedKeys: protectedKeys);
         if (requiresEntryCapacity && index.Entries.Count + missingKeyCount > MaximumEntries)
         {
-            WriteIndex(root, rootPath, index, protectedKeys);
+            WriteIndex(root, rootPath, index, protectedKeys, unixDirectoryFsyncForTests);
             missingKeyCount = keys.Distinct(StringComparer.Ordinal)
                 .Count(key => Find(index, repositoryNamespace, key) is null);
             if (index.Entries.Count + missingKeyCount > MaximumEntries)
@@ -93,9 +104,9 @@ internal static class EvidenceReceiptQuota
                 });
             }
         }
-        WriteIndex(root, rootPath, index, protectedKeys);
         using var namespaceRoot = EnsureChildDirectory(root, repositoryNamespace);
         foreach (var key in keys) using (EnsureChildDirectory(namespaceRoot, key)) { }
+        WriteIndex(root, rootPath, index, protectedKeys, unixDirectoryFsyncForTests);
         return reservationId;
     }
 
@@ -111,7 +122,8 @@ internal static class EvidenceReceiptQuota
     /// A null timeout preserves the historical 30-second wait. Larger or infinite timeouts are capped at 30 seconds;
     /// zero permits one immediate acquisition attempt but does not wait if the index is busy, and other negative
     /// timeouts are rejected. Cancellation is checked while waiting and again after acquiring the native lease before
-    /// index authority is read or changed.
+    /// index authority is read or changed. If eviction won before the key lease was acquired, confirmation
+    /// re-publishes the tombstone and finishes its cleanup under that lease before recreating the reservation.
     /// </remarks>
     internal static void ConfirmEssentialReservation(string rootPath, string repositoryNamespace, string key,
         string reservationId, DateTimeOffset now, TimeSpan? waitTimeout = null,
@@ -122,11 +134,21 @@ internal static class EvidenceReceiptQuota
         using var indexLease = AcquireIndexLease(rootPath, waitTimeout, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var index = ReadIndex(root);
-        var entry = FindForMutation(index, repositoryNamespace, key);
+        var entry = Find(index, repositoryNamespace, key);
+        if (entry is { EvictionPending: true })
+        {
+            // An earlier publish may have made the tombstone visible without flushing its directory entry.
+            PublishIndex(root, index);
+            using var keyRoot = OpenRoot(Path.Combine(rootPath, repositoryNamespace, key));
+            if (!TryReclaimEvictedPayloads(keyRoot, entry))
+                throw new EvidenceReceiptQuotaUnavailableException("receipt-key-eviction-pending");
+            index.Entries.Remove(entry);
+            entry = null;
+        }
         if (entry?.EssentialReservationIds?.Contains(reservationId, StringComparer.Ordinal) == true) return;
         var protectedKeys = new HashSet<string>([EntryIdentity(repositoryNamespace, key)], StringComparer.Ordinal);
         MaintainLocked(root, rootPath, index, EssentialReservationBytes, now,
-            requireEntryCapacity: entry is null && index.Entries.Count >= MaximumEntries,
+            requiredEntryCount: entry is null ? 1 : 0,
             protectedKeys: protectedKeys);
         entry = FindForMutation(index, repositoryNamespace, key);
         if (entry is null && index.Entries.Count >= MaximumEntries)
@@ -471,8 +493,19 @@ internal static class EvidenceReceiptQuota
             if (prior is null || prior.InFlightExecutionId != commit.ExecutionId
                 || (prior.AuditIntentExecutionId is not null && prior.AuditIntentExecutionId != commit.ExecutionId))
                 throw new InvalidOperationException("Receipt batch no longer owns every selected authority row.");
+            if (commit.State.SchemaVersion != 1 || commit.State.Key != commit.Key
+                || commit.State.InFlightExecutionId is not null || commit.State.AuditIntentExecutionId is not null
+                || commit.State.AuditMismatch || commit.State.PayloadDirectoryName != commit.PayloadDirectoryName
+                || commit.State.OriginCompletedAt != commit.CompletedAt)
+                throw new InvalidDataException("Receipt batch state does not describe the committed settled payload.");
+            if (commit.State.PassedProducerRecord is { Length: > MaximumPassedProducerRecordCharacters })
+                throw new EvidenceReceiptQuotaUnavailableException("receipt-passed-producer-record-capacity-unavailable");
+            if (JsonSerializer.SerializeToUtf8Bytes(commit.State).Length > MaximumStateBytes)
+                throw new EvidenceReceiptQuotaUnavailableException("receipt-state-capacity-unavailable");
             var payloadReservation = (entry.PayloadReservations ?? [])
                 .SingleOrDefault(item => item.PayloadDirectoryName == commit.PayloadDirectoryName);
+            if (payloadReservation is null && entry.PayloadReservations is { Count: > 0 })
+                throw new EvidenceReceiptQuotaUnavailableException("receipt-batch-reservation-binding-missing");
             var reservationBytes = payloadReservation?.ReservedBytes ?? commit.ReservationBytes;
             if (reservationBytes < 0 || reservationBytes > entry.ReservedPayloadBytes
                 || commit.PayloadBytes < 0 || commit.PayloadBytes > reservationBytes
@@ -710,7 +743,7 @@ internal static class EvidenceReceiptQuota
     }
 
     private static bool MaintainLocked(CoverageRunOutputLease root, string rootPath, EvidenceReceiptQuotaIndex index,
-        long requiredBytes, DateTimeOffset now, bool requireEntryCapacity = false, bool requireIndexCapacity = false,
+        long requiredBytes, DateTimeOffset now, int requiredEntryCount = 0, bool requireIndexCapacity = false,
         bool indexCapacityOnly = false, bool cleanupEvictionTombstonesOnly = false,
         IReadOnlySet<string>? protectedKeys = null)
     {
@@ -719,6 +752,8 @@ internal static class EvidenceReceiptQuota
             .ThenBy(static entry => entry.Key, StringComparer.Ordinal).ToArray();
         var changed = false;
         var indexCapacityNeeded = requireIndexCapacity && !IndexCanBePublished(root, index);
+        var selectedEntryCapacityTombstones = 0;
+        long selectedPayloadReclaimBytes = 0;
         foreach (var snapshot in entries)
         {
             if (protectedKeys?.Contains(EntryIdentity(snapshot.RepositoryNamespace, snapshot.Key)) == true)
@@ -737,8 +772,9 @@ internal static class EvidenceReceiptQuota
             var hasPayloadReservation = (snapshot.PayloadReservations?.Count ?? 0) != 0;
             var hasRetiredPayload = snapshot.RetiredPayloads.Count != 0;
             var expired = IsExpired(snapshot.OriginCompletedAt, now);
-            var overCapacity = requiredBytes > 0 && UsedBytes(index, root) > MaximumBytes - requiredBytes;
-            var overEntryCapacity = requireEntryCapacity && index.Entries.Count >= MaximumEntries;
+            var overCapacity = requiredBytes > 0 && UsedBytes(index, root) - selectedPayloadReclaimBytes > MaximumBytes - requiredBytes;
+            var overEntryCapacity = requiredEntryCount > 0
+                && index.Entries.Count - selectedEntryCapacityTombstones + requiredEntryCount > MaximumEntries;
             var overIndexCapacity = requireIndexCapacity && indexCapacityNeeded;
             var needsWork = cleanupEvictionTombstonesOnly
                 ? true
@@ -768,10 +804,7 @@ internal static class EvidenceReceiptQuota
                 if (cleanupEvictionTombstonesOnly)
                 {
                     if (!current.EvictionPending) continue;
-                    var deleted = DeleteOwnedPayloadIfPresent(keyRoot, current.PayloadDirectoryName);
-                    foreach (var retired in current.RetiredPayloads)
-                        deleted &= DeleteOwnedPayloadIfPresent(keyRoot, retired.DirectoryName);
-                    if (!deleted) continue;
+                    if (!TryReclaimEvictedPayloads(keyRoot, current)) continue;
                     index.Entries.Remove(current);
                     changed = true;
                     if (requireIndexCapacity) indexCapacityNeeded = !IndexCanBePublished(root, index);
@@ -844,8 +877,9 @@ internal static class EvidenceReceiptQuota
                 }
 
                 expired = IsExpired(current.OriginCompletedAt, now);
-                overCapacity = requiredBytes > 0 && UsedBytes(index, root) > MaximumBytes - requiredBytes;
-                overEntryCapacity = requireEntryCapacity && index.Entries.Count >= MaximumEntries;
+                overCapacity = requiredBytes > 0 && UsedBytes(index, root) - selectedPayloadReclaimBytes > MaximumBytes - requiredBytes;
+                overEntryCapacity = requiredEntryCount > 0
+                    && index.Entries.Count - selectedEntryCapacityTombstones + requiredEntryCount > MaximumEntries;
                 overIndexCapacity = requireIndexCapacity && indexCapacityNeeded;
                 var shouldEvict = indexCapacityOnly ? overIndexCapacity
                     : expired || overCapacity || overEntryCapacity || overIndexCapacity;
@@ -875,6 +909,11 @@ internal static class EvidenceReceiptQuota
                         PayloadReservations = [],
                         EvictionPending = true
                     });
+                    // This is only a selection projection. Actual bytes remain charged until
+                    // the durable tombstone has been published and cleanup has succeeded.
+                    selectedPayloadReclaimBytes = checked(selectedPayloadReclaimBytes + current.PayloadBytes
+                        + current.RetiredPayloads.Sum(static payload => payload.Bytes));
+                    if (requiredEntryCount > 0) selectedEntryCapacityTombstones++;
                 }
                 changed = true;
                 if (requireIndexCapacity) indexCapacityNeeded = !IndexCanBePublished(root, index);
@@ -956,19 +995,44 @@ internal static class EvidenceReceiptQuota
     private static bool IsExpired(DateTimeOffset? completedAt, DateTimeOffset now)
         => completedAt is { } completed && (completed > now || now - completed >= MaximumOriginAge);
 
-    private static bool DeleteOwnedPayloadIfPresent(CoverageRunOutputLease keyRoot, string? payloadName)
+    /// <summary>Reclaims the payloads of a durably published eviction tombstone under its exclusive key lease.</summary>
+    /// <remarks>A failed removal leaves the tombstone and its charges available for a later retry.</remarks>
+    private static bool TryReclaimEvictedPayloads(CoverageRunOutputLease keyRoot, EvidenceReceiptQuotaEntry tombstone)
+    {
+        var deleted = DeleteOwnedPayloadIfPresent(keyRoot, tombstone.PayloadDirectoryName);
+        foreach (var retired in tombstone.RetiredPayloads)
+            deleted &= DeleteOwnedPayloadIfPresent(keyRoot, retired.DirectoryName);
+        return deleted;
+    }
+
+    /// <summary>Reclaims one committed payload, including its exact generated staging name after a rename rollback.</summary>
+    /// <param name="keyRoot">Private directory retained under the committed entry's exclusive key lease.</param>
+    /// <param name="payloadName">Indexed committed or retired payload name; null requires no deletion.</param>
+    /// <param name="expectedIdentity">Optional object identity retained before cleanup.</param>
+    /// <returns>True only after both generated names are confirmed absent. Both present, changed identities,
+    /// non-directory entries and unreadable state retain the charge. Legacy names have no inferred stage.</returns>
+    /// <remarks>Precommit staging cleanup must use its explicit reservation and stage identity instead of this recovery inference.</remarks>
+    internal static bool DeleteOwnedPayloadIfPresent(CoverageRunOutputLease keyRoot, string? payloadName,
+        string? expectedIdentity = null)
     {
         if (payloadName is null) return true;
         if (!payloadName.StartsWith("payload-", StringComparison.Ordinal)) return false;
+        var recoveryName = payloadName.Length == "payload-".Length + 32
+            && payloadName["payload-".Length..].All(char.IsAsciiHexDigitLower)
+                ? "payload-stage-" + payloadName["payload-".Length..] : null;
         try
         {
-            var entry = keyRoot.EnumerateArtifactEntries(MaximumPayloadTreeEntries).SingleOrDefault(item => item.Name == payloadName);
+            var entries = keyRoot.EnumerateArtifactEntries(MaximumPayloadTreeEntries);
+            var finalEntry = entries.SingleOrDefault(item => item.Name == payloadName);
+            var recoveryEntry = recoveryName is null ? null : entries.SingleOrDefault(item => item.Name == recoveryName);
+            if (finalEntry is not null && recoveryEntry is not null) return false;
+            var entry = finalEntry ?? recoveryEntry;
             if (entry is null) return true;
-            if (!entry.IsDirectory) return false;
-            keyRoot.DeleteArtifactEntry(payloadName, MaximumPayloadTreeEntries, entry.Identity);
-            return keyRoot.EnumerateArtifactEntries(MaximumPayloadTreeEntries).All(item => item.Name != payloadName);
+            if (!entry.IsDirectory || expectedIdentity is not null && entry.Identity != expectedIdentity) return false;
+            keyRoot.DeleteArtifactEntry(entry.Name, MaximumPayloadTreeEntries, entry.Identity);
+            return keyRoot.EnumerateArtifactEntries(MaximumPayloadTreeEntries)
+                .All(item => item.Name != payloadName && item.Name != recoveryName);
         }
-        catch (FileNotFoundException) { return true; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or NotSupportedException)
         { return false; }
     }
@@ -1111,19 +1175,20 @@ internal static class EvidenceReceiptQuota
     }
 
     private static void WriteIndex(CoverageRunOutputLease root, string rootPath, EvidenceReceiptQuotaIndex index,
-        IReadOnlySet<string>? protectedKeys = null)
+        IReadOnlySet<string>? protectedKeys = null, Func<int, int>? unixDirectoryFsyncForTests = null)
     {
         ValidateEntries(index);
         if (!IndexCanBePublished(root, index))
             MaintainLocked(root, rootPath, index, requiredBytes: 0, DateTimeOffset.UtcNow,
                 requireIndexCapacity: true, indexCapacityOnly: true, protectedKeys: protectedKeys);
-        PublishIndex(root, index);
+        PublishIndex(root, index, unixDirectoryFsyncForTests);
         if (MaintainLocked(root, rootPath, index, requiredBytes: 0, DateTimeOffset.UtcNow,
                 cleanupEvictionTombstonesOnly: true, protectedKeys: protectedKeys))
-            PublishIndex(root, index);
+            PublishIndex(root, index, unixDirectoryFsyncForTests);
     }
 
-    private static void PublishIndex(CoverageRunOutputLease root, EvidenceReceiptQuotaIndex index)
+    private static void PublishIndex(CoverageRunOutputLease root, EvidenceReceiptQuotaIndex index,
+        Func<int, int>? unixDirectoryFsyncForTests = null)
     {
         ValidateEntries(index);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(index);
@@ -1132,7 +1197,7 @@ internal static class EvidenceReceiptQuota
                 ExistingIndexStagingBytes(root)))
             throw new EvidenceReceiptQuotaUnavailableException("receipt-quota-index-capacity-unavailable");
         CoverageArtifactMetadataPublication.Write(root, "quota-index.json", bytes, IndexMaximumBytes,
-            durableDirectoryEntry: true);
+            durableDirectoryEntry: true, unixDirectoryFsync: unixDirectoryFsyncForTests);
     }
 
     private static bool IndexCanBePublished(CoverageRunOutputLease root, EvidenceReceiptQuotaIndex index)

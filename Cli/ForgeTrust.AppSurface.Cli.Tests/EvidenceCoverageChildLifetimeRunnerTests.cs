@@ -23,6 +23,33 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         Assert.Empty(runner.Requests);
     }
 
+    [Fact]
+    public async Task ListenerLossBeforeDispatchRejectsDotnetRequestWithoutCallingInnerRunner()
+    {
+        await using var session = EvidenceChildLifetimeSession.Start("runner-listener-loss-" + Guid.NewGuid().ToString("N"),
+            beforeListenerCreation: () => throw new IOException("Controlled listener creation failure."));
+        var inner = new CaptureRunner();
+        var wrapper = new EvidenceCoverageProcessRunner(inner, session);
+
+        Assert.False(session.CanAcceptChildren);
+        await Assert.ThrowsAsync<IOException>(() => wrapper.RunAsync(Request("dotnet", ["test"]), CancellationToken.None));
+
+        Assert.Empty(inner.Requests);
+    }
+
+    [Fact]
+    public async Task EnrollmentClosedAfterWrapperCreationRejectsDotnetRequestBeforeDispatch()
+    {
+        await using var session = EvidenceChildLifetimeSession.Start("runner-session-loss-" + Guid.NewGuid().ToString("N"));
+        var inner = new CaptureRunner();
+        var wrapper = new EvidenceCoverageProcessRunner(inner, session);
+        session.CloseEnrollment();
+
+        await Assert.ThrowsAsync<IOException>(() => wrapper.RunAsync(Request("dotnet", ["build"]), CancellationToken.None));
+
+        Assert.Empty(inner.Requests);
+    }
+
     [Theory]
     [InlineData("msbuild", false)]
     [InlineData("build", true)]

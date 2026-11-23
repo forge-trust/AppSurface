@@ -19,7 +19,7 @@ internal static class EvidenceReuseOutput
             ? Path.GetFullPath(Path.Join(defaultParent, "runs", Guid.NewGuid().ToString("N")))
             : Path.GetFullPath(explicitPath);
         var parentPath = Path.GetDirectoryName(path)
-            ?? throw new InvalidOperationException("reuse.output_invalid: Output must name a new child directory, not a filesystem root.");
+            ?? throw new ArgumentException("reuse.output_invalid: Output must name a new child directory, not a filesystem root.", nameof(explicitPath));
         var name = Path.GetFileName(path);
         CoverageRunOutputLease.ValidateArtifactComponent(name);
         using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(parentPath, true, false)

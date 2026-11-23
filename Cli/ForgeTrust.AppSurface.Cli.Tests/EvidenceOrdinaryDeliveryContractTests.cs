@@ -101,6 +101,42 @@ public sealed class EvidenceOrdinaryDeliveryContractTests
     }
 
     [Fact]
+    public async Task CancellationAfterCopyDoesNotOccupyCanonicalReportPathsAndCanBeRetried()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        using var cancellation = new CancellationTokenSource();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CoverageEvidenceProducer.PreserveOrdinaryReportsAsync(fixture.Source, fixture.Destination,
+                fixture.Execution, fixture.Publications, cancellation.Token, cancellation.Cancel));
+
+        Assert.Empty(Directory.EnumerateFiles(fixture.Destination, "*", SearchOption.AllDirectories));
+        await fixture.AssertSourcesUnchangedAsync();
+        await fixture.DeliverAsync();
+        foreach (var file in fixture.Publications)
+            Assert.Equal(fixture.Bytes[file.Path], await File.ReadAllBytesAsync(
+                TestPathUtils.PathUnder(fixture.Destination, "coverage", file.Path)));
+        Assert.Empty(Directory.EnumerateFiles(fixture.Destination, ".report-*.tmp", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task DestinationClaimedDuringCopyIsPreservedAndOnlyOwnedStagingIsRemoved()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var firstPath = TestPathUtils.PathUnder(fixture.Destination, "coverage", fixture.Publications[0].Path);
+        const string foreign = "another writer owns this destination";
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            CoverageEvidenceProducer.PreserveOrdinaryReportsAsync(fixture.Source, fixture.Destination,
+                fixture.Execution, fixture.Publications, CancellationToken.None,
+                () => File.WriteAllText(firstPath, foreign)));
+
+        Assert.Equal(foreign, await File.ReadAllTextAsync(firstPath));
+        Assert.Equal(firstPath, Assert.Single(Directory.EnumerateFiles(fixture.Destination, "*", SearchOption.AllDirectories)));
+        await fixture.AssertSourcesUnchangedAsync();
+    }
+
+    [Fact]
     public async Task CancelledDeliveryDoesNotCreateDestinationOrChangeAnySourceBytes()
     {
         using var fixture = await Fixture.CreateAsync();

@@ -78,6 +78,8 @@ internal static class Program
         try
         {
             var options = Parse(args);
+            if (options.ContainsKey("--feed") && options.GetValueOrDefault("--operation") != "reuse-package-proof")
+                throw new ArgumentException("--feed requires --operation reuse-package-proof.");
             if (options.TryGetValue("--operation", out var operation))
             {
                 if (operation == "reuse-package-proof")

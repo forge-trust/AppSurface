@@ -75,6 +75,18 @@ public sealed class NativeEvidenceProgramTests
     }
 
     [Fact]
+    public async Task LocalPlanRejectsPackedProofFeedBeforeWritingEvidence()
+    {
+        using var fixture = new NativeCaptureFixture();
+        var output = Path.Join(fixture.Root, "evidence");
+        var result = await InvokeAsync(["--operation", "local-plan", "--output", output, "--feed", fixture.Root]);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("ArgumentException", result.StandardError, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
     public async Task NativeContractVersion_IsRejectedOutsideRepositoryEvidenceRun()
     {
         using var fixture = new NativeCaptureFixture();

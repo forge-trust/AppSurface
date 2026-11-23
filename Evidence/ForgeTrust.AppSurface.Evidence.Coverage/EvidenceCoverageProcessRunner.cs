@@ -12,6 +12,7 @@ internal sealed class EvidenceCoverageProcessRunner : ICoverageRunProcessRunner
 {
     private readonly ICoverageRunProcessRunner _inner;
     private readonly IReadOnlyDictionary<string, string> _environment;
+    private readonly EvidenceChildLifetimeSession? _session;
 
     /// <summary>Gets stable protocol and effective isolation tokens for producer key material.</summary>
     /// <remarks>Contains no execution ID, endpoint, nonce, working directory or other invocation-specific path.</remarks>
@@ -32,15 +33,20 @@ internal sealed class EvidenceCoverageProcessRunner : ICoverageRunProcessRunner
 
     /// <summary>Wraps the existing injected runner for a single coordinator-owned lifetime session.</summary>
     internal EvidenceCoverageProcessRunner(ICoverageRunProcessRunner inner, EvidenceChildLifetimeSession session)
-        : this(inner, (session ?? throw new ArgumentNullException(nameof(session))).Environment) { }
+        : this(inner, (session ?? throw new ArgumentNullException(nameof(session))).Environment, session) { }
 
     /// <summary>Snapshots channel variables for request-level verification without creating or owning a session.</summary>
     /// <remarks>The production adapter uses the session constructor; this seam permits deterministic runner tests.</remarks>
     internal EvidenceCoverageProcessRunner(ICoverageRunProcessRunner inner, IReadOnlyDictionary<string, string> environment)
+        : this(inner, environment, null) { }
+
+    private EvidenceCoverageProcessRunner(ICoverageRunProcessRunner inner, IReadOnlyDictionary<string, string> environment,
+        EvidenceChildLifetimeSession? session)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         ArgumentNullException.ThrowIfNull(environment);
         _environment = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(environment, EnvironmentComparer));
+        _session = session;
     }
 
     /// <inheritdoc />
@@ -48,6 +54,8 @@ internal sealed class EvidenceCoverageProcessRunner : ICoverageRunProcessRunner
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!IsDotnet(request.FileName)) return _inner.RunAsync(request, cancellationToken);
+        if (_session is { CanAcceptChildren: false })
+            throw new IOException("The cooperative child channel is no longer available for SDK process enrollment.");
         var environment = request.EnvironmentOverrides is { } original
             ? new Dictionary<string, string?>(original, EnvironmentComparer)
             : new Dictionary<string, string?>(EnvironmentComparer);
