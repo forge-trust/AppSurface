@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "postgresql-fixture-benchmark.py"
@@ -179,6 +180,7 @@ class ServerMetadataTests(unittest.TestCase):
     def test_rejects_unsupported_version_unknown_setting_and_secret_key(self):
         invalid_values = [
             {"version": "15.9", "settings": {"max_connections": 100}},
+            {"version": "16-rc1", "settings": SERVER_SETTINGS},
             {"version": "16.4", "settings": {"password": "sentinel"}},
             {"version": "16.4", "settings": {"max_connections": [100]}},
         ]
@@ -205,19 +207,62 @@ class TrxEvidenceTests(unittest.TestCase):
             # An exact, passing Work cohort alone provides no ownership or fault evidence.
             write_trx(path, "work")
             with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "witness"):
-                BENCHMARK.validate_acceptance_trx(path, expected_rows=MANIFEST["_identities"]["work"])
+                BENCHMARK.validate_acceptance_trx(
+                    path,
+                    expected_rows=[(identity, identity) for identity in MANIFEST["_identities"]["work"]],
+                )
             identities = [f"{BENCHMARK.POSTGRES_TEST_NAMESPACE}.{class_name}.{method}"
                           for class_name, methods in BENCHMARK.ACCEPTANCE_WITNESSES.values()
                           for method in methods]
+            expected_rows = [(identity, identity) for identity in identities]
             write_trx(path, "matrix", identities=identities, include_collector=False)
-            self.assertEqual(len(identities), BENCHMARK.validate_acceptance_trx(path, expected_rows=identities)["passed"])
+            self.assertEqual(len(identities), BENCHMARK.validate_acceptance_trx(
+                path, expected_rows=expected_rows)["passed"])
             with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "discovery"):
-                BENCHMARK.validate_acceptance_trx(path, expected_rows=[*identities, "fixture.Theory(value: 1)"])
+                BENCHMARK.validate_acceptance_trx(
+                    path, expected_rows=[*expected_rows, ("fixture.Theory", "fixture.Theory(value: 1)")])
             with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "discovery"):
-                BENCHMARK.validate_acceptance_trx(path, expected_rows=[*identities, identities[0]])
+                BENCHMARK.validate_acceptance_trx(path, expected_rows=[*expected_rows, expected_rows[0]])
             write_trx(path, "matrix", identities=identities[1:], include_collector=False)
             with self.assertRaises(BENCHMARK.BenchmarkError):
-                BENCHMARK.validate_acceptance_trx(path, expected_rows=identities)
+                BENCHMARK.validate_acceptance_trx(path, expected_rows=expected_rows)
+
+    def test_acceptance_discovery_keeps_theory_display_name_and_method_identity(self):
+        cases = []
+        expected_theory_row = None
+        for index, class_name in enumerate(BENCHMARK.ACCEPTANCE_CLASSES):
+            prefix = f"{BENCHMARK.POSTGRES_TEST_NAMESPACE}.{class_name}."
+            cases.append(prefix + "OrdinaryCase")
+            if index == 0:
+                expected_theory_row = (prefix + "TheoryCase", prefix + "TheoryCase(value: 1)")
+                cases.append(expected_theory_row[1])
+        result = subprocess.CompletedProcess(
+            args=["dotnet"], returncode=0, stdout="\n".join(cases), stderr="",
+        )
+
+        with patch.object(BENCHMARK, "run_checked", return_value=result):
+            rows = BENCHMARK.discover_acceptance_rows("dotnet")
+
+        self.assertIn(expected_theory_row, rows)
+
+    def test_acceptance_rejects_result_rows_bound_to_another_test_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "acceptance.trx"
+            identities = [name for family in BENCHMARK.required_acceptance_witnesses().values() for name in family]
+            identities = list(dict.fromkeys(identities))
+            write_trx(path, "matrix", identities=identities, include_collector=False)
+            tree = ET.parse(path)
+            results = tree.findall(".//{*}UnitTestResult")
+            first_id = results[0].get("testId")
+            results[0].set("testId", results[1].get("testId", ""))
+            results[1].set("testId", first_id or "")
+            tree.write(path, encoding="utf-8")
+
+            with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "method identities and display names"):
+                BENCHMARK.validate_acceptance_trx(
+                    path,
+                    expected_rows=[(identity, identity) for identity in identities],
+                )
 
     def test_acceptance_build_marker_must_match_the_measured_release(self):
         digest = "ab" * 32
@@ -236,9 +281,14 @@ class TrxEvidenceTests(unittest.TestCase):
             )
             tree.write(path, encoding="utf-8")
             self.assertEqual(len(identities), BENCHMARK.validate_acceptance_trx(
-                path, expected_rows=identities, expected_assembly_sha256=digest)["passed"])
+                path, expected_rows=[(identity, identity) for identity in identities],
+                expected_assembly_sha256=digest)["passed"])
             with self.assertRaises(BENCHMARK.BenchmarkError):
-                BENCHMARK.validate_acceptance_trx(path, expected_rows=identities, expected_assembly_sha256="11" * 32)
+                BENCHMARK.validate_acceptance_trx(
+                    path,
+                    expected_rows=[(identity, identity) for identity in identities],
+                    expected_assembly_sha256="11" * 32,
+                )
 
     def test_requires_exact_pass_identity_set_and_xplat_collector(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -286,6 +336,27 @@ class CoverageEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "differs"):
                 BENCHMARK.validate_process_evidence(root, "work", "fresh")
 
+    def test_coverage_attachment_is_relative_to_resolved_symlinked_results_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "target"
+            target.mkdir()
+            alias = base / "alias"
+            try:
+                alias.symlink_to(target, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"directory symlinks are unavailable: {error}")
+
+            write_trx(target / "results.trx", "work")
+            write_timings(target / "fixture-timings.csv", "work", "fresh")
+            attachment = target / "results/In/coverage.cobertura.xml"
+            attachment.parent.mkdir(parents=True)
+            write_coverage(attachment)
+
+            evidence = BENCHMARK.validate_process_evidence(alias, "work", "fresh")
+
+            self.assertEqual("results/In/coverage.cobertura.xml", evidence["coverage"])
+
     def test_accepts_nonempty_cobertura_and_rejects_invalid_counters(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "coverage.cobertura.xml"
@@ -332,6 +403,138 @@ class TimingEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "phase counts"):
                 BENCHMARK.parse_timing_csv(path, "work", "fresh")
 
+    def test_rejects_rows_with_extra_csv_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "timings.csv"
+            write_timings(path, "work", "fresh")
+            with path.open("r", encoding="utf-8", newline="") as stream:
+                rows = list(csv.reader(stream))
+            rows[1].append("unexpected")
+            with path.open("w", encoding="utf-8", newline="") as stream:
+                csv.writer(stream).writerows(rows)
+
+            with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "extra fields"):
+                BENCHMARK.parse_timing_csv(path, "work", "fresh")
+
+
+class RunnerConfigurationTests(unittest.TestCase):
+    def test_uses_output_assembly_override_and_pins_effective_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            assembly = output / "Fixture.Tests.dll"
+            assembly.write_bytes(b"assembly")
+            shared = output / "xunit.runner.json"
+            shared.write_text('{"maxParallelThreads":2}', encoding="utf-8")
+            assembly_config = output / "Fixture.Tests.xunit.runner.json"
+            with patch.object(BENCHMARK, "TEST_ASSEMBLY", assembly):
+                effective_path, shared_hash = BENCHMARK.effective_runner_config()
+                self.assertEqual(shared, effective_path)
+                self.assertEqual(shared_hash, BENCHMARK.require_runner_config_hash(shared_hash, "in test"))
+
+                assembly_config.write_text('{ "maxParallelThreads": 2 }', encoding="utf-8")
+                effective_path, assembly_hash = BENCHMARK.effective_runner_config()
+                self.assertEqual(assembly_config, effective_path)
+                self.assertNotEqual(shared_hash, assembly_hash)
+
+                shared.write_text('{"maxParallelThreads":1}', encoding="utf-8")
+                self.assertEqual(assembly_hash, BENCHMARK.require_runner_config_hash(assembly_hash, "in test"))
+                assembly_config.write_text('{"maxParallelThreads":4}', encoding="utf-8")
+                with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "worker cap"):
+                    BENCHMARK.effective_runner_config()
+
+    def test_detects_effective_runner_configuration_hash_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            assembly = output / "Fixture.Tests.dll"
+            assembly.write_bytes(b"assembly")
+            config = output / "xunit.runner.json"
+            config.write_text('{"maxParallelThreads":2}', encoding="utf-8")
+            with patch.object(BENCHMARK, "TEST_ASSEMBLY", assembly):
+                _, pinned_hash = BENCHMARK.effective_runner_config()
+                config.write_text('{"maxParallelThreads":2,"diagnosticMessages":true}', encoding="utf-8")
+                with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "SHA-256 changed"):
+                    BENCHMARK.require_runner_config_hash(pinned_hash, "during test")
+
+
+class ProcessEvidenceTests(unittest.TestCase):
+    def test_timeout_writes_logs_invalid_receipt_and_no_wall_time_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            assembly = base / "Fixture.Tests.dll"
+            assembly.write_bytes(b"assembly")
+            config = base / "xunit.runner.json"
+            config.write_text('{"maxParallelThreads":2}', encoding="utf-8")
+            root = base / "results"
+            root.mkdir()
+            with patch.object(BENCHMARK, "TEST_ASSEMBLY", assembly):
+                _, runner_hash = BENCHMARK.effective_runner_config()
+                timeout = subprocess.TimeoutExpired(
+                    "dotnet test", BENCHMARK.COHORT_TIMEOUT_SECONDS,
+                    output=b"partial stdout", stderr=b"partial stderr",
+                )
+                with patch.object(BENCHMARK.subprocess, "run", side_effect=timeout) as run_command:
+                    record = BENCHMARK.run_process(
+                        "dotnet", root, "pair-01", "fresh", "work", BENCHMARK.file_sha256(assembly), runner_hash,
+                    )
+                self.assertEqual(BENCHMARK.COHORT_TIMEOUT_SECONDS, run_command.call_args.kwargs["timeout"])
+
+            process_directory = root / "pair-01/fresh/work"
+            self.assertTrue(record["timed_out"])
+            self.assertEqual("INVALID", record["status"])
+            self.assertIsNone(record["wall_seconds"])
+            self.assertIsNone(record["wall_nanoseconds"])
+            self.assertIn("partial stdout", (process_directory / "stdout.log").read_text(encoding="utf-8"))
+            self.assertIn("partial stderr", (process_directory / "stderr.log").read_text(encoding="utf-8"))
+            record["directory"] = "pair-01/fresh/work"
+            BENCHMARK.build_index(root, [record], "INVALID")
+            self.assertIn("N/A", (root / "index.md").read_text(encoding="utf-8"))
+
+    def test_runner_configuration_change_during_host_invalidates_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            assembly = base / "Fixture.Tests.dll"
+            assembly.write_bytes(b"assembly")
+            config = base / "xunit.runner.json"
+            config.write_text('{"maxParallelThreads":2}', encoding="utf-8")
+            root = base / "results"
+            root.mkdir()
+
+            def finish_host(*args, **kwargs):
+                config.write_text('{"maxParallelThreads":2,"diagnosticMessages":true}', encoding="utf-8")
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+            with patch.object(BENCHMARK, "TEST_ASSEMBLY", assembly):
+                _, runner_hash = BENCHMARK.effective_runner_config()
+                with (
+                    patch.object(BENCHMARK.subprocess, "run", side_effect=finish_host),
+                    patch.object(BENCHMARK, "validate_process_evidence", return_value={
+                        "trx": "results.trx", "coverage": "coverage.cobertura.xml", "timing_evidence": {},
+                    }),
+                ):
+                    record = BENCHMARK.run_process(
+                        "dotnet", root, "pair-01", "fresh", "work", BENCHMARK.file_sha256(assembly), runner_hash,
+                    )
+
+            self.assertEqual("INVALID", record["status"])
+            self.assertTrue(any("runner configuration SHA-256 changed" in problem for problem in record["problems"]))
+
+    def test_completed_cohort_is_indexed_before_the_next_cohort_starts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            all_records: list[dict[str, object]] = []
+            completed = {"phase": "pair-01", "arm": "fresh", "cohort": "work", "status": "VALID", "wall_seconds": 1.0}
+            with (
+                patch.object(BENCHMARK, "arm_snapshot"),
+                patch.object(BENCHMARK, "run_process", side_effect=[completed, BENCHMARK.BenchmarkError("assembly changed")]),
+                patch.object(BENCHMARK, "build_index") as build_index,
+            ):
+                with self.assertRaisesRegex(BENCHMARK.BenchmarkError, "assembly changed"):
+                    BENCHMARK.run_arm("dotnet", root, "pair-01", "fresh", "assembly-hash", "runner-hash", all_records, "RUNNING")
+
+            self.assertEqual([completed], all_records)
+            self.assertEqual(1, build_index.call_count)
+            self.assertEqual([completed], build_index.call_args.args[1])
+
 
 class DecisionTests(unittest.TestCase):
     def test_exact_five_percent_threshold_is_go_and_just_below_is_no_go(self):
@@ -342,10 +545,10 @@ class DecisionTests(unittest.TestCase):
         self.assertFalse(below["checks"]["median_gain_at_least_5_percent"])
 
     def test_median_gain_must_strictly_exceed_twice_mad(self):
-        result = BENCHMARK.analyze_pairs(build_pairs([0, 0, 10, 20, 20], [0, 0, 10, 20, 20]))
+        result = BENCHMARK.analyze_pairs(build_pairs([0, 5, 10, 15, 20], [0, 5, 10, 15, 20]))
         self.assertEqual("NO_GO", result["status"])
         self.assertEqual(10.0, result["median_gain_percent"])
-        self.assertEqual(10.0, result["median_absolute_deviation_percent"])
+        self.assertEqual(5.0, result["median_absolute_deviation_percent"])
         self.assertFalse(result["checks"]["median_gain_exceeds_twice_mad"])
 
     def test_slowdown_veto_boundary_is_two_versus_three_pairs(self):

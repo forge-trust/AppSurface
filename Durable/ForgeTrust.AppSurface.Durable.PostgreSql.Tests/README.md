@@ -61,7 +61,7 @@ Each candidate class adds one template migration, quiescence check and teardown.
 
 For each pair, gain is 100 × (fresh seconds − template seconds) / fresh seconds. The median gain must reach 5% and exceed twice the median absolute deviation of those five gains. A cohort slowdown of at least 5% in three or more pairs vetoes adoption. Isolation and cleanup checks must also pass. Record absolute seconds, both cohort veto counts and links to process evidence.
 
-The [paired runner](../../scripts/postgresql-fixture-benchmark.py) checks the manifest against test discovery, records the Release assembly hash and creates an index for the 24 processes. Build once before starting it. Prepare a new scratch directory and collect the server version and selected settings from the dedicated measurement server. Configure `psql` through your local PostgreSQL service or environment so the command connects to that server.
+The [paired runner](../../scripts/postgresql-fixture-benchmark.py) checks the manifest against test discovery and records the Release assembly hash. It also checks the effective xUnit configuration beside that assembly, including an assembly-specific override if present. The configuration must specify two workers and retain the same hash throughout the run. The results index links each completed process so you can inspect partial evidence if a later cohort fails. Build once before starting the runner. Prepare a new scratch directory and collect the server version and selected settings from the dedicated measurement server. Configure `psql` through your local PostgreSQL service or environment so the command connects to that server.
 
 ```sh
 scratch=$(mktemp -d)

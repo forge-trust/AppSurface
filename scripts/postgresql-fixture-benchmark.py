@@ -33,10 +33,10 @@ PROJECT_RELATIVE = Path(
 )
 PROJECT = ROOT / PROJECT_RELATIVE
 TEST_ASSEMBLY = PROJECT.parent / "bin/Release/net10.0/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.dll"
-RUNNER_CONFIG = PROJECT.parent / "xunit.runner.json"
 EXPECTED_MANIFEST_SHA256 = "a0744765a334e4787c33893e0df9728bd3f0542803ae9cfcf10eac624aac9634"
 EXPECTED_REVISION = "3f3126a5febff2cb94847bf8a1092b5d61657a18"
 EXPECTED_SDK = "10.0.402"
+COHORT_TIMEOUT_SECONDS = 15 * 60
 EXPECTED_CLASSES = {
     "work": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests",
     "flow": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests",
@@ -207,9 +207,17 @@ def parse_server_info(raw: bytes) -> dict[str, object]:
         raise BenchmarkError("server metadata must contain only version and settings")
     version = info["version"]
     settings = info["settings"]
-    if not isinstance(version, str) or not re.fullmatch(r"\d+(?:\.\d+){0,2}(?:[-+][A-Za-z0-9._-]+)?", version):
+    version_match = (
+        re.fullmatch(r"(\d+)(?:\.\d+(?:\.\d+)?(?:[-+][A-Za-z0-9._-]+)?)?", version)
+        if isinstance(version, str)
+        else None
+    )
+    if version_match is None:
         raise BenchmarkError("server metadata must contain a version such as 16.4")
-    major = int(version.split(".", 1)[0])
+    try:
+        major = int(version_match.group(1))
+    except ValueError as error:
+        raise BenchmarkError("server metadata must contain a numeric PostgreSQL major version") from error
     if major < 16:
         raise BenchmarkError(f"PostgreSQL {version} is below the required major version 16")
     if not isinstance(settings, dict) or set(settings) != SERVER_SETTING_KEYS:
@@ -336,7 +344,7 @@ def acceptance_filter() -> str:
     return "|".join(f"FullyQualifiedName~{POSTGRES_TEST_NAMESPACE}.{name}." for name in ACCEPTANCE_CLASSES)
 
 
-def discover_acceptance_rows(dotnet: str) -> list[str]:
+def discover_acceptance_rows(dotnet: str) -> list[tuple[str, str]]:
     result = run_checked([
         dotnet, "test", str(PROJECT_RELATIVE), "--configuration", "Release",
         "--no-build", "--no-restore", "--list-tests", "--filter", acceptance_filter(),
@@ -344,14 +352,40 @@ def discover_acceptance_rows(dotnet: str) -> list[str]:
     if result.returncode:
         raise BenchmarkError("could not discover the fixture acceptance cases in the measured Release build")
     lines = [line.strip() for line in result.stdout.splitlines()]
-    rows = []
+    rows: list[tuple[str, str]] = []
     for name in ACCEPTANCE_CLASSES:
         prefix = f"{POSTGRES_TEST_NAMESPACE}.{name}."
         cases = [line for line in lines if line.startswith(prefix)]
         if not cases:
             raise BenchmarkError(f"acceptance discovery returned no cases for {name}")
-        rows.extend(cases)
+        for display_name in cases:
+            method_name = display_name[len(prefix):].partition("(")[0].rstrip()
+            if not method_name:
+                raise BenchmarkError(f"acceptance discovery returned an invalid case for {name}")
+            rows.append((prefix + method_name, display_name))
     return sorted(rows)
+
+
+def effective_runner_config() -> tuple[Path, str]:
+    output_directory = TEST_ASSEMBLY.parent
+    assembly_config = output_directory / f"{TEST_ASSEMBLY.stem}.xunit.runner.json"
+    shared_config = output_directory / "xunit.runner.json"
+    path = assembly_config if assembly_config.is_file() else shared_config
+    try:
+        raw = path.read_bytes()
+        settings = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json_object)
+    except (OSError, UnicodeError, ValueError) as error:
+        raise BenchmarkError("cannot read the effective output-directory xUnit runner configuration") from error
+    if not isinstance(settings, dict) or settings.get("maxParallelThreads") != 2:
+        raise BenchmarkError("effective xUnit worker cap must remain at the approved value of 2")
+    return path, hashlib.sha256(raw).hexdigest()
+
+
+def require_runner_config_hash(expected: str, stage: str) -> str:
+    _, actual = effective_runner_config()
+    if actual != expected:
+        raise BenchmarkError(f"effective xUnit runner configuration SHA-256 changed {stage}")
+    return actual
 
 
 def validate_environment(dotnet: str, manifest: dict[str, object]) -> dict[str, object]:
@@ -360,12 +394,7 @@ def validate_environment(dotnet: str, manifest: dict[str, object]) -> dict[str, 
     if not TEST_ASSEMBLY.is_file():
         raise BenchmarkError("Release test assembly is missing; build the PostgreSQL test project first")
     assembly_sha256 = file_sha256(TEST_ASSEMBLY)
-    try:
-        runner_settings = json.loads(RUNNER_CONFIG.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise BenchmarkError("cannot read xUnit runner configuration") from error
-    if not isinstance(runner_settings, dict) or runner_settings.get("maxParallelThreads") != 2:
-        raise BenchmarkError("xUnit worker cap must remain at the approved value of 2")
+    runner_config_path, runner_config_sha256 = effective_runner_config()
 
     version_result = run_checked([dotnet, "--version"])
     sdk_version = version_result.stdout.strip()
@@ -406,10 +435,13 @@ def validate_environment(dotnet: str, manifest: dict[str, object]) -> dict[str, 
         raise BenchmarkError("dotnet --info failed while recording SDK provenance")
     safe_info = redact(info_result.stdout, os.environ.get(CONNECTION_VARIABLE, ""))
     require_assembly_hash(assembly_sha256, "during SDK and test discovery validation")
+    require_runner_config_hash(runner_config_sha256, "during SDK and test discovery validation")
     return {
         "sdk_version": sdk_version,
         "dotnet_path": Path(dotnet).name,
         "release_assembly_sha256": assembly_sha256,
+        "runner_config_file": runner_config_path.name,
+        "runner_config_sha256": runner_config_sha256,
         "dotnet_info": safe_info,
         "worker_cap": 2,
         "discovery": discovery_outputs,
@@ -419,7 +451,7 @@ def validate_environment(dotnet: str, manifest: dict[str, object]) -> dict[str, 
 def validate_acceptance_trx(
     path: Path,
     *,
-    expected_rows: list[str],
+    expected_rows: list[tuple[str, str]],
     expected_assembly_sha256: str | None = None,
 ) -> dict[str, object]:
     try:
@@ -443,9 +475,9 @@ def validate_acceptance_trx(
     if missing:
         details = "; ".join(f"{family}: {', '.join(names)}" for family, names in missing.items())
         raise BenchmarkError(f"acceptance TRX is missing required fixture witnesses: {details}")
-    actual_rows = Counter(result.get("testName", "") for result in root.findall(".//{*}UnitTestResult"))
+    actual_rows = Counter(evidence["result_rows"])
     if not expected_rows or actual_rows != Counter(expected_rows):
-        raise BenchmarkError("acceptance TRX cases differ from the Release fixture discovery, including theory rows")
+        raise BenchmarkError("acceptance TRX method identities and display names differ from Release fixture discovery")
     receipt: dict[str, object] = {
         "status": "PASS",
         "source_sha256": hashlib.sha256(raw).hexdigest(),
@@ -461,22 +493,16 @@ def validate_acceptance_trx(
         def local_name(element: ET.Element) -> str:
             return element.tag.rsplit("}", 1)[-1]
 
-        definitions: dict[str, str] = {}
-        for element in root.iter():
-            if local_name(element) != "UnitTest":
-                continue
-            test_id = element.get("id")
-            method = next((child for child in element if local_name(child) == "TestMethod"), None)
-            class_name = method.get("className") if method is not None else None
-            method_name = method.get("name") if method is not None else None
-            if test_id and class_name and method_name:
-                definitions[test_id] = f"{class_name}.{method_name}"
-
+        metadata_result_ids = {
+            test_id
+            for test_id, identity in evidence["result_identities"].items()
+            if identity == SERVER_METADATA_TEST
+        }
         metadata_results = [
             result
             for result in root.iter()
             if local_name(result) == "UnitTestResult"
-            and definitions.get(result.get("testId", "")) == SERVER_METADATA_TEST
+            and result.get("testId") in metadata_result_ids
         ]
         if len(metadata_results) != 1:
             raise BenchmarkError("acceptance TRX must contain exactly one named server metadata result")
@@ -563,6 +589,10 @@ def parse_trx_root(
         raise BenchmarkError("TRX test result IDs are missing or duplicated")
     if set(result_ids) != set(definitions):
         raise BenchmarkError("TRX test definitions and complete result ID set do not match")
+    result_rows = [
+        (definitions[str(result.get("testId"))], result.get("testName", ""))
+        for result in results
+    ]
     outcomes = [element.get("outcome", "") for element in results]
     if any(outcome != "Passed" for outcome in outcomes):
         raise BenchmarkError("TRX contains a failed, skipped, or incomplete outcome")
@@ -603,6 +633,8 @@ def parse_trx_root(
         "passed": len(results),
         "result_ids": sorted(result_ids),
         "identities": actual,
+        "result_rows": result_rows,
+        "result_identities": {str(test_id): definitions[str(test_id)] for test_id in result_ids},
         "failed": parsed_counters["failed"],
         "skipped": parsed_counters["notExecuted"],
     }
@@ -720,6 +752,8 @@ def parse_timing_csv(path: Path, cohort: str, arm: str) -> dict[str, object]:
         raise BenchmarkError("fixture timing CSV contains no phase rows")
     phases: dict[str, list[float]] = {}
     for row in rows:
+        if None in row:
+            raise BenchmarkError("fixture timing CSV contains extra fields")
         phase = row.get("phase")
         raw_elapsed = row.get("elapsed_ms")
         if phase not in {"database_setup", "database_teardown", "template_prepare", "template_teardown"}:
@@ -791,7 +825,7 @@ def validate_process_evidence(directory: Path, cohort: str, arm: str) -> dict[st
     timing_data = parse_timing_csv(directory / "fixture-timings.csv", cohort, arm)
     return {
         "trx": str(trx.relative_to(directory)),
-        "coverage": str(coverage.relative_to(directory)),
+        "coverage": str(coverage.relative_to(directory.resolve())),
         "timing_csv": "fixture-timings.csv",
         "coverage_export_copies": export_copies,
         "trx_evidence": trx_data,
@@ -923,6 +957,7 @@ def run_process(
     arm: str,
     cohort: str,
     assembly_sha256: str,
+    runner_config_sha256: str,
 ) -> dict[str, object]:
     directory = root / phase / arm / cohort
     directory.mkdir(parents=True, exist_ok=False)
@@ -935,8 +970,10 @@ def run_process(
     environment[TIMING_VARIABLE] = str(timing_path)
     command = test_command(dotnet, cohort, results_path)
     require_assembly_hash(assembly_sha256, f"before {phase}/{arm}/{cohort}")
+    require_runner_config_hash(runner_config_sha256, f"before {phase}/{arm}/{cohort}")
     started_at = utc_now()
     started = time.perf_counter_ns()
+    timed_out = False
     try:
         process = subprocess.run(
             command,
@@ -945,10 +982,20 @@ def run_process(
             check=False,
             capture_output=True,
             text=True,
+            timeout=COHORT_TIMEOUT_SECONDS,
         )
         return_code = process.returncode
         stdout = process.stdout
         stderr = process.stderr
+    except subprocess.TimeoutExpired as error:
+        timed_out = True
+        return_code = 124
+        stdout = error.stdout or ""
+        stderr = error.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
     except OSError as error:
         return_code = 127
         stdout = ""
@@ -964,24 +1011,37 @@ def run_process(
         "cohort": cohort,
         "started_at": started_at,
         "finished_at": utc_now(),
-        "wall_seconds": elapsed_seconds,
-        "wall_nanoseconds": elapsed_nanoseconds,
+        "wall_seconds": None if timed_out else elapsed_seconds,
+        "wall_nanoseconds": None if timed_out else elapsed_nanoseconds,
+        "elapsed_before_timeout_seconds": elapsed_seconds if timed_out else None,
         "release_assembly_sha256_before": assembly_sha256,
         "release_assembly_sha256_after": assembly_after,
+        "runner_config_sha256_before": runner_config_sha256,
+        "runner_config_sha256_after": None,
+        "timed_out": timed_out,
         "exit_code": return_code,
         "status": "VALID",
         "command": [Path(command[0]).name, *["<RESULTS_DIR>" if item == str(results_path) else item for item in command[1:]]],
         "result_files": {},
     }
     problems: list[str] = []
-    if return_code != 0:
+    if timed_out:
+        problems.append(f"dotnet test exceeded its {COHORT_TIMEOUT_SECONDS}-second deadline")
+    elif return_code != 0:
         problems.append(f"dotnet test exited with code {return_code}")
-    if not math.isfinite(elapsed_seconds) or elapsed_seconds <= 0:
+    if not timed_out and (not math.isfinite(elapsed_seconds) or elapsed_seconds <= 0):
         problems.append("process wall time must be finite and greater than zero")
     if assembly_after != assembly_sha256:
         problems.append("Release test assembly SHA-256 changed during the process")
     try:
         require_assembly_hash(assembly_sha256, f"after final {phase}/{arm}/{cohort} process evidence validation")
+    except BenchmarkError as error:
+        problems.append(str(error))
+    try:
+        record["runner_config_sha256_after"] = require_runner_config_hash(
+            runner_config_sha256,
+            f"after {phase}/{arm}/{cohort}",
+        )
     except BenchmarkError as error:
         problems.append(str(error))
     try:
@@ -1001,10 +1061,19 @@ def run_process(
     return record
 
 
-def arm_snapshot(root: Path, phase: str, arm: str, boundary: str, assembly_sha256: str) -> None:
+def arm_snapshot(
+    root: Path,
+    phase: str,
+    arm: str,
+    boundary: str,
+    assembly_sha256: str,
+    runner_config_sha256: str,
+) -> None:
     require_assembly_hash(assembly_sha256, f"at {phase}/{arm} {boundary}")
+    require_runner_config_hash(runner_config_sha256, f"at {phase}/{arm} {boundary}")
     details = machine_details()
     details["release_assembly_sha256"] = assembly_sha256
+    details["runner_config_sha256"] = runner_config_sha256
     write_json(root / phase / arm / f"boundary-{boundary}.json", details)
 
 
@@ -1014,15 +1083,21 @@ def run_arm(
     phase: str,
     arm: str,
     assembly_sha256: str,
+    runner_config_sha256: str,
+    all_records: list[dict[str, object]],
+    index_status: str,
 ) -> list[dict[str, object]]:
     arm_root = root / phase / arm
     arm_root.mkdir(parents=True, exist_ok=False)
-    arm_snapshot(root, phase, arm, "start", assembly_sha256)
-    records = [
-        run_process(dotnet, root, phase, arm, cohort, assembly_sha256)
-        for cohort in ("work", "flow")
-    ]
-    arm_snapshot(root, phase, arm, "end", assembly_sha256)
+    arm_snapshot(root, phase, arm, "start", assembly_sha256, runner_config_sha256)
+    records: list[dict[str, object]] = []
+    for cohort in ("work", "flow"):
+        record = run_process(dotnet, root, phase, arm, cohort, assembly_sha256, runner_config_sha256)
+        record["directory"] = str(Path(phase) / arm / cohort)
+        records.append(record)
+        all_records.append(record)
+        build_index(root, all_records, index_status)
+    arm_snapshot(root, phase, arm, "end", assembly_sha256, runner_config_sha256)
     return records
 
 
@@ -1213,9 +1288,11 @@ def build_index(root: Path, records: list[dict[str, object]], status: str) -> No
         timing_csv = record.get("evidence", {}).get("timing_csv")
         if timing_csv:
             links.append(f"[timing CSV]({directory.as_posix()}/{timing_csv})")
+        wall_seconds = record.get("wall_seconds")
+        wall_display = f"{wall_seconds:.3f}" if isinstance(wall_seconds, (int, float)) else "N/A"
         lines.append(
             f"| {record['phase']} | {record['arm']} | {record['cohort']} | {record['status']} | "
-            f"{record['wall_seconds']:.3f} | {' · '.join(links)} |"
+            f"{wall_display} | {' · '.join(links)} |"
         )
     run_evidence = (
         ("acceptance.trx", "acceptance TRX"),
@@ -1294,11 +1371,16 @@ def protocol(args: argparse.Namespace) -> int:
 
         warmup_valid = True
         for arm in ("fresh", "template"):
-            arm_records = run_arm(dotnet, root, "warmup", arm, assembly_sha256)
-            for record in arm_records:
-                record["directory"] = str(Path("warmup") / arm / str(record["cohort"]))
-                records.append(record)
-            build_index(root, records, "WARMUP")
+            arm_records = run_arm(
+                dotnet,
+                root,
+                "warmup",
+                arm,
+                assembly_sha256,
+                str(environment["runner_config_sha256"]),
+                records,
+                "WARMUP",
+            )
             warmup_valid &= all(record["status"] == "VALID" for record in arm_records)
         if not warmup_valid:
             raise BenchmarkError("warmup evidence is incomplete; measured pairs were not started")
@@ -1308,14 +1390,19 @@ def protocol(args: argparse.Namespace) -> int:
             pair: dict[str, object] = {"pair": pair_number, "status": "VALID", "arms": {}}
             phase = f"pair-{pair_number:02d}"
             for arm in order:
-                arm_records = run_arm(dotnet, root, phase, arm, assembly_sha256)
-                for record in arm_records:
-                    record["directory"] = str(Path(phase) / arm / str(record["cohort"]))
-                    records.append(record)
+                arm_records = run_arm(
+                    dotnet,
+                    root,
+                    phase,
+                    arm,
+                    assembly_sha256,
+                    str(environment["runner_config_sha256"]),
+                    records,
+                    f"RUNNING {pair_number}/5",
+                )
                 pair["arms"][arm] = arm_records
                 if any(record["status"] != "VALID" for record in arm_records):
                     pair["status"] = "INVALID"
-                build_index(root, records, f"RUNNING {pair_number}/5")
             pairs.append(pair)
         result = analyze_pairs(pairs)
         result["acceptance_trx"] = {
