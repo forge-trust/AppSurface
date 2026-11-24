@@ -182,31 +182,12 @@ internal static class RepositoryEvidenceWorkflow
             foreach (var artifact in producer.Artifacts ?? [])
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var relative = EvidenceArtifactValidation.NormalizeRelativePath(artifact.RelativePath);
-                var root = Path.GetFullPath(artifactRoot);
-                var components = new[] { producer.ProducerId }.Concat(relative.Split('/'));
-                var path = root;
-                RejectLink(path);
-                foreach (var component in components)
-                {
-                    path = Path.Join(path, component);
-                    RejectLink(path);
-                }
-                await using var stream = File.OpenRead(path);
-                ValidationProof.Require(stream.Length == artifact.LengthBytes, "retained artifact length");
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                var buffer = new byte[64 * 1024];
-                long length = 0;
-                int read;
-                while ((read = await stream.ReadAsync(buffer, cancellationToken)) != 0)
-                {
-                    length += read;
-                    ValidationProof.Require(length <= artifact.LengthBytes, "bounded retained artifact");
-                    hash.AppendData(buffer, 0, read);
-                }
-                ValidationProof.Require(length == artifact.LengthBytes
-                    && string.Equals(Convert.ToHexString(hash.GetHashAndReset()), artifact.Sha256, StringComparison.OrdinalIgnoreCase),
-                    "retained artifact digest");
+                var status = await EvidenceArtifactFileValidation.CheckAsync(artifactRoot, producer.ProducerId, artifact, cancellationToken);
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.InvalidPath, "normalized retained artifact path");
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.Linked, "unlinked retained artifact path");
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.Missing, "retained artifact present");
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.LengthMismatch, "retained artifact length");
+                ValidationProof.Require(status == EvidenceArtifactFileStatus.Valid, "retained artifact digest");
             }
         }
     }
@@ -231,8 +212,6 @@ internal static class RepositoryEvidenceWorkflow
         // Reuse the bounded snapshot rather than reopening a caller-controlled input.
         return EvidenceCanonicalJson.Deserialize<T>(Encoding.UTF8.GetBytes(json.RootElement.GetRawText()));
     }
-
-    private static void RejectLink(string path) => ValidationProof.Require(!File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint), "unlinked retained artifact path");
 
     /// <summary>Whether the selected profile needs the separately packed CLI used by native acceptance journeys.</summary>
     internal static bool RequiresPackage(EvidenceProfile profile) =>
