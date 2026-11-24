@@ -129,13 +129,13 @@ public sealed partial class AppSurfaceDevAuthEndpointTests
         Assert.Equal(StatusCodes.Status200OK, (int)firstResponse.StatusCode);
         var first = Assert.Single(probe.Activations);
         Assert.Same(first.InjectedDependency, first.ContextDependency);
-        Assert.True(first.InjectedDependency.IsDisposed);
+        await first.InjectedDependency.Disposed.WaitAsync(TimeSpan.FromSeconds(5));
 
         using var secondResponse = await PostSelectionAsync(client, "viewer");
         Assert.Equal(StatusCodes.Status302Found, (int)secondResponse.StatusCode);
         var second = Assert.Single(probe.Activations, activation => !ReferenceEquals(activation, first));
         Assert.Same(second.InjectedDependency, second.ContextDependency);
-        Assert.True(second.InjectedDependency.IsDisposed);
+        await second.InjectedDependency.Disposed.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotSame(first.Handler, second.Handler);
         Assert.NotSame(first.InjectedDependency, second.InjectedDependency);
         Assert.NotSame(first.RequestServices, second.RequestServices);
@@ -611,11 +611,13 @@ public sealed partial class AppSurfaceDevAuthEndpointTests
 
     private sealed class ScopedActivationDependency : IDisposable
     {
-        public bool IsDisposed { get; private set; }
+        private readonly TaskCompletionSource _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Disposed => _disposed.Task;
 
         public void Dispose()
         {
-            IsDisposed = true;
+            _disposed.TrySetResult();
         }
     }
 
