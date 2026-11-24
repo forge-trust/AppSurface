@@ -48,6 +48,70 @@ A complete claim is deliberately conservative:
 
 An unavailable capability, timeout, skipped producer, incomplete test profile, or failed assertion therefore produces `None`, not a partial success. This is how EvidenceHost distinguishes an observation from evidence that can mediate risk.
 
+## Retained artifact check
+
+`EvidenceArtifactFileValidation.CheckAsync(artifactRoot, producerId, artifact, cancellationToken)` compares one artifact recorded in an `EvidenceProducerResult` with the file at `<artifactRoot>/<producerId>/<artifact.RelativePath>` and returns an `EvidenceArtifactFileStatus`.
+
+| Status | Meaning |
+| --- | --- |
+| `Valid` | An unlinked regular file with the recorded length and SHA-256. |
+| `InvalidPath` | The producer id is not one path segment, the relative path is absolute, empty or traversing, or the recorded length is negative. |
+| `Linked` | The artifact root, a directory on the way, or the file is a symbolic link or other reparse point. |
+| `Missing` | The file or a directory on the way does not exist or cannot be opened. |
+| `LengthMismatch` | The file length differs from the recorded length. Checked before hashing, and again while reading: a file that shrinks or grows after it is opened gets this status. |
+| `DigestMismatch` | Same length, different SHA-256. At most the recorded length is hashed, and at most one byte past it is read. |
+
+**Why it exists.** `EvidenceArtifactValidation.AreValid(...)` checks artifact metadata against a declaration, and `EvidenceManifestBuilder.Verify(...)` checks digests of the plan and manifest. Neither opens the artifact, so without this check a manifest can verify after its artifact is deleted or replaced. [`appsurface evidence verify`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#verifying-evidence) and the repository validation tool both call this one method, so there is a single link-rejection rule.
+
+**When to use something else.** A producer checking its own writes during a run should keep using `EvidenceArtifactWriter.VerifyWrittenArtifactsAsync()`.
+
+**Pitfalls.** Links are rejected at the artifact root and below it, not above it, so pass a root you trust. The method returns a status and does not throw for a bad file; a caller that forgets to compare with `Valid` accepts everything.
+
+## Test producer declaration (preview)
+
+A producer of kind `test` declares the test projects it lists, runs and reconciles in an optional `test` block on `EvidenceProducerDeclaration`. It claims selection completeness, "every test the declared projects and filters selected ran and passed", and nothing about coverage.
+
+```json
+{
+  "id": "tooling-tests",
+  "kind": "test",
+  "version": "1.0.0",
+  "requiredResources": [],
+  "assertionIds": ["appsurface/test/discovery-complete@1"],
+  "artifactSlots": [
+    { "logicalName": "test-receipt", "relativeRoot": "test", "mediaType": "application/json", "required": true, "maximumBytes": 65536 }
+  ],
+  "timeoutSeconds": 900,
+  "test": {
+    "projects": [
+      { "path": "tests/Tooling.Tests/Tooling.Tests.csproj", "filter": "FullyQualifiedName~Tooling.Release", "minimumTests": 10 }
+    ]
+  }
+}
+```
+
+| Member | Shape and default | Constraint |
+| --- | --- | --- |
+| `EvidenceProducerDeclaration.Test` | `EvidenceTestDeclaration?`, `null` | Required for kind `test`, rejected on every other kind. Omitted from canonical JSON when `null`. |
+| `EvidenceTestDeclaration.Projects` | list of `EvidenceTestProject` | 1 to 32 entries, unique paths. |
+| `EvidenceTestProject.Path` | string | Repository-relative, forward slashes, at most 512 characters, ends in `.csproj`, `.fsproj` or `.vbproj`. |
+| `EvidenceTestProject.Filter` | `string?`, `null` | VSTest filter, at most 1024 characters, one line. Omitted when `null`. |
+| `EvidenceTestProject.MinimumTests` | `int?`, `null` meaning 1 | 1 or greater. Omitted when `null`. |
+| `EvidenceTestProducerContract` | constants | The kind, the single assertion id, the receipt slot name, media type and required `relativeRoot` (`test`), the limits above, the 30-second minimum timeout, and `GetMinimumReceiptBytes(projects)`: 4096 bytes plus, per project, 512 bytes and six bytes per character of its path. |
+
+The [planner](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#test-producer-rules-preview) enforces every constraint with its own diagnostic, `ASEVD137` through `ASEVD149`.
+
+**When to use it.** Use kind `test` for paths with no production code to cover, such as workflows, scripts and release tooling, where the truthful evidence is that the tests exercising them ran. Use kind `coverage` when a coverage threshold is the evidence; a `test` producer cannot carry a coverage gate or close a coverage assertion.
+
+**Digests.** The whole declaration is hashed, so changing a project, a filter or a minimum changes `PolicyDigest` and `PlanDigest`. A policy with no `test` block keeps its existing canonical bytes.
+
+**Pitfalls.**
+
+- Preview: the kind, the assertion id and this shape may change without a compatibility step until a real route has closed with them.
+- The filter is public plan data. Do not put anything confidential in it.
+- A filter that starts matching fewer tests can still pass if it matches at least `minimumTests` tests, or one when no minimum is set, and every selected test runs and passes. A filter that matches no test always fails.
+- A reader that does not know the `test` property drops it and computes a different `PolicyDigest`. Upgrade every CLI that runs or verifies evidence before adding a `test` block to a shared policy, and remove the block before downgrading.
+
 ## Pitfalls
 
 - Do not construct a `NoEvidenceRequired` result merely because a local run omitted tests. It is a policy outcome, not a convenience override.

@@ -46,6 +46,27 @@ The selected coverage producer runs the existing `coverage gate` evaluator with 
 
 If CI intentionally selects only part of the test suite, call that a targeted observation or create a policy profile whose declared obligations match that selection. Do not run a repository-wide threshold and call the outcome “full coverage.”
 
+## Tests-only evidence for tooling paths
+
+Some paths have no production code to cover: CI workflows, build scripts, release tooling. A coverage number for them is theater. The truthful evidence is that the tests which exercise them all ran and passed. The preview [`test` producer](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#test-producer-preview) records exactly that and makes no coverage claim.
+
+1. Name the test project that exercises the path. If no such test exists, write it first; this recipe cannot create evidence that is not there.
+2. Add the profile and rule from the [first-run fragment](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#first-run), replacing the project path and the rule pattern.
+3. Run it once with no filter and read the counts table:
+
+   ```bash
+   appsurface evidence explain --path scripts/build.sh
+   appsurface evidence run --path scripts/build.sh
+   appsurface evidence verify TestResults/evidence/evidence-manifest.json
+   ```
+
+4. Set `minimumTests` to the discovered count the table reports, so a later change that silently selects fewer tests fails.
+5. Before the route replaces broader evidence, replay one known regression in that path and confirm a selected test fails. The producer proves the selection ran; only a replay shows the selection is the right one.
+
+Keep the path on the conservative profile instead when the tests return early on some platforms, when the project needs a database or browser (use a [resource-backed EvidenceHost](#resource-backed-browser-e2e) with your own producer), or when the project multi-targets or uses Microsoft.Testing.Platform. The [reason table](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#reasons) lists every way a run can stay incomplete and what to do next.
+
+Pitfall: upgrade every CLI that runs or verifies evidence before a `test` block enters a shared policy. An older CLI ignores the block and cannot verify plans written with it; see the [upgrade note](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#upgrade-note-and-mixed-versions).
+
 ## Resource-backed browser E2E
 
 Put the EvidenceHost in a test/CI project, separate from the application AppHost. Register each resource readiness probe and browser producer explicitly:
@@ -97,6 +118,7 @@ Run `appsurface evidence doctor` from the protected release workflow first. A lo
 | `ready_with_external_prerequisites` | The policy is valid but the CI image must provide Docker or browser capability. | Fix the runner/image; do not treat it as a pass. |
 | `blocked` | A policy/diff/envelope condition prevents a truthful run. | Read the named diagnostic and fix the source condition. |
 | `ClaimKind.None` | A producer, obligation, artifact, or envelope did not complete. | Read `evidence-summary.json`; do not lower a gate blindly. |
+| A `reason=` line from a `test` producer | One declared test project is incomplete. | Follow the `next:` line printed with it, or look the reason up in the [reason table](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#reasons). |
 | `ObservationOnly` | A useful signal that cannot satisfy a gate. | Use it for discovery, then define the missing profile/producer before enforcement. |
 
 ## Safe extension rules

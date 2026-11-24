@@ -154,4 +154,17 @@ public sealed class PostgreSqlFixtureArgumentTests
             _ = PostgreSqlFixture.WithClusterInitializationLockAsync("Host=localhost", null!);
         });
     }
+
+    [Theory]
+    [InlineData(typeof(OutOfMemoryException), true)]
+    [InlineData(typeof(StackOverflowException), true)]
+    [InlineData(typeof(AccessViolationException), true)]
+    [InlineData(typeof(InvalidOperationException), false)]
+    [InlineData(typeof(OperationCanceledException), false)]
+    public void IsFatalCleanupException_ClassifiesCleanupFailures(Type exceptionType, bool expected)
+    {
+        var exception = Assert.IsAssignableFrom<Exception>(Activator.CreateInstance(exceptionType));
+
+        Assert.Equal(expected, PostgreSqlFixture.IsFatalCleanupException(exception));
+    }
 }

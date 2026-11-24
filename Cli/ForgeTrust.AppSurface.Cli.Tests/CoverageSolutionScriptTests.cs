@@ -71,7 +71,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("COVERAGE_RUN_SCOPE: ${{ github.repository }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ID: ${{ github.run_id }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn", workflow, StringComparison.Ordinal);
+        Assert.Contains("FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_DOGFOOD_OUTPUT", workflow, StringComparison.Ordinal);
         Assert.Contains("/composed/coverage.cobertura.xml", workflow, StringComparison.Ordinal);
         Assert.Contains("steps.solution-coverage.outcome == 'success'", workflow, StringComparison.Ordinal);
@@ -277,7 +277,7 @@ public sealed class CoverageSolutionScriptTests
         var coverageJob = (YamlMappingNode)jobs.Children[new YamlScalarNode("coverage-security-platform")];
         Assert.Equal("Coverage security contracts (${{ matrix.os }})", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("name")]).Value);
         Assert.Equal("${{ matrix.os }}", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("runs-on")]).Value);
-        Assert.Equal("${{ (matrix.os == 'macos-latest' || matrix.os == 'windows-latest') && 30 || 20 }}",
+        Assert.Equal("${{ (matrix.os == 'macos-latest' || matrix.os == 'windows-latest') && 40 || 20 }}",
             ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("timeout-minutes")]).Value);
 
         var steps = (YamlSequenceNode)coverageJob.Children[new YamlScalarNode("steps")];
@@ -290,7 +290,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--configuration Release", runCommand, StringComparison.Ordinal);
         Assert.Contains("--no-restore", runCommand, StringComparison.Ordinal);
         Assert.Contains("/p:TailwindEnabled=false", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--logger \"console;verbosity=detailed\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--results-directory \"${{ runner.temp }}/coverage-native-results\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--collect:\"XPlat Code Coverage\"", runCommand, StringComparison.Ordinal);
@@ -1039,7 +1039,7 @@ public sealed class CoverageSolutionScriptTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(
-            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Aspire.Tests.csproj\n--exclusive-test-project\nAuthAspNetCoreDevAuthExample.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
+            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Aspire.Tests.csproj\n--exclusive-test-project\nAuthAspNetCoreDevAuthExample.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
             result.DotnetInvocations,
             StringComparison.Ordinal);
     }

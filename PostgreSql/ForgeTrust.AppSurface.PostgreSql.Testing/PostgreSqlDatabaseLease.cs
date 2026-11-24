@@ -17,7 +17,7 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
         Name = name;
         Oid = oid;
         ConnectionString = PostgreSqlCatalog.Target(connectionString, name);
-        maintenanceConnectionString = PostgreSqlCatalog.Target(connectionString, "postgres");
+        maintenanceConnectionString = PostgreSqlCatalog.MaintenanceConnectionString(connectionString);
         server = PostgreSqlCatalog.ServerEndpoint(connectionString);
         this.parent = parent;
         if (parent != null)
@@ -44,7 +44,8 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
 
     internal static Task<PostgreSqlDatabaseLease> CreateAsync(string connectionString, string databaseNamePrefix,
         Func<string, CancellationToken, ValueTask>? afterCreate, CancellationToken cancellationToken) =>
-        CreateNamedAsync(connectionString, NewName(databaseNamePrefix), afterCreate, cancellationToken);
+        CreateNamedAsync(connectionString, NewName(databaseNamePrefix),
+            afterCreate is null ? null : (_, name, token) => afterCreate(name, token), cancellationToken);
 
     internal static string NewName(string databaseNamePrefix)
     {
@@ -52,8 +53,9 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
         return $"{databaseNamePrefix[..Math.Min(databaseNamePrefix.Length, 46)]}_{Guid.NewGuid().ToString("N")[..16]}";
     }
 
+    /// <summary>Creates a named lease. The optional observer runs on the maintenance session after CREATE and before identity capture.</summary>
     internal static Task<PostgreSqlDatabaseLease> CreateNamedAsync(string connectionString, string name,
-        Func<string, CancellationToken, ValueTask>? afterCreate, CancellationToken cancellationToken)
+        Func<NpgsqlConnection, string, CancellationToken, ValueTask>? afterCreate, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         PostgreSqlCatalog.ValidateSingleServer(connectionString);
@@ -73,7 +75,9 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(dropped, this);
-            return await CreateCoreAsync(ConnectionString, name, this, afterCreate, deadline.Token, disconnectTemplateSessions);
+            return await CreateCoreAsync(ConnectionString, name, this,
+                afterCreate is null ? null : (_, createdName, token) => afterCreate(createdName, token),
+                deadline.Token, disconnectTemplateSessions);
         }
         finally
         {
@@ -82,15 +86,16 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
     }
 
     private static async Task<PostgreSqlDatabaseLease> CreateCoreAsync(string connectionString, string name,
-        PostgreSqlDatabaseLease? parent, Func<string, CancellationToken, ValueTask>? afterCreate, CancellationToken token,
+        PostgreSqlDatabaseLease? parent, Func<NpgsqlConnection, string, CancellationToken, ValueTask>? afterCreate, CancellationToken token,
         bool disconnectTemplateSessions = false)
     {
         using var beforeDispatch = Deadline(token);
-        await using var admin = new NpgsqlConnection(PostgreSqlCatalog.Target(connectionString, "postgres"));
-        await admin.OpenAsync(beforeDispatch.Token);
         PostgreSqlDatabaseLease? owned = null;
         try
         {
+            // Return the CREATE session before compensating cleanup rents a maintenance connection.
+            await using var admin = new NpgsqlConnection(PostgreSqlCatalog.MaintenanceConnectionString(connectionString));
+            await admin.OpenAsync(beforeDispatch.Token);
             await PostgreSqlCatalog.WithDatabaseCatalogLockAsync(admin, async () =>
             {
                 var sql = $"CREATE DATABASE {PostgreSqlCatalog.QuoteIdentifier(name)}";
@@ -131,7 +136,7 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
                 {
                     if (afterCreate != null)
                     {
-                        await afterCreate(name, capture.Token).AsTask().WaitAsync(capture.Token);
+                        await afterCreate(admin, name, capture.Token).AsTask().WaitAsync(capture.Token);
                     }
 
                     await using var read = new NpgsqlCommand("SELECT oid FROM pg_catalog.pg_database WHERE datname = @name", admin);

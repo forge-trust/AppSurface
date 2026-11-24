@@ -6,6 +6,7 @@ Use this guide with the revision-specific [script inventory](script-inventory.md
 
 | Form | Choose it when | Example and prerequisites |
 | --- | --- | --- |
+| Taskfile entry | Contributors need a discoverable name for an existing checkout command. Give the task a description and keep its implementation in the tool or script it calls. | With Task v3 installed, `task evidence:plan` previews the checks for a change. See [repository tasks](../CONTRIBUTING.md#repository-tasks). |
 | Bootstrap script | The command installs the SDK or runs before CI selects one. | Keep the [SDK setup script](https://github.com/forge-trust/AppSurface/blob/main/agent-setup.sh) usable with Bash. |
 | Framework-free C# file | The SDK is already present and BCL types are sufficient. | A file that reads a local schema-v3 report and prints its diagnostic codes can use `System.Text.Json` directly. |
 | AppSurface-backed C# file | A focused task needs command help and the same logical settings from JSON, environment variables, or a secret provider. | The [checkout PWA verifier](../scripts/web-pwa/README.md) uses project references. The [standalone file](../examples/file-based-console/README.md) pins published packages. |

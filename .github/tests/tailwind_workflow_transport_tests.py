@@ -370,7 +370,10 @@ class WorkflowTransportTests(unittest.TestCase):
                 producer = producer[: producer.index("\n      - name:")]
                 self.assertIn('/package-artifact-manifest.unapproved.json"', producer)
         rehearsal = (ROOT / ".github/workflows/package-artifacts.yml").read_text()
-        self.assertNotIn("artifact_manifest_file:", rehearsal)
+        tailwind_call, docs_call = rehearsal[rehearsal.index("  tailwind-native-rehearsal:") :
+            rehearsal.index("  tailwind-publish-rehearsal:")].split("  docs-native-rehearsal:")
+        self.assertNotIn("artifact_manifest_file:", tailwind_call)
+        self.assertIn("artifact_manifest_file: package-artifact-manifest.json", docs_call)
 
     def test_native_manifest_preflight_rejects_empty_unknown_and_unconfined_names(
         self,
@@ -645,12 +648,7 @@ class WorkflowTransportTests(unittest.TestCase):
     def test_original_start_receipt_overrides_newer_aggregate_outputs(self) -> None:
         receipt = self.root / "original-start.json"
         original_sha = "a" * 64
-        receipt.write_text(json.dumps({
-            "producerArtifactId": "123",
-            "aggregateArtifactId": "456",
-            "aggregateSha256": original_sha,
-            "nativeInvocationId": "producer-42-1-tailwind-native",
-        }))
+        original_docs_sha = "c" * 64
         for publisher in PUBLISHERS:
             with self.subTest(publisher=publisher.name):
                 receipt.write_text(json.dumps({
@@ -658,6 +656,7 @@ class WorkflowTransportTests(unittest.TestCase):
                     "aggregateArtifactId": "456",
                     "aggregateSha256": original_sha,
                     "nativeInvocationId": "producer-42-1-tailwind-native",
+                    "docsNativeEvidence": {"artifactId": "789", "sha256": original_docs_sha},
                 }))
                 source = publisher.read_text()
                 step_marker = "- name: Select original producer and aggregate binding\n"
@@ -675,6 +674,7 @@ class WorkflowTransportTests(unittest.TestCase):
                 self.assertIn("RECOVERED_START_ID: ${{ steps.start-recovery.outputs.publication_artifact_id }}", step)
                 self.assertNotIn("${{ steps.start-recovery.outputs.publication_artifact_id }}", script)
                 output = self.root / f"{publisher.stem}-candidate.out"
+                next_step_env = self.root / f"{publisher.stem}-candidate.env"
                 env = os.environ.copy()
                 env.update(
                     RECOVERED="true",
@@ -684,7 +684,10 @@ class WorkflowTransportTests(unittest.TestCase):
                     CURRENT_AGGREGATE_ARTIFACT_ID="999",
                     CURRENT_AGGREGATE_SHA256="b" * 64,
                     CURRENT_NATIVE_INVOCATION_ID="newer-invocation",
+                    CURRENT_DOCS_NATIVE_ARTIFACT_ID="1000",
+                    CURRENT_DOCS_NATIVE_SHA256="d" * 64,
                     GITHUB_OUTPUT=str(output),
+                    GITHUB_ENV=str(next_step_env),
                 )
                 result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -693,6 +696,11 @@ class WorkflowTransportTests(unittest.TestCase):
                 self.assertIn(f"expected_aggregate_sha256={original_sha}", actual)
                 self.assertIn("native_invocation_id=producer-42-1-tailwind-native", actual)
                 self.assertIn("start_artifact_id=7001", actual)
+                self.assertIn("docs_native_artifact_id=789", actual)
+                self.assertEqual(
+                    ["DOCS_NATIVE_ARTIFACT_ID=789", f"DOCS_NATIVE_SHA256={original_docs_sha}"],
+                    next_step_env.read_text().splitlines(),
+                )
 
                 for invalid_id in ("", "0", "7; exit 0"):
                     invalid_env = env | {"RECOVERED_START_ID": invalid_id}
@@ -763,7 +771,19 @@ class WorkflowTransportTests(unittest.TestCase):
         native = NATIVE.read_text()
         self.assertIn("tailwind-native-rehearsal:", package)
         self.assertIn("name: Nonpublishing aggregate and publisher replay rehearsal", package)
-        self.assertIn("needs: [package-artifacts, tailwind-native-rehearsal]", package)
+        self.assertIn(
+            "needs: [package-artifacts, tailwind-native-rehearsal, docs-native-rehearsal, durable-template-evidence]",
+            package,
+        )
+        self.assertIn("artifact-ids: ${{ needs.durable-template-evidence.outputs.receipt_artifact_ids }}", package)
+        self.assertIn("github.event_name == 'workflow_dispatch' && github.repository == 'forge-trust/AppSurface'", package)
+        self.assertIn("github.ref_type == 'branch' && inputs['release-rehearsal']", package)
+        self.assertIn("rehearsal: ${{ github.ref == 'refs/heads/main' }}", package)
+        self.assertIn("uses: ./.github/workflows/docs-native-evidence.yml", package)
+        self.assertIn("DOCS_NATIVE_ARTIFACT_ID: ${{ needs.docs-native-rehearsal.outputs.artifact_id }}", package)
+        self.assertIn("DOCS_NATIVE_SHA256: ${{ needs.docs-native-rehearsal.outputs.sha256 }}", package)
+        self.assertIn("artifact-ids: ${{ env.DOCS_NATIVE_ARTIFACT_ID }}", package)
+        self.assertIn("TAILWIND_REHEARSAL_DOCS_NATIVE_PROOF: ${{ runner.temp }}/docs-native-proof/docs-native-proof.json", package)
         self.assertIn("--mode publish-preflight", package)
         self.assertIn("--producer-artifact-id \"$PRODUCER_ARTIFACT_ID\"", package)
         self.assertIn("--aggregate-artifact-id \"$AGGREGATE_ARTIFACT_ID\"", package)
@@ -772,17 +792,17 @@ class WorkflowTransportTests(unittest.TestCase):
         self.assertIn("artifact-ids: ${{ steps.upload-rehearsal-start.outputs.artifact-id }}", package)
         self.assertIn("--mode validate-publication-start", package)
         self.assertIn("for pass in initial replay; do", package)
-        step_start = package.index("- name: Validate original receipt and credential-free replay")
-        step_end = package.index("\n      - name:", step_start + 1)
-        step = package[step_start:step_end]
-        run_marker = "        run: |\n"
-        self.assertIn(run_marker, step)
-        script = "\n".join(
-            line[10:] if line.startswith("          ") else ""
-            for line in step.split(run_marker, 1)[1].splitlines()
-        )
-        syntax = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True, check=False)
-        self.assertEqual(0, syntax.returncode, syntax.stderr)
+        for name in (
+            "Validate frozen aggregate and prepare publication inputs without credentials",
+            "Validate original receipt and credential-free replay",
+        ):
+            with self.subTest(name=name):
+                script = workflow_step_script(package, name)
+                self.assertIn("source .github/scripts/docs-native-publication-args.sh", script)
+                self.assertIn('test "${#docs_native_args[@]}" -eq 6', script)
+                self.assertIn('verify-tailwind-evidence "${docs_native_args[@]}"', script)
+                syntax = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True, check=False)
+                self.assertEqual(0, syntax.returncode, syntax.stderr)
         self.assertIn('TAILWIND_REHEARSAL_ENABLED: "true"', package)
         self.assertIn("TAILWIND_REHEARSAL_PRODUCER_ARTIFACT_ID: ${{ env.PRODUCER_ARTIFACT_ID }}", package)
         self.assertIn("TAILWIND_REHEARSAL_AGGREGATE_ARTIFACT_ID: ${{ env.AGGREGATE_ARTIFACT_ID }}", package)

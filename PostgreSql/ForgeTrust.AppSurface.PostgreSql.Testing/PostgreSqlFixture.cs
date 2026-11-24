@@ -56,15 +56,7 @@ public sealed class PostgreSqlFixture
                 template = existing;
             }
 
-            if (template.Cleaning)
-            {
-                throw new InvalidOperationException("The requested template is being cleaned up.");
-            }
-
-            if (template.Users++ == 0)
-            {
-                template.Idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
+            template.Admit();
         }
 
         try
@@ -76,10 +68,7 @@ public sealed class PostgreSqlFixture
         {
             lock (gate)
             {
-                if (--template.Users == 0)
-                {
-                    template.Idle!.SetResult();
-                }
+                template.Release();
             }
         }
     }
@@ -178,11 +167,18 @@ public sealed class PostgreSqlFixture
             template.Database = failure.Database;
             throw;
         }
-        catch
+        catch (Exception initializationError)
         {
             if (template.Database != null)
             {
-                await template.Database.DisposeAsync();
+                try
+                {
+                    await template.Database.DisposeAsync();
+                }
+                catch (Exception cleanupError) when (!IsFatalCleanupException(cleanupError))
+                {
+                    throw new PostgreSqlDatabaseCleanupException(template.Database, cleanupError, initializationError);
+                }
             }
 
             lock (gate)
@@ -207,8 +203,10 @@ public sealed class PostgreSqlFixture
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(PostgreSqlCatalog.Timeout);
-        var outcomes = await Task.WhenAll(selected.Select(template => CleanupOneAsync(template, deadline.Token)));
-        var freshOutcomes = await Task.WhenAll(freshRetries.Select(database => RetryDropAsync(database, failedFreshDrops, deadline.Token)));
+        var cleanupTasks = selected.Select(template => CleanupOneAsync(template, deadline.Token)).ToArray();
+        var freshRetryTasks = freshRetries.Select(database => RetryDropAsync(database, failedFreshDrops, deadline.Token)).ToArray();
+        var outcomes = await Task.WhenAll(cleanupTasks);
+        var freshOutcomes = await Task.WhenAll(freshRetryTasks);
         var result = new TemplateCleanupResult(outcomes, stopwatch.Elapsed) { FreshDatabaseOutcomes = freshOutcomes };
         result.ThrowIfFailed();
         return result;
@@ -219,13 +217,10 @@ public sealed class PostgreSqlFixture
         Task idle;
         lock (gate)
         {
-            if (template.Cleaning)
+            if (!template.TryBeginCleanup(out idle))
             {
                 return TemplateCleanupOutcome.AlreadyInProgress(template.Name);
             }
-
-            template.Cleaning = true;
-            idle = template.Idle?.Task ?? Task.CompletedTask;
         }
 
         try
@@ -240,6 +235,11 @@ public sealed class PostgreSqlFixture
             catch when (preparation.IsCompleted && template.Database != null && !token.IsCancellationRequested)
             {
                 // Initialization already attempted teardown. Retry any drop that failed.
+            }
+            catch (Exception preparationError) when (preparation.IsCompleted && template.Database == null
+                && preparationError is not PostgreSqlDatabaseOwnershipException && !token.IsCancellationRequested)
+            {
+                return TemplateCleanupOutcome.Removed(template.Name);
             }
 
             PostgreSqlDatabaseLease[] retries;
@@ -272,7 +272,7 @@ public sealed class PostgreSqlFixture
         {
             lock (gate)
             {
-                template.Cleaning = false;
+                template.EndCleanup();
             }
         }
     }
@@ -329,7 +329,8 @@ public sealed class PostgreSqlFixture
         watchingProcessExit = needed;
     }
 
-    private void OnProcessExit(object? sender, EventArgs args)
+    /// <summary>Attempts bounded teardown during process exit. Explicit cleanup can retry any retained leases.</summary>
+    internal void OnProcessExit(object? sender, EventArgs args)
     {
         try
         {
@@ -354,7 +355,13 @@ public sealed class PostgreSqlFixture
         }
     }
 
-    // The gate protects Users, Idle and Cleaning. Preparation is shared independently of individual waiters.
+    /// <summary>Identifies CLR exceptions that must propagate directly from template cleanup.</summary>
+    /// <param name="exception">The cleanup exception to classify.</param>
+    /// <returns><see langword="true"/> when the exception represents a fatal CLR condition.</returns>
+    internal static bool IsFatalCleanupException(Exception exception) =>
+        exception is OutOfMemoryException or StackOverflowException or AccessViolationException;
+
+    // Lifecycle methods are called under the fixture gate. Preparation is shared independently of individual waiters.
     private sealed class Template(string connection, string prefix)
     {
         public string Connection { get; } = connection;
@@ -363,8 +370,45 @@ public sealed class PostgreSqlFixture
         public PostgreSqlDatabaseLease? Database { get; set; }
         public HashSet<PostgreSqlDatabaseLease> FailedDrops { get; } = [];
         public Lazy<Task> Preparation { get; set; } = null!;
-        public int Users { get; set; }
-        public TaskCompletionSource? Idle { get; set; }
-        public bool Cleaning { get; set; }
+
+        private int users;
+        private TaskCompletionSource? idle;
+        private bool cleaning;
+
+        public void Admit()
+        {
+            if (cleaning)
+            {
+                throw new InvalidOperationException("The requested template is being cleaned up.");
+            }
+
+            if (users++ == 0)
+            {
+                idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+
+        public void Release()
+        {
+            if (--users == 0)
+            {
+                idle!.SetResult();
+            }
+        }
+
+        public bool TryBeginCleanup(out Task idleTask)
+        {
+            if (cleaning)
+            {
+                idleTask = Task.CompletedTask;
+                return false;
+            }
+
+            cleaning = true;
+            idleTask = idle?.Task ?? Task.CompletedTask;
+            return true;
+        }
+
+        public void EndCleanup() => cleaning = false;
     }
 }

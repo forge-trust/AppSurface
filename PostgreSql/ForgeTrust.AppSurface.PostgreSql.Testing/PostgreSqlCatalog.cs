@@ -7,7 +7,8 @@ namespace ForgeTrust.AppSurface.PostgreSql.Testing;
 /// <summary>Runs fixture database catalog operations under the shared PostgreSQL advisory locks.</summary>
 internal static class PostgreSqlCatalog
 {
-    private const long DatabaseCatalogLockKey = 5_300_219_492_281_001;
+    /// <summary>Session advisory lock shared by fixture catalog mutations and their test observers.</summary>
+    internal const long DatabaseCatalogLockKey = 5_300_219_492_281_001;
     private const long ClusterInitializationLockKey = 5_300_219_492_281_002;
     private const int CommandTimeoutSeconds = 300;
     internal static readonly TimeSpan Timeout = TimeSpan.FromMinutes(5);
@@ -19,8 +20,17 @@ internal static class PostgreSqlCatalog
         if (disablePooling)
         {
             builder.Pooling = false;
+            builder.Multiplexing = false;
         }
 
+        return builder.ConnectionString;
+    }
+
+    internal static string MaintenanceConnectionString(string connectionString)
+    {
+        var builder = ParseConnectionString(connectionString);
+        builder.Database = "postgres";
+        builder.Multiplexing = false;
         return builder.ConnectionString;
     }
 
@@ -103,26 +113,39 @@ internal static class PostgreSqlCatalog
         Func<Task> action,
         CancellationToken cancellationToken)
     {
-        var acquired = false;
+        var operationCompleted = false;
         try
         {
             await AcquireAsync(admin, DatabaseCatalogLockKey, cancellationToken);
-            acquired = true;
             await action();
+            operationCompleted = true;
         }
         finally
         {
             if (admin.State == ConnectionState.Open)
             {
                 using var deadline = new CancellationTokenSource(Timeout);
-                await using var release = new NpgsqlCommand($"SELECT pg_advisory_unlock({DatabaseCatalogLockKey});", admin)
+                try
                 {
-                    CommandTimeout = CommandTimeoutSeconds,
-                };
-                var unlocked = await release.ExecuteScalarAsync(deadline.Token) is true;
-                if (!unlocked && acquired)
+                    await using var release = new NpgsqlCommand($"SELECT pg_catalog.pg_advisory_unlock({DatabaseCatalogLockKey});", admin)
+                    {
+                        CommandTimeout = CommandTimeoutSeconds,
+                    };
+                    var unlocked = await release.ExecuteScalarAsync(deadline.Token) is true;
+                    if (!unlocked && operationCompleted)
+                    {
+                        throw new InvalidOperationException("The PostgreSQL fixture lost its catalog advisory lock.");
+                    }
+                }
+                catch
                 {
-                    throw new InvalidOperationException("The PostgreSQL fixture lost its catalog advisory lock.");
+                    // A pooled session can retain the advisory lock until its next checkout.
+                    // Retire this maintenance pool so disposal closes the affected physical session.
+                    NpgsqlConnection.ClearPool(admin);
+                    if (operationCompleted)
+                    {
+                        throw;
+                    }
                 }
             }
         }
@@ -130,7 +153,7 @@ internal static class PostgreSqlCatalog
 
     private static async Task AcquireAsync(NpgsqlConnection admin, long key, CancellationToken cancellationToken)
     {
-        await using var acquire = new NpgsqlCommand($"SELECT pg_advisory_lock({key});", admin)
+        await using var acquire = new NpgsqlCommand($"SELECT pg_catalog.pg_advisory_lock({key});", admin)
         {
             CommandTimeout = CommandTimeoutSeconds,
         };
@@ -155,15 +178,16 @@ internal static class PostgreSqlCatalog
 
     internal static ServerIdentity ServerEndpoint(string connectionString)
     {
-        var builder = ParseConnectionString(connectionString);
-        return new ServerIdentity(builder.Host!, builder.Port);
+        using var connection = new NpgsqlConnection(connectionString);
+        // Npgsql normalizes inline Host:Port syntax and retains Unix socket endpoints as paths.
+        return new ServerIdentity(connection.DataSource);
     }
 
     internal readonly record struct DatabaseCatalogIdentity(uint? OidAtName, string? NameAtOid);
 
-    internal readonly record struct ServerIdentity(string Host, int Port)
+    internal readonly record struct ServerIdentity(string Endpoint)
     {
         internal bool Matches(ServerIdentity other) =>
-            string.Equals(Host, other.Host, StringComparison.Ordinal) && Port == other.Port;
+            string.Equals(Endpoint, other.Endpoint, StringComparison.Ordinal);
     }
 }

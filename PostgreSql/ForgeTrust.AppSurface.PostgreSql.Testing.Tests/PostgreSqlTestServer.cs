@@ -1,6 +1,5 @@
 using Npgsql;
 using Testcontainers.PostgreSql;
-using Xunit.Sdk;
 
 namespace ForgeTrust.AppSurface.PostgreSql.Testing.Tests;
 
@@ -26,17 +25,28 @@ internal static class PostgreSqlTestServer
         return container.GetConnectionString();
     }
 
+    /// <summary>Builds settings for a dedicated backend session. Multiplexing requires pooling in Npgsql.</summary>
+    internal static NpgsqlConnectionStringBuilder NonPooledSettings(string connectionString, string? database = null)
+    {
+        var settings = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            Pooling = false,
+            Multiplexing = false,
+        };
+        if (database is not null)
+        {
+            settings.Database = database;
+        }
+
+        return settings;
+    }
+
     private static async Task VerifyServerAsync(string connectionString)
     {
-        var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false,
-            Timeout = 5,
-            CommandTimeout = 15,
-        }.ConnectionString;
-
-        await using var connection = new NpgsqlConnection(maintenanceConnectionString);
+        var settings = NonPooledSettings(connectionString, "postgres");
+        settings.Timeout = 5;
+        settings.CommandTimeout = 15;
+        await using var connection = new NpgsqlConnection(settings.ConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand("SHOW server_version_num;", connection);
         var value = (string?)await command.ExecuteScalarAsync();
@@ -60,11 +70,7 @@ internal static class PostgreSqlTestServer
         {
             return await containerTask;
         }
-        catch (SkipException)
-        {
-            throw;
-        }
-        catch
+        catch (Exception failure) when (failure is not Xunit.SkipException)
         {
             await SharedContainerGate.WaitAsync();
             try
@@ -85,27 +91,36 @@ internal static class PostgreSqlTestServer
 
     private static async Task<PostgreSqlContainer> CreateSharedContainerAsync()
     {
-        var container = new PostgreSqlBuilder(PostgreSqlImage)
-            .WithDatabase("appsurface_postgresql_testing")
-            .WithUsername("appsurface")
-            .WithPassword("appsurface-test-password")
-            .WithCleanUp(true)
-            .Build();
-
+        PostgreSqlContainer? container = null;
         try
         {
+            container = new PostgreSqlBuilder(PostgreSqlImage)
+                .WithDatabase("appsurface_postgresql_testing")
+                .WithUsername("appsurface")
+                .WithPassword("appsurface-test-password")
+                .WithCleanUp(true)
+                .Build();
+
             await container.StartAsync();
             await VerifyServerAsync(container.GetConnectionString());
             return container;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await container.DisposeAsync();
+            if (container is not null)
+            {
+                await container.DisposeAsync();
+            }
+
             throw CreateContainerPrerequisiteException(exception);
         }
         catch
         {
-            await container.DisposeAsync();
+            if (container is not null)
+            {
+                await container.DisposeAsync();
+            }
+
             throw;
         }
     }
@@ -124,7 +139,7 @@ internal static class PostgreSqlTestServer
             StringComparison.OrdinalIgnoreCase);
         if (allowLocalSkip && !runningInCi)
         {
-            return SkipException.ForSkip(message);
+            return new Xunit.SkipException(message, exception);
         }
 
         return new InvalidOperationException(
@@ -146,11 +161,7 @@ internal static class PostgreSqlTestServer
 
     internal static async Task<bool> DatabaseExistsAsync(string connectionString, string databaseName)
     {
-        var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false,
-        }.ConnectionString;
+        var maintenanceConnectionString = NonPooledSettings(connectionString, "postgres").ConnectionString;
 
         await using var connection = new NpgsqlConnection(maintenanceConnectionString);
         await connection.OpenAsync();

@@ -83,8 +83,9 @@ its API clients expect.
 ## Feedback and contributing
 
 Use the [issue forms](https://github.com/forge-trust/AppSurface/issues/new/choose) for bugs, feature requests,
-or a quickstart that left you stuck. The [contributor guide](./CONTRIBUTING.md) covers local setup and
-verification. Report vulnerabilities through the [private security reporting process](./SECURITY.md).
+or a quickstart that left you stuck. The [contributor guide](./CONTRIBUTING.md) covers local setup.
+Run `task` to list the [repository tasks](./CONTRIBUTING.md#repository-tasks) for building, testing, and
+verifying a change. Report vulnerabilities through the [private security reporting process](./SECURITY.md).
 
 <a id="coverage-efficiency-evidence-for-issue-728"></a>
 

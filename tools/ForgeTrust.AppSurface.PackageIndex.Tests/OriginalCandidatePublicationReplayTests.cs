@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 /// <summary>Credential-free rehearsal of interrupted Tailwind publication recovery.</summary>
@@ -19,6 +21,11 @@ public sealed class OriginalCandidatePublicationReplayTests
         var aggregateDirectory = Required("TAILWIND_REHEARSAL_AGGREGATE_DIRECTORY");
         var startReceiptPath = Required("TAILWIND_REHEARSAL_START_RECEIPT");
         var preparedDirectory = Required("TAILWIND_REHEARSAL_PREPARED_DIRECTORY");
+        var durableTemplateEvidence = Required("TAILWIND_REHEARSAL_DURABLE_TEMPLATE_EVIDENCE");
+        var publicationPlanPath = TestPathUtils.PathUnder(repositoryRoot, "packages", "package-index.yml");
+        var docsNativeProofPath = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_PROOF");
+        var docsNativeArtifactId = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_ARTIFACT_ID");
+        var docsNativeSha256 = Required("TAILWIND_REHEARSAL_DOCS_NATIVE_SHA256");
         var manifestPath = Path.Combine(producerDirectory, "package-artifact-manifest.json");
         var manifest = await new PackageArtifactManifestReader().ReadAsync(manifestPath, CancellationToken.None);
         var tailwindArtifact = Assert.Single(manifest.Entries, entry => entry.PackageId == PackageId);
@@ -28,9 +35,10 @@ public sealed class OriginalCandidatePublicationReplayTests
         {
             var credentials = new TestCredentialProvider();
             var publisher = new RealEvidenceRecordingPublisher(tailwindArtifact.ArtifactFileName);
+            var planResolver = new PackagePublishPlanResolver(
+                new PackageProjectScanner(), new DotNetProjectMetadataProvider(), new PackageManifestLoader());
             var workflow = new PackagePublishWorkflow(
-                new PackagePublishPlanResolver(new PackageProjectScanner(), new DotNetProjectMetadataProvider(), new PackageManifestLoader()),
-                new PackageArtifactManifestReader(), publisher, new PackagePublishLedgerRenderer(), credentials);
+                planResolver, new PackageArtifactManifestReader(), publisher, new PackagePublishLedgerRenderer(), credentials);
             var originalIdentity = new TailwindPublicationRequest(
                 repositoryRoot, producerDirectory, manifestPath,
                 Path.Combine(producerDirectory, "tailwind-proof-subject.json"),
@@ -43,7 +51,25 @@ public sealed class OriginalCandidatePublicationReplayTests
                 Required("TAILWIND_REHEARSAL_AGGREGATE_ARTIFACT_ID"),
                 Required("TAILWIND_REHEARSAL_AGGREGATE_SHA256"),
                 string.Empty, startReceiptPath,
-                Required("TAILWIND_REHEARSAL_START_ARTIFACT_ID"), string.Empty);
+                Required("TAILWIND_REHEARSAL_START_ARTIFACT_ID"), string.Empty)
+            {
+                DocsNativeEvidence = new DocsNativeEvidenceInput(
+                    docsNativeProofPath, docsNativeArtifactId, docsNativeSha256)
+            };
+
+            using (var startReceipt = JsonDocument.Parse(await File.ReadAllBytesAsync(startReceiptPath)))
+            {
+                Assert.Equal(
+                    "appsurface-tailwind-publication-start-v2",
+                    startReceipt.RootElement.GetProperty("schema").GetString());
+                var docsNativeIdentity = startReceipt.RootElement.GetProperty("docsNativeEvidence");
+                Assert.Equal(
+                    docsNativeArtifactId,
+                    docsNativeIdentity.GetProperty("artifactId").GetString());
+                Assert.Equal(
+                    docsNativeSha256,
+                    docsNativeIdentity.GetProperty("sha256").GetString());
+            }
 
             PackagePublishRequest RequestFor(int attempt)
             {
@@ -62,13 +88,27 @@ public sealed class OriginalCandidatePublicationReplayTests
                     ReportDirectory = TestPathUtils.PathUnder(scratch, $"attempt-{attempt}", "report")
                 };
                 return new PackagePublishRequest(
-                    repositoryRoot, Path.Combine(repositoryRoot, "packages", "package-index.yml"),
-                    producerDirectory, manifestPath,
+                    repositoryRoot, publicationPlanPath, producerDirectory, manifestPath,
                     TestPathUtils.PathUnder(scratch, $"attempt-{attempt}", "publish-ledger.md"),
-                    "https://api.nuget.org/v3/index.json", "TEST_ONLY_NUGET_KEY", evidence);
+                    "https://api.nuget.org/v3/index.json", "TEST_ONLY_NUGET_KEY", evidence,
+                    durableTemplateEvidence, originalIdentity.SourceCommit);
             }
 
+            var plan = await planResolver.ResolveAsync(repositoryRoot, publicationPlanPath, CancellationToken.None);
+            var blocked = plan.Entries.Where(entry => !string.IsNullOrWhiteSpace(entry.ReadinessBlocker)).ToArray();
             var firstRequest = RequestFor(1);
+            if (blocked.Length > 0)
+            {
+                var failure = await Assert.ThrowsAsync<PackageIndexException>(
+                    () => workflow.RunAsync(firstRequest, CancellationToken.None));
+                Assert.StartsWith("Package publication is blocked by unresolved readiness evidence:", failure.Message);
+                Assert.All(blocked, entry => Assert.Contains(
+                    $"{entry.PackageId} ({entry.ReadinessBlocker})", failure.Message, StringComparison.Ordinal));
+                Assert.Equal(0, credentials.Reads);
+                Assert.Empty(publisher.Requests);
+                return;
+            }
+
             publisher.Attempt = 1;
             var interrupted = await workflow.RunAsync(firstRequest, CancellationToken.None);
             Assert.Equal(PackagePublishStatus.Failed, Assert.Single(interrupted.Entries, entry => entry.PackageId == PackageId).Status);
@@ -382,12 +422,12 @@ public sealed class OriginalCandidatePublicationReplayTests
     }
 }
 
-/// <summary>Discovers the real-artifact replay only in the main-only manual rehearsal job.</summary>
+/// <summary>Discovers the real-artifact replay only in the manual release rehearsal job.</summary>
 public sealed class ManualRehearsalFactAttribute : FactAttribute
 {
     public ManualRehearsalFactAttribute()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("TAILWIND_REHEARSAL_ENABLED"), "true", StringComparison.Ordinal))
-            Skip = "Requires the main-only manual rehearsal's downloaded producer, aggregate, and start receipt.";
+            Skip = "Requires the manual release rehearsal's downloaded candidate and evidence.";
     }
 }

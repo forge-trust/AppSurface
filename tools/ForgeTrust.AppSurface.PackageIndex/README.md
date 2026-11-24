@@ -81,6 +81,15 @@ remains authored content; after that, retain the markers exactly.
    paths with Cobertura paths. A fixture nested inside this checkout must use that explicit root: the CLI's
    automatic Git-root detection otherwise selects the outer checkout and cannot match consumer-relative paths.
 
+## Chooser install commands
+
+Set `prerelease_install: true` in the [package manifest](https://github.com/forge-trust/AppSurface/blob/main/packages/package-index.yml) for a public, publishable
+library whose available versions are prereleases. PackageIndex adds `--prerelease` to the generated library command.
+The field defaults to `false` and applies to library installs. The chooser omits install commands for held packages,
+including libraries with this flag set. Tools and templates have their own commands. Remove the flag once the library
+has a stable install. When adding a package to an existing AppSurface app, pin the coordinated version already in use.
+See the [package chooser](../../packages/README.md) for the generated commands.
+
 ## Cloud Tasks packed isolation proof (#892)
 
 When CloudTasks is in the verification plan, `verify-packages` requires the
@@ -110,15 +119,17 @@ accepts this as its second argument: `./scripts/verify-cloudtasks-activation.sh 
 Only the two allowlisted central declarations (`Google.Cloud.Tasks.V2` and the project-conditioned `Grpc.Net.Client`)
 are normalized. Their versions must match exactly one direct root each in the candidate CloudTasks `packages.lock.json`;
 the lock hash is recorded. The historical baseline may omit both declarations; a candidate-source baseline contains
-both exact validated declarations. Missing, partial, duplicate, mismatched or differently conditioned declarations
-fail. Every other central policy entry and all neutral source/build inputs remain exact.
+both exact validated declarations. The baseline also accepts the exact gRPC condition from before the package was
+renamed to `ForgeTrust.AppSurface.Durable.GoogleCloudTasks`, with the same locked version. The candidate requires the
+renamed project condition. Missing, partial, duplicate or mismatched declarations fail. Every other central policy
+entry and all neutral source/build inputs remain exact.
 
 The [approved plan](../../docs/plans/issue-892-cloudtasks-activation-transport.md)
 allows binary differences only for Core, Flow, Workers and Durable after unchanged authored sources/projects,
 Flow.Generators and shared build inputs are proved. Packed framework/dependency contracts, library entry sets,
 external package IDs/versions/hashes/edges and each restored local archive binding remain exact; both raw archive
 and library hashes are retained. Any failed check withholds the manifest. Normalization approval alone proves
-neither a successful run nor publication authority; use the [package guide](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md#local-proof) for local commands and proof limits.
+neither a successful run nor publication authority; use the [package guide](../../Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md#local-proof) for local commands and proof limits.
 
 ## Tailwind artifact provenance (#798)
 
@@ -133,6 +144,39 @@ The native consumer starts with the [committed consumer lock](https://github.com
 The required hosts are exactly `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, and `win-x64`. Native v2 receipts (`appsurface-tailwind-native-host-proof-v2`) are eligible; v1 is historical diagnostic data only. Each success binds producer ID/run/attempt, subject and manifest digests, source/version, current native invocation, expected and observed host RID/OS/process architecture, and per-first-party producer/restored raw SHA-512 and protected payload evidence. The closure includes Core and Tailwind and comes from the producer's successful `net10.0` consumer graph plus validated package inventory. It also records Tailwind release-manifest and selected host CLI digests, generated CSS, absence of companion dependency, and absence of native consumer output. Full modes, flags, report shapes, limits, recipes and recovery are in the [reference](../../docs/tailwind-artifact-provenance.md).
 
 The [package artifact workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-artifacts.yml), [package gate](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml), and [prerelease](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-prerelease-publish.yml)/[stable](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-stable-publish.yml) carriers retain the safe `cloudtasks-package-consumer-proof.md` report in their diagnostic uploads when it exists. A later proof failure therefore preserves the completed isolation evidence. The report is written only after the isolation proof succeeds; its absence from a diagnostic artifact does not identify the failed step. Neither its presence nor the diagnostic upload replaces the complete package workflow's success requirement.
+
+## Docs native asset release proof
+
+The [Docs native asset policy](../../Web/ForgeTrust.AppSurface.Docs/README.md#tree-sitter-native-assets-in-build-and-publish-output)
+adds a release proof requirement when the selected Docs archive contains its
+`buildTransitive/ForgeTrust.AppSurface.Docs.targets` entry. The packed-consumer
+[verifier](https://github.com/forge-trust/AppSurface/blob/main/scripts/verify-docs-native-consumer.py) exercises separate direct and transitive
+C# project graphs. The required evidence covers eight SDK host RIDs and Windows x64 execution
+of the exact Linux x64 default and keep-all publish archives.
+On each host the verifier also builds and publishes each graph for an explicit foreign RID
+and for the host RID inferred by the SDK with `UseCurrentRuntimeIdentifier=true`.
+It compares the dependency manifests and Tree-sitter native paths and bytes in each output
+with a separate build and publish using `AppSurfaceDocsKeepAllTreeSitterRuntimes=true` as the SDK baseline.
+
+The [Docs evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/docs-native-evidence.yml) tries native Linux
+Arm32 execution on `ubuntu-24.04-arm` with the pinned Microsoft Arm32 SDK container. The host
+needs Arm32 userspace support and Docker on Arm hardware. Set the optional repository variable
+`APPSURFACE_DOCS_LINUX_ARM32_RUNNER` to a unique label for another trusted runner with those
+capabilities. The job checks the SDK RID and runtime process architecture, and it requires successful
+native grammar execution. Other jobs install the SDK for their selected architecture. The Windows
+destination launches the two transferred publish archives without a restore or build.
+Each new aggregate uses one complete workflow attempt. If artifact collection is missing a job from
+a partial rerun, rerun all jobs to produce a complete attempt.
+
+Before requesting NuGet credentials, use `--docs-native-proof`, `--docs-native-artifact-id`,
+and `--docs-native-sha256` with the existing publication preflight and validation commands.
+Provide the downloaded proof JSON, its immutable upload ID, and its SHA-256.
+The preflight verifies the selected package version, producer, source revision, archive digest,
+host outcomes and both transferred publish digests. It writes the Docs ID and SHA-256 alongside
+the Tailwind reference in the version 2 publication-start receipt. For a resumed publication,
+recover both proof references from the original receipt and pass them to the same validation before
+credentials and again at the push boundary. A candidate that predates the Docs target continues
+using the version 1 publication-start receipt.
 
 ## Durable preflight artifact proof (#845)
 

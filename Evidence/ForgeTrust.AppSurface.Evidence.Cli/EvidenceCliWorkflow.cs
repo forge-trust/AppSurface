@@ -190,7 +190,58 @@ internal sealed class EvidenceCliWorkflow
     /// Missing files produce <c>ASEVD208</c>, malformed canonical JSON produces <c>ASEVD209</c>, and a missing,
     /// unresolvable, or non-binding policy snapshot produces <c>ASEVD203</c>.
     /// </remarks>
+    public Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyAsync(
+        string planPath,
+        string manifestPath,
+        CancellationToken cancellationToken) =>
+        VerifyAsync(planPath, manifestPath, artifactRoot: null, cancellationToken);
+
+    /// <summary>
+    /// Verifies the plan and manifest binding, then checks every manifest-listed artifact on disk.
+    /// </summary>
+    /// <param name="planPath">Generated <c>evidence-plan.json</c> path.</param>
+    /// <param name="manifestPath">Generated <c>evidence-manifest.json</c> path.</param>
+    /// <param name="artifactRoot">
+    /// Directory holding one subdirectory per producer id; <see langword="null"/> or blank means the <c>artifacts</c>
+    /// directory beside the manifest file.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The verified plan and manifest.</returns>
+    /// <remarks>
+    /// Adds <c>ASEVD213</c> to the codes of the three-argument overload: a listed artifact is missing, linked, outside
+    /// the artifact root, or has a different length or SHA-256. A manifest that lists no artifacts never touches the
+    /// artifact root, so manifests written before artifacts existed verify as before. Success proves integrity, not
+    /// that a gate passed: an intact manifest whose claim is <c>None</c> verifies.
+    /// </remarks>
     public async Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyAsync(
+        string planPath,
+        string manifestPath,
+        string? artifactRoot,
+        CancellationToken cancellationToken)
+    {
+        var verified = await VerifyBindingAsync(planPath, manifestPath, cancellationToken).ConfigureAwait(false);
+        var root = string.IsNullOrWhiteSpace(artifactRoot)
+            ? Path.Join(Path.GetDirectoryName(Path.GetFullPath(manifestPath))!, "artifacts")
+            : artifactRoot;
+        foreach (var producer in verified.Manifest.ProducerResults)
+        {
+            foreach (var artifact in producer.Artifacts ?? [])
+            {
+                var status = await EvidenceArtifactFileValidation.CheckAsync(root, producer.ProducerId, artifact, cancellationToken).ConfigureAwait(false);
+                if (status != EvidenceArtifactFileStatus.Valid)
+                {
+                    throw new EvidenceCliException(
+                        "ASEVD213",
+                        $"Evidence artifact '{artifact.LogicalName}' of producer '{producer.ProducerId}' failed its on-disk check ({status}) under '{root}'.",
+                        "Rerun appsurface evidence run and verify the plan, manifest, and artifacts directory from that one run; pass --artifact-root if the artifacts were moved.");
+                }
+            }
+        }
+
+        return verified;
+    }
+
+    private async Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyBindingAsync(
         string planPath,
         string manifestPath,
         CancellationToken cancellationToken)
@@ -243,14 +294,18 @@ internal sealed class EvidenceCliWorkflow
         var obligations = plan.Profile.Obligations.Count == 0
             ? "none (explicit no-evidence profile)"
             : string.Join(", ", plan.Profile.Obligations.Select(static obligation => obligation.Id));
-        return string.Join(
-            Environment.NewLine,
+        string[] lines =
+        [
             $"Evidence plan: {plan.Profile.Id} ({plan.Profile.Scope.ToString().ToLowerInvariant()})",
             $"Why: {string.Join(", ", plan.MatchedRuleIds)}",
             $"Changed paths: {string.Join(", ", plan.ChangedPaths.Select(static path => path.Path))}",
             $"Obligations: {obligations}",
             $"Required producers: {FormatIds(plan.Profile.Producers.Select(static producer => producer.Id))}",
-            $"Required resources: {FormatIds(plan.Profile.Resources.Select(static resource => resource.Id))}");
+            $"Required resources: {FormatIds(plan.Profile.Resources.Select(static resource => resource.Id))}",
+            // Test producers list their projects, filters and minimums so a reviewer sees the selection before it runs.
+            .. TestEvidenceRunSupport.FormatPlan(plan),
+        ];
+        return string.Join(Environment.NewLine, lines);
     }
 
     /// <summary>
@@ -413,15 +468,17 @@ internal sealed class EvidenceCliWorkflow
 
     private static bool ContainsGeneratedMarker(string path) => File.ReadAllText(path).Contains(GeneratedMarker, StringComparison.Ordinal);
 
-    private static object CreateSummary(EvidencePlan plan) => new
+    private static object CreateSummary(EvidencePlan plan)
     {
-        kind = "plan",
-        profile = plan.Profile.Id,
-        scope = plan.Profile.Scope.ToString(),
-        matchedRules = plan.MatchedRuleIds,
-        obligations = plan.Profile.Obligations.Select(static obligation => obligation.Id).ToArray(),
-        next = "Run 'appsurface evidence run' only when the selected producer capabilities are ready.",
-    };
+        const string next = "Run 'appsurface evidence run' only when the selected producer capabilities are ready.";
+        var obligations = plan.Profile.Obligations.Select(static obligation => obligation.Id).ToArray();
+        var testProducers = TestEvidenceRunSupport.DescribePlan(plan);
+
+        // The testProducers property is added only when a test producer is selected, so other summaries keep their shape.
+        return testProducers.Length == 0
+            ? new { kind = "plan", profile = plan.Profile.Id, scope = plan.Profile.Scope.ToString(), matchedRules = plan.MatchedRuleIds, obligations, next }
+            : new { kind = "plan", profile = plan.Profile.Id, scope = plan.Profile.Scope.ToString(), matchedRules = plan.MatchedRuleIds, obligations, testProducers, next };
+    }
 
     private static object CreateSummary(EvidenceManifest manifest) => new
     {

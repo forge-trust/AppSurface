@@ -63,7 +63,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         var exclusiveProjects = run.Arguments.Zip(run.Arguments.Skip(1))
             .Where(pair => pair.First == "--exclusive-test-project").Select(pair => pair.Second).ToArray();
         Assert.Equal(9, exclusiveProjects.Length);
-        Assert.Contains("ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj", exclusiveProjects);
+        Assert.Contains("ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests.csproj", exclusiveProjects);
         Assert.Equal("2", ValueAfter(run.Arguments, "--parallelism"));
         Assert.Equal("longest-first", ValueAfter(run.Arguments, "--schedule"));
         Assert.DoesNotContain("--schedule-timings", run.Arguments);

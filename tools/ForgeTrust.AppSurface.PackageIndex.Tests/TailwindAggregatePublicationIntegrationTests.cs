@@ -160,6 +160,88 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.False(workflowDiagnostics.RootElement.GetProperty("releaseEligible").GetBoolean());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublicationStart_RequiresSeparateExactDocsProofWhenTheCandidateHasTheTarget(bool includeDocsNativeTarget)
+    {
+        using var fixture = await Fixture.CreateAsync(_root, includeDocsNativeTarget: includeDocsNativeTarget);
+        var aggregate = await fixture.AggregateAsync("docs-candidate-tailwind");
+        Assert.True(aggregate.Succeeded);
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        var docs = manifest.Entries.Single(entry => entry.PackageId == DocsNativeReleaseEvidence.PackageId);
+        var planned = manifest.Entries.Select(entry =>
+            new PlannedPackageArtifact(entry, TestPathUtils.PathUnder(fixture.Bundle, entry.ArtifactFileName))).ToArray();
+        var preflightReport = TestPathUtils.PathUnder(_root, "docs-preflight");
+        var request = new TailwindPublicationRequest(
+            fixture.Repository, fixture.Bundle, fixture.ManifestPath, TestPathUtils.PathUnder(fixture.Bundle, TailwindProofSubjectService.FileName),
+            "501", fixture.SubjectHash, "12345", "901", fixture.SourceCommit, Path.GetDirectoryName(aggregate.ReportPath)!,
+            "702", Sha256(await File.ReadAllBytesAsync(aggregate.ReportPath)), TestPathUtils.PathUnder(_root, "docs-prepared"),
+            TestPathUtils.PathUnder(preflightReport, "publication-start-receipt.json"), "703", preflightReport);
+
+        if (!includeDocsNativeTarget)
+        {
+            await TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, planned, CancellationToken.None);
+            using var legacyReceipt = JsonDocument.Parse(await File.ReadAllBytesAsync(request.PublicationStartReceiptPath));
+            Assert.Equal("appsurface-tailwind-publication-start-v1", legacyReceipt.RootElement.GetProperty("schema").GetString());
+            Assert.False(legacyReceipt.RootElement.TryGetProperty("docsNativeEvidence", out _));
+            var validatedLegacy = await TailwindEvidenceWorkflow.ValidatePublicationAsync(request, manifest, planned, CancellationToken.None);
+            Assert.Equal(planned.Length, validatedLegacy.Count);
+            return;
+        }
+
+        var missing = await Assert.ThrowsAsync<PackageIndexException>(() => TailwindEvidenceWorkflow.PreparePublicationAsync(
+            request with { ReportDirectory = TestPathUtils.PathUnder(_root, "missing-docs-proof") }, manifest, planned, CancellationToken.None));
+        Assert.Contains("requires the frozen Docs native proof", missing.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(request.PublicationStartReceiptPath));
+
+        var proof = DocsNativeReleaseEvidenceTests.CreateProof(request.ProducerArtifactId, fixture.SourceCommit, Version, docs.Sha512);
+        var proofPath = TestPathUtils.PathUnder(_root, "docs-native-proof.json");
+        await File.WriteAllTextAsync(proofPath, proof.ToJsonString());
+        var proofInput = new DocsNativeEvidenceInput(proofPath, "704", Sha256(await File.ReadAllBytesAsync(proofPath)));
+        request = request with { DocsNativeEvidence = proofInput };
+        await TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, planned, CancellationToken.None);
+
+        using var start = JsonDocument.Parse(await File.ReadAllBytesAsync(request.PublicationStartReceiptPath));
+        Assert.Equal("appsurface-tailwind-publication-start-v2", start.RootElement.GetProperty("schema").GetString());
+        var binding = start.RootElement.GetProperty("docsNativeEvidence");
+        Assert.Equal(proofInput.ArtifactId, binding.GetProperty("artifactId").GetString());
+        Assert.Equal(proofInput.Sha256, binding.GetProperty("sha256").GetString());
+
+        var validated = await TailwindEvidenceWorkflow.ValidatePublicationAsync(request, manifest, planned, CancellationToken.None);
+        Assert.Equal(planned.Length, validated.Count);
+        var substituted = await Assert.ThrowsAsync<PackageIndexException>(() => TailwindEvidenceWorkflow.ValidatePublicationAsync(
+            request with { DocsNativeEvidence = proofInput with { ArtifactId = "705" } }, manifest, planned, CancellationToken.None));
+        Assert.Contains("artifactId", substituted.Message, StringComparison.Ordinal);
+
+        await File.AppendAllTextAsync(proofPath, "\n");
+        var updatedHash = Sha256(await File.ReadAllBytesAsync(proofPath));
+        var changed = await Assert.ThrowsAsync<PackageIndexException>(() => TailwindEvidenceWorkflow.ValidatePublicationAsync(
+            request with { DocsNativeEvidence = proofInput with { Sha256 = updatedHash } }, manifest, planned, CancellationToken.None));
+        Assert.Contains("sha256", changed.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("nuget-prerelease-publish.yml", "publish-prerelease")]
+    [InlineData("nuget-stable-publish.yml", "publish-stable")]
+    public void ReleaseWorkflow_RequiresAndRevalidatesTheExactDocsArtifact(string workflow, string publishCommand)
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var source = File.ReadAllText(TestPathUtils.PathUnder(repository, ".github", "workflows", workflow));
+        Assert.Contains("uses: ./.github/workflows/docs-native-evidence.yml", source, StringComparison.Ordinal);
+        Assert.Contains("- docs-native-evidence", source, StringComparison.Ordinal);
+        Assert.Contains(".docsNativeEvidence.artifactId", source, StringComparison.Ordinal);
+        Assert.Contains(".docsNativeEvidence.sha256", source, StringComparison.Ordinal);
+        Assert.Contains("artifact-ids: ${{ steps.candidate.outputs.docs_native_artifact_id }}", source, StringComparison.Ordinal);
+        var beforeCredentials = source.IndexOf("name: Validate uploaded publication-start before requesting credentials", StringComparison.Ordinal);
+        var credentials = source.IndexOf("name: Request NuGet trusted publishing token", StringComparison.Ordinal);
+        var push = source.IndexOf($"dll\" {publishCommand} --durable-template-evidence", StringComparison.Ordinal);
+        const string docsArgs = "source .github/scripts/docs-native-publication-args.sh";
+        Assert.True(beforeCredentials >= 0 && beforeCredentials < credentials && credentials < push);
+        Assert.Contains(docsArgs, source[beforeCredentials..credentials], StringComparison.Ordinal);
+        Assert.Contains(docsArgs, source[credentials..push], StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ProgramRunAsync_DispatchesPublicationPreflightAndStartValidationSuccess()
     {
@@ -171,12 +253,27 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         var publicationDirectory = TestPathUtils.PathUnder(_root, "cli-publication-prepared");
         var preflightReport = TestPathUtils.PathUnder(_root, "cli-publication-preflight-report");
 
-        var preflight = await fixture.RunEvidenceCliAsync("publish-preflight", preflightReport,
+        string[] preflightArguments =
+        [
             "--manifest", fixture.PlanManifestPath!,
             "--aggregate-input", aggregateDirectory,
             "--aggregate-artifact-id", "702",
             "--expected-aggregate-sha256", aggregateHash,
-            "--publication-directory", publicationDirectory);
+            "--publication-directory", publicationDirectory
+        ];
+        var unexpectedProof = TestPathUtils.PathUnder(_root, "unexpected-docs-native-proof.json");
+        await File.WriteAllTextAsync(unexpectedProof, DocsNativeReleaseEvidenceTests.CreateProof().ToJsonString());
+        var unexpectedHash = Sha256(await File.ReadAllBytesAsync(unexpectedProof));
+        var rejectedReport = TestPathUtils.PathUnder(_root, "unexpected-docs-proof-report");
+        var rejected = await fixture.RunEvidenceCliAsync("publish-preflight", rejectedReport,
+            [.. preflightArguments, "--docs-native-proof", unexpectedProof, "--docs-native-artifact-id", "704",
+                "--docs-native-sha256", unexpectedHash]);
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.Contains("does not carry the Docs native asset target", rejected.Stderr, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(publicationDirectory));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(rejectedReport, "publication-start-receipt.json")));
+
+        var preflight = await fixture.RunEvidenceCliAsync("publish-preflight", preflightReport, preflightArguments);
 
         Assert.True(preflight.ExitCode == 0, preflight.Stderr + Environment.NewLine + preflight.Stdout);
         Assert.Empty(preflight.Stderr);
@@ -595,7 +692,8 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         public string Map { get; }
         public string? PlanManifestPath { get; }
 
-        public static async Task<Fixture> CreateAsync(string parent, bool includeWebPublicationPlan = false)
+        public static async Task<Fixture> CreateAsync(
+            string parent, bool includeWebPublicationPlan = false, bool? includeDocsNativeTarget = null)
         {
             var root = TestPathUtils.PathUnder(parent, Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
@@ -634,7 +732,33 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
 
             var entry = new PackageArtifactManifestEntry(PackageId, "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
                 "publish", fileName, PackageHash.ComputeSha512(archivePath), false);
-            var manifestEntries = webEntry is null ? new[] { entry } : new[] { webEntry!, entry };
+            var manifestEntries = new List<PackageArtifactManifestEntry>();
+            if (webEntry is not null)
+            {
+                manifestEntries.Add(webEntry);
+            }
+
+            if (includeDocsNativeTarget.HasValue)
+            {
+                const string docsPackageId = "ForgeTrust.AppSurface.Docs";
+                const string docsProject = "Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj";
+                var docsFileName = $"{docsPackageId}.{Version}.nupkg";
+                var docsArchivePath = TestPathUtils.PathUnder(bundle, docsFileName);
+                using (var archive = ZipFile.Open(docsArchivePath, ZipArchiveMode.Create))
+                {
+                    Add(archive, $"{docsPackageId}.nuspec",
+                        $"<package><metadata><id>{docsPackageId}</id><version>{Version}</version></metadata></package>");
+                    if (includeDocsNativeTarget.Value)
+                    {
+                        Add(archive, DocsNativeReleaseEvidence.TargetPath, "<Project />");
+                    }
+                }
+
+                manifestEntries.Add(new PackageArtifactManifestEntry(docsPackageId, docsProject, "publish",
+                    docsFileName, PackageHash.ComputeSha512(docsArchivePath), false));
+            }
+
+            manifestEntries.Add(entry);
             var manifest = new PackageArtifactManifest(1, Version, DateTimeOffset.Parse("2026-09-23T00:00:00Z"), manifestEntries);
             var manifestPath = TestPathUtils.PathUnder(bundle, "package-artifact-manifest.json");
             await File.WriteAllBytesAsync(manifestPath, JsonSerializer.SerializeToUtf8Bytes(manifest, PackageArtifactJson.Options));
