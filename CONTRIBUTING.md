@@ -64,13 +64,27 @@ Good docs pull requests usually include:
 - Verification notes for commands, links, snippets, or examples that were checked.
 - For shared package-policy text, follow the [PackageIndex release-guidance maintainer guide](./tools/ForgeTrust.AppSurface.PackageIndex/README.md#release-guidance) instead of hand-copying `## Release Guidance` prose across package READMEs.
 
-## Test fixture path policy
+## Filesystem paths
 
-Tests that build a full filesystem path under a repository root, temp workspace, project directory, output directory, or other trusted base should use `TestPathUtils.PathUnder` from `ForgeTrust.AppSurface.Testing`. Add a project reference to `tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj` and a `Using Include="ForgeTrust.AppSurface.Testing"` entry when a test project needs the helper.
+Use the shared utility whenever its contract fits. For new or changed code that builds a child beneath a known root, use `PathUnder` for every child, including string literals. A later change from a literal to a parameter then keeps the same containment check. This rule also applies to equivalent uses of `Path.Combine`, `Path.Join`, `Path.GetFullPath(child, root)`, interpolation, and concatenation.
 
-Use `PathUnder` for dynamic repo-relative, temp-relative, or output-relative values such as `projectPath`, `relativePath`, and `outputRelativePath`. Use `TestPathUtils.RelativePath` only when the test needs a validated relative string rather than a full filesystem path.
+| Intent | API |
+| --- | --- |
+| Build a framework file or directory path under a known root | `PathUtils.PathUnder(root, segments)` |
+| Build a full fixture path, including the expected path in an assertion | `TestPathUtils.PathUnder(root, segments)` |
+| Build a validated relative filesystem path in a test | `TestPathUtils.RelativePath(segments)` |
+| Locate the Git repository root in framework code | `PathUtils.FindRepositoryRoot(startPath)` |
+| Locate the AppSurface solution root in tests | `TestPathUtils.FindRepoRoot(startPath)` |
 
-Literal expected paths and tests intentionally exercising `Path.Join` or `Path.Combine` platform behavior may continue to use the BCL APIs directly. If the policy test flags an intentional case, add a reasoned entry to `tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml`; entries without reasons or entries that no longer match a violation fail validation.
+Use `System.IO.Path` for operations such as getting the OS temp root, extracting a filename, or computing the relative path between two existing locations. For example, `TestPathUtils.PathUnder(Path.GetTempPath(), "report.csv")` constructs a path without creating a file. A caller that accepts an arbitrary absolute destination can normalize it with `Path.GetFullPath(destination)`. Where a feature also checks symbolic links or filesystem permissions, retain those checks alongside lexical containment. See the [Core path utilities](./ForgeTrust.AppSurface.Core/README.md#path-utilities).
+
+### Test fixture path policy
+
+Apply the same rule in fixture setup, cleanup, and assertions. Add a project reference to `tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj` and a `Using Include="ForgeTrust.AppSurface.Testing"` entry when introducing the helper to a test project. See the [fixture examples](./tests/ForgeTrust.AppSurface.Testing/README.md#common-migrations).
+
+Use raw composition when the helper itself needs the primitive or the behavior under test requires platform semantics, such as resolving an authored link containing a parent segment. Document that reason at the call site. The repository [policy test](./tests/ForgeTrust.AppSurface.Testing.Tests/TestFixturePathPolicyTests.cs) flags a subset of dynamic `Combine` and `Join` calls. Apply the full rule in review, including literal-only calls. If the check flags a necessary exception, record its reason in the [allowlist](./tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml).
+
+## Testing child processes
 
 For tests that launch a child process, use a [CliWrap-backed helper](./ForgeTrust.AppSurface.Core/README.md#process-execution-utilities)
 that returns the exit code, stdout and stderr. Assert the expected exit code and include both output streams in the

@@ -15,9 +15,13 @@ These guidelines apply to all changes made in this repository.
 - Link named concepts to their canonical documentation instead of only mentioning them. When prose names a package, guide, example, workflow, policy, diagnostic family, CLI command, or cross-package concept, add a nearby link to the best start-here or reference page unless the same paragraph already defines it completely.
 - Prefer a small set of useful cross-links over scattered repeats. Link the first meaningful mention in a section, and link again only when the reader is likely to need the destination without scrolling back.
 
+### Filesystem paths
+
+- Use the shared path utility whenever it provides the operation. For every new or changed path built beneath a known root, use `PathUtils.PathUnder` in framework code and `TestPathUtils.PathUnder` in test fixtures and assertions. This includes literal children, generated filenames, and expected paths.
+- Review direct `Path.Combine`, `Path.Join`, two-argument `Path.GetFullPath`, and hand-built path strings against that rule. Use `System.IO.Path` directly for operations the utilities do not cover, such as extracting a filename. See the [filesystem path policy](./CONTRIBUTING.md#filesystem-paths).
+
 ### Tests
 
-- Use `TestPathUtils.PathUnder` when building a fixture path beneath a known root. See the [test fixture path policy](./CONTRIBUTING.md#test-fixture-path-policy).
 - Aim for nearly 100% branch verification coverage, especially in changed code and critical execution paths.
 - Test both success paths and failure or edge-case branches.
 - Test behavior through public APIs and internal APIs that are intentionally exposed for testing.
