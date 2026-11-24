@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
+using ForgeTrust.AppSurface.PostgreSql.Testing;
+using Xunit.Sdk;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
@@ -35,6 +37,9 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
     private readonly TimeSpan _fixtureDrainTimeout;
     private readonly Func<PostgreSqlIntegrationTestDatabase, ValueTask>? _afterTemplatePreparedAsync;
     private readonly Func<ValueTask>? _beforeCaseDatabaseCreateAsync;
+    private readonly Func<bool, ValueTask<PostgreSqlIntegrationTestDatabase>> _createCaseDatabaseAsync;
+    private readonly Func<IAsyncDisposable, ValueTask> _disposeResourceAsync;
+    private readonly HashSet<IAsyncDisposable> _failedCleanupResources = [];
     private readonly object _lifecycleLock = new();
     private TaskCompletionSource _caseDatabasesDrained = CompletedSignal();
     private PostgreSqlFixtureTimingCsv? _timings;
@@ -49,7 +54,9 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
         PostgreSqlCohortFixtureOptions options,
         TimeSpan? fixtureDrainTimeout = null,
         Func<PostgreSqlIntegrationTestDatabase, ValueTask>? afterTemplatePreparedAsync = null,
-        Func<ValueTask>? beforeCaseDatabaseCreateAsync = null)
+        Func<ValueTask>? beforeCaseDatabaseCreateAsync = null,
+        Func<bool, ValueTask<PostgreSqlIntegrationTestDatabase>>? createCaseDatabaseAsync = null,
+        Func<IAsyncDisposable, ValueTask>? disposeResourceAsync = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _fixtureDrainTimeout = fixtureDrainTimeout ?? DefaultFixtureDrainTimeout;
@@ -60,6 +67,8 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
 
         _afterTemplatePreparedAsync = afterTemplatePreparedAsync;
         _beforeCaseDatabaseCreateAsync = beforeCaseDatabaseCreateAsync;
+        _createCaseDatabaseAsync = createCaseDatabaseAsync ?? CreateCaseDatabaseAsync;
+        _disposeResourceAsync = disposeResourceAsync ?? (static resource => resource.DisposeAsync());
     }
 
     internal Task InitializeAsync()
@@ -112,7 +121,7 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
 
             _template = template;
         }
-        catch (Exception preparationError)
+        catch (Exception preparationError) when (!PostgreSqlFixture.IsFatalCleanupException(preparationError))
         {
             var failures = new List<Exception> { preparationError };
             if (!preparationRecorded)
@@ -124,12 +133,17 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
             {
                 try
                 {
-                    await template.DisposeAsync();
+                    await _disposeResourceAsync(template);
                 }
-                catch (Exception cleanupError)
+                catch (Exception cleanupError) when (!PostgreSqlFixture.IsFatalCleanupException(cleanupError))
                 {
                     failures.Add(cleanupError);
+                    _template = template;
                 }
+            }
+            else if (preparationError is PostgreSqlDatabaseCleanupException failedCreate)
+            {
+                RetainFailedCleanupResource(failedCreate.Database);
             }
 
             var timings = _timings;
@@ -140,7 +154,7 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
                 {
                     await timings.DisposeAsync();
                 }
-                catch (Exception timingError)
+                catch (Exception timingError) when (!PostgreSqlFixture.IsFatalCleanupException(timingError))
                 {
                     failures.Add(timingError);
                 }
@@ -177,7 +191,7 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
             setupRecorded = true;
             return new PostgreSqlCohortReadyDatabase(tracked.Database, epoch, status);
         }
-        catch (Exception setupError)
+        catch (Exception setupError) when (!PostgreSqlFixture.IsFatalCleanupException(setupError))
         {
             var failures = new List<Exception> { setupError };
             if (!setupRecorded)
@@ -185,13 +199,11 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
                 TryRecord("database_setup", tracked.StartedTimestamp, failures);
             }
 
-            try
+            await CleanUpFailedSetupAsync(tracked, failures);
+
+            if (setupError is OperationCanceledException && failures.Count == 1)
             {
-                await tracked.Database.DisposeAsync();
-            }
-            catch (Exception cleanupError)
-            {
-                failures.Add(cleanupError);
+                throw;
             }
 
             throw CreateFailure("Database setup", failures);
@@ -206,19 +218,31 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
             RecordSetup(tracked.StartedTimestamp);
             return tracked.Database;
         }
-        catch (Exception setupError)
+        catch (Exception setupError) when (!PostgreSqlFixture.IsFatalCleanupException(setupError))
         {
             var failures = new List<Exception> { setupError };
-            try
+            await CleanUpFailedSetupAsync(tracked, failures);
+
+            if (setupError is OperationCanceledException && failures.Count == 1)
             {
-                await tracked.Database.DisposeAsync();
-            }
-            catch (Exception cleanupError)
-            {
-                failures.Add(cleanupError);
+                throw;
             }
 
             throw CreateFailure("Empty database setup", failures);
+        }
+    }
+
+    private async ValueTask CleanUpFailedSetupAsync(TrackedCaseDatabase tracked, List<Exception> failures)
+    {
+        try
+        {
+            await _disposeResourceAsync(tracked.Database);
+        }
+        catch (Exception cleanupError) when (!PostgreSqlFixture.IsFatalCleanupException(cleanupError))
+        {
+            failures.Add(cleanupError);
+            RetainFailedCleanupResource(tracked.Database);
+            tracked.ReleaseCaseDatabase();
         }
     }
 
@@ -234,7 +258,11 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
             drained = _activeCaseDatabases == 0
                 ? Task.CompletedTask
                 : _caseDatabasesDrained.Task;
-            _disposeTask ??= DisposeCoreAsync(initializationTask, drained);
+            if (_disposeTask is null || _disposeTask.IsFaulted || _disposeTask.IsCanceled)
+            {
+                _disposeTask = DisposeCoreAsync(initializationTask, drained);
+            }
+
             disposalTask = _disposeTask;
         }
 
@@ -253,31 +281,50 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
                 await _beforeCaseDatabaseCreateAsync();
             }
 
-            var database = _options.ConnectionString is { } connectionString
-                ? await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(
-                    connectionString,
-                    template: _options.UsesTemplate && !empty ? _template : null)
-                : await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+            var database = await _createCaseDatabaseAsync(empty);
 
             var released = 0;
-            database.ObserveTeardown = elapsed => _timings?.Record("database_teardown", elapsed);
-            database.AfterDispose = () =>
+            Action releaseCaseDatabase = () =>
             {
                 if (Interlocked.Exchange(ref released, 1) == 0)
                 {
                     EndCaseDatabase();
                 }
             };
-            return new TrackedCaseDatabase(database, startedTimestamp);
+            database.ObserveTeardown = elapsed => _timings?.Record("database_teardown", elapsed);
+            database.AfterDispose = releaseCaseDatabase;
+            return new TrackedCaseDatabase(database, startedTimestamp, releaseCaseDatabase);
         }
-        catch (Exception creationError)
+        catch (Exception creationError) when (!PostgreSqlFixture.IsFatalCleanupException(creationError))
         {
             var failures = new List<Exception> { creationError };
-            TryRecord("database_setup", startedTimestamp, failures);
-            EndCaseDatabase();
+            try
+            {
+                if (creationError is PostgreSqlDatabaseCleanupException failedCreate)
+                {
+                    RetainFailedCleanupResource(failedCreate.Database);
+                }
+
+                TryRecord("database_setup", startedTimestamp, failures);
+            }
+            finally
+            {
+                EndCaseDatabase();
+            }
+
+            if (creationError is (OperationCanceledException or SkipException) && failures.Count == 1)
+            {
+                throw;
+            }
+
             throw CreateFailure("Database creation", failures);
         }
     }
+
+    private ValueTask<PostgreSqlIntegrationTestDatabase> CreateCaseDatabaseAsync(bool empty) =>
+        _options.ConnectionString is { } connectionString
+            ? PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(connectionString, template: _options.UsesTemplate && !empty ? _template : null)
+            : PostgreSqlIntegrationTestDatabase.TryCreateAsync();
 
     private async Task DisposeCoreAsync(Task? initializationTask, Task drained)
     {
@@ -287,22 +334,23 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
             {
                 await initializationTask;
             }
-            catch
+            catch (Exception exception) when (!PostgreSqlFixture.IsFatalCleanupException(exception))
             {
-                // Initialization reports its own failure after cleaning unpublished resources.
+                // Initialization already reported the error and retained any owned resource that still needs cleanup.
             }
         }
 
         await drained;
-
         var failures = new List<Exception>();
-        if (_template is not null)
+        await RetryFailedCleanupResourcesAsync(failures);
+        if (failures.Count == 0 && _template is not null)
         {
             try
             {
-                await _template.DisposeAsync();
+                await _disposeResourceAsync(_template);
+                _template = null;
             }
-            catch (Exception cleanupError)
+            catch (Exception cleanupError) when (!PostgreSqlFixture.IsFatalCleanupException(cleanupError))
             {
                 failures.Add(cleanupError);
             }
@@ -316,7 +364,7 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
             {
                 await timings.DisposeAsync();
             }
-            catch (Exception timingError)
+            catch (Exception timingError) when (!PostgreSqlFixture.IsFatalCleanupException(timingError))
             {
                 failures.Add(timingError);
             }
@@ -366,10 +414,44 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
     {
         lock (_lifecycleLock)
         {
-            _activeCaseDatabases--;
-            if (_activeCaseDatabases == 0)
+            if (--_activeCaseDatabases == 0)
             {
                 _caseDatabasesDrained.TrySetResult();
+            }
+        }
+    }
+
+    // Transfer failed setup resources to the cohort before releasing the case reservation.
+    // Once the reservations drain, the cohort owns every cleanup the caller could not finish.
+    private void RetainFailedCleanupResource(IAsyncDisposable resource)
+    {
+        lock (_lifecycleLock)
+        {
+            _failedCleanupResources.Add(resource);
+        }
+    }
+
+    private async Task RetryFailedCleanupResourcesAsync(List<Exception> failures)
+    {
+        IAsyncDisposable[] resources;
+        lock (_lifecycleLock)
+        {
+            resources = _failedCleanupResources.ToArray();
+        }
+
+        foreach (var resource in resources)
+        {
+            try
+            {
+                await _disposeResourceAsync(resource);
+                lock (_lifecycleLock)
+                {
+                    _failedCleanupResources.Remove(resource);
+                }
+            }
+            catch (Exception cleanupError) when (!PostgreSqlFixture.IsFatalCleanupException(cleanupError))
+            {
+                failures.Add(cleanupError);
             }
         }
     }
@@ -403,7 +485,7 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
         {
             _timings.RecordElapsed(phase, startedTimestamp);
         }
-        catch (Exception timingError)
+        catch (Exception timingError) when (!PostgreSqlFixture.IsFatalCleanupException(timingError))
         {
             failures.Add(timingError);
         }
@@ -411,11 +493,18 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
 
     private static PostgreSqlFixtureException CreateFailure(string phase, IReadOnlyList<Exception> failures)
     {
-        var detail = failures.Count == 1
-            ? PostgreSqlFixtureException.Describe(failures[0])
-            : PostgreSqlFixtureException.Describe(new AggregateException(failures));
+        var detail = string.Join(", ", failures.Select(DescribeFailure));
         return new PostgreSqlFixtureException($"{phase} failed ({detail}). Preserve the original diagnostic and reconcile cleanup before retrying.");
     }
+
+    private static string DescribeFailure(Exception error) => error switch
+    {
+        PostgreSqlDatabaseCleanupException cleanup => cleanup.OperationError is null
+            ? cleanup.Message
+            : $"{cleanup.Message} Operation failed ({DescribeFailure(cleanup.OperationError)}).",
+        AggregateException aggregate => string.Join(", ", aggregate.InnerExceptions.Select(DescribeFailure)),
+        _ => PostgreSqlFixtureException.Describe(error),
+    };
 
     private static TaskCompletionSource CompletedSignal()
     {
@@ -426,7 +515,8 @@ internal sealed class PostgreSqlCohortFixtureCore : IAsyncDisposable
 
     private sealed record TrackedCaseDatabase(
         PostgreSqlIntegrationTestDatabase Database,
-        long StartedTimestamp);
+        long StartedTimestamp,
+        Action ReleaseCaseDatabase);
 }
 
 internal sealed class PostgreSqlCohortReadyDatabase(

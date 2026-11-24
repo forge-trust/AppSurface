@@ -49,6 +49,8 @@ A failed create with an unknown acknowledgement, or a different OID under a reco
 
 If an owned clone’s drop fails, its case keeps the fixture lease. Once the failed attempt has finished and ownership is confirmed, retry disposal on the same case handle. Successful cleanup releases the lease and lets fixture disposal remove the template.
 
+If setup fails before handing a case to its caller, the cohort retains any known lease that still needs cleanup. On disposal it waits for active cases, retries retained resources, then drops the template. Concurrent disposals share the same attempt. If a drop fails, resolve the server condition and call `DisposeAsync` again on the same cohort. If the rekey commit loses its acknowledgement, activation discards the owned clone using its recorded OID.
+
 ## Compare baseline and candidate
 
 The [original five-pair measurement and two verification runs](../../artifacts/issue-931-fixture-benchmark/results.md) yielded a no-go in the decision sample, a no-go in the first verification, and a pass on the repaired build. The decision sample missed the variability threshold. Fresh is the supported default for these cohorts. The template arm was a median 0.883 s faster across the five new pairs (+6.56% gain). The recorded decision was `NO_GO`. [Shared-fixture results and timings](../../artifacts/issue-931-fixture-benchmark/shared-fixture-results.md)
@@ -92,6 +94,8 @@ python3 scripts/postgresql-fixture-benchmark.py run \
 ```
 
 The acceptance TRX must include the server metadata test, which records the SHA-256 of its executing test assembly. The runner compares that hash with the Release assembly it measures. A separate, untimed invocation of the metadata test verifies the supplied settings against the measurement server before warmup. Read `summary.md` for the decision and `index.md` for the acceptance, server and process records. The runner refuses an existing results root. Preserve an invalid attempt and use a new directory for a repeat. Raw TRX, collector output and SDK information can contain local filesystem paths. Inspect the export for private machine or connection details before sharing it.
+
+The paired runner gives each warmup and measured cohort process 15 minutes. A timeout produces an invalid receipt with the available logs and excludes that process from the timing sample.
 
 ## Test-project entry points
 

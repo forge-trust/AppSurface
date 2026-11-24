@@ -150,6 +150,56 @@ public sealed class PostgreSqlCohortFixtureTests
     }
 
     [Fact]
+    public async Task CreateTrackedDatabaseAsync_RethrowsLocalSkipWithoutWrappingIt()
+    {
+        var skip = Xunit.Sdk.SkipException.ForSkip("Intentional local PostgreSQL opt-out.");
+        await using var fixture = new PostgreSqlCohortFixtureCore(
+            PostgreSqlCohortFixtureOptions.Parse(nameof(PostgreSqlCohortFixtureTests), "fresh", null, null),
+            createCaseDatabaseAsync: _ => ValueTask.FromException<PostgreSqlIntegrationTestDatabase>(skip));
+
+        var observed = await Assert.ThrowsAsync<Xunit.Sdk.SkipException>(() =>
+            fixture.CreateReadyDatabaseAsync("fixture-tests", "local-skip").AsTask());
+
+        Assert.Same(skip, observed);
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task InitializeAsync_RetainsUnpublishedTemplateWhenCompensatingCleanupFails()
+    {
+        await using var anchor = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        string? templateName = null;
+        var disposeAttempts = 0;
+        await using var fixture = new PostgreSqlCohortFixtureCore(
+            TemplateOptions(anchor),
+            afterTemplatePreparedAsync: template =>
+            {
+                templateName = new NpgsqlConnectionStringBuilder(template.ConnectionString).Database;
+                return ValueTask.FromException(new InvalidOperationException("Injected template preparation failure."));
+            },
+            disposeResourceAsync: async resource =>
+            {
+                if (Interlocked.Increment(ref disposeAttempts) == 1)
+                {
+                    throw new InvalidOperationException("Injected template cleanup failure.");
+                }
+
+                await resource.DisposeAsync();
+            });
+
+        var initializationError = await Assert.ThrowsAsync<PostgreSqlFixtureException>(
+            () => fixture.InitializeAsync());
+        Assert.Contains("Template preparation", initializationError.Message, StringComparison.Ordinal);
+        Assert.NotNull(templateName);
+        Assert.True(await DatabaseExistsAsync(anchor, templateName));
+
+        await fixture.DisposeAsync().AsTask().WaitAsync(TestOperationTimeout);
+
+        Assert.Equal(2, disposeAttempts);
+        Assert.False(await DatabaseExistsAsync(anchor, templateName));
+    }
+
+    [Fact]
     public async Task CreateReadyDatabaseAsync_ActivationFailureDisposesCloneReleasesLeaseAndCleansTemplate()
     {
         await using var anchor = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -164,14 +214,32 @@ public sealed class PostgreSqlCohortFixtureTests
 
         try
         {
+            PostgreSqlIntegrationTestDatabase? preparedTemplate = null;
+            string? failedCaseDatabaseName = null;
+            var failedCaseDisposeAttempts = 0;
             await using var fixture = new PostgreSqlCohortFixtureCore(
                 options,
                 fixtureDrainTimeout: TimeSpan.FromMilliseconds(100),
                 afterTemplatePreparedAsync: async template =>
                 {
+                    preparedTemplate = template;
                     templateName = new NpgsqlConnectionStringBuilder(template.ConnectionString).Database;
                     await new PostgreSqlDurableRuntimeSchemaManager(template.DataSource)
                         .InitializeRuntimeEpochAsync(seededEpoch, "fixture-tests", "issue-931-invalid-template");
+                },
+                disposeResourceAsync: async resource =>
+                {
+                    if (resource is PostgreSqlIntegrationTestDatabase database &&
+                        !ReferenceEquals(database, preparedTemplate) &&
+                        Interlocked.Increment(ref failedCaseDisposeAttempts) == 1)
+                    {
+                        failedCaseDatabaseName = new NpgsqlConnectionStringBuilder(database.ConnectionString).Database;
+                        await database.DisposeAsync(_ =>
+                            ValueTask.FromException(new InvalidOperationException("Injected clone cleanup failure.")));
+                        return;
+                    }
+
+                    await resource.DisposeAsync();
                 });
 
             await fixture.InitializeAsync().WaitAsync(TestOperationTimeout);
@@ -180,10 +248,15 @@ public sealed class PostgreSqlCohortFixtureTests
                 () => fixture.CreateReadyDatabaseAsync("fixture-tests", "issue-931").AsTask());
 
             Assert.Contains("active runtime epoch", activationError.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(1, failedCaseDisposeAttempts);
+            Assert.NotNull(failedCaseDatabaseName);
+            Assert.True(await DatabaseExistsAsync(anchor, failedCaseDatabaseName));
             Assert.NotNull(templateName);
 
             await fixture.DisposeAsync().AsTask().WaitAsync(TestOperationTimeout);
 
+            Assert.Equal(2, failedCaseDisposeAttempts);
+            Assert.False(await DatabaseExistsAsync(anchor, failedCaseDatabaseName));
             Assert.False(await DatabaseExistsAsync(anchor, templateName));
             var phases = (await File.ReadAllLinesAsync(timingPath))
                 .Skip(1)
