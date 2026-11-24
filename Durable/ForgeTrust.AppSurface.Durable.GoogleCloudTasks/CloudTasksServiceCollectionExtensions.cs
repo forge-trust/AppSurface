@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
 /// <summary>Explicit singleton registration for the optional Google Cloud Tasks transport.</summary>
 /// <remarks>Register a single singleton token source before activation. See <see href="https://github.com/forge-trust/AppSurface/blob/main/Durable/cloudtasks-activation.md#registration"/>.</remarks>

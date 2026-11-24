@@ -477,6 +477,14 @@ internal sealed class PackageIndexGenerator
         }
 
         ValidateToolCommandName(entry, metadata);
+        if (entry.PrereleaseInstall
+            && (entry.Classification != PackageClassification.Public
+                || metadata.IsTool || metadata.IsTemplate))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Project}' can set 'prerelease_install' only for a public library.");
+        }
+
         ValidatePublishContract(entry, knownPackageIds);
     }
 
@@ -726,7 +734,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("AppSurface is a coordinated .NET 10 package family. Start with the package that matches the app you're building, then add optional modules only when your app needs them.");
         builder.AppendLine();
-        builder.AppendLine($"{targetFrameworkSummary} Published library rows use `dotnet package add`; in .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Tool rows use `dotnet tool install`. Template rows use `dotnet new install <package-id>@<version>` and require an explicit released version. Public previews marked publication held are source-only and intentionally have no install command.");
+        builder.AppendLine($"{targetFrameworkSummary} Published library rows use `dotnet package add`; in .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Library rows marked for prerelease installs include `--prerelease`. Pin the same version across coordinated packages when adding one to an existing app. Tool rows use `dotnet tool install`. Template rows use `dotnet new install <package-id>@<version>` and require an explicit released version. Public previews marked publication held are source-only and intentionally have no install command.");
         builder.AppendLine();
         builder.AppendLine("## Web app");
         builder.AppendLine();
@@ -743,7 +751,7 @@ internal sealed class PackageIndexGenerator
         else
         {
             builder.AppendLine("```bash");
-            builder.AppendLine(webEntry.Metadata.InstallCommand);
+            builder.AppendLine(GetInstallCommand(webEntry));
             builder.AppendLine("```");
         }
         builder.AppendLine();
@@ -905,6 +913,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("- Package readiness evidence is package-index review evidence. Per-version release consistency lives in `releases/v{version}.evidence.json` and is validated by the release cockpit.");
         builder.AppendLine($"- Follow the {FormatMarkdownLink("coordinated release-links guide", GetCanonicalRepositoryUrl(CoordinatedReleaseLinksGuidePath))}: use `release_track: coordinated` for the frozen tree-local current pointer, or `release_track: explicit` with `release_notes_path` for a package-specific historical story.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
+        builder.AppendLine("- Set `prerelease_install: true` for a public library with `publish_decision: publish` when its available versions are prereleases. The chooser adds `--prerelease`. Remove the flag once a stable install is available. See the [PackageIndex maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#chooser-install-commands).");
         builder.AppendLine("- Keep `tool_command_name` aligned with each published .NET tool project's `ToolCommandName` so package validation, pre-publish coverage proof, and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including stable or prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, release-guidance variants, readiness blockers, or readiness notes; it reports changed and managed README-region counts.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm package-index outputs and managed README guidance are current without writing files.");
@@ -1583,8 +1592,12 @@ internal sealed class PackageIndexGenerator
 
         return entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish
             ? "Source only - publication held"
-            : $"`{entry.Metadata.InstallCommand}`";
+            : $"`{GetInstallCommand(entry)}`";
     }
+
+    private static string GetInstallCommand(ResolvedPackageEntry entry) => entry.Manifest.PrereleaseInstall
+        ? $"{entry.Metadata.InstallCommand} --prerelease"
+        : entry.Metadata.InstallCommand;
 
     private static void AppendReleaseSummary(
         StringBuilder builder,
@@ -2793,6 +2806,13 @@ internal sealed class PackageManifestEntry
     /// Gets the optional chooser label used for the linked documentation target.
     /// </summary>
     public string? StartHereLabel { get; init; }
+
+    /// <summary>
+    /// Gets whether the chooser adds <c>--prerelease</c> to this public library's install command.
+    /// Defaults to false. Set it for a library whose available releases are prereleases.
+    /// Libraries held from publication have no install command.
+    /// </summary>
+    public bool PrereleaseInstall { get; init; }
 
     /// <summary>
     /// Gets the optional recipe summary shown in the “Also building...” section.

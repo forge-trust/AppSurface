@@ -86,7 +86,7 @@ public sealed class CloudTasksNeutralPackageContractTests
     [Fact]
     public void Read_DoesNotNormalizeCloudTasksOrExternalDependencyVersions()
     {
-        using var fixture = new PackageFixture($"<package><metadata><dependencies><group targetFramework=\"net10.0\"><dependency id=\"ForgeTrust.AppSurface.Durable.CloudTasks\" version=\"{Version}\"/><dependency id=\"Google.Cloud.Tasks.V2\" version=\"{Version}\"/></group></dependencies></metadata></package>");
+        using var fixture = new PackageFixture($"<package><metadata><dependencies><group targetFramework=\"net10.0\"><dependency id=\"ForgeTrust.AppSurface.Durable.GoogleCloudTasks\" version=\"{Version}\"/><dependency id=\"Google.Cloud.Tasks.V2\" version=\"{Version}\"/></group></dependencies></metadata></package>");
 
         using var document = System.Text.Json.JsonDocument.Parse(CloudTasksNeutralPackageContract.Read(fixture.Path, Version));
         var dependencies = document.RootElement.GetProperty("Dependencies").GetProperty("Groups")[0].GetProperty("Dependencies");

@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 /// <summary>Proves the packed Cloud Tasks API, invalid-token no-I/O behavior, and neutral Durable graph isolation.</summary>
 internal sealed class CloudTasksPackageConsumerProof
 {
-    internal const string PackageId = "ForgeTrust.AppSurface.Durable.CloudTasks";
+    internal const string PackageId = "ForgeTrust.AppSurface.Durable.GoogleCloudTasks";
     internal const string DeterministicPackageTimestamp = "2000-01-01T00:00:00Z";
     /// <summary>Names the report file invalidated before every direct packed-proof run.</summary>
     internal const string ReportFileName = "cloudtasks-package-consumer-proof.md";
@@ -413,7 +413,7 @@ internal sealed class CloudTasksPackageConsumerProof
             <Project>
               <PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile><AppSurfacePackageVersion>{version}</AppSurfacePackageVersion></PropertyGroup>
               <ItemGroup>
-                <PackageVersion Include="ForgeTrust.AppSurface.Durable.CloudTasks" Version="$(AppSurfacePackageVersion)" />
+                <PackageVersion Include="ForgeTrust.AppSurface.Durable.GoogleCloudTasks" Version="$(AppSurfacePackageVersion)" />
                 <PackageVersion Include="ForgeTrust.AppSurface.Durable" Version="$(AppSurfacePackageVersion)" />
                 <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
               </ItemGroup>
@@ -550,7 +550,7 @@ internal sealed class CloudTasksPackageConsumerProof
             expected.Add(package.Name, (version, hash, dependencies));
         }
         var rootPackageIds = graph.DirectDependencies.Keys.Where(id =>
-            string.Equals(id, "ForgeTrust.AppSurface.Durable.CloudTasks", StringComparison.OrdinalIgnoreCase)
+            string.Equals(id, "ForgeTrust.AppSurface.Durable.GoogleCloudTasks", StringComparison.OrdinalIgnoreCase)
             || string.Equals(id, "Microsoft.Extensions.DependencyInjection", StringComparison.OrdinalIgnoreCase)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var actual = graph.Nodes.Values.Where(node => !rootPackageIds.Contains(node.Id)).ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
         var missing = expected.Keys.Except(actual.Keys, StringComparer.OrdinalIgnoreCase).ToArray();

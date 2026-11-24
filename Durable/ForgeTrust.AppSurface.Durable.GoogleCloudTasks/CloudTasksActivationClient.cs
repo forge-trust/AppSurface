@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using Grpc.Core;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
 /// <summary>Owns one explicitly credentialed creation invocation and classifies only safe evidence.</summary>
 internal sealed class CloudTasksActivationClient(
@@ -117,7 +117,7 @@ internal sealed class CloudTasksResponseLimitException : Exception
 internal static class CloudTasksDiagnostics
 {
     /// <summary>Name for standard .NET Activity listeners.</summary>
-    internal const string SourceName = "ForgeTrust.AppSurface.Durable.CloudTasks";
+    internal const string SourceName = "ForgeTrust.AppSurface.Durable.GoogleCloudTasks";
     // InformationalVersion carries the NuGet prerelease; AssemblyVersion is fixed for binary compatibility.
     private static readonly string PackageVersion = typeof(CloudTasksDiagnostics).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+', 2)[0];

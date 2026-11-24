@@ -4,9 +4,9 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests;
 
 // protects: owner-approved protocol-declared unprocessed replay boundary.
 // fails_when: GOAWAY bypasses the finite .NET retry bound or becomes application retry.

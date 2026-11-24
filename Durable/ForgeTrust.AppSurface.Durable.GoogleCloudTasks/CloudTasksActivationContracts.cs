@@ -1,4 +1,4 @@
-namespace ForgeTrust.AppSurface.Durable.CloudTasks;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
 /// <summary>Describes the fixed Cloud Tasks queue and payload-free worker wake target.</summary>
 /// <remarks>
