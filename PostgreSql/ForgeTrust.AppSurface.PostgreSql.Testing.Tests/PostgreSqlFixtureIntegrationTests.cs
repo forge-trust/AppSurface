@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.PostgreSql.Testing.Tests;
 
 public sealed class PostgreSqlFixtureIntegrationTests
 {
-    [Fact]
+    [SkippableFact]
     public async Task RunFromTemplateAsync_InitializesOnceAndCreatesIndependentClones()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -51,7 +51,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         Assert.Equal(4, cloneNames.Distinct(StringComparer.Ordinal).Count());
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RunFromTemplateAsync_CloneChangesRemainPrivateToEachClone()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -114,7 +114,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         Assert.Equal(2, cloneNames.Distinct(StringComparer.Ordinal).Count());
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task SeparateFixtureOwners_CreateAndCleanOnlyTheirOwnTemplates()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -182,7 +182,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         Assert.Equal(1, secondInitializationCount);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CleanupAllAsync_WaitsForActiveCloneAndReportsConcurrentCleanup()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -256,12 +256,12 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CleanupTemplatesAsync_IsSelectiveAndLongPrefixesRemainDistinct()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
         var fixture = new PostgreSqlFixture();
-        var sharedPrefix = new string('l', 70);
+        var sharedPrefix = PostgreSqlTestServer.NewPrefix("long").PadRight(70, 'l');
         var firstTemplatePrefix = $"{sharedPrefix}_first";
         var secondTemplatePrefix = $"{sharedPrefix}_second";
 
@@ -318,7 +318,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CleanupAllAsync_ReportsCanceledCleanupAndAllowsRetry()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -356,7 +356,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RunFreshAsync_PropagatesActionFailureAndDropsTheDatabase()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -383,7 +383,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connectionString, databaseName));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RunFromTemplateAsync_FailedInitializationIsCleanedAndCanBeRetried()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -435,7 +435,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         Assert.Equal(2, initializationCount);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RunFromTemplateAsync_FailedRollbackDropIsRetainedForCleanupRetry()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -443,10 +443,11 @@ public sealed class PostgreSqlFixtureIntegrationTests
         var templatePrefix = PostgreSqlTestServer.NewPrefix("initializer_drop_retry");
         var templateDatabaseNames = new List<string>();
         var initializationCount = 0;
+        var initializationError = new InvalidOperationException("template initializer failure after blocking rollback");
 
         try
         {
-            var rollbackFailure = await Assert.ThrowsAsync<PostgresException>(() => fixture.RunFromTemplateAsync(
+            var rollbackFailure = await Assert.ThrowsAsync<PostgreSqlDatabaseCleanupException>(() => fixture.RunFromTemplateAsync(
                 connectionString,
                 PostgreSqlTestServer.NewPrefix("initializer_drop_retry_clone"),
                 templatePrefix,
@@ -458,12 +459,14 @@ public sealed class PostgreSqlFixtureIntegrationTests
                         "SELECT current_database();");
                     templateDatabaseNames.Add(databaseName);
                     await SetDatabaseTemplateFlagAsync(connectionString, databaseName, true);
-                    throw new InvalidOperationException("template initializer failure after blocking rollback");
+                    throw initializationError;
                 },
                 static (_, _) => Task.CompletedTask));
 
-            Assert.Contains("template", rollbackFailure.Message, StringComparison.OrdinalIgnoreCase);
             var databaseName = Assert.Single(templateDatabaseNames);
+            Assert.Equal(databaseName, rollbackFailure.Database.Name);
+            Assert.Same(initializationError, rollbackFailure.OperationError);
+            Assert.Contains("template", Assert.IsType<PostgresException>(rollbackFailure.CleanupError).Message, StringComparison.OrdinalIgnoreCase);
             var cleanupFailure = await Assert.ThrowsAsync<TemplateCleanupException>(async () =>
                 await fixture.CleanupAllAsync());
 
@@ -519,14 +522,14 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task ProcessExit_RemovesTemplateOwnedByNormallyExitingChildProcess()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
         var templatePrefix = PostgreSqlTestServer.NewPrefix("process_exit_template");
         var processName = "ForgeTrust.AppSurface.PostgreSql.Testing.Tests"
             + (OperatingSystem.IsWindows() ? ".exe" : string.Empty);
-        var startInfo = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, processName))
+        var startInfo = new ProcessStartInfo(Path.Join(AppContext.BaseDirectory, processName))
         {
             RedirectStandardError = true,
             RedirectStandardOutput = true,
@@ -561,7 +564,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connectionString, templateDatabaseName));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Cancellation_DoesNotCancelSharedInitializationAndFreshDatabaseIsDropped()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -641,7 +644,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connectionString, freshDatabaseName));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RunFreshAsync_CancellationAfterCatalogLockAcquisitionCancelsCreateAndCleansDatabase()
     {
         const long databaseCatalogLockKey = 5_300_219_492_281_001;
@@ -733,7 +736,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task WithClusterInitializationLockAsync_SerializesClusterWideInitialization()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -749,7 +752,12 @@ public sealed class PostgreSqlFixtureIntegrationTests
 
         await firstActionEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var waiterName = PostgreSqlTestServer.NewPrefix("cluster_lock_waiter");
-        var waiterConnectionString = new NpgsqlConnectionStringBuilder(connectionString) { ApplicationName = waiterName };
+        var waiterConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            ApplicationName = waiterName,
+            Pooling = true,
+            Multiplexing = true,
+        };
         var second = PostgreSqlFixture.WithClusterInitializationLockAsync(waiterConnectionString.ConnectionString, cancellationToken =>
         {
             secondActionEntered.TrySetResult();
@@ -827,7 +835,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         return names;
     }
 
-    [Theory]
+    [SkippableTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task FailedCaseDrop_RetainsTheDatabaseUntilHostCleanupCanRetry(bool useTemplate)
@@ -897,7 +905,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task ProcessExit_PreservesFailedFreshDropForTheNextCleanupAttempt()
     {
         var connection = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -931,7 +939,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CanceledCreate_ExposesVerifiedLeaseWhenRollbackFails()
     {
         var connection = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -958,6 +966,98 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
 
         Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connection, error.Database.Name));
+    }
+
+    [SkippableFact]
+    public async Task CleanupAllAsync_ReportsRemovalWhenSelectedTemplateCreateIsRejected()
+    {
+        var connection = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
+        var readOnly = new NpgsqlConnectionStringBuilder(connection) { Options = "-c default_transaction_read_only=on" };
+        var fixture = new PostgreSqlFixture();
+        await using var admin = new NpgsqlConnection(PostgreSqlCatalog.MaintenanceConnectionString(connection));
+        await admin.OpenAsync();
+        Task preparation = Task.CompletedTask;
+        Task<TemplateCleanupResult>? cleanup = null;
+
+        try
+        {
+            await PostgreSqlCatalog.WithDatabaseCatalogLockAsync(admin, () =>
+            {
+                preparation = fixture.RunFromTemplateAsync(readOnly.ConnectionString, "rejected_case", "rejected_template",
+                    (_, _) => Task.CompletedTask, (_, _) => Task.CompletedTask);
+                cleanup = fixture.CleanupAllAsync().AsTask();
+                return Task.CompletedTask;
+            }, CancellationToken.None);
+
+            var error = await Assert.ThrowsAsync<PostgresException>(() => preparation);
+            Assert.Equal(PostgresErrorCodes.ReadOnlySqlTransaction, error.SqlState);
+            var result = await cleanup!;
+            Assert.Equal(TemplateCleanupStatus.Removed, Assert.Single(result.Outcomes).Status);
+        }
+        finally
+        {
+            await fixture.CleanupAllAsync();
+        }
+    }
+
+    [SkippableFact]
+    public async Task CleanupAllAsync_RetriesFreshDatabaseWhileTemplateInitializerIsStillRunning()
+    {
+        var connection = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
+        var fixture = new PostgreSqlFixture();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task template = Task.CompletedTask;
+        Task<TemplateCleanupResult>? cleanup = null;
+        string? fresh = null;
+        try
+        {
+            var protectedDrop = await Assert.ThrowsAsync<PostgreSqlDatabaseCleanupException>(() =>
+                fixture.RunFreshAsync(connection, "fresh_retry", async (database, _) =>
+                {
+                    fresh = new NpgsqlConnectionStringBuilder(database).Database!;
+                    await SetDatabaseTemplateFlagAsync(connection, fresh, true);
+                }));
+            await SetDatabaseTemplateFlagAsync(connection, protectedDrop.Database.Name, false);
+
+            template = fixture.RunFromTemplateAsync(connection, "busy_case", "busy_template", async (_, token) =>
+            {
+                entered.SetResult();
+                await release.Task.WaitAsync(token);
+            }, (_, _) => Task.CompletedTask);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await entered.Task.WaitAsync(deadline.Token);
+            cleanup = fixture.CleanupAllAsync().AsTask();
+            while (await PostgreSqlTestServer.DatabaseExistsAsync(connection, protectedDrop.Database.Name))
+            {
+                await Task.Delay(25, deadline.Token);
+            }
+
+            Assert.False(cleanup.IsCompleted);
+        }
+        finally
+        {
+            release.TrySetResult();
+            if (fresh is not null && await PostgreSqlTestServer.DatabaseExistsAsync(connection, fresh))
+            {
+                await SetDatabaseTemplateFlagAsync(connection, fresh, false);
+            }
+
+            try
+            {
+                await template;
+                if (cleanup is not null)
+                {
+                    var result = await cleanup;
+                    Assert.Equal(fresh, Assert.Single(result.FreshDatabaseOutcomes).DatabaseName);
+                    Assert.Equal(1, result.RemovedTemplateCount);
+                }
+            }
+            finally
+            {
+                await fixture.CleanupAllAsync();
+            }
+        }
     }
 
     private static async Task SetDatabaseTemplateFlagAsync(string connectionString, string databaseName, bool isTemplate)

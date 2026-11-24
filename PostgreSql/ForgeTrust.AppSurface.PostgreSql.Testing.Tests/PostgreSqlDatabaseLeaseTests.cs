@@ -4,7 +4,7 @@ namespace ForgeTrust.AppSurface.PostgreSql.Testing.Tests;
 
 public sealed class PostgreSqlDatabaseLeaseTests
 {
-    [Fact]
+    [SkippableFact]
     public async Task CreateAndCloneAsync_VerifiesIdentityCopiesContentsAndDropsByName()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -92,7 +92,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CreateNamedAsync_ReportsLostCatalogLockAndRemovesOwnedDatabase()
     {
         var connection = MaintenanceConnectionString(await PostgreSqlTestServer.GetRequiredConnectionStringAsync());
@@ -121,7 +121,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CloneAsync_RejectsExternallyRemovedTemplate()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -141,7 +141,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         Assert.False(await PostgreSqlTestServer.DatabaseExistsAsync(connectionString, lease.Name));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task VerifyConnectedIdentityAsync_RejectsTransactionFromDifferentConnection()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -166,7 +166,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         await lease.VerifyConnectedIdentityAsync(transactionConnection, transaction);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task ExistsAsync_RejectsWrongServerBeforeOpeningConnection()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -186,7 +186,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         Assert.Equal(System.Data.ConnectionState.Closed, wrongServer.State);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CreateAndCloneAsync_RejectsInvalidParametersAndMultiHostConnectionStrings()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -219,7 +219,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CreateAsync_CancellationBeforeDispatchDoesNotCreateADatabase()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -243,7 +243,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
             MaintenanceConnectionString(connectionString), prefix));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task ExistsAsync_RejectsRenamedDatabaseWhenItsOidStillExists()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -275,7 +275,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CloneAsync_StaleSourceLeavesReplacementDatabaseSessionsIntact()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -339,7 +339,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CreateAsync_UnknownAcknowledgementPreservesTargetAndSanitizesDiagnostics()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
@@ -356,18 +356,18 @@ public sealed class PostgreSqlDatabaseLeaseTests
         try
         {
             var failure = await Assert.ThrowsAsync<PostgreSqlDatabaseOwnershipException>(() =>
-                PostgreSqlDatabaseLease.CreateAsync(connectionString, prefix, (name, _) =>
+                PostgreSqlDatabaseLease.CreateAsync(connectionString, prefix, async (name, _) =>
                 {
                     databaseName = name;
-                    return ValueTask.FromException(new NpgsqlException(
-                        $"Simulated lost CREATE acknowledgement for {diagnosticConnectionString}."));
+                    databaseOid = await ReadDatabaseOidAsync(maintenanceConnectionString, name);
+                    throw new NpgsqlException($"Simulated lost CREATE acknowledgement for {diagnosticConnectionString}.");
                 }, CancellationToken.None));
 
             Assert.NotNull(databaseName);
             Assert.Contains(databaseName, failure.Message, StringComparison.Ordinal);
             Assert.DoesNotContain(sentinelPassword, failure.ToString(), StringComparison.Ordinal);
             Assert.DoesNotContain(diagnosticConnectionString, failure.ToString(), StringComparison.Ordinal);
-            databaseOid = await ReadDatabaseOidAsync(maintenanceConnectionString, databaseName);
+            Assert.Equal(databaseOid, await ReadDatabaseOidAsync(maintenanceConnectionString, databaseName));
             Assert.NotEqual(0u, databaseOid);
         }
         finally
@@ -379,10 +379,16 @@ public sealed class PostgreSqlDatabaseLeaseTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task CreateAsync_CancellationAfterDispatchCapturesAndDropsCreatedDatabase()
     {
-        var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(await PostgreSqlTestServer.GetRequiredConnectionStringAsync())
+        {
+            Database = "postgres",
+            Pooling = true,
+            MaxPoolSize = 1,
+            Timeout = 3,
+        }.ConnectionString;
         var maintenanceConnectionString = MaintenanceConnectionString(connectionString);
         var prefix = PostgreSqlTestServer.NewPrefix("lease_cancel_after_dispatch");
         var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -422,8 +428,9 @@ public sealed class PostgreSqlDatabaseLeaseTests
                     {
                         createdLease = await createTask;
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                     {
+                        // Cancellation is the expected result. The OID-checked cleanup below also runs on assertion failure.
                     }
                 }
 
@@ -442,7 +449,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task DropAsync_FailedDropRetainsCloneRegistrationAndConcurrentRetryIsIdempotent()
     {
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();

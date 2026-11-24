@@ -1,6 +1,5 @@
 using Npgsql;
 using Testcontainers.PostgreSql;
-using Xunit.Sdk;
 
 namespace ForgeTrust.AppSurface.PostgreSql.Testing.Tests;
 
@@ -60,11 +59,7 @@ internal static class PostgreSqlTestServer
         {
             return await containerTask;
         }
-        catch (SkipException)
-        {
-            throw;
-        }
-        catch
+        catch (Exception failure) when (failure is not Xunit.SkipException)
         {
             await SharedContainerGate.WaitAsync();
             try
@@ -85,27 +80,36 @@ internal static class PostgreSqlTestServer
 
     private static async Task<PostgreSqlContainer> CreateSharedContainerAsync()
     {
-        var container = new PostgreSqlBuilder(PostgreSqlImage)
-            .WithDatabase("appsurface_postgresql_testing")
-            .WithUsername("appsurface")
-            .WithPassword("appsurface-test-password")
-            .WithCleanUp(true)
-            .Build();
-
+        PostgreSqlContainer? container = null;
         try
         {
+            container = new PostgreSqlBuilder(PostgreSqlImage)
+                .WithDatabase("appsurface_postgresql_testing")
+                .WithUsername("appsurface")
+                .WithPassword("appsurface-test-password")
+                .WithCleanUp(true)
+                .Build();
+
             await container.StartAsync();
             await VerifyServerAsync(container.GetConnectionString());
             return container;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await container.DisposeAsync();
+            if (container is not null)
+            {
+                await container.DisposeAsync();
+            }
+
             throw CreateContainerPrerequisiteException(exception);
         }
         catch
         {
-            await container.DisposeAsync();
+            if (container is not null)
+            {
+                await container.DisposeAsync();
+            }
+
             throw;
         }
     }
@@ -124,7 +128,7 @@ internal static class PostgreSqlTestServer
             StringComparison.OrdinalIgnoreCase);
         if (allowLocalSkip && !runningInCi)
         {
-            return SkipException.ForSkip(message);
+            return new Xunit.SkipException(message, exception);
         }
 
         return new InvalidOperationException(

@@ -17,7 +17,7 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
         Name = name;
         Oid = oid;
         ConnectionString = PostgreSqlCatalog.Target(connectionString, name);
-        maintenanceConnectionString = PostgreSqlCatalog.Target(connectionString, "postgres");
+        maintenanceConnectionString = PostgreSqlCatalog.MaintenanceConnectionString(connectionString);
         server = PostgreSqlCatalog.ServerEndpoint(connectionString);
         this.parent = parent;
         if (parent != null)
@@ -90,11 +90,12 @@ public sealed class PostgreSqlDatabaseLease : IAsyncDisposable
         bool disconnectTemplateSessions = false)
     {
         using var beforeDispatch = Deadline(token);
-        await using var admin = new NpgsqlConnection(PostgreSqlCatalog.Target(connectionString, "postgres"));
-        await admin.OpenAsync(beforeDispatch.Token);
         PostgreSqlDatabaseLease? owned = null;
         try
         {
+            // Return the CREATE session before compensating cleanup rents a maintenance connection.
+            await using var admin = new NpgsqlConnection(PostgreSqlCatalog.MaintenanceConnectionString(connectionString));
+            await admin.OpenAsync(beforeDispatch.Token);
             await PostgreSqlCatalog.WithDatabaseCatalogLockAsync(admin, async () =>
             {
                 var sql = $"CREATE DATABASE {PostgreSqlCatalog.QuoteIdentifier(name)}";

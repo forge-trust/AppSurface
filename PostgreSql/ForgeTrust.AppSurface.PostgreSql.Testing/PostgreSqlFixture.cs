@@ -178,11 +178,18 @@ public sealed class PostgreSqlFixture
             template.Database = failure.Database;
             throw;
         }
-        catch
+        catch (Exception initializationError)
         {
             if (template.Database != null)
             {
-                await template.Database.DisposeAsync();
+                try
+                {
+                    await template.Database.DisposeAsync();
+                }
+                catch (Exception cleanupError)
+                {
+                    throw new PostgreSqlDatabaseCleanupException(template.Database, cleanupError, initializationError);
+                }
             }
 
             lock (gate)
@@ -207,8 +214,10 @@ public sealed class PostgreSqlFixture
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(PostgreSqlCatalog.Timeout);
-        var outcomes = await Task.WhenAll(selected.Select(template => CleanupOneAsync(template, deadline.Token)));
-        var freshOutcomes = await Task.WhenAll(freshRetries.Select(database => RetryDropAsync(database, failedFreshDrops, deadline.Token)));
+        var cleanupTasks = selected.Select(template => CleanupOneAsync(template, deadline.Token)).ToArray();
+        var freshRetryTasks = freshRetries.Select(database => RetryDropAsync(database, failedFreshDrops, deadline.Token)).ToArray();
+        var outcomes = await Task.WhenAll(cleanupTasks);
+        var freshOutcomes = await Task.WhenAll(freshRetryTasks);
         var result = new TemplateCleanupResult(outcomes, stopwatch.Elapsed) { FreshDatabaseOutcomes = freshOutcomes };
         result.ThrowIfFailed();
         return result;
@@ -240,6 +249,11 @@ public sealed class PostgreSqlFixture
             catch when (preparation.IsCompleted && template.Database != null && !token.IsCancellationRequested)
             {
                 // Initialization already attempted teardown. Retry any drop that failed.
+            }
+            catch (Exception preparationError) when (preparation.IsCompleted && template.Database == null
+                && preparationError is not PostgreSqlDatabaseOwnershipException && !token.IsCancellationRequested)
+            {
+                return TemplateCleanupOutcome.Removed(template.Name);
             }
 
             PostgreSqlDatabaseLease[] retries;
