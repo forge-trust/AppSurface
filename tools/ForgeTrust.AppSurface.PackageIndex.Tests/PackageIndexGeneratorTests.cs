@@ -869,9 +869,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task GenerateAsync_RendersChooserSectionsAndInstallCommands(bool prereleaseInstall)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task GenerateAsync_RendersChooserSectionsAndInstallCommands(bool prereleaseInstall, bool configureTool)
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);
         await WriteFileAsync("examples/product-readiness-lab/README.md", "# Product readiness lab");
@@ -879,7 +880,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         {
             const string manifestPath = "packages/package-index.yml";
             var manifest = await File.ReadAllTextAsync(Path.Combine(_repositoryRoot, manifestPath));
-            await WriteFileAsync(manifestPath, manifest.Replace("    order: 20", "    prerelease_install: true\n    order: 20", StringComparison.Ordinal));
+            var targetOrder = configureTool ? "    order: 50" : "    order: 20";
+            await WriteFileAsync(manifestPath, manifest.Replace(targetOrder, $"    prerelease_install: true\n{targetOrder}", StringComparison.Ordinal));
         }
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
@@ -902,6 +904,13 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 isTool: true,
                 outputType: "Exe")
         });
+
+        if (configureTool)
+        {
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+            Assert.Contains("can set 'prerelease_install' only for a public library marked 'publish'", error.Message, StringComparison.Ordinal);
+            return;
+        }
 
         var markdown = await generator.GenerateAsync(CreateRequest());
 

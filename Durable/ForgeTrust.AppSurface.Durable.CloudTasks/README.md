@@ -1,6 +1,6 @@
 # Google Cloud Tasks package documentation
 
-The Durable adapter ships under the name `ForgeTrust.AppSurface.Durable.GoogleCloudTasks`. See the
+Use `ForgeTrust.AppSurface.Durable.GoogleCloudTasks` for the Durable adapter. See the
 [package guide](../ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md) for installation, configuration, and receipts.
 
 ## Local proof
