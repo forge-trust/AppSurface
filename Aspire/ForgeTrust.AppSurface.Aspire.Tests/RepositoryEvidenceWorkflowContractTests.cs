@@ -420,14 +420,38 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     {
         var steps = NativeJob["steps"].AsSequence();
         var pack = FindStep(steps, "Pack selected native producer input");
+        var preparation = FindStep(steps, "Prepare shared neutral package feed");
         var proof = FindStep(steps, "Prove installed neutral coverage package and published application");
+        var reuseProof = FindStep(steps, "Prove installed reuse tool and package-only prepared host");
         var rejection = FindStep(steps, "Reject case-varied engine version skew before proof output");
-        Assert.True(IndexOf(steps, pack) < IndexOf(steps, proof));
+        Assert.True(IndexOf(steps, pack) < IndexOf(steps, preparation));
+        Assert.True(IndexOf(steps, preparation) < IndexOf(steps, proof));
+        Assert.True(IndexOf(steps, preparation) < IndexOf(steps, reuseProof));
+        Assert.Contains("steps.pack.outcome == 'success'", preparation["if"].AsScalar());
+        var contractsPack = "dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj";
+        var preparationCommand = preparation["run"].AsScalar();
+        Assert.Contains(contractsPack, preparationCommand);
+        var workflowCommands = string.Join("\n", steps.Children.OfType<YamlMappingNode>()
+            .Where(step => step.Children.ContainsKey("run")).Select(step => step["run"].AsScalar()));
+        Assert.Equal(2, workflowCommands.Split(contractsPack, StringSplitOptions.None).Length);
+        Assert.Contains("Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj", preparationCommand);
+        Assert.Contains("Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj", preparationCommand);
+        Assert.Contains("Copy-Item", preparationCommand);
+        Assert.Contains("/p:RepositoryCommit=$env:SOURCE_COMMIT", preparationCommand);
+        Assert.Contains("/p:SourceRevisionId=$env:SOURCE_COMMIT", preparationCommand);
+        Assert.Equal("${{ steps.diff.outputs.source_commit }}", preparation["env"].AsMapping()["SOURCE_COMMIT"].AsScalar());
         Assert.True(IndexOf(steps, proof) < IndexOf(steps, rejection));
-        foreach (var step in new[] { proof, rejection })
-            Assert.Contains("steps.pack.outcome == 'success'", step["if"].AsScalar());
+        Assert.Contains("steps.pack.outcome == 'success'", rejection["if"].AsScalar());
+        foreach (var step in new[] { proof, reuseProof })
+        {
+            Assert.Equal("${{ !cancelled() && steps.prepare-neutral-feed.outcome == 'success' }}", step["if"].AsScalar());
+            var env = step["env"].AsMapping();
+            Assert.Equal("${{ steps.prepare-neutral-feed.outputs.feed }}", env["NATIVE_PACKAGE_FEED"].AsScalar());
+            Assert.Equal("${{ steps.prepare-neutral-feed.outputs.version }}", env["NATIVE_PACKAGE_VERSION"].AsScalar());
+            Assert.Contains("--feed $env:NATIVE_PACKAGE_FEED --version $env:NATIVE_PACKAGE_VERSION", step["run"].AsScalar());
+        }
+        Assert.Contains("@('Planner', 'Readiness', 'Cli', 'Aspire')", reuseProof["run"].AsScalar());
         Assert.Contains("--package-proof", proof["run"].AsScalar());
-        Assert.Contains("/p:RepositoryCommit=$env:SOURCE_COMMIT", proof["run"].AsScalar());
         Assert.Contains("$LASTEXITCODE -eq 0 -or (Test-Path $output)", rejection["run"].AsScalar());
         Assert.Contains("<repository type='git' commit='$candidateCommit'/>", rejection["run"].AsScalar());
         Assert.Contains("coverage.private-dependency-invalid", rejection["run"].AsScalar());

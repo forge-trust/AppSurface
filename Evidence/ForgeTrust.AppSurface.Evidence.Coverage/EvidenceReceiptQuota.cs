@@ -543,51 +543,6 @@ internal static class EvidenceReceiptQuota
         WriteIndex(root, rootPath, index);
     }
 
-    /// <summary>Converts a matching bound or legacy unbound payload reservation to committed payload accounting.</summary>
-    /// <param name="rootPath">Private receipt root containing the reservation.</param>
-    /// <param name="repositoryNamespace">Canonical repository identity owning the key.</param>
-    /// <param name="key">Canonical producer content key whose native lease the caller holds.</param>
-    /// <param name="payloadBytes">Actual payload bytes, from zero through the matching reserved charge.</param>
-    /// <param name="payloadDirectoryName">Final payload component belonging to that reservation, never a stage name.</param>
-    /// <param name="completedAt">Original successful completion time retained for age checks.</param>
-    /// <param name="stateBytes">Serialized metadata bytes to retain in accounting.</param>
-    /// <remarks>This internal accounting operation does not authenticate a passed receipt. Invocation admission separately
-    /// publishes its complete origin and authority bindings. A matching bound reservation is removed atomically with the
-    /// accounting replacement; invalid custody aliases fail before index publication.</remarks>
-    /// <exception cref="InvalidDataException">The existing index or candidate violates persisted entry invariants.</exception>
-    internal static void CommitPayload(string rootPath, string repositoryNamespace, string key, long payloadBytes,
-        string payloadDirectoryName, DateTimeOffset completedAt, long stateBytes)
-    {
-        using var root = OpenRoot(rootPath);
-        using var indexLease = AcquireIndexLease(rootPath);
-        var index = ReadIndex(root);
-        var entry = FindForMutation(index, repositoryNamespace, key)
-            ?? throw new EvidenceReceiptQuotaUnavailableException("payload-reservation-missing");
-        var payloadReservation = (entry.PayloadReservations ?? [])
-            .SingleOrDefault(item => item.PayloadDirectoryName == payloadDirectoryName);
-        var reservationBytes = payloadReservation?.ReservedBytes
-            ?? ((entry.PayloadReservations?.Count ?? 0) == 0 ? entry.ReservedPayloadBytes : 0);
-        if (payloadBytes < 0 || payloadBytes > reservationBytes)
-            throw new EvidenceReceiptQuotaUnavailableException("payload-size-exceeds-reservation");
-        Replace(index, entry, entry with
-        {
-            ReservedPayloadBytes = entry.ReservedPayloadBytes - reservationBytes,
-            PayloadReservations = payloadReservation is null
-                ? entry.PayloadReservations
-                : (entry.PayloadReservations ?? []).Where(item => item.ReservationId != payloadReservation.ReservationId).ToArray(),
-            PayloadBytes = payloadBytes,
-            MetadataBytes = Math.Max(0, stateBytes),
-            PayloadDirectoryName = payloadDirectoryName,
-            OriginCompletedAt = completedAt,
-            LastSuccessfulUse = null,
-            EssentialReserved = false,
-            HasInFlight = false,
-            HasAuditIntent = false,
-            Quarantined = false
-        });
-        WriteIndex(root, rootPath, index);
-    }
-
     internal static void RecordSuccessfulUse(string rootPath, string repositoryNamespace, string key,
         DateTimeOffset usedAt, long stateBytes, EvidenceReceiptState state)
     {

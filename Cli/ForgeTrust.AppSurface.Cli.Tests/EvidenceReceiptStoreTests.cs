@@ -244,8 +244,16 @@ public sealed class EvidenceReceiptStoreTests
     public async Task AuditMismatchQuarantinesReceiptUntilOwnerCommitsSuccessfulAudit()
     {
         var root = NewRoot();
+        var sourceRoot = NewRoot();
         try
         {
+            var producer = ReceiptProducer();
+            var plan = CreatePlan(producer);
+            Directory.CreateDirectory(sourceRoot);
+            var writer = new EvidenceArtifactWriter(producer, sourceRoot);
+            await writer.WriteAsync("report", "reports/audit.txt", "fresh audited report"u8.ToArray());
+            var manifest = EvidenceManifestBuilder.Build(plan, [new EvidenceProducerResult(producer.Id,
+                EvidenceProducerOutcome.Passed, ["assertion"], Artifacts: writer.WrittenArtifacts)]);
             var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
             {
                 RootDirectory = root,
@@ -267,14 +275,17 @@ public sealed class EvidenceReceiptStoreTests
                 Assert.Equal("audit-b", lease.ReadState()?.InFlightExecutionId);
                 Assert.Equal("audit-b", lease.ReadState()?.AuditIntentExecutionId);
                 Assert.Equal("assertion-a:required", lease.ReadState()?.AuditExpectedAssertions);
-                lease.CommitPassed("audit-b", Hash("manifest"), DateTimeOffset.UtcNow, "payload-a", [1, 2, 3]);
+                var publication = await lease.PublishAsync("audit-b", plan, manifest, producer.Id,
+                    sourceRoot, DateTimeOffset.UtcNow, CancellationToken.None);
+                Assert.True(publication.Published, publication.Reason);
                 var recovered = lease.ProposeReadReceipt();
                 Assert.True(recovered.IsCandidate);
                 Assert.Null(recovered.State?.AuditIntentExecutionId);
                 Assert.False(recovered.State?.AuditMismatch);
+                Assert.Equal(publication.PayloadDirectoryName, recovered.State?.PayloadDirectoryName);
             }
         }
-        finally { DeleteIfPresent(root); }
+        finally { DeleteIfPresent(root); DeleteIfPresent(sourceRoot); }
     }
 
     [Fact]

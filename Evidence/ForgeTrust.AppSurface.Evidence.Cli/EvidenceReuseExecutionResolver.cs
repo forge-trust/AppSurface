@@ -60,21 +60,14 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         var producerRoots = new Dictionary<string, (string Execution, string Artifacts)>(StringComparer.Ordinal);
         foreach (var producer in plan.Profile.Producers)
         {
-            producerRoots.Add(producer.Id, GetProducerRoots(outputDirectory, producer.Id,
-                useInvocationArtifactRoot: plan.Profile.Producers.Count == 1));
-            var executionRoot = producerRoots[producer.Id].Execution;
-            var sdkVersion = RequiresCoverageIdentity(producer, solutionPath)
-                ? await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken, _sdkExecutable).ConfigureAwait(false)
-                : "not-applicable";
-            var adapter = new CoverageProducerAdapter(producer.Id, coverageProducer, solutionPath, executionRoot,
-                finalReportRoot: producerRoots[producer.Id].Artifacts, diffSnapshot: diffSnapshot, output: output, error: error,
-                sdkVersion: sdkVersion, sdkExecutable: _sdkExecutable, repositoryRoot: repositoryRoot);
-            adapters.Add(producer.Id, adapter);
-            registrations.Add(producer.Id, new EvidenceReuseProducerRegistration(adapter,
-                string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
-                    ? CoverageImplementationIdentity
-                    : "appsurface-cli-consumer-host-required-v1",
-                CreateToolIdentity(producer, repositoryRoot, solutionPath, sdkVersion)));
+            var roots = GetProducerRoots(outputDirectory, producer.Id,
+                useInvocationArtifactRoot: plan.Profile.Producers.Count == 1);
+            producerRoots.Add(producer.Id, roots);
+            var setup = await CreateProducerSetupAsync(producer, repositoryRoot, solutionPath,
+                roots.Execution, roots.Artifacts,
+                diffSnapshot, output, error, cancellationToken).ConfigureAwait(false);
+            adapters.Add(producer.Id, setup.Adapter);
+            registrations.Add(producer.Id, setup.Registration);
         }
 
         EvidenceProducerReuseSession? session = null;
@@ -176,16 +169,9 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         var registrations = new Dictionary<string, EvidenceReuseProducerRegistration>(StringComparer.Ordinal);
         foreach (var producer in plan.Profile.Producers)
         {
-            var sdkVersion = RequiresCoverageIdentity(producer, solutionPath)
-                ? await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken, _sdkExecutable).ConfigureAwait(false)
-                : "not-applicable";
-            var adapter = new CoverageProducerAdapter(producer.Id, coverageProducer, solutionPath, string.Empty,
-                finalReportRoot: null, diffSnapshot: diffSnapshot, output: TextWriter.Null, error: TextWriter.Null,
-                sdkVersion: sdkVersion, sdkExecutable: _sdkExecutable, repositoryRoot: repositoryRoot);
-            registrations.Add(producer.Id, new EvidenceReuseProducerRegistration(adapter,
-                string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
-                    ? CoverageImplementationIdentity : "appsurface-cli-consumer-host-required-v1",
-                CreateToolIdentity(producer, repositoryRoot, solutionPath, sdkVersion)));
+            var setup = await CreateProducerSetupAsync(producer, repositoryRoot, solutionPath,
+                string.Empty, null, diffSnapshot, TextWriter.Null, TextWriter.Null, cancellationToken).ConfigureAwait(false);
+            registrations.Add(producer.Id, setup.Registration);
         }
 
         await using var session = await EvidenceProducerReuseSession.PrepareAsync(plan, registrations,
@@ -313,6 +299,25 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         && producer.Inputs is not null
         && producer.CoverageExecution is { CooperativeChildLifetime: true }
         && !string.IsNullOrWhiteSpace(solutionPath);
+
+    private async Task<(CoverageProducerAdapter Adapter, EvidenceReuseProducerRegistration Registration)> CreateProducerSetupAsync(
+        EvidenceProducerDeclaration producer, string repositoryRoot, string? solutionPath, string executionRoot,
+        string? artifactRoot, EvidenceDiffSnapshot? diffSnapshot, TextWriter output, TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        var sdkVersion = RequiresCoverageIdentity(producer, solutionPath)
+            ? await ReadDotnetSdkVersionAsync(solutionPath, cancellationToken, _sdkExecutable).ConfigureAwait(false)
+            : "not-applicable";
+        var adapter = new CoverageProducerAdapter(producer.Id, coverageProducer, solutionPath, executionRoot,
+            finalReportRoot: artifactRoot, diffSnapshot: diffSnapshot, output: output, error: error,
+            sdkVersion: sdkVersion, sdkExecutable: _sdkExecutable, repositoryRoot: repositoryRoot);
+        var implementationIdentity = string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
+            ? CoverageImplementationIdentity
+            : "appsurface-cli-consumer-host-required-v1";
+        var registration = new EvidenceReuseProducerRegistration(adapter, implementationIdentity,
+            CreateToolIdentity(producer, repositoryRoot, solutionPath, sdkVersion));
+        return (adapter, registration);
+    }
 
     private static bool IsSolutionIdentitySafe(string repositoryRoot, string? solutionPath)
     {

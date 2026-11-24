@@ -257,35 +257,43 @@ public sealed class EvidenceReceiptStoreCoverageTests
     }
 
     [Fact]
-    public async Task CommitPassedRefusesFutureWrongOwnerAndQuarantinedAuthorityWithoutChangingState()
+    public async Task PublicationRefusesFutureWrongOwnerAndQuarantinedAuthorityWithoutChangingState()
     {
         using var temporary = TestDirectory.Create();
         var root = TestPathUtils.PathUnder(temporary.Path, "commit-passed-guards", "store");
         var repository = Hash("commit-passed-guards-repository").ToLowerInvariant();
         var key = Hash("commit-passed-guards-key").ToLowerInvariant();
+        var producer = PublicationProducer("publication-guard");
+        var (plan, manifest, sourceRoot) = await CreatePublicationAttemptAsync(temporary.Path, producer, "candidate");
         var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
         { RootDirectory = root, RepositoryNamespace = repository });
         using var lease = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
         lease.EstablishAuthority("commit-owner");
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => lease.CommitPassed("commit-owner",
-            Hash("commit-passed-manifest").ToLowerInvariant(), DateTimeOffset.UtcNow.AddHours(1),
-            "payload-future", "passed-result"u8.ToArray()));
-        var beforeWrongOwner = lease.ReadState();
-        Assert.Throws<InvalidOperationException>(() => lease.CommitPassed("other-owner",
-            Hash("commit-passed-manifest").ToLowerInvariant(), DateTimeOffset.UtcNow,
-            "payload-wrong-owner", "passed-result"u8.ToArray()));
-        Assert.Equal(beforeWrongOwner, lease.ReadState());
+        var before = lease.ReadState();
+        var indexBeforeRefusal = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json"));
+        var future = await lease.PublishAsync("commit-owner", plan, manifest, producer.Id, sourceRoot,
+            DateTimeOffset.UtcNow.AddHours(1), CancellationToken.None);
+        Assert.False(future.Published);
+        Assert.Equal("payload-publication-failed", future.Reason);
 
-        var quarantined = beforeWrongOwner! with { AuditMismatch = true, AuditIntentExecutionId = null };
+        var wrongOwner = await lease.PublishAsync("other-owner", plan, manifest, producer.Id, sourceRoot,
+            DateTimeOffset.UtcNow, CancellationToken.None);
+        Assert.False(wrongOwner.Published);
+        Assert.Equal("execution-authority-mismatch", wrongOwner.Reason);
+        Assert.Equal(before, lease.ReadState());
+        Assert.Equal(indexBeforeRefusal, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json")));
+
+        var quarantined = before! with { AuditMismatch = true, AuditIntentExecutionId = null };
         EvidenceReceiptQuota.RecordState(root, repository, key, JsonSerializer.SerializeToUtf8Bytes(quarantined).Length,
             quarantined);
         var beforeQuarantineRefusal = lease.ReadState();
         var indexBeforeQuarantineRefusal = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json"));
 
-        Assert.Throws<InvalidOperationException>(() => lease.CommitPassed("commit-owner",
-            Hash("commit-passed-manifest").ToLowerInvariant(), DateTimeOffset.UtcNow,
-            "payload-quarantine", "passed-result"u8.ToArray()));
+        var refused = await lease.PublishAsync("commit-owner", plan, manifest, producer.Id, sourceRoot,
+            DateTimeOffset.UtcNow, CancellationToken.None);
+        Assert.False(refused.Published);
+        Assert.Equal("audit-quarantined", refused.Reason);
 
         Assert.Equal(beforeQuarantineRefusal, lease.ReadState());
         Assert.Equal(indexBeforeQuarantineRefusal,
@@ -2354,6 +2362,8 @@ public sealed class EvidenceReceiptStoreCoverageTests
         using var temporary = TestDirectory.Create();
         var root = TestPathUtils.PathUnder(temporary.Path, "store");
         var key = Hash("no-authority-key").ToLowerInvariant();
+        var producer = PublicationProducer("publication-without-authority");
+        var (plan, manifest, sourceRoot) = await CreatePublicationAttemptAsync(temporary.Path, producer, "candidate");
         var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
         { RootDirectory = root, RepositoryNamespace = Hash("no-authority-repository").ToLowerInvariant() });
         using var lease = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
@@ -2363,8 +2373,10 @@ public sealed class EvidenceReceiptStoreCoverageTests
         Assert.Throws<InvalidOperationException>(() => lease.SettleExecution("missing-owner"));
         Assert.Throws<InvalidOperationException>(() => lease.MarkAuditMismatch("missing-owner", "assertion"));
         Assert.Throws<InvalidOperationException>(() => lease.RecordSuccessfulUse(DateTimeOffset.UtcNow));
-        Assert.Throws<InvalidOperationException>(() => lease.CommitPassed("missing-owner", Hash("manifest"),
-            DateTimeOffset.UtcNow, "payload-uncommitted", "record"u8.ToArray()));
+        var refused = await lease.PublishAsync("missing-owner", plan, manifest, producer.Id, sourceRoot,
+            DateTimeOffset.UtcNow, CancellationToken.None);
+        Assert.False(refused.Published);
+        Assert.Equal("execution-authority-mismatch", refused.Reason);
 
         Assert.Null(lease.ReadState());
         AssertStoreSnapshotUnchanged(before, root);
@@ -2689,13 +2701,11 @@ public sealed class EvidenceReceiptStoreCoverageTests
     {
         var payloadPath = TestPathUtils.PathUnder(fixture.StoreRoot, fixture.Repository, fixture.Key, fixture.PayloadName);
         var resultBytes = EvidenceCanonicalJson.Serialize(result);
-        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(payloadPath, "passed-producer.json"), resultBytes);
         using var lease = Assert.Single(await fixture.Store.AcquireAsync([fixture.Key], CancellationToken.None));
-        var prior = lease.ReadState() ?? throw new InvalidOperationException("The published fixture authority is missing.");
-        const string execution = "origin-result-binding-rewrite";
-        lease.EstablishAuthority(execution);
-        lease.CommitPassed(execution, prior.OriginManifestDigest!, prior.OriginCompletedAt!.Value,
-            prior.PayloadDirectoryName!, resultBytes);
+        Assert.Equal(fixture.PayloadName, lease.ReadState()?.PayloadDirectoryName);
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(payloadPath, "passed-producer.json"), resultBytes);
+        await UpdateFixtureAuthorityAsync(fixture,
+            state => state["PassedProducerRecord"] = Convert.ToBase64String(resultBytes));
     }
 
     private static bool NoPayloadReservations(JsonElement reservations)

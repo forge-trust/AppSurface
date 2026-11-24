@@ -454,8 +454,8 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 270, DateTimeOffset.UtcNow,
             remainingId, "payload-stage-" + remainingId, "payload-" + remainingId));
 
-        EvidenceReceiptQuota.CommitPayload(root, repository, key, 100, committedName,
-            DateTimeOffset.UtcNow, stateBytes: 23);
+        CommitPayloadBatch(lease, 100, committedName, DateTimeOffset.UtcNow,
+            reservationBytes: 130);
 
         var committed = Entry(root, key);
         Assert.Equal(270, committed.GetProperty("ReservedPayloadBytes").GetInt64());
@@ -463,7 +463,7 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             .GetProperty("ReservedBytes").GetInt64());
         Assert.Equal(100, committed.GetProperty("PayloadBytes").GetInt64());
         Assert.Equal(committedName, committed.GetProperty("PayloadDirectoryName").GetString());
-        Assert.Equal(23, committed.GetProperty("MetadataBytes").GetInt64());
+        Assert.Equal(0, committed.GetProperty("MetadataBytes").GetInt64());
     }
 
     [Fact]
@@ -480,10 +480,12 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         var boundPayloadName = "payload-" + reservationId;
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 91, DateTimeOffset.UtcNow,
             reservationId, "payload-stage-" + reservationId, boundPayloadName));
+        var invalidCommit = CreatePayloadBatchCommit(lease, 1,
+            "payload-" + Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, reservationBytes: 91);
         var before = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json"));
 
-        Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() => EvidenceReceiptQuota.CommitPayload(root,
-            repository, key, 1, "payload-" + Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, stateBytes: 17));
+        Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() =>
+            EvidenceReceiptQuota.CommitInvocation(root, [invalidCommit]));
 
         Assert.Equal(before, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json")));
         var unchanged = Entry(root, key);
@@ -744,16 +746,13 @@ public sealed class EvidenceReceiptQuotaCoverageTests
                 file.Write(new byte[] { 7, 8, 9, 10 });
                 file.Flush(flushToDisk: true);
             }
-            Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 4, DateTimeOffset.UtcNow));
-            EvidenceReceiptQuota.CommitPayload(root, repository, key, 4, payloadName, state.OriginCompletedAt!.Value,
-                stateBytes: 0);
-            EvidenceReceiptQuota.RecordState(root, repository, key, JsonSerializer.SerializeToUtf8Bytes(state).Length, state);
         }
 
         var indexPath = TestPathUtils.PathUnder(root, "quota-index.json");
         var index = JsonNode.Parse(await File.ReadAllBytesAsync(indexPath))!;
         var entry = index["Entries"]!.AsArray().Single()!;
         entry["AuthorityState"] = null;
+        entry["PayloadBytes"] = 4;
         await File.WriteAllBytesAsync(indexPath, Encoding.UTF8.GetBytes(index.ToJsonString()));
         EvidenceReceiptQuota.Maintain(root, DateTimeOffset.UtcNow.AddDays(8));
 
@@ -949,7 +948,7 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             file.Flush(flushToDisk: true);
         }
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 3, completedAt));
-        EvidenceReceiptQuota.CommitPayload(root, repository, key, 3, payloadName, completedAt, stateBytes: 0);
+        CommitPayloadBatch(lease, 3, payloadName, completedAt, reservationBytes: 3);
         var settled = new EvidenceReceiptState(1, key, null, null, Hash("retired-capacity-origin"), completedAt,
             payloadName, null, completedAt, false, null);
         EvidenceReceiptQuota.RecordState(root, repository, key, JsonSerializer.SerializeToUtf8Bytes(settled).Length, settled);
@@ -1001,11 +1000,8 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             file.Flush(flushToDisk: true);
         }
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 12, completedAt));
-        EvidenceReceiptQuota.CommitPayload(root, repository, key, 3, payloadName, completedAt, stateBytes: 0);
-        var passed = EvidenceCanonicalJson.Serialize(new EvidenceProducerResult("producer",
-            EvidenceProducerOutcome.Passed, ["assertion"]));
-        lease.CommitPassed("invalidation-shape-owner", Hash("invalidation-shape-origin"), completedAt,
-            payloadName, passed);
+        CommitPayloadBatch(lease, 3, payloadName, completedAt, reservationBytes: 12,
+            producerId: "producer", originManifestDigest: Hash("invalidation-shape-origin"));
         var settled = lease.ReadState()!;
         var invalidated = new EvidenceReceiptState(1, key, null, null, null, null, null);
         var indexPath = TestPathUtils.PathUnder(root, "quota-index.json");
@@ -1395,7 +1391,7 @@ public sealed class EvidenceReceiptQuotaCoverageTests
 
             var completedAt = DateTimeOffset.UtcNow;
             Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 128, completedAt));
-            EvidenceReceiptQuota.CommitPayload(root, repository, key, 128, payloadName, completedAt, stateBytes: 0);
+            CommitPayloadBatch(lease, 128, payloadName, completedAt, reservationBytes: 128);
             var state = new EvidenceReceiptState(1, key, null, null, Hash("retired-origin"), completedAt,
                 payloadName, null, completedAt, false, null);
             EvidenceReceiptQuota.RecordState(root, repository, key,
@@ -1480,10 +1476,8 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             file.Flush(flushToDisk: true);
         }
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 16, completedAt));
-        EvidenceReceiptQuota.CommitPayload(root, repository, key, 3, payloadName, completedAt, stateBytes: 0);
-        var passed = EvidenceCanonicalJson.Serialize(new EvidenceProducerResult("producer",
-            EvidenceProducerOutcome.Passed, ["assertion"]));
-        lease.CommitPassed("active-invalidation-owner", Hash("invalidation-origin"), completedAt, payloadName, passed);
+        CommitPayloadBatch(lease, 3, payloadName, completedAt, reservationBytes: 16,
+            producerId: "producer", originManifestDigest: Hash("invalidation-origin"));
         var settled = lease.ReadState()!;
         var stale = settled with { OriginManifestDigest = Hash("stale-invalidation-origin") };
         var settledIndex = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json"));
@@ -1790,8 +1784,12 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 73, DateTimeOffset.UtcNow,
             reservationId, "payload-stage-" + reservationId, payloadName));
 
-        Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() => EvidenceReceiptQuota.CommitPayload(
-            root, repository, key, 74, payloadName, DateTimeOffset.UtcNow, stateBytes: 19));
+        var overage = CreatePayloadBatchCommit(lease, 74, payloadName,
+            DateTimeOffset.UtcNow, reservationBytes: 73);
+        var before = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json"));
+        Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() =>
+            EvidenceReceiptQuota.CommitInvocation(root, [overage]));
+        Assert.Equal(before, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json")));
         var unchanged = Entry(root, key);
         Assert.Equal(73, unchanged.GetProperty("ReservedPayloadBytes").GetInt64());
         Assert.Equal(73, Assert.Single(unchanged.GetProperty("PayloadReservations").EnumerateArray())
@@ -1813,10 +1811,11 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         var payloadName = "payload-" + reservationId;
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 29, DateTimeOffset.UtcNow,
             reservationId, "payload-stage-" + reservationId, payloadName));
+        var negative = CreatePayloadBatchCommit(lease, -1, payloadName,
+            DateTimeOffset.UtcNow, reservationBytes: 29);
         var before = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json"));
-
-        Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() => EvidenceReceiptQuota.CommitPayload(root,
-            repository, key, -1, payloadName, DateTimeOffset.UtcNow, stateBytes: 0));
+        Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() =>
+            EvidenceReceiptQuota.CommitInvocation(root, [negative]));
 
         Assert.Equal(before, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json")));
         var unchanged = Entry(root, key);
@@ -1840,14 +1839,15 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, 500, DateTimeOffset.UtcNow));
         var completedAt = DateTimeOffset.UtcNow;
 
-        EvidenceReceiptQuota.CommitPayload(root, repository, key, 321, "payload-committed", completedAt, stateBytes: 88);
+        CommitPayloadBatch(lease, 321, "payload-committed", completedAt,
+            reservationBytes: 500);
 
         var committed = Entry(root, key);
         Assert.Equal(0, committed.GetProperty("ReservedPayloadBytes").GetInt64());
         Assert.Equal(321, committed.GetProperty("PayloadBytes").GetInt64());
         Assert.Equal("payload-committed", committed.GetProperty("PayloadDirectoryName").GetString());
         Assert.Equal(completedAt, committed.GetProperty("OriginCompletedAt").GetDateTimeOffset());
-        Assert.Equal(88, committed.GetProperty("MetadataBytes").GetInt64());
+        Assert.Equal(0, committed.GetProperty("MetadataBytes").GetInt64());
         Assert.False(committed.GetProperty("EssentialReserved").GetBoolean());
     }
 
@@ -2023,13 +2023,14 @@ public sealed class EvidenceReceiptQuotaCoverageTests
         entry["PayloadReservations"] = new JsonArray();
         await File.WriteAllBytesAsync(indexPath, Encoding.UTF8.GetBytes(index.ToJsonString()));
 
-        EvidenceReceiptQuota.CommitPayload(root, repository, key, 71, "payload-empty-legacy-commit", completedAt,
-            stateBytes: 22);
+        var emptyLegacyCommit = CreatePayloadBatchCommit(lease, 71,
+            "payload-empty-legacy-commit", completedAt, reservationBytes: 93);
+        EvidenceReceiptQuota.CommitInvocation(root, [emptyLegacyCommit]);
 
         var committed = Entry(root, key);
         Assert.Equal(0, committed.GetProperty("ReservedPayloadBytes").GetInt64());
         Assert.Equal(71, committed.GetProperty("PayloadBytes").GetInt64());
-        Assert.Equal(22, committed.GetProperty("MetadataBytes").GetInt64());
+        Assert.Equal(0, committed.GetProperty("MetadataBytes").GetInt64());
         Assert.Equal("payload-empty-legacy-commit", committed.GetProperty("PayloadDirectoryName").GetString());
         Assert.Equal(completedAt, committed.GetProperty("OriginCompletedAt").GetDateTimeOffset());
         Assert.Empty(committed.GetProperty("PayloadReservations").EnumerateArray());
@@ -2287,6 +2288,8 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             var index = JsonNode.Parse(originalIndexBytes)!;
             var entries = index["Entries"]!.AsArray();
             var missingEntry = entries.Single(entry => entry!["Key"]!.GetValue<string>() == missingKey);
+            var missingRowCommit = CreatePayloadBatchCommit(missingLease, 0,
+                "payload-missing-row", DateTimeOffset.UtcNow, reservationBytes: 0);
             Assert.True(entries.Remove(missingEntry));
             await File.WriteAllTextAsync(indexPath, index.ToJsonString());
             var missingIndex = await File.ReadAllBytesAsync(indexPath);
@@ -2298,8 +2301,8 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() => EvidenceReceiptQuota.RecordState(
                 root, repository, missingKey, 0, state));
             Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
-            Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() => EvidenceReceiptQuota.CommitPayload(
-                root, repository, missingKey, 0, "payload-missing-row", DateTimeOffset.UtcNow, stateBytes: 0));
+            Assert.Throws<EvidenceReceiptQuotaUnavailableException>(() =>
+                EvidenceReceiptQuota.CommitInvocation(root, [missingRowCommit]));
             Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
             Assert.Empty(EvidenceReceiptQuota.ReadRetiredPayloadNames(root, repository, missingKey));
             Assert.Equal(missingIndex, await File.ReadAllBytesAsync(indexPath));
@@ -2407,12 +2410,40 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             file.Flush(flushToDisk: true);
         }
         Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, payloadBytes.LongLength, completedAt));
-        EvidenceReceiptQuota.CommitPayload(root, repository, key, payloadBytes.LongLength, payloadName,
-            completedAt, stateBytes: 0);
-        var passed = EvidenceCanonicalJson.Serialize(new EvidenceProducerResult("quota-maintenance-producer",
-            EvidenceProducerOutcome.Passed, ["quota-maintenance-assertion"]));
-        lease.CommitPassed(executionId, Hash("quota-maintenance-origin-" + key), completedAt, payloadName, passed);
+        CommitPayloadBatch(lease, payloadBytes.LongLength, payloadName, completedAt,
+            reservationBytes: payloadBytes.LongLength, producerId: "quota-maintenance-producer",
+            originManifestDigest: Hash("quota-maintenance-origin-" + key));
         return lease.ReadState()!;
+    }
+
+    private static void CommitPayloadBatch(EvidenceReceiptStore.EvidenceReceiptKeyLease lease,
+        long payloadBytes, string payloadName, DateTimeOffset completedAt, long reservationBytes,
+        string producerId = "quota-fixture-producer", string? originManifestDigest = null)
+    {
+        var commit = CreatePayloadBatchCommit(lease, payloadBytes, payloadName, completedAt, reservationBytes,
+            producerId, originManifestDigest);
+        EvidenceReceiptQuota.CommitInvocation(lease.StoreRoot, [commit]);
+    }
+
+    private static EvidenceReceiptBatchCommit CreatePayloadBatchCommit(EvidenceReceiptStore.EvidenceReceiptKeyLease lease,
+        long payloadBytes, string payloadName, DateTimeOffset completedAt, long reservationBytes,
+        string producerId = "quota-fixture-producer", string? originManifestDigest = null)
+    {
+        var executionId = lease.ReadState()?.InFlightExecutionId;
+        if (executionId is null)
+        {
+            executionId = "quota-fixture-owner";
+            lease.EstablishAuthority(executionId);
+        }
+
+        var result = EvidenceCanonicalJson.Serialize(new EvidenceProducerResult(producerId,
+            EvidenceProducerOutcome.Passed, ["assertion"]));
+        var state = new EvidenceReceiptState(1, lease.Key, null, null,
+            originManifestDigest ?? Hash("quota-fixture-origin-" + lease.Key), completedAt, payloadName,
+            Convert.ToBase64String(result));
+        return new EvidenceReceiptBatchCommit(lease.RepositoryNamespace, lease.Key, producerId, executionId, state,
+            JsonSerializer.SerializeToUtf8Bytes(state).Length, payloadName, completedAt, payloadBytes,
+            reservationBytes, lease.EssentialReservationId);
     }
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();

@@ -1395,41 +1395,6 @@ internal sealed class EvidenceReceiptStore
             }
         }
 
-        /// <summary>Atomically commits a passed immutable payload reference and clears matching audit intent.</summary>
-        /// <param name="executionId">Execution that owns the current durable authority.</param>
-        /// <param name="originManifestDigest">Canonical origin-manifest SHA-256.</param>
-        /// <param name="originCompletedAt">Caller-supplied origin completion time.</param>
-        /// <param name="payloadDirectoryName">Validated immutable final component beginning with <c>payload-</c>;
-        /// <c>payload-stage-</c> names, including case variants, are excluded.</param>
-        /// <param name="passedProducerRecord">Bounded canonical producer record bytes.</param>
-        internal void CommitPassed(string executionId, string originManifestDigest, DateTimeOffset originCompletedAt,
-            string payloadDirectoryName, byte[] passedProducerRecord)
-        {
-            ValidateHash(originManifestDigest, nameof(originManifestDigest));
-            if (originCompletedAt > clock.GetUtcNow())
-                throw new ArgumentOutOfRangeException(nameof(originCompletedAt), "Receipt origin completion time cannot be in the future.");
-            CoverageRunOutputLease.ValidateArtifactComponent(payloadDirectoryName);
-            ArgumentNullException.ThrowIfNull(passedProducerRecord);
-            if (passedProducerRecord.Length > 32 * 1024) throw new InvalidDataException("Producer record exceeds its bound.");
-            var state = ReadState() ?? throw new InvalidOperationException("No execution authority exists.");
-            if (state.InFlightExecutionId != executionId) throw new InvalidOperationException("Execution authority belongs to another execution.");
-            if (state.AuditIntentExecutionId is not null && state.AuditIntentExecutionId != executionId)
-                throw new InvalidOperationException("Audit intent belongs to another execution.");
-            if (state.AuditMismatch && state.AuditIntentExecutionId != executionId)
-                throw new InvalidOperationException("An ordinary execution cannot clear audit quarantine.");
-            WriteState(state with
-            {
-                InFlightExecutionId = null,
-                AuditIntentExecutionId = null,
-                OriginManifestDigest = originManifestDigest.ToLowerInvariant(),
-                OriginCompletedAt = originCompletedAt,
-                PayloadDirectoryName = payloadDirectoryName,
-                PassedProducerRecord = Convert.ToBase64String(passedProducerRecord),
-                AuditMismatch = false,
-                AuditExpectedAssertions = null
-            });
-        }
-
         private void WriteState(EvidenceReceiptState state)
         {
             Verify();

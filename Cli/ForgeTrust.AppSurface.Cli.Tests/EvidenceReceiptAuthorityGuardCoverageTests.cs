@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -93,46 +94,65 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
     }
 
     [Theory]
-    [InlineData("digest-null", typeof(ArgumentException))]
-    [InlineData("digest-short", typeof(ArgumentException))]
-    [InlineData("digest-nonhex", typeof(ArgumentException))]
-    [InlineData("future-origin", typeof(ArgumentOutOfRangeException))]
-    [InlineData("payload-escape", typeof(InvalidDataException))]
-    [InlineData("record-null", typeof(ArgumentNullException))]
-    [InlineData("record-oversized", typeof(InvalidDataException))]
-    public async Task InvalidPassedCommitCannotReplaceOrSettleTheCurrentExecution(string defect, Type expectedException)
+    [InlineData("digest-null", "invocation-not-complete-and-passed")]
+    [InlineData("digest-short", "invocation-not-complete-and-passed")]
+    [InlineData("digest-nonhex", "invocation-not-complete-and-passed")]
+    [InlineData("future-origin", "payload-publication-failed")]
+    [InlineData("missing-producer", "producer-not-reusable-passed-result")]
+    [InlineData("record-oversized", "producer-result-too-large")]
+    public async Task InvalidPublicationCannotReplaceOrSettleTheCurrentExecution(string defect, string expectedReason)
     {
         using var fixture = await Fixture.CreateAsync();
         fixture.Lease.EstablishAuthority("execution");
         var state = fixture.Lease.ReadState();
         var original = fixture.IndexBytes();
-        var hash = defect switch { "digest-null" => null!, "digest-short" => "abcd", "digest-nonhex" => new string('g', 64), _ => new string('b', 64) };
-        var completed = fixture.Clock.GetUtcNow() + (defect == "future-origin" ? TimeSpan.FromTicks(1) : TimeSpan.Zero);
-        var payload = defect == "payload-escape" ? "../outside" : "payload-guard";
-        var record = defect switch
+        var (plan, manifest, sourceRoot) = CreatePublication(fixture.DirectoryPath,
+            defect == "record-oversized" ? new string('x', EvidenceReceiptQuota.MaximumStateBytes + 1) : null);
+        manifest = defect switch
         {
-            "record-null" => null!,
-            "record-oversized" => new byte[32 * 1024 + 1],
-            _ => EvidenceCanonicalJson.Serialize(new EvidenceProducerResult("producer", EvidenceProducerOutcome.Passed, []))
+            "digest-null" => manifest with { ManifestDigest = null! },
+            "digest-short" => manifest with { ManifestDigest = "abcd" },
+            "digest-nonhex" => manifest with { ManifestDigest = new string('g', 64) },
+            _ => manifest,
         };
+        var completed = fixture.Clock.GetUtcNow() + (defect == "future-origin" ? TimeSpan.FromTicks(1) : TimeSpan.Zero);
+        var producerId = defect == "missing-producer" ? "missing" : "producer";
+        var publication = await fixture.Lease.PublishAsync("execution", plan, manifest, producerId, sourceRoot, completed,
+            CancellationToken.None);
 
-        var failure = Record.Exception(() => fixture.Lease.CommitPassed("execution", hash, completed, payload, record));
-
-        Assert.IsType(expectedException, failure);
+        Assert.False(publication.Published);
+        Assert.Equal(expectedReason, publication.Reason);
         Assert.Equal(state, fixture.Lease.ReadState());
         Assert.Equal(original, fixture.IndexBytes());
         Assert.Equal("execution", fixture.Lease.ReadState()!.InFlightExecutionId);
-        Assert.False(Directory.Exists(TestPathUtils.PathUnder(fixture.Lease.DirectoryPath, "payload-guard")));
-        if (defect == "payload-escape")
-        {
-            var escaped = TestPathUtils.PathUnder(Path.GetDirectoryName(fixture.Lease.DirectoryPath)!, "outside");
-            Assert.False(File.Exists(escaped));
-            Assert.False(Directory.Exists(escaped));
-        }
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Lease.DirectoryPath, "payload-*"));
     }
 
     [Fact]
-    public async Task QuarantinedFreshCommitCannotClearAnotherExecutionsAuditIntent()
+    public async Task BatchCommitRejectsAnEscapingPayloadNameWithoutChangingAuthority()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("execution");
+        var state = fixture.Lease.ReadState()!;
+        var before = fixture.IndexBytes();
+        var completedAt = fixture.Clock.GetUtcNow();
+        var settled = state with { InFlightExecutionId = null, OriginCompletedAt = completedAt, PayloadDirectoryName = "../outside" };
+
+        Assert.Throws<InvalidDataException>(() =>
+            EvidenceReceiptQuota.CommitInvocation(fixture.Root,
+                [new(fixture.Repository, state.Key, "producer", "execution", settled,
+                    JsonSerializer.SerializeToUtf8Bytes(settled).Length, "../outside", completedAt, 0, 0,
+                    fixture.Lease.EssentialReservationId)]));
+
+        Assert.Equal(state, fixture.Lease.ReadState());
+        Assert.Equal(before, fixture.IndexBytes());
+        var escaped = TestPathUtils.PathUnder(Path.GetDirectoryName(fixture.Lease.DirectoryPath)!, "outside");
+        Assert.False(File.Exists(escaped));
+        Assert.False(Directory.Exists(escaped));
+    }
+
+    [Fact]
+    public async Task QuarantinedFreshPublicationCannotClearAnotherExecutionsAuditIntent()
     {
         using var fixture = await Fixture.CreateAsync();
         fixture.Lease.EstablishAuthority("audit", auditIntent: true, expectedAssertions: "[\"expected\"]");
@@ -142,10 +162,12 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         var state = fixture.Lease.ReadState();
         var original = fixture.IndexBytes();
 
-        Assert.Throws<InvalidOperationException>(() => fixture.Lease.CommitPassed("fresh", new string('b', 64),
-            fixture.Clock.GetUtcNow(), "payload-guard", EvidenceCanonicalJson.Serialize(
-                new EvidenceProducerResult("producer", EvidenceProducerOutcome.Passed, []))));
+        var (plan, manifest, sourceRoot) = CreatePublication(fixture.DirectoryPath);
+        var publication = await fixture.Lease.PublishAsync("fresh", plan, manifest, "producer", sourceRoot,
+            fixture.Clock.GetUtcNow(), CancellationToken.None);
 
+        Assert.False(publication.Published);
+        Assert.Equal("audit-intent-owner-mismatch", publication.Reason);
         Assert.Equal(state, fixture.Lease.ReadState());
         Assert.Equal(original, fixture.IndexBytes());
         Assert.Equal("audit", fixture.Lease.ReadState()!.AuditIntentExecutionId);
@@ -265,13 +287,12 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
             file.Write(new byte[] { 2, 4, 6 });
             file.Flush(flushToDisk: true);
         }
-        EvidenceReceiptQuota.CommitPayload(fixture.Root, repository, key, 3, payloadName, completedAt,
-            JsonSerializer.SerializeToUtf8Bytes(new EvidenceReceiptState(1, key, null, null,
-                new string('b', 64), completedAt, payloadName)).Length);
         var settled = new EvidenceReceiptState(1, key, null, null, new string('b', 64), completedAt,
             payloadName, null, completedAt, false, null);
-        EvidenceReceiptQuota.RecordState(fixture.Root, repository, key,
-            JsonSerializer.SerializeToUtf8Bytes(settled).Length, settled);
+        fixture.Lease.EstablishAuthority("retirement-fixture");
+        EvidenceReceiptQuota.CommitInvocation(fixture.Root,
+            [new(repository, key, "producer", "retirement-fixture", settled, JsonSerializer.SerializeToUtf8Bytes(settled).Length,
+                payloadName, completedAt, 3, 3, fixture.Lease.EssentialReservationId)]);
         var invalidated = new EvidenceReceiptState(1, key, null, null, null, null, null);
         EvidenceReceiptQuota.InvalidatePayload(fixture.Lease, settled, invalidated);
 
@@ -296,6 +317,22 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         var entry = Assert.Single(index.RootElement.GetProperty("Entries").EnumerateArray());
         Assert.Empty(entry.GetProperty("RetiredPayloads").EnumerateArray());
         Assert.Equal("preserve outside receipt custody", await File.ReadAllTextAsync(sentinelPath));
+    }
+
+    private static (EvidencePlan Plan, EvidenceManifest Manifest, string SourceRoot) CreatePublication(string root,
+        string? diagnostic = null)
+    {
+        var producer = new EvidenceProducerDeclaration("producer", "unit", "1", [], ["assertion"], [], 30)
+        { Inputs = new EvidenceProducerInputs(["src/**"], []) };
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [producer],
+            [new EvidenceObligation("check", "risk", "reason", [producer.Id], "assertion")]);
+        var plan = new EvidencePlanner().Resolve(new EvidencePolicy("policy", "1", profile.Id, [profile], []),
+            [new NormalizedDiffPath("src/fixture.cs")]);
+        var manifest = EvidenceManifestBuilder.Build(plan,
+            [new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, ["assertion"], diagnostic)]);
+        var sourceRoot = TestPathUtils.PathUnder(root, "source");
+        Directory.CreateDirectory(sourceRoot);
+        return (plan, manifest, sourceRoot);
     }
 
     private static void AssertRetiredPayloadCharge(byte[] indexBytes, string payloadName, long expectedBytes)

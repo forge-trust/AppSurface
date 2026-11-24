@@ -131,15 +131,15 @@ jobs:
           $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
           dotnet $validation --operation verify --scope native --policy .github/evidence.policy.json --changed-paths $changedPaths --plan $planPath --manifest (Join-Path $proofPath 'evidence-manifest.json') --artifact-root (Join-Path $proofPath 'artifacts')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Prove installed neutral coverage package and published application
+      - name: Prepare shared neutral package feed
+        id: prepare-neutral-feed
         if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
         shell: pwsh
         env:
           SOURCE_COMMIT: ${{ steps.diff.outputs.source_commit }}
         run: |
-          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
+          $version = "0.0.0-native.${env:GITHUB_RUN_NUMBER}.${env:GITHUB_RUN_ATTEMPT}"
           $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-library-feed'
-          $proof = Join-Path $env:RUNNER_TEMP 'native-coverage-library-proof'
           New-Item -ItemType Directory -Path $feed -Force | Out-Null
           Copy-Item (Join-Path $env:EVIDENCE_ROOT "feed/ForgeTrust.AppSurface.Cli.$version.nupkg") $feed
           dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
@@ -148,25 +148,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet pack Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release -- --package-proof --feed $feed --version $version --output $proof --dotnet (Get-Command dotnet).Source
+          "feed=$feed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+      - name: Prove installed neutral coverage package and published application
+        if: ${{ !cancelled() && steps.prepare-neutral-feed.outcome == 'success' }}
+        shell: pwsh
+        env:
+          NATIVE_PACKAGE_FEED: ${{ steps.prepare-neutral-feed.outputs.feed }}
+          NATIVE_PACKAGE_VERSION: ${{ steps.prepare-neutral-feed.outputs.version }}
+        run: |
+          $proof = Join-Path $env:RUNNER_TEMP 'native-coverage-library-proof'
+          dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --configuration Release -- --package-proof --feed $env:NATIVE_PACKAGE_FEED --version $env:NATIVE_PACKAGE_VERSION --output $proof --dotnet (Get-Command dotnet).Source
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prove installed reuse tool and package-only prepared host
         id: reuse-package-proof
-        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.prepare-neutral-feed.outcome == 'success' }}
         shell: pwsh
         env:
           SOURCE_COMMIT: ${{ steps.diff.outputs.source_commit }}
+          NATIVE_PACKAGE_FEED: ${{ steps.prepare-neutral-feed.outputs.feed }}
+          NATIVE_PACKAGE_VERSION: ${{ steps.prepare-neutral-feed.outputs.version }}
         run: |
-          $version = "0.0.0-native.${{ github.run_number }}.${{ github.run_attempt }}"
-          $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-library-feed'
           $proof = Join-Path $env:RUNNER_TEMP 'native-evidence-reuse-package-proof'
-          foreach ($name in @('Contracts', 'Planner', 'Readiness', 'Cli', 'Aspire')) {
+          foreach ($name in @('Planner', 'Readiness', 'Cli', 'Aspire')) {
             $project = "Evidence/ForgeTrust.AppSurface.Evidence.$name/ForgeTrust.AppSurface.Evidence.$name.csproj"
-            dotnet pack $project --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
+            dotnet pack $project --configuration Release --output $env:NATIVE_PACKAGE_FEED "/p:PackageVersion=$env:NATIVE_PACKAGE_VERSION" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
-          dotnet $validation --operation reuse-package-proof --feed $feed --version $version --source-commit $env:SOURCE_COMMIT --dotnet (Get-Command dotnet).Source --output $proof
+          dotnet $validation --operation reuse-package-proof --feed $env:NATIVE_PACKAGE_FEED --version $env:NATIVE_PACKAGE_VERSION --source-commit $env:SOURCE_COMMIT --dotnet (Get-Command dotnet).Source --output $proof
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Reject case-varied engine version skew before proof output
         if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
