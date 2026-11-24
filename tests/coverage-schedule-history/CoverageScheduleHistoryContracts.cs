@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
@@ -444,12 +445,17 @@ internal static class CoverageScheduleHistoryContracts
 
     private static async Task UnreadableMemberAsync()
     {
+        var fixture = ReadCanonicalFixture();
+        var validArchive = MakeZip(new("timings.json", fixture));
+        var paddedArchive = MakeZip(new("timings.json", [.. fixture, (byte)' ']));
         var invalidArchives = new (string Name, byte[] Archive)[]
         {
-            ("unsupported-compression", SetZipCompressionMethod(MakeZip(new("timings.json", ReadCanonicalFixture())), 99)),
-            ("encrypted-flag", SetZipEncryptedFlag(MakeZip(new("timings.json", ReadCanonicalFixture())))),
-            ("corrupt-deflate", CorruptDeflate(MakeZip(new("timings.json", ReadCanonicalFixture())))),
-            ("corrupt-crc", CorruptStoredCrc(MakeZip(new("timings.json", ReadCanonicalFixture(), CompressionLevel.NoCompression))))
+            ("unsupported-compression", SetZipCompressionMethod(validArchive, 99)),
+            ("encrypted-flag", SetZipEncryptedFlag(validArchive)),
+            ("corrupt-deflate", CorruptDeflate(validArchive)),
+            ("corrupt-crc", CorruptStoredCrc(MakeZip(new("timings.json", fixture, CompressionLevel.NoCompression)))),
+            ("declared-length-too-large", WithDeclaredEntryMetadata(validArchive, paddedArchive)),
+            ("declared-length-too-small", WithDeclaredEntryMetadata(paddedArchive, validArchive))
         };
 
         foreach (var (name, archive) in invalidArchives)
@@ -1155,29 +1161,48 @@ internal static class CoverageScheduleHistoryContracts
     private static byte[] SetZipCompressionMethod(byte[] archive, ushort method)
     {
         var result = (byte[])archive.Clone();
-        var localHeader = FindSignature(result, [0x50, 0x4b, 0x03, 0x04]);
-        var centralHeader = FindSignature(result, [0x50, 0x4b, 0x01, 0x02]);
-        WriteUInt16(result, localHeader + 8, method);
-        WriteUInt16(result, centralHeader + 10, method);
+        var localHeader = FindSignature(result, "PK\x03\x04"u8);
+        var centralHeader = FindSignature(result, "PK\x01\x02"u8);
+        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(localHeader + 8), method);
+        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(centralHeader + 10), method);
+        return result;
+    }
+
+    private static byte[] WithDeclaredEntryMetadata(byte[] archive, byte[] referenceArchive)
+    {
+        // Match the CRC to the declared payload so a truncated, valid JSON prefix would pass the CRC check.
+        using var referenceStream = new MemoryStream(referenceArchive, writable: false);
+        using var referenceZip = new ZipArchive(referenceStream, ZipArchiveMode.Read);
+        var declared = referenceZip.Entries.Single();
+        var declaredSize = checked((uint)declared.Length);
+        var result = (byte[])archive.Clone();
+        var localHeader = FindSignature(result, "PK\x03\x04"u8);
+        var centralHeader = FindSignature(result, "PK\x01\x02"u8);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(localHeader + 14), declared.Crc32);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(centralHeader + 16), declared.Crc32);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(localHeader + 22), declaredSize);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(centralHeader + 24), declaredSize);
         return result;
     }
 
     private static byte[] SetZipEncryptedFlag(byte[] archive)
     {
         var result = (byte[])archive.Clone();
-        var localHeader = FindSignature(result, [0x50, 0x4b, 0x03, 0x04]);
-        var centralHeader = FindSignature(result, [0x50, 0x4b, 0x01, 0x02]);
-        WriteUInt16(result, localHeader + 6, (ushort)(ReadUInt16(result, localHeader + 6) | 1));
-        WriteUInt16(result, centralHeader + 8, (ushort)(ReadUInt16(result, centralHeader + 8) | 1));
+        var localHeader = FindSignature(result, "PK\x03\x04"u8);
+        var centralHeader = FindSignature(result, "PK\x01\x02"u8);
+        var localFlags = result.AsSpan(localHeader + 6);
+        var centralFlags = result.AsSpan(centralHeader + 8);
+        BinaryPrimitives.WriteUInt16LittleEndian(localFlags, (ushort)(BinaryPrimitives.ReadUInt16LittleEndian(localFlags) | 1));
+        BinaryPrimitives.WriteUInt16LittleEndian(centralFlags, (ushort)(BinaryPrimitives.ReadUInt16LittleEndian(centralFlags) | 1));
         return result;
     }
 
     private static byte[] CorruptDeflate(byte[] archive)
     {
         var result = (byte[])archive.Clone();
-        var localHeader = FindSignature(result, [0x50, 0x4b, 0x03, 0x04]);
-        var nameLength = ReadUInt16(result, localHeader + 26);
-        var extraLength = ReadUInt16(result, localHeader + 28);
+        var localHeader = FindSignature(result, "PK\x03\x04"u8);
+        var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(result.AsSpan(localHeader + 26));
+        var extraLength = BinaryPrimitives.ReadUInt16LittleEndian(result.AsSpan(localHeader + 28));
         var compressedStart = localHeader + 30 + nameLength + extraLength;
         result[compressedStart] = 0xff;
         return result;
@@ -1186,21 +1211,24 @@ internal static class CoverageScheduleHistoryContracts
     private static byte[] CorruptStoredCrc(byte[] archive)
     {
         var result = (byte[])archive.Clone();
-        var localHeader = FindSignature(result, [0x50, 0x4b, 0x03, 0x04]);
-        var centralHeader = FindSignature(result, [0x50, 0x4b, 0x01, 0x02]);
-        WriteUInt32(result, localHeader + 14, ReadUInt32(result, localHeader + 14) ^ 1u);
-        WriteUInt32(result, centralHeader + 16, ReadUInt32(result, centralHeader + 16) ^ 1u);
+        var localHeader = FindSignature(result, "PK\x03\x04"u8);
+        var centralHeader = FindSignature(result, "PK\x01\x02"u8);
+        var localCrc = result.AsSpan(localHeader + 14);
+        var centralCrc = result.AsSpan(centralHeader + 16);
+        BinaryPrimitives.WriteUInt32LittleEndian(localCrc, BinaryPrimitives.ReadUInt32LittleEndian(localCrc) ^ 1u);
+        BinaryPrimitives.WriteUInt32LittleEndian(centralCrc, BinaryPrimitives.ReadUInt32LittleEndian(centralCrc) ^ 1u);
         return result;
     }
 
     private static byte[] PadZipCommentToLength(byte[] archive, int targetLength)
     {
-        var endRecord = FindSignatureFromEnd(archive, [0x50, 0x4b, 0x05, 0x06]);
+        var endRecord = archive.AsSpan().LastIndexOf("PK\x05\x06"u8);
+        Check(endRecord >= 0, "The ZIP fixture is missing its end record.");
         var commentLength = targetLength - archive.Length;
         Check(commentLength >= 0 && commentLength <= ushort.MaxValue, "The ZIP comment cannot reach the requested boundary.");
         var result = new byte[targetLength];
         archive.CopyTo(result, 0);
-        WriteUInt16(result, endRecord + 20, (ushort)commentLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(endRecord + 20), (ushort)commentLength);
         return result;
     }
 
@@ -1213,48 +1241,11 @@ internal static class CoverageScheduleHistoryContracts
         return result;
     }
 
-    private static int FindSignature(byte[] bytes, byte[] signature)
+    private static int FindSignature(byte[] bytes, ReadOnlySpan<byte> signature)
     {
-        for (var offset = 0; offset <= bytes.Length - signature.Length; offset++)
-        {
-            if (bytes.AsSpan(offset, signature.Length).SequenceEqual(signature))
-            {
-                return offset;
-            }
-        }
-        throw new InvalidDataException("The ZIP fixture is missing an expected header.");
-    }
-
-    private static int FindSignatureFromEnd(byte[] bytes, byte[] signature)
-    {
-        for (var offset = bytes.Length - signature.Length; offset >= 0; offset--)
-        {
-            if (bytes.AsSpan(offset, signature.Length).SequenceEqual(signature))
-            {
-                return offset;
-            }
-        }
-        throw new InvalidDataException("The ZIP fixture is missing its end record.");
-    }
-
-    private static ushort ReadUInt16(byte[] bytes, int offset) =>
-        (ushort)(bytes[offset] | (bytes[offset + 1] << 8));
-
-    private static uint ReadUInt32(byte[] bytes, int offset) =>
-        (uint)(bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24));
-
-    private static void WriteUInt16(byte[] bytes, int offset, ushort value)
-    {
-        bytes[offset] = (byte)value;
-        bytes[offset + 1] = (byte)(value >> 8);
-    }
-
-    private static void WriteUInt32(byte[] bytes, int offset, uint value)
-    {
-        bytes[offset] = (byte)value;
-        bytes[offset + 1] = (byte)(value >> 8);
-        bytes[offset + 2] = (byte)(value >> 16);
-        bytes[offset + 3] = (byte)(value >> 24);
+        var offset = bytes.AsSpan().IndexOf(signature);
+        Check(offset >= 0, "The ZIP fixture is missing an expected header.");
+        return offset;
     }
 
     private static IReadOnlyList<string> Endpoints(RunResult result) =>

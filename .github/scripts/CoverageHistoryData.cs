@@ -145,39 +145,14 @@ internal static class CoverageHistoryData
     private static byte[] ReadEntry(IArchiveEntry entry)
     {
         using var entryStream = entry.OpenEntryStream();
-        using var contents = new MemoryStream((int)entry.Size);
-        var buffer = new byte[8192];
-        var totalBytes = 0;
-
-        while (true)
+        var contents = new byte[checked((int)entry.Size)];
+        entryStream.ReadExactly(contents);
+        if (entryStream.ReadByte() != -1)
         {
-            var bytesToRead = Math.Min(buffer.Length, MaxJsonBytes + 1 - totalBytes);
-            if (bytesToRead <= 0)
-            {
-                throw new InvalidDataException("timings.json exceeds the 2 MiB limit.");
-            }
-
-            var bytesRead = entryStream.Read(buffer, 0, bytesToRead);
-            if (bytesRead == 0)
-            {
-                break;
-            }
-
-            totalBytes += bytesRead;
-            if (totalBytes > MaxJsonBytes)
-            {
-                throw new InvalidDataException("timings.json exceeds the 2 MiB limit.");
-            }
-
-            contents.Write(buffer, 0, bytesRead);
+            throw new InvalidDataException("timings.json exceeds its declared size.");
         }
 
-        if (totalBytes != entry.Size)
-        {
-            throw new InvalidDataException("timings.json is incomplete.");
-        }
-
-        return contents.ToArray();
+        return contents;
     }
 
     private static void ValidateTimings(JsonElement root)
