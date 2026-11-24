@@ -1587,6 +1587,7 @@ internal sealed record PackagePublishRequest(
 /// <param name="PublicationStartReceiptPath">Start receipt from its completed immutable upload.</param>
 /// <param name="PublicationStartArtifactId">ID returned by that successful upload or exact recovery.</param>
 /// <param name="ReportDirectory">Fresh diagnostics directory disjoint from inputs.</param>
+/// <param name="DocsNativeEvidence">Downloaded, immutable Docs native proof when the candidate carries host-only assets.</param>
 internal sealed record TailwindPublicationRequest(
     string RepositoryRoot,
     string ArtifactsInputPath,
@@ -1603,7 +1604,8 @@ internal sealed record TailwindPublicationRequest(
     string PublicationDirectory,
     string PublicationStartReceiptPath,
     string PublicationStartArtifactId,
-    string ReportDirectory);
+    string ReportDirectory,
+    DocsNativeEvidenceInput? DocsNativeEvidence = null);
 
 /// <summary>Reads a NuGet credential only after publication evidence has passed validation.</summary>
 internal interface IReleaseCredentialProvider

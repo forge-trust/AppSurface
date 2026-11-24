@@ -136,6 +136,18 @@ jobs:
       expected_subject_sha256: ${{ needs.pack-and-verify.outputs.expected_subject_sha256 }}
       artifact_manifest_file: package-artifact-manifest.unapproved.json
 
+  docs-native-evidence:
+    needs: [validate-tag, validate-source-ci, pack-and-verify]
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/docs-native-evidence.yml
+    with:
+      package_version: ${{ needs.validate-tag.outputs.package-version }}
+      source_commit: ${{ needs.validate-tag.outputs.tag-commit }}
+      producer_artifact_id: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}
+      artifact_manifest_file: package-artifact-manifest.unapproved.json
+
   durable-template-evidence:
     needs: [validate-tag, validate-source-ci, pack-and-verify]
     permissions:
@@ -511,6 +523,7 @@ jobs:
       - validate-tag
       - validate-release-environment
       - native-host-evidence
+      - docs-native-evidence
       - durable-template-evidence
       - pack-and-verify
       - prove-docs-archive
@@ -532,6 +545,8 @@ jobs:
       CURRENT_AGGREGATE_ARTIFACT_ID: ${{ needs.native-host-evidence.outputs.aggregate_artifact_id }}
       CURRENT_AGGREGATE_SHA256: ${{ needs.native-host-evidence.outputs.aggregate_sha256 }}
       CURRENT_NATIVE_INVOCATION_ID: ${{ needs.native-host-evidence.outputs.native_invocation_id }}
+      CURRENT_DOCS_NATIVE_ARTIFACT_ID: ${{ needs.docs-native-evidence.outputs.artifact_id }}
+      CURRENT_DOCS_NATIVE_SHA256: ${{ needs.docs-native-evidence.outputs.sha256 }}
 
     steps:
       - name: Initialize publication paths
@@ -600,6 +615,8 @@ jobs:
             aggregate_id="$(jq -er 'select(.aggregateArtifactId | type == "string" and test("^[1-9][0-9]*$")) | .aggregateArtifactId' "$START_RECEIPT")"
             aggregate_sha="$(jq -er '.aggregateSha256' "$START_RECEIPT")"
             invocation="$(jq -er '.nativeInvocationId' "$START_RECEIPT")"
+            docs_artifact_id="$(jq -er '.docsNativeEvidence.artifactId // ""' "$START_RECEIPT")"
+            docs_sha256="$(jq -er '.docsNativeEvidence.sha256 // ""' "$START_RECEIPT")"
             [[ "$aggregate_id" =~ ^[1-9][0-9]*$ && "$aggregate_sha" =~ ^[0-9a-f]{64}$ ]]
             [[ "$RECOVERED_START_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
             echo "start_receipt_path=$START_RECEIPT" >> "$GITHUB_OUTPUT"
@@ -608,12 +625,21 @@ jobs:
             aggregate_id="$CURRENT_AGGREGATE_ARTIFACT_ID"
             aggregate_sha="$CURRENT_AGGREGATE_SHA256"
             invocation="$CURRENT_NATIVE_INVOCATION_ID"
+            docs_artifact_id="$CURRENT_DOCS_NATIVE_ARTIFACT_ID"
+            docs_sha256="$CURRENT_DOCS_NATIVE_SHA256"
+            [[ -n "$docs_artifact_id" && -n "$docs_sha256" ]]
             [[ "$aggregate_id" =~ ^[1-9][0-9]*$ && "$aggregate_sha" =~ ^[0-9a-f]{64}$ && -n "$invocation" ]]
             echo "start_receipt_path=$PREFLIGHT_REPORT_DIRECTORY/publication-start-receipt.json" >> "$GITHUB_OUTPUT"
           fi
           echo "aggregate_artifact_id=$aggregate_id" >> "$GITHUB_OUTPUT"
           echo "expected_aggregate_sha256=$aggregate_sha" >> "$GITHUB_OUTPUT"
           echo "native_invocation_id=$invocation" >> "$GITHUB_OUTPUT"
+          if [[ -n "$docs_artifact_id" || -n "$docs_sha256" ]]; then
+            [[ "$docs_artifact_id" =~ ^[1-9][0-9]*$ && "$docs_sha256" =~ ^[0-9a-f]{64}$ ]]
+          fi
+          echo "docs_native_artifact_id=$docs_artifact_id" >> "$GITHUB_OUTPUT"
+          echo "DOCS_NATIVE_ARTIFACT_ID=$docs_artifact_id" >> "$GITHUB_ENV"
+          echo "DOCS_NATIVE_SHA256=$docs_sha256" >> "$GITHUB_ENV"
 
       - name: Download frozen producer bundle by immutable ID
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -639,6 +665,13 @@ jobs:
         with:
           artifact-ids: ${{ steps.candidate.outputs.aggregate_artifact_id }}
           path: ${{ runner.temp }}/tailwind-aggregate
+
+      - name: Download selected Docs proof by immutable ID
+        if: steps.candidate.outputs.docs_native_artifact_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.candidate.outputs.docs_native_artifact_id }}
+          path: ${{ runner.temp }}/docs-native-proof
 
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -676,12 +709,13 @@ jobs:
           PREFLIGHT_OUTPUT_DIRECTORY: ${{ steps.start-recovery.outputs.publication_found == 'true' && format('{0}/tailwind-recovery-validation-report', runner.temp) || env.PREFLIGHT_REPORT_DIRECTORY }}
         run: |
           set -euo pipefail
+          source .github/scripts/docs-native-publication-args.sh
           bundle_args=(--repo-root "$GITHUB_WORKSPACE" --artifacts-input "$PACKAGE_ARTIFACTS" \
             --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
             --producer-subject "$PACKAGE_ARTIFACTS/tailwind-proof-subject.json" \
             --producer-artifact-id "$PRODUCER_ARTIFACT_ID" --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
             --repository-id "$REPOSITORY_ID" --producer-run-id "$PRODUCER_RUN_ID" --source-commit "$SOURCE_COMMIT")
-          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence ${docs_native_args[@]+"${docs_native_args[@]}"} \
             "${bundle_args[@]}" --mode publish-preflight \
             --aggregate-input "$AGGREGATE_DIRECTORY" --aggregate-artifact-id "$AGGREGATE_ARTIFACT_ID" \
             --expected-aggregate-sha256 "$EXPECTED_AGGREGATE_SHA256" \
@@ -730,7 +764,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
+          source .github/scripts/docs-native-publication-args.sh
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence ${docs_native_args[@]+"${docs_native_args[@]}"} \
             --mode validate-publication-start --repo-root "$GITHUB_WORKSPACE" \
             --artifacts-input "$PACKAGE_ARTIFACTS" \
             --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
@@ -777,6 +812,7 @@ jobs:
           PUBLISH_REPORT_DIRECTORY: ${{ runner.temp }}/tailwind-publish-report
         run: |
           set -euo pipefail
+          source .github/scripts/docs-native-publication-args.sh
           bundle_args=(--repo-root "$GITHUB_WORKSPACE" --artifacts-input "$PACKAGE_ARTIFACTS" \
             --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
             --producer-subject "$PACKAGE_ARTIFACTS/tailwind-proof-subject.json" \
@@ -784,7 +820,7 @@ jobs:
             --repository-id "$REPOSITORY_ID" --producer-run-id "$PRODUCER_RUN_ID" --source-commit "$SOURCE_COMMIT")
           aggregate_args=(--aggregate-input "$AGGREGATE_DIRECTORY" --aggregate-artifact-id "$AGGREGATE_ARTIFACT_ID" \
             --expected-aggregate-sha256 "$EXPECTED_AGGREGATE_SHA256")
-          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" publish-stable --durable-template-evidence "$RUNNER_TEMP/durable-template-evidence" \
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" publish-stable --durable-template-evidence "$RUNNER_TEMP/durable-template-evidence" ${docs_native_args[@]+"${docs_native_args[@]}"} \
             "${bundle_args[@]}" "${aggregate_args[@]}" --publication-directory "$PUBLICATION_DIRECTORY" \
             --publication-start-receipt "$START_RECEIPT_PATH" --publication-start-artifact-id "$START_ARTIFACT_ID" \
             --publish-log "$PACKAGE_ARTIFACTS/package-publish-log.md" --report-directory "$PUBLISH_REPORT_DIRECTORY" \
