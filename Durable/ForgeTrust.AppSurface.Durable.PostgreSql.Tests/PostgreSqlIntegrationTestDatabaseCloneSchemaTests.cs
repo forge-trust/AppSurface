@@ -166,7 +166,8 @@ public sealed class PostgreSqlIntegrationTestDatabaseCloneSchemaTests
                 template.DataSource,
                 $"CREATE TABLE appsurface_durable.{sentinelRelation} (id integer PRIMARY KEY); " +
                 $"GRANT USAGE ON SCHEMA appsurface_durable TO {quotedRole}; " +
-                $"GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.{sentinelRelation} TO {quotedRole};");
+                $"GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.{sentinelRelation} TO {quotedRole}; " +
+                $"GRANT SELECT ON ALL TABLES IN SCHEMA appsurface_durable TO {quotedRole};");
 
             await using var hiddenClone = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(server.ConnectionString, template);
             await using var namedClone = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(server.ConnectionString, template);
@@ -186,21 +187,13 @@ public sealed class PostgreSqlIntegrationTestDatabaseCloneSchemaTests
             Assert.False(roleIdentity.IsSuperuser);
             Assert.False(roleIdentity.BypassesRowSecurity);
 
-            await using (var hiddenConnection = await restrictedCloneDataSource.OpenConnectionAsync())
-            await using (var hiddenTransaction = await hiddenConnection.BeginTransactionAsync())
-            {
-                await using var disableRls = new NpgsqlCommand("SET LOCAL row_security = off;", hiddenConnection, hiddenTransaction);
-                await disableRls.ExecuteNonQueryAsync();
-                await using var probe = new NpgsqlCommand(
-                    "SELECT count(*) FROM appsurface_durable.scope;",
-                    hiddenConnection,
-                    hiddenTransaction);
-                var rlsFailure = await Assert.ThrowsAsync<PostgresException>(async () => await probe.ExecuteScalarAsync());
-                Assert.Equal("42501", rlsFailure.SqlState);
-            }
-
             var hiddenError = await Assert.ThrowsAsync<PostgreSqlFixtureException>(async () =>
-                await hiddenClone.ActivateCloneAsync(templateStoreId, Guid.NewGuid(), "schema-tests", "hidden-row"));
+                await hiddenClone.ActivateCloneAsync(
+                    templateStoreId,
+                    Guid.NewGuid(),
+                    "schema-tests",
+                    "hidden-row",
+                    activationDataSource: restrictedCloneDataSource));
             Assert.Contains("runtime rows", hiddenError.Message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(password, hiddenError.Message, StringComparison.Ordinal);
             var hiddenMetadata = await ReadMetadataAsync(hiddenClone.DataSource);
@@ -266,7 +259,7 @@ public sealed class PostgreSqlIntegrationTestDatabaseCloneSchemaTests
         await using var server = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var (template, templateStoreId) = await CreatePreparedTemplateAsync(server.ConnectionString);
         await using var templateScope = template;
-        var clone = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(server.ConnectionString, template);
+        await using var clone = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(server.ConnectionString, template);
         var cloneName = new NpgsqlConnectionStringBuilder(clone.ConnectionString).Database!;
         const string injectedDiagnostic = "credential-sentinel-post-rekey";
 
@@ -285,7 +278,38 @@ public sealed class PostgreSqlIntegrationTestDatabaseCloneSchemaTests
         var templateStatus = await new PostgreSqlDurableRuntimeSchemaManager(template.DataSource).GetStatusAsync();
         Assert.Equal(templateStoreId, templateStatus.StoreId);
         Assert.Null(templateStatus.ActiveRuntimeEpoch);
-        await clone.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ActivateClone_CommitAcknowledgementLost_CleansRekeyedOwnedClone()
+    {
+        await using var server = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var (template, templateStoreId) = await CreatePreparedTemplateAsync(server.ConnectionString);
+        await using var templateScope = template;
+        await using var clone = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(server.ConnectionString, template);
+        var cloneName = new NpgsqlConnectionStringBuilder(clone.ConnectionString).Database!;
+        var cloneOid = await ReadDatabaseOidAsync(server.ConnectionString, cloneName);
+        Assert.NotNull(cloneOid);
+
+        var error = await Assert.ThrowsAsync<PostgreSqlFixtureException>(() =>
+            clone.ActivateCloneAsync(
+                templateStoreId,
+                Guid.NewGuid(),
+                "schema-tests",
+                "lost-rekey-commit-acknowledgement",
+                commitRekey: async (transaction, cancellationToken) =>
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                    throw new InvalidOperationException("Injected lost rekey commit acknowledgement.");
+                }).AsTask());
+
+        Assert.Contains("after rekey", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("InvalidOperationException", error.Message, StringComparison.Ordinal);
+        Assert.Contains("removed", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await DatabaseExistsAsync(server.ConnectionString, cloneName));
+        var templateStatus = await new PostgreSqlDurableRuntimeSchemaManager(template.DataSource).GetStatusAsync();
+        Assert.Equal(templateStoreId, templateStatus.StoreId);
+        Assert.Null(templateStatus.ActiveRuntimeEpoch);
     }
 
     [Fact]
@@ -335,7 +359,7 @@ public sealed class PostgreSqlIntegrationTestDatabaseCloneSchemaTests
         await using var server = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var (template, templateStoreId) = await CreatePreparedTemplateAsync(server.ConnectionString);
         await using var templateScope = template;
-        var clone = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(server.ConnectionString, template);
+        await using var clone = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(server.ConnectionString, template);
 
         var error = await Assert.ThrowsAsync<PostgreSqlFixtureException>(() => template.DisposeAsync().AsTask());
         Assert.Contains("registered clones", error.Message, StringComparison.OrdinalIgnoreCase);

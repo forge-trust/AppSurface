@@ -97,12 +97,20 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
     }
 
     /// <summary>Validates a copied template, rekeys the clone, and initializes its first runtime epoch.</summary>
+    /// <remarks>
+    /// The optional commit and data-source overrides support regression tests for ambiguous commit acknowledgements
+    /// and restricted-role validation. A supplied data source must target this owned database. A commit callback that
+    /// returns indicates confirmed success, while a callback failure is treated as an uncertain commit outcome and
+    /// triggers owned-clone cleanup.
+    /// </remarks>
     /// <param name="expectedTemplateStoreId">The store ID returned by <see cref="PrepareTemplateAsync"/>.</param>
     /// <param name="epoch">The fresh runtime epoch to activate for the clone.</param>
     /// <param name="actor">The opaque actor code recorded with epoch initialization.</param>
     /// <param name="reason">The opaque reason code recorded with epoch initialization.</param>
     /// <param name="afterRekey">Optional fault-injection callback invoked after the rekey commit and before epoch activation.</param>
     /// <param name="cancellationToken">Cancels validation and activation. A post-rekey failure triggers owned-clone cleanup.</param>
+    /// <param name="commitRekey">Optional test callback that replaces the rekey commit operation.</param>
+    /// <param name="activationDataSource">Optional data source used for validation and activation tests.</param>
     /// <returns>The verified, compatible status containing the clone's new store ID and active epoch.</returns>
     /// <exception cref="PostgreSqlFixtureException">The clone identity, migration history, metadata, visibility, or state is invalid.</exception>
     internal async ValueTask<DurableRuntimeSchemaStatus> ActivateCloneAsync(
@@ -111,7 +119,9 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
         string actor,
         string reason,
         Func<CancellationToken, ValueTask>? afterRekey = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<NpgsqlTransaction, CancellationToken, ValueTask>? commitRekey = null,
+        NpgsqlDataSource? activationDataSource = null)
     {
         if (expectedTemplateStoreId == Guid.Empty)
         {
@@ -126,7 +136,7 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         Exception? postCommitFailure = null;
         DurableRuntimeSchemaStatus? activatedStatus = null;
-        var rekeyCommitted = false;
+        var rekeyCommitAttempted = false;
         try
         {
             ObjectDisposedException.ThrowIf(_closing || _disposed, this);
@@ -140,9 +150,10 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
                 throw new PostgreSqlFixtureException("The supplied template store ID does not match this clone's registered source identity.");
             }
 
-            var manager = new PostgreSqlDurableRuntimeSchemaManager(DataSource);
+            var validationDataSource = activationDataSource ?? DataSource;
+            var manager = new PostgreSqlDurableRuntimeSchemaManager(validationDataSource);
             Guid newStoreId;
-            await using (var connection = await DataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false))
+            await using (var connection = await validationDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false))
             await using (var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false))
             {
                 try
@@ -176,10 +187,17 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
                         throw new PostgreSqlFixtureException("Clone rekey did not produce a distinct, nonempty store ID.");
                     }
 
-                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-                    rekeyCommitted = true;
+                    rekeyCommitAttempted = true;
+                    if (commitRekey is null)
+                    {
+                        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await commitRekey(transaction, cancellationToken).ConfigureAwait(false);
+                    }
                 }
-                catch (Exception error) when (!rekeyCommitted)
+                catch (Exception error) when (!rekeyCommitAttempted)
                 {
                     await RollbackAsync(transaction, error).ConfigureAwait(false);
                     throw;
@@ -211,7 +229,7 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
                 throw new PostgreSqlFixtureException("Clone identity or runtime epoch failed post-commit verification.");
             }
         }
-        catch (Exception error) when (rekeyCommitted)
+        catch (Exception error) when (rekeyCommitAttempted)
         {
             _closing = true;
             postCommitFailure = error;
@@ -353,7 +371,18 @@ internal sealed partial class PostgreSqlIntegrationTestDatabase
                 $"SELECT EXISTS (SELECT 1 FROM {qualifiedName} LIMIT 1);",
                 connection,
                 transaction);
-            if ((bool)(await probe.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!)
+            bool containsRows;
+            try
+            {
+                containsRows = (bool)(await probe.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+            }
+            catch (PostgresException error) when (error.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+            {
+                throw new PostgreSqlFixtureException(
+                    "Clone source contains Durable runtime rows or row security prevents a complete emptiness check. Rebuild it from a virgin migrated template.");
+            }
+
+            if (containsRows)
             {
                 throw new PostgreSqlFixtureException("Clone source contains Durable runtime rows. Rebuild it from a virgin migrated template.");
             }

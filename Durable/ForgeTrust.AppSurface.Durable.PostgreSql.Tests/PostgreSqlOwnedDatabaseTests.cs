@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
 using Npgsql;
 
@@ -126,6 +127,7 @@ public sealed class PostgreSqlOwnedDatabaseTests
         PostgreSqlIntegrationTestDatabase? template = null;
         PostgreSqlIntegrationTestDatabase? firstClone = null;
         PostgreSqlIntegrationTestDatabase? secondClone = null;
+        Exception? testFailure = null;
 
         try
         {
@@ -173,22 +175,29 @@ public sealed class PostgreSqlOwnedDatabaseTests
             await Assert.ThrowsAsync<PostgresException>(async () =>
                 await ReadSentinelAsync(secondClone.ConnectionString, GetDatabaseName(secondClone.ConnectionString)));
         }
-        finally
+        catch (Exception error)
         {
-            if (secondClone is not null)
-            {
-                await secondClone.DisposeAsync();
-            }
+            testFailure = error;
+        }
 
-            if (firstClone is not null)
-            {
-                await firstClone.DisposeAsync();
-            }
+        var cleanupFailures = new List<Exception>();
+        await DisposeAndCollectAsync(secondClone, cleanupFailures);
+        await DisposeAndCollectAsync(firstClone, cleanupFailures);
+        await DisposeAndCollectAsync(template, cleanupFailures);
 
-            if (template is not null)
-            {
-                await template.DisposeAsync();
-            }
+        if (testFailure is not null)
+        {
+            cleanupFailures.Insert(0, testFailure);
+        }
+
+        if (cleanupFailures.Count == 1)
+        {
+            ExceptionDispatchInfo.Capture(cleanupFailures[0]).Throw();
+        }
+
+        if (cleanupFailures.Count > 1)
+        {
+            throw new AggregateException("The clone-isolation test or its owned-resource cleanup failed.", cleanupFailures);
         }
     }
 
@@ -278,6 +287,7 @@ public sealed class PostgreSqlOwnedDatabaseTests
         Guid? rekeyedStoreId = null;
         var originalCloneParked = false;
         var replacementCreated = false;
+        var replacementSentinelWritten = false;
         Guid templateStoreId = Guid.Empty;
 
         try
@@ -322,6 +332,7 @@ public sealed class PostgreSqlOwnedDatabaseTests
                         }
 
                         await WriteSentinelAsync(anchor.ConnectionString, cloneName, cancellationToken);
+                        replacementSentinelWritten = true;
                         throw new InvalidOperationException("Injected post-rekey activation failure.");
                     }).AsTask());
 
@@ -384,7 +395,7 @@ public sealed class PostgreSqlOwnedDatabaseTests
                         maintenanceConnectionString,
                         cloneName,
                         replacementOid.Value,
-                        SentinelValue);
+                        replacementSentinelWritten ? SentinelValue : null);
                 }
             }
 
@@ -574,6 +585,7 @@ public sealed class PostgreSqlOwnedDatabaseTests
         uint? roleDependencyFunctionOid = null;
         var originalDatabaseRenamed = false;
         var replacementDatabaseCreated = false;
+        var replacementDatabaseSentinelWritten = false;
 
         try
         {
@@ -605,6 +617,7 @@ public sealed class PostgreSqlOwnedDatabaseTests
             }
 
             await WriteSentinelAsync(anchor.ConnectionString, ownedName);
+            replacementDatabaseSentinelWritten = true;
             Assert.NotEqual(originalDatabaseOid, replacementDatabaseOid);
 
             var error = await Assert.ThrowsAsync<PostgreSqlFixtureException>(() => owned.DisposeAsync().AsTask());
@@ -652,7 +665,7 @@ public sealed class PostgreSqlOwnedDatabaseTests
                         maintenanceConnectionString,
                         ownedName,
                         replacementDatabaseOid.Value,
-                        SentinelValue);
+                        replacementDatabaseSentinelWritten ? SentinelValue : null);
                 }
             }
 
@@ -804,6 +817,25 @@ public sealed class PostgreSqlOwnedDatabaseTests
             Database = "postgres",
             Pooling = false,
         }.ConnectionString;
+
+    private static async Task DisposeAndCollectAsync(
+        PostgreSqlIntegrationTestDatabase? database,
+        List<Exception> failures)
+    {
+        if (database is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await database.DisposeAsync();
+        }
+        catch (Exception error)
+        {
+            failures.Add(error);
+        }
+    }
 
     private static string GetDatabaseName(string connectionString) =>
         new NpgsqlConnectionStringBuilder(connectionString).Database
