@@ -176,7 +176,7 @@ internal sealed class CoverageEvidenceProducer
                 CreateRunRequest(solutionPath, outputDirectory, producer.CoverageExecution) with { ProducerDeadline = producerDeadline, ArtifactRetention = producer.CoverageArtifactRetention },
                 CreateGateRequest(outputDirectory, diffSnapshot, producer.CoverageGate),
                 writers,
-                executionCancellation.Token, captureInventory: false,
+                executionCancellation.Token,
                 captureOrdinaryPublications: finalReportRoot is not null || captureInventory).ConfigureAwait(false);
             if (!result.Run.Success)
             {

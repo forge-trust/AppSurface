@@ -300,47 +300,29 @@ internal sealed class EvidenceReceiptStore
             using var payload = CoverageRunOutputLease.AcquireArtifactDirectory(
                 Path.Combine(_root, _namespace, normalizedKey, state.PayloadDirectoryName), false, true);
             if (payload is null) return EvidenceReceiptReadResult.Miss("payload-missing", state);
-            var resultBytes = ReadBoundedFile(payload, "passed-producer.json", 64 * 1024);
-            var stateResultBytes = DecodePassedProducerRecord(state.PassedProducerRecord);
-            if (!stateResultBytes.AsSpan().SequenceEqual(resultBytes))
-                return EvidenceReceiptReadResult.Miss("passed-producer-record-invalid", state);
-            var manifestBytes = ReadBoundedFile(payload, "origin.manifest.json", 4 * 1024 * 1024);
-            var result = EvidenceCanonicalJson.Deserialize<EvidenceProducerResult>(resultBytes);
-            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(manifestBytes);
-            var planBytes = ReadBoundedFile(payload, "origin.plan.json", 4 * 1024 * 1024);
-            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(planBytes);
-            EvidenceReceiptInputIdentity? inputIdentity = null;
-            if (state.InputIdentityDigest is not null)
+            try
             {
-                var identityBytes = ReadBoundedFile(payload, "identity.json", EvidenceProducerIdentityBuilder.MaximumMetadataBytes);
-                if (!StringComparer.Ordinal.Equals(Convert.ToHexString(SHA256.HashData(identityBytes)).ToLowerInvariant(), state.InputIdentityDigest))
-                    return EvidenceReceiptReadResult.Miss("input-identity-invalid", state);
-                inputIdentity = EvidenceCanonicalJson.Deserialize<EvidenceReceiptInputIdentity>(identityBytes);
-                inputIdentity.Validate();
-                if (!identityBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(inputIdentity)))
-                    return EvidenceReceiptReadResult.Miss("input-identity-noncanonical", state);
+                var origin = ReadOriginMetadata(payload, state);
+                return EvidenceReceiptReadResult.Candidate(state) with
+                {
+                    Result = origin.Result,
+                    OriginPlan = origin.Plan,
+                    OriginManifest = origin.Manifest,
+                    InputIdentity = origin.InputIdentity,
+                    OriginCompletedAt = state.OriginCompletedAt,
+                    OriginElapsedMilliseconds = origin.Result.ElapsedMilliseconds
+                };
             }
-            if (!resultBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(result))
-                || !manifestBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(manifest))
-                || !planBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(plan))
-                || !EvidenceManifestBuilder.Verify(plan, manifest)
-                || result.Outcome != EvidenceProducerOutcome.Passed
-                || !manifest.ProducerResults.Any(item => item.ProducerId == result.ProducerId
-                    && EvidenceCanonicalJson.Serialize(item).AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(result)))
-                || !StringComparer.Ordinal.Equals(manifest.ManifestDigest, state.OriginManifestDigest)
-                || !StringComparer.Ordinal.Equals(manifest.ManifestDigest,
-                    EvidenceDigest.CanonicalSha256(manifest with { ManifestDigest = string.Empty }))
-                || !StringComparer.Ordinal.Equals(plan.PlanDigest, manifest.PlanDigest))
-                return EvidenceReceiptReadResult.Miss("origin-binding-invalid", state);
-            return EvidenceReceiptReadResult.Candidate(state) with
+            catch (ReceiptMetadataException exception)
             {
-                Result = result,
-                OriginPlan = plan,
-                OriginManifest = manifest,
-                InputIdentity = inputIdentity,
-                OriginCompletedAt = state.OriginCompletedAt,
-                OriginElapsedMilliseconds = result.ElapsedMilliseconds
-            };
+                var reason = exception.Reason switch
+                {
+                    "input-identity-digest-invalid" => "input-identity-invalid",
+                    "passed-producer-invalid" => "origin-binding-invalid",
+                    _ => exception.Reason
+                };
+                return EvidenceReceiptReadResult.Miss(reason, state);
+            }
         }
         catch (FormatException) { return EvidenceReceiptReadResult.Miss("passed-producer-record-invalid"); }
         catch (FileNotFoundException) { return EvidenceReceiptReadResult.Miss("missing"); }
@@ -389,6 +371,56 @@ internal sealed class EvidenceReceiptStore
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
             or JsonException or ArgumentException or InvalidOperationException or KeyNotFoundException)
         { return EvidenceReceiptComparableResult.Unavailable("receipt-index-unavailable"); }
+    }
+
+    /// <summary>Reads and binds the canonical origin metadata without changing receipt state or touching artifacts.</summary>
+    private static ReceiptOriginMetadata ReadOriginMetadata(CoverageRunOutputLease payload, EvidenceReceiptState state)
+    {
+        var resultBytes = ReadBoundedFile(payload, "passed-producer.json", 64 * 1024);
+        if (!DecodePassedProducerRecord(state.PassedProducerRecord).AsSpan().SequenceEqual(resultBytes))
+            throw new ReceiptMetadataException("passed-producer-record-invalid");
+
+        var manifestBytes = ReadBoundedFile(payload, "origin.manifest.json", 4 * 1024 * 1024);
+        var result = EvidenceCanonicalJson.Deserialize<EvidenceProducerResult>(resultBytes);
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(manifestBytes);
+        var planBytes = ReadBoundedFile(payload, "origin.plan.json", 4 * 1024 * 1024);
+        var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(planBytes);
+
+        EvidenceReceiptInputIdentity? inputIdentity = null;
+        if (state.InputIdentityDigest is not null)
+        {
+            var identityBytes = ReadBoundedFile(payload, "identity.json", EvidenceProducerIdentityBuilder.MaximumMetadataBytes);
+            if (!StringComparer.Ordinal.Equals(EvidenceDigest.Sha256(identityBytes), state.InputIdentityDigest))
+                throw new ReceiptMetadataException("input-identity-digest-invalid");
+            inputIdentity = EvidenceCanonicalJson.Deserialize<EvidenceReceiptInputIdentity>(identityBytes);
+            inputIdentity.Validate();
+            if (!identityBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(inputIdentity)))
+                throw new ReceiptMetadataException("input-identity-noncanonical");
+        }
+
+        if (!resultBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(result))
+            || !manifestBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(manifest))
+            || !planBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(plan))
+            || !EvidenceManifestBuilder.Verify(plan, manifest)
+            || !StringComparer.Ordinal.Equals(manifest.ManifestDigest, state.OriginManifestDigest))
+            throw new ReceiptMetadataException("origin-binding-invalid");
+
+        if (result.Outcome != EvidenceProducerOutcome.Passed
+            || !manifest.ProducerResults.Any(item => item.ProducerId == result.ProducerId
+                && resultBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(item))))
+            throw new ReceiptMetadataException("passed-producer-invalid");
+
+        return new ReceiptOriginMetadata(plan, manifest, result, inputIdentity);
+    }
+
+    /// <summary>The verified origin data shared by inspection and restoration.</summary>
+    private sealed record ReceiptOriginMetadata(EvidencePlan Plan, EvidenceManifest Manifest,
+        EvidenceProducerResult Result, EvidenceReceiptInputIdentity? InputIdentity);
+
+    /// <summary>A metadata refusal that inspection and leased restoration handle according to their ownership rules.</summary>
+    private sealed class ReceiptMetadataException(string reason) : Exception
+    {
+        internal string Reason { get; } = reason;
     }
 
     private static byte[] ReadBoundedFile(CoverageRunOutputLease root, string name, int maximumBytes)
@@ -555,45 +587,17 @@ internal sealed class EvidenceReceiptStore
                         || rootEntries.Single(static entry => entry.Name == "artifacts").IsDirectory is false
                         || rootEntries.Where(static entry => entry.Name != "artifacts").Any(static entry => entry.IsDirectory))
                         throw new InvalidOwnedReceiptException("payload-container-invalid");
-                    var planBytes = ReadImmediate(payload.Root, "origin.plan.json", 4 * 1024 * 1024);
-                    var manifestBytes = ReadImmediate(payload.Root, "origin.manifest.json", 4 * 1024 * 1024);
-                    var resultBytes = ReadImmediate(payload.Root, "passed-producer.json", 64 * 1024);
-                    if (!DecodePassedProducerRecord(state.PassedProducerRecord).AsSpan().SequenceEqual(resultBytes))
-                        throw new InvalidOwnedReceiptException("passed-producer-record-invalid");
-                    var originPlan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(planBytes);
-                    var originManifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(manifestBytes);
-                    var persistedResult = EvidenceCanonicalJson.Deserialize<EvidenceProducerResult>(resultBytes);
-                    EvidenceReceiptInputIdentity? inputIdentity = null;
-                    if (state.InputIdentityDigest is not null)
-                    {
-                        var identityBytes = ReadImmediate(payload.Root, "identity.json", EvidenceProducerIdentityBuilder.MaximumMetadataBytes);
-                        if (!StringComparer.Ordinal.Equals(Hash(identityBytes), state.InputIdentityDigest))
-                            throw new InvalidOwnedReceiptException("input-identity-digest-invalid");
-                        inputIdentity = EvidenceCanonicalJson.Deserialize<EvidenceReceiptInputIdentity>(identityBytes);
-                        inputIdentity.Validate();
-                        if (!identityBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(inputIdentity)))
-                            throw new InvalidOwnedReceiptException("input-identity-noncanonical");
-                    }
-                    if (!planBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(originPlan))
-                        || !manifestBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(originManifest))
-                        || !resultBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(persistedResult))
-                        || state.OriginCompletedAt is null || state.OriginCompletedAt == default
-                        || !EvidenceManifestBuilder.Verify(originPlan, originManifest)
-                        || !StringComparer.Ordinal.Equals(originManifest.ManifestDigest, state.OriginManifestDigest)
-                        || !StringComparer.Ordinal.Equals(originManifest.ManifestDigest,
-                            EvidenceDigest.CanonicalSha256(originManifest with { ManifestDigest = string.Empty }))
-                        || !StringComparer.Ordinal.Equals(originPlan.PlanDigest, originManifest.PlanDigest))
+                    var origin = ReadOriginMetadata(payload.Root, state);
+                    if (state.OriginCompletedAt is null)
                         throw new InvalidOwnedReceiptException("origin-binding-invalid");
 
-                    var declaration = originPlan.Profile.Producers.SingleOrDefault(item => item.Id == producer.Id);
-                    var originResult = originManifest.ProducerResults.SingleOrDefault(item => item.ProducerId == producer.Id);
-                    if (declaration is null || originResult is null
+                    var declaration = origin.Plan.Profile.Producers.SingleOrDefault(item => item.Id == producer.Id);
+                    var originResult = origin.Manifest.ProducerResults.SingleOrDefault(item => item.ProducerId == producer.Id);
+                    if (declaration is null || originResult is null || origin.Result.ProducerId != producer.Id
                         || !StringComparer.Ordinal.Equals(
                             EvidenceProducerIdentityBuilder.CanonicalDeclarationHash(declaration),
                             EvidenceProducerIdentityBuilder.CanonicalDeclarationHash(producer))
-                        || originResult.Outcome != EvidenceProducerOutcome.Passed
-                        || !EvidenceArtifactValidation.AreValid(producer, originResult.Artifacts)
-                        || !EvidenceCanonicalJson.Serialize(originResult).AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(persistedResult)))
+                        || !EvidenceArtifactValidation.AreValid(producer, originResult.Artifacts))
                         throw new InvalidOwnedReceiptException("passed-producer-invalid");
 
                     var artifacts = originResult.Artifacts ?? [];
@@ -631,15 +635,19 @@ internal sealed class EvidenceReceiptStore
                         Outcome = EvidenceProducerOutcome.Reused,
                         ElapsedMilliseconds = 0,
                         ProducerKey = Key,
-                        OriginManifestDigest = originManifest.ManifestDigest,
+                        OriginManifestDigest = origin.Manifest.ManifestDigest,
                         OriginCompletedAt = state.OriginCompletedAt,
                         Diagnostic = producer.Kind.Equals("coverage", StringComparison.OrdinalIgnoreCase)
                             ? "Coverage report: coverage/coverage-gate.md (relative to the producer artifact root)."
                             : originResult.Diagnostic
                     };
-                    return EvidenceReceiptReadResult.Restored(reused, originPlan, originManifest,
-                        state.OriginCompletedAt!.Value, inputIdentity, persistedResult.ElapsedMilliseconds);
+                    return EvidenceReceiptReadResult.Restored(reused, origin.Plan, origin.Manifest,
+                        state.OriginCompletedAt.Value, origin.InputIdentity, originResult.ElapsedMilliseconds);
                 }
+            }
+            catch (ReceiptMetadataException exception)
+            {
+                return InvalidateOwned(state, exception.Reason);
             }
             catch (InvalidOwnedReceiptException exception)
             {
@@ -1018,15 +1026,6 @@ internal sealed class EvidenceReceiptStore
             var path = Path.Combine(directory, payloadName);
             return (CoverageRunOutputLease.AcquireArtifactDirectory(path, false, true)
                 ?? throw new DirectoryNotFoundException("Receipt payload is missing."), path);
-        }
-
-        private static byte[] ReadImmediate(CoverageRunOutputLease root, string name, int maximumBytes)
-        {
-            using var input = root.OpenArtifactFile(name, false);
-            if (input.Length < 0 || input.Length > maximumBytes) throw new InvalidDataException("Receipt document exceeds its bound.");
-            using var memory = new MemoryStream((int)input.Length);
-            input.CopyTo(memory);
-            return memory.ToArray();
         }
 
         private static void WriteImmediate(CoverageRunOutputLease root, string name, byte[] bytes, int maximumBytes)

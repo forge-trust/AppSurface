@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
-using System.Text;
+using static ForgeTrust.AppSurface.Evidence.Contracts.EvidenceOwnedChildWire;
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -26,9 +26,6 @@ public static class EvidenceOwnedChild
     /// <summary>Maximum number of child enrollments in one invocation session.</summary>
     public const int MaximumChildren = 64;
 
-    private const string PipeVariable = "APPSURFACE_EVIDENCE_CHILD_PIPE";
-    private const string ExecutionVariable = "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID";
-    private const string NonceVariable = "APPSURFACE_EVIDENCE_CHILD_NONCE";
     private const string StartupCompletionFailureDataKey = "EvidenceOwnedChild.StartupCompletionFailure";
     private static readonly TimeSpan ProtocolIoDeadline = TimeSpan.FromSeconds(5);
 
@@ -112,15 +109,15 @@ public static class EvidenceOwnedChild
         var ownedStartInfo = Clone(startInfo, copyEnvironment);
         if (enrolled)
         {
-            ownedStartInfo.Environment[PipeVariable] = pipeName;
-            ownedStartInfo.Environment[ExecutionVariable] = executionId;
-            ownedStartInfo.Environment[NonceVariable] = nonce;
+            ownedStartInfo.Environment[PipeEnvironmentName] = pipeName;
+            ownedStartInfo.Environment[ExecutionEnvironmentName] = executionId;
+            ownedStartInfo.Environment[NonceEnvironmentName] = nonce;
         }
         else if (copyEnvironment)
         {
-            ownedStartInfo.Environment.Remove(PipeVariable);
-            ownedStartInfo.Environment.Remove(ExecutionVariable);
-            ownedStartInfo.Environment.Remove(NonceVariable);
+            ownedStartInfo.Environment.Remove(PipeEnvironmentName);
+            ownedStartInfo.Environment.Remove(ExecutionEnvironmentName);
+            ownedStartInfo.Environment.Remove(NonceEnvironmentName);
         }
         using var process = new Process { StartInfo = ownedStartInfo };
         try
@@ -176,7 +173,7 @@ public static class EvidenceOwnedChild
     private static IReadOnlyDictionary<string, string> GetProcessChannelEnvironment()
     {
         var environment = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var name in new[] { PipeVariable, ExecutionVariable, NonceVariable })
+        foreach (var name in new[] { PipeEnvironmentName, ExecutionEnvironmentName, NonceEnvironmentName })
             if (System.Environment.GetEnvironmentVariable(name) is { } value) environment[name] = value;
         return environment;
     }
@@ -217,9 +214,9 @@ public static class EvidenceOwnedChild
     private static bool TryGetChannel(IReadOnlyDictionary<string, string> environment,
         out string? pipeName, out string? executionId, out string? nonce)
     {
-        var hasPipe = environment.TryGetValue(PipeVariable, out pipeName);
-        var hasExecution = environment.TryGetValue(ExecutionVariable, out executionId);
-        var hasNonce = environment.TryGetValue(NonceVariable, out nonce);
+        var hasPipe = environment.TryGetValue(PipeEnvironmentName, out pipeName);
+        var hasExecution = environment.TryGetValue(ExecutionEnvironmentName, out executionId);
+        var hasNonce = environment.TryGetValue(NonceEnvironmentName, out nonce);
         if (!hasPipe && !hasExecution && !hasNonce) return false;
         if (!hasPipe || !hasExecution || !hasNonce
             || !IsProtocolToken(pipeName, 180) || !IsProtocolToken(executionId, 128) || !IsProtocolToken(nonce, 128))
@@ -260,26 +257,9 @@ public static class EvidenceOwnedChild
         => value is { Length: > 0 } && value.Length <= maximumLength
             && value.All(static character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
 
-    private static async Task WriteFrameAsync(Stream stream, string value, CancellationToken cancellationToken)
-    {
-        var bytes = Encoding.UTF8.GetBytes(value + "\n");
-        if (bytes.Length > MaximumFrameBytes) throw new InvalidOperationException("Cooperative child protocol frame exceeds its limit.");
-        await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task<string?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        var bytes = new byte[MaximumFrameBytes];
-        var length = 0;
-        while (length < bytes.Length)
-        {
-            var read = await stream.ReadAsync(bytes.AsMemory(length, 1), cancellationToken).ConfigureAwait(false);
-            if (read == 0) return length == 0 ? null : throw new IOException("Truncated cooperative child protocol frame.");
-            if (bytes[length++] == (byte)'\n') return Encoding.UTF8.GetString(bytes, 0, length - 1);
-        }
-        throw new IOException("Cooperative child protocol frame exceeds its limit.");
-    }
+    private static Task WriteFrameAsync(Stream stream, string value, CancellationToken cancellationToken) =>
+        EvidenceOwnedChildWire.WriteFrameAsync(stream, value, cancellationToken,
+            static () => new InvalidOperationException("Cooperative child protocol frame exceeds its limit."));
 
     private sealed class Enrollment(NamedPipeClientStream pipe, Guid childId) : IAsyncDisposable
     {

@@ -434,38 +434,58 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
         var results = new List<EvidenceResourceResult>();
         foreach (var resource in OrderResources(declarations))
         {
-            var timer = Stopwatch.StartNew();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(resource.DeadlineSeconds));
-            try
+            var result = await ProbeResourceReadinessAsync(
+                resource,
+                cancellationToken,
+                token => _registration.Resources[resource.Id].WaitUntilReadyAsync(token)).ConfigureAwait(false);
+            results.Add(result);
+            if (result.Outcome != EvidenceResourceOutcome.Ready)
             {
-                // A registration should observe cancellation, but the host must also enforce its
-                // declared deadline when a third-party probe fails to do so.
-                var readinessTask = _registration.Resources[resource.Id].WaitUntilReadyAsync(deadline.Token);
-                await readinessTask.WaitAsync(deadline.Token).ConfigureAwait(false);
-                results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Ready, timer.ElapsedMilliseconds));
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.TimedOut, timer.ElapsedMilliseconds, $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."));
                 return new ResourceReadiness(
                     results,
-                    FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception exception) when (IsNonFatalException(exception))
-            {
-                results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Unavailable, timer.ElapsedMilliseconds, $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
-                return new ResourceReadiness(
-                    results,
-                    FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
+                    FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, result.Diagnostic!));
             }
         }
 
         return new ResourceReadiness(results, null);
+    }
+
+    private async Task<EvidenceResourceResult> ProbeResourceReadinessAsync(
+        EvidenceResourceDeclaration resource,
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task> startReadiness)
+    {
+        var timer = Stopwatch.StartNew();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(resource.DeadlineSeconds));
+        try
+        {
+            // Eager callers start the probe inline. Prepared callers can start and register
+            // their actual callback task before this method awaits its settlement.
+            var readinessTask = startReadiness(deadline.Token);
+            await readinessTask.WaitAsync(deadline.Token).ConfigureAwait(false);
+            return new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Ready, timer.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new EvidenceResourceResult(
+                resource.Id,
+                EvidenceResourceOutcome.TimedOut,
+                timer.ElapsedMilliseconds,
+                $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (IsNonFatalException(exception))
+        {
+            return new EvidenceResourceResult(
+                resource.Id,
+                EvidenceResourceOutcome.Unavailable,
+                timer.ElapsedMilliseconds,
+                $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}.");
+        }
     }
 
     private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(CancellationToken cancellationToken)
@@ -809,30 +829,13 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
                 continue;
             }
 
-            var timer = Stopwatch.StartNew();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(resource.DeadlineSeconds));
-            try
+            var result = await ProbeResourceReadinessAsync(resource, cancellationToken, token =>
             {
-                var actualTask = Task.Run(() => _registration.Resources[resource.Id].WaitUntilReadyAsync(deadline.Token));
+                var actualTask = Task.Run(() => _registration.Resources[resource.Id].WaitUntilReadyAsync(token));
                 _readinessExecutions.Add(actualTask);
-                await actualTask.WaitAsync(deadline.Token).ConfigureAwait(false);
-                results.Add(resource.Id, new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Ready, timer.ElapsedMilliseconds));
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                results.Add(resource.Id, new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.TimedOut, timer.ElapsedMilliseconds,
-                    $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception exception) when (IsNonFatalException(exception))
-            {
-                results.Add(resource.Id, new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Unavailable, timer.ElapsedMilliseconds,
-                    $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
-            }
+                return actualTask;
+            }).ConfigureAwait(false);
+            results.Add(resource.Id, result);
         }
 
         _preparedReadiness = results;

@@ -693,6 +693,24 @@ public sealed class EvidenceChildProtocolCoverageTests
         Assert.Empty(stream.ToArray());
     }
 
+    [Fact]
+    public async Task ProtocolFramesUseTheUtf8ByteLimitAndLeaveTheNextFrameUnread()
+    {
+        using var stream = new MemoryStream();
+        var payload = new string('é', (EvidenceOwnedChild.MaximumFrameBytes - 1) / 2) + "x";
+
+        await EvidenceOwnedChildProtocol.WriteFrameAsync(stream, payload, CancellationToken.None);
+        Assert.Equal(EvidenceOwnedChild.MaximumFrameBytes, stream.Length);
+        await Assert.ThrowsAsync<IOException>(() =>
+            EvidenceOwnedChildProtocol.WriteFrameAsync(stream, payload + "x", CancellationToken.None));
+        await EvidenceOwnedChildProtocol.WriteFrameAsync(stream, "DONE", CancellationToken.None);
+        stream.Position = 0;
+
+        Assert.Equal(payload, await EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
+        Assert.Equal("DONE", await EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
+        Assert.Null(await EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
+    }
+
     [Theory]
     [InlineData("io", false)]
     [InlineData("disposed", false)]

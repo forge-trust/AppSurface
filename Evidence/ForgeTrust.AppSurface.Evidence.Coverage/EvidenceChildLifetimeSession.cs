@@ -18,9 +18,9 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// </remarks>
 internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
 {
-    internal const string PipeEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_PIPE";
-    internal const string ExecutionEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID";
-    internal const string NonceEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_NONCE";
+    internal const string PipeEnvironmentName = EvidenceOwnedChildWire.PipeEnvironmentName;
+    internal const string ExecutionEnvironmentName = EvidenceOwnedChildWire.ExecutionEnvironmentName;
+    internal const string NonceEnvironmentName = EvidenceOwnedChildWire.NonceEnvironmentName;
 
     private const int MaximumPendingBegins = 128;
     private const int MaximumPipeInstances = EvidenceOwnedChild.MaximumChildren + MaximumPendingBegins + 1;
@@ -389,13 +389,8 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
 
 internal static class EvidenceOwnedChildProtocol
 {
-    internal static async Task WriteFrameAsync(Stream stream, string value, CancellationToken cancellationToken)
-    {
-        var bytes = Encoding.UTF8.GetBytes(value + "\n");
-        if (bytes.Length > EvidenceOwnedChild.MaximumFrameBytes) throw new IOException("Child protocol frame exceeds its limit.");
-        await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-    }
+    internal static Task WriteFrameAsync(Stream stream, string value, CancellationToken cancellationToken) =>
+        EvidenceOwnedChildWire.WriteFrameAsync(stream, value, cancellationToken);
 
     internal static async Task TryWriteFrameAsync(Stream stream, string value, CancellationToken cancellationToken)
     {
@@ -403,16 +398,6 @@ internal static class EvidenceOwnedChildProtocol
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException) { }
     }
 
-    internal static async Task<string?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        var bytes = new byte[EvidenceOwnedChild.MaximumFrameBytes];
-        var length = 0;
-        while (length < bytes.Length)
-        {
-            var read = await stream.ReadAsync(bytes.AsMemory(length, 1), cancellationToken).ConfigureAwait(false);
-            if (read == 0) return length == 0 ? null : throw new IOException("Truncated child protocol frame.");
-            if (bytes[length++] == (byte)'\n') return Encoding.UTF8.GetString(bytes, 0, length - 1);
-        }
-        throw new IOException("Child protocol frame exceeds its limit.");
-    }
+    internal static Task<string?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken) =>
+        EvidenceOwnedChildWire.ReadFrameAsync(stream, cancellationToken);
 }
