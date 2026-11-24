@@ -234,7 +234,10 @@ public sealed class EvidenceHostPreparationOwnershipTests
         private readonly string _root = Directory.CreateTempSubdirectory("prepared-host-ownership-").FullName;
         private string Repository => TestPathUtils.PathUnder(_root, "repo");
 
-        internal PreparedRunFixture() => Directory.CreateDirectory(Repository);
+        internal PreparedRunFixture()
+        {
+            Directory.CreateDirectory(Repository);
+        }
 
         internal Task<EvidencePreparedRun> PrepareAsync(IEvidenceProducer producer, bool requiresResource = true,
             TimeSpan? cleanupTimeout = null)
