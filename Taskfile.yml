@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+tasks:
+    default:
+        desc: List repository tasks
+        silent: true
+        cmds:
+            - task --list
+
+    restore:
+        desc: Restore NuGet packages using the checked-in lock files
+        cmds:
+            - dotnet restore --locked-mode {{.CLI_ARGS}}
+
+    build:
+        desc: Build the solution or a specified project
+        cmds:
+            - dotnet build {{.CLI_ARGS}}
+
+    test:
+        desc: Build and run tests for the solution or a specified project
+        cmds:
+            - dotnet test {{.CLI_ARGS}}
+
+    format:
+        desc: Apply the repository's .NET formatting rules
+        cmds:
+            - dotnet format {{.CLI_ARGS}}
+
+    format:check:
+        desc: Check .NET formatting without editing files
+        cmds:
+            - dotnet format --verify-no-changes {{.CLI_ARGS}}
+
+    evidence:plan:
+        desc: Show which evidence checks the current changes require
+        cmds:
+            - >-
+              dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release --
+              --operation local-plan {{.CLI_ARGS}}
+
+    evidence:
+        desc: Run and verify the evidence checks selected for the current changes
+        cmds:
+            - >-
+              dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release --
+              --operation local {{.CLI_ARGS}}
+
+    coverage:
+        desc: Run full solution coverage and its gates with the Bash compatibility script
+        cmds:
+            - bash scripts/coverage-solution.sh {{.CLI_ARGS}}

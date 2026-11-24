@@ -179,12 +179,12 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
 
         // protects=verification may include only Cloud Tasks readiness-blocked entries without changing publish filtering; fails_when=other blocked packages enter verification or Cloud Tasks stays omitted; no_claim=does not resolve package project metadata.
         [Theory]
-        [InlineData("ForgeTrust.AppSurface.Durable.CloudTasks", "Publish", null, false, true)]
+        [InlineData("ForgeTrust.AppSurface.Durable.GoogleCloudTasks", "Publish", null, false, true)]
         [InlineData("ForgeTrust.AppSurface.Durable", "SupportPublish", null, false, true)]
-        [InlineData("ForgeTrust.AppSurface.Durable.CloudTasks", "DoNotPublish", "#892", false, false)]
-        [InlineData("ForgeTrust.AppSurface.Durable.CloudTasks", "DoNotPublish", "#892", true, true)]
+        [InlineData("ForgeTrust.AppSurface.Durable.GoogleCloudTasks", "DoNotPublish", "#892", false, false)]
+        [InlineData("ForgeTrust.AppSurface.Durable.GoogleCloudTasks", "DoNotPublish", "#892", true, true)]
         [InlineData("ForgeTrust.AppSurface.Durable", "DoNotPublish", "#123", true, false)]
-        [InlineData("ForgeTrust.AppSurface.Durable.CloudTasks", "DoNotPublish", null, true, false)]
+        [InlineData("ForgeTrust.AppSurface.Durable.GoogleCloudTasks", "DoNotPublish", null, true, false)]
         public void VerificationPlanIncludesReadinessBlockedEntriesWithoutChangingDefaultPlan(
             string packageId,
             string decision,
@@ -197,8 +197,8 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
         // why_new=CI reports the project-reference guard uncovered; seam=none; no_claim=does not inspect transitive restore edges.
         [Theory]
         [InlineData("PackageReference", "Google.Cloud.Tasks.V2")]
-        [InlineData("PackageReference", "ForgeTrust.AppSurface.Durable.CloudTasks")]
-        [InlineData("ProjectReference", "ForgeTrust.AppSurface.Durable.CloudTasks")]
+        [InlineData("PackageReference", "ForgeTrust.AppSurface.Durable.GoogleCloudTasks")]
+        [InlineData("ProjectReference", "ForgeTrust.AppSurface.Durable.GoogleCloudTasks")]
         public void FindNeutralProjectReferenceViolations_RejectsDirectGooglePackageReferenceFromNeutralConsumer(string referenceType, string packageId)
         {
             var root = Path.Combine(Path.GetTempPath(), "cloudtasks-neutral-fixture-" + Guid.NewGuid().ToString("N"));
@@ -871,7 +871,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                     var hash = package.Value.GetProperty("contentHash").GetString();
                     libraries[key] = new { type = "package", sha512 = invalidCloudTasksGraph == "hash" && package.Name == "Google.Api.Gax" ? "altered-content-hash" : hash };
                 }
-                var cloudTasksKey = $"ForgeTrust.AppSurface.Durable.CloudTasks/{candidateVersion}";
+                var cloudTasksKey = $"ForgeTrust.AppSurface.Durable.GoogleCloudTasks/{candidateVersion}";
                 var directPackageDependencies = lockedTarget
                     .EnumerateObject()
                     .Where(static package => string.Equals(package.Value.GetProperty("type").GetString(), "Direct", StringComparison.Ordinal))
@@ -880,7 +880,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 if (invalidCloudTasksGraph != "root")
                 {
                     target[cloudTasksKey] = new { type = "package", dependencies = directPackageDependencies };
-                    libraries[cloudTasksKey] = new { type = "package", sha512 = Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(candidatePackages["ForgeTrust.AppSurface.Durable.CloudTasks"]))) };
+                    libraries[cloudTasksKey] = new { type = "package", sha512 = Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(candidatePackages["ForgeTrust.AppSurface.Durable.GoogleCloudTasks"]))) };
                 }
                 var consumerDiKey = "Microsoft.Extensions.DependencyInjection/10.0.14";
                 target[consumerDiKey] = new { type = "package", dependencies = new Dictionary<string, string>() };
@@ -893,7 +893,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 }
                 var directDependencies = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["ForgeTrust.AppSurface.Durable.CloudTasks"] = new { version = $"[{candidateVersion}, )" },
+                    ["ForgeTrust.AppSurface.Durable.GoogleCloudTasks"] = new { version = $"[{candidateVersion}, )" },
                     ["Microsoft.Extensions.DependencyInjection"] = new { version = "[10.0.14, )" },
                 };
                 return new

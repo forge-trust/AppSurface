@@ -1,8 +1,8 @@
 # Cloud Tasks activation
 
-This guide documents the optional `ForgeTrust.AppSurface.Durable.CloudTasks` adapter for submitting one named, empty Google Cloud Tasks wake to an existing Durable external-activation host. It covers the public API, identity boundary, request and response limits, result meanings, recovery, and known pitfalls.
+This guide documents the optional `ForgeTrust.AppSurface.Durable.GoogleCloudTasks` adapter for submitting one named, empty Google Cloud Tasks wake to an existing Durable external-activation host. It covers the public API, identity boundary, request and response limits, result meanings, recovery, and known pitfalls.
 
-The adapter is a transport for task creation. It does not own accepted Work, worker hosting, application outboxes, scheduling, queue administration, or business recovery. Start with the [external activation reference](external-activation-v1.md) for the worker-side contract and the [Cloud Tasks package README](ForgeTrust.AppSurface.Durable.CloudTasks/README.md) for installation, registration, and the local proof command.
+The adapter is a transport for task creation. It does not own accepted Work, worker hosting, application outboxes, scheduling, queue administration, or business recovery. Start with the [external activation reference](external-activation-v1.md) for the worker-side contract and the [Cloud Tasks package README](ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md) for installation, registration, and the local proof command.
 The [Cloud Tasks caller example](../examples/durable-external-activation/CloudTasksCallerExample.md) shows both explicit Cloud Run token-source registration and the simulated reference-host delivery boundary.
 
 ## Decision
@@ -17,7 +17,7 @@ This package is not the right choice when the application needs queue scheduling
 
 ### Public types
 
-All public types are in namespace `ForgeTrust.AppSurface.Durable.CloudTasks`.
+All public types are in namespace `ForgeTrust.AppSurface.Durable.GoogleCloudTasks`.
 
 | Type | Contract |
 | --- | --- |
@@ -79,7 +79,7 @@ The dispatch deadline is between 15 seconds and 30 minutes inclusive with whole-
 Register exactly one unkeyed singleton `ICloudTasksAccessTokenSource` before adding the activation client. Or opt into the built-in Cloud Run metadata source, which registers the same singleton contract. Then add the activation client with explicit immutable options:
 
 ```csharp
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
 services.AddCloudRunMetadataAccessTokenSource(
     new CloudRunMetadataAccessTokenOptions(TimeSpan.FromSeconds(2)));
@@ -122,7 +122,7 @@ The client uses the official generated request model and a reusable TLS `GrpcCha
 
 The shared channel permits additional HTTP/2 connections when active calls reach the server's concurrent-stream limit, following the [.NET gRPC connection-concurrency guidance](https://learn.microsoft.com/en-us/aspnet/core/grpc/performance#connection-concurrency). This avoids forcing another submission to wait for a stream on that connection. Connection establishment and RPC work still consume each invocation's submission budget; this setting does not guarantee capacity or successful creation. Applications own admission and concurrency limits. Opening another connection does not add SDK invocations or application retries.
 
-The gRPC transport can transparently replay a request only before acceptance when HTTP/2 reports `REFUSED_STREAM` or GOAWAY declares the request stream unprocessed. That pre-acceptance transport behavior is permitted; the client still makes one SDK call, and the replay is neither a GAX retry nor an application retry. As a result, a local fixture may observe multiple HTTP/2 request streams for one SDK invocation while the provider accepts at most one task. This is distinct from retrying after an ambiguous accepted submission, which the adapter never does. See [Google's SDK behavior and the package fixture results](ForgeTrust.AppSurface.Durable.CloudTasks/README.md#transport-replay-and-bounds). The local fixture observes SDK RPC invocations with an interceptor on the real SDK call invoker, separately from HTTP-handler sends and complete wire requests; its counters do not infer SDK calls from the number of dispatches.
+The gRPC transport can transparently replay a request only before acceptance when HTTP/2 reports `REFUSED_STREAM` or GOAWAY declares the request stream unprocessed. That pre-acceptance transport behavior is permitted; the client still makes one SDK call, and the replay is neither a GAX retry nor an application retry. As a result, a local fixture may observe multiple HTTP/2 request streams for one SDK invocation while the provider accepts at most one task. This is distinct from retrying after an ambiguous accepted submission, which the adapter never does. See [Google's SDK behavior and the package fixture results](ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md#transport-replay-and-bounds). The local fixture observes SDK RPC invocations with an interceptor on the real SDK call invoker, separately from HTTP-handler sends and complete wire requests; its counters do not infer SDK calls from the number of dispatches.
 
 The package bounds metadata JSON to 16 KiB, access tokens to 8 KiB, gRPC received protobuf messages to 64 KiB, and aggregate response headers/trailers to 16 KiB. Metadata JSON is read with limit-plus-one detection and a maximum JSON depth of four. Gzip responses are decoded under a 64 KiB limit. Redirects, cookies, proxy use, and automatic content decompression for metadata are disabled. Oversized responses are not buffered as fallback HTML or provider error text. Diagnostics never contain token values, provider messages, exception objects, or raw response metadata.
 
@@ -305,14 +305,14 @@ Caller-requested cancellation before or during token/RPC work propagates a sanit
 
 ### Activity diagnostics
 
-The package emits an optional `System.Diagnostics.ActivitySource` named `ForgeTrust.AppSurface.Durable.CloudTasks`. Subscribe with an `ActivityListener`; ordinary callback failures are ignored by the adapter, while fatal process exceptions propagate. The activity is `cloudtasks.dispatch.failure` and its event is `cloudtasks.failure`. Package-owned event tags are `operation`, `stage`, `cause`, `code`, `package.version`, and `phase.sequence`. Current safe values include `operation=token|create`, `stage=acquisition|submission`, and `cause=source|rpc|transport`. The phase sequence is `validate>token>failure` for a token-source failure or `validate>token>create>failure` for a create-stage failure. There are no raw exceptions, exception messages, tokens, URLs, task IDs, response metadata, or caller/work correlation tags.
+The package emits an optional `System.Diagnostics.ActivitySource` named `ForgeTrust.AppSurface.Durable.GoogleCloudTasks`. Subscribe with an `ActivityListener`; ordinary callback failures are ignored by the adapter, while fatal process exceptions propagate. The activity is `cloudtasks.dispatch.failure` and its event is `cloudtasks.failure`. Package-owned event tags are `operation`, `stage`, `cause`, `code`, `package.version`, and `phase.sequence`. Current safe values include `operation=token|create`, `stage=acquisition|submission`, and `cause=source|rpc|transport`. The phase sequence is `validate>token>failure` for a token-source failure or `validate>token>create>failure` for a create-stage failure. There are no raw exceptions, exception messages, tokens, URLs, task IDs, response metadata, or caller/work correlation tags.
 
 ```csharp
 using System.Diagnostics;
 
 using var listener = new ActivityListener
 {
-    ShouldListenTo = source => source.Name == "ForgeTrust.AppSurface.Durable.CloudTasks",
+    ShouldListenTo = source => source.Name == "ForgeTrust.AppSurface.Durable.GoogleCloudTasks",
     Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
     ActivityStopped = activity =>
     {

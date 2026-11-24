@@ -354,7 +354,7 @@
           "ForgeTrust.AppSurface.Workers": "[0.1.0, )"
         }
       },
-      "forgetrust.appsurface.durable.cloudtasks": {
+      "forgetrust.appsurface.durable.googlecloudtasks": {
         "type": "Project",
         "dependencies": {
           "Google.Cloud.Tasks.V2": "[3.7.0, )",

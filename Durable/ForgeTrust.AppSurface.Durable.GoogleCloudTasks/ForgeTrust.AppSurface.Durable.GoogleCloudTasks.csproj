@@ -10,7 +10,7 @@
     <PackageReference Include="Google.Cloud.Tasks.V2" />
     <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Durable.CloudTasks.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests" />
     <None Include="README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 </Project>

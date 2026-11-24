@@ -4,8 +4,8 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed partial class PackageArtifactValidationTests
 {
-    private const string CloudTasksProject = "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/ForgeTrust.AppSurface.Durable.CloudTasks.csproj";
-    private const string CloudTasksPackage = "ForgeTrust.AppSurface.Durable.CloudTasks";
+    private const string CloudTasksProject = "Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/ForgeTrust.AppSurface.Durable.GoogleCloudTasks.csproj";
+    private const string CloudTasksPackage = "ForgeTrust.AppSurface.Durable.GoogleCloudTasks";
     private const string WebProject = "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj";
     private const string WebPackage = "ForgeTrust.AppSurface.Web";
 
@@ -156,18 +156,18 @@ public sealed partial class PackageArtifactValidationTests
                 use_when: Dispatch durable work to Cloud Tasks.
                 includes: Cloud Tasks activation and metadata token support.
                 does_not_include: Cloud Run hosting or queue administration.
-                start_here_path: Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md
+                start_here_path: Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md
             """);
         await WriteFileAsync(WebProject, "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# AppSurface Web");
         await WriteFileAsync(CloudTasksProject, "<Project />");
-        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md", "# Cloud Tasks");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md", "# Cloud Tasks");
         await WriteFileAsync("releases/unreleased.md", "# Unreleased");
         await WriteFileAsync("packages/third-party-payloads.yml", """
             schema_version: 1
             audits:
               - id: cloudtasks-workflow-fixture
-                package_id: ForgeTrust.AppSurface.Durable.CloudTasks
+                package_id: ForgeTrust.AppSurface.Durable.GoogleCloudTasks
                 applies_to:
                   - README.md
                 evidence_kind: fixture_audit

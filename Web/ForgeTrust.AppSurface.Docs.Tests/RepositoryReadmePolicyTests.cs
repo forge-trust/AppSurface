@@ -275,7 +275,7 @@ public sealed partial class RepositoryReadmePolicyTests
             "Durable/ForgeTrust.AppSurface.Durable.Provider/README.md",
             requiredReadmes);
         Assert.Contains(
-            "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md",
+            "Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md",
             requiredReadmes);
         Assert.Contains(
             "Durable/ForgeTrust.AppSurface.Durable.Testing/README.md",

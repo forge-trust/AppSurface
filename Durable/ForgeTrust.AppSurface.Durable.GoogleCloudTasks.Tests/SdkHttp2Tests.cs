@@ -5,7 +5,7 @@ using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 using Google.Api.Gax;
 using Google.Api.Gax.Grpc;
 using Google.Cloud.Tasks.V2;
@@ -25,7 +25,7 @@ using Microsoft.Extensions.Logging;
 using ProviderTask = Google.Cloud.Tasks.V2.Task;
 using Task = System.Threading.Tasks.Task;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests;
 
 // protects: real official-SDK bounds, explicit credentials and acceptance uncertainty.
 // fails_when: SDK/HTTP retries, decoding or metadata accounting changes across package upgrades.

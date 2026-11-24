@@ -1,7 +1,7 @@
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests;
 
 public sealed class CloudTasksRegistrationTests
 {

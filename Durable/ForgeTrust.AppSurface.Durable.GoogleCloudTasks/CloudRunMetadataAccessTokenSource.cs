@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
 /// <summary>Reports only whether metadata token acquisition failed because data was invalid or unavailable.</summary>
 /// <remarks>No provider response, exception, token, URI, or configuration value is retained.</remarks>

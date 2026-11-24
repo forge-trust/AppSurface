@@ -88,7 +88,7 @@ internal sealed class PackagePublishPlanResolver
         bool includeReadinessBlockedForVerification) =>
         decision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish
         || (includeReadinessBlockedForVerification
-            && string.Equals(packageId, "ForgeTrust.AppSurface.Durable.CloudTasks", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(packageId, "ForgeTrust.AppSurface.Durable.GoogleCloudTasks", StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(readinessBlocker));
 
     private async Task<IReadOnlyDictionary<string, PackageProjectMetadata>> LoadMetadataAsync(

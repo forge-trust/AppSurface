@@ -1,9 +1,9 @@
 using System.Net;
 using System.Text;
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 using Microsoft.Extensions.Time.Testing;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests;
 
 public sealed class CloudRunMetadataAccessTokenSourceTests
 {

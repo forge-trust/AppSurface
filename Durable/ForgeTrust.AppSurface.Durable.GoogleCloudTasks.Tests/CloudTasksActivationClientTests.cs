@@ -1,9 +1,9 @@
 using System.Diagnostics;
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 using Grpc.Core;
 using Microsoft.Extensions.Time.Testing;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests;
 
 public sealed class CloudTasksActivationClientTests
 {
@@ -218,7 +218,7 @@ public sealed class CloudTasksActivationClientTests
         var expectedParents = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal);
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => source.Name == "ForgeTrust.AppSurface.Durable.CloudTasks",
+            ShouldListenTo = source => source.Name == "ForgeTrust.AppSurface.Durable.GoogleCloudTasks",
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
             ActivityStopped = activity =>
             {
@@ -297,7 +297,7 @@ public sealed class CloudTasksActivationClientTests
         var tokenFailure = Assert.Single(events, item => item.ParentId == resultC.ParentId);
         var unexpectedFailure = Assert.Single(events, item => item.ParentId == resultD.ParentId);
         Assert.All(events, observed => Assert.Equal("cloudtasks.dispatch.failure", observed.OperationName));
-        Assert.All(events, observed => Assert.Equal("ForgeTrust.AppSurface.Durable.CloudTasks", observed.SourceName));
+        Assert.All(events, observed => Assert.Equal("ForgeTrust.AppSurface.Durable.GoogleCloudTasks", observed.SourceName));
         var expectedPackageVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(typeof(ICloudTasksActivationClient).Assembly.Location).ProductVersion!.Split('+', 2)[0];
         Assert.All(events, observed => Assert.Equal(expectedPackageVersion, observed.SourceVersion));
         Assert.All(events, observed => Assert.Equal(expectedPackageVersion, observed.EventTags["package.version"]));
@@ -348,7 +348,7 @@ public sealed class CloudTasksActivationClientTests
         var fatal = new OutOfMemoryException("fatal-listener-secret");
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => source.Name == "ForgeTrust.AppSurface.Durable.CloudTasks",
+            ShouldListenTo = source => source.Name == "ForgeTrust.AppSurface.Durable.GoogleCloudTasks",
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
             ActivityStopped = activity =>
             {

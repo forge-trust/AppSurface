@@ -11,7 +11,7 @@ using Grpc.Net.Client.Configuration;
 using Grpc.Net.Compression;
 using ProviderTask = Google.Cloud.Tasks.V2.Task;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
 /// <summary>Owns the reusable SDK channel and HTTP handler; no ambient credentials or retry policy.</summary>
 internal sealed class CloudTasksSdkTransport : ICloudTasksRpcTransport, IDisposable

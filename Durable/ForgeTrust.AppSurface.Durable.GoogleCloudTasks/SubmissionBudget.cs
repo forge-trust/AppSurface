@@ -1,4 +1,4 @@
-namespace ForgeTrust.AppSurface.Durable.CloudTasks;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
 /// <summary>Invocation-local monotonic time remaining, shared only with the built-in metadata source.</summary>
 internal sealed class SubmissionBudget

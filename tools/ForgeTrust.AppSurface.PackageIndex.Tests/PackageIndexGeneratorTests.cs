@@ -868,11 +868,21 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("Published library rows use `dotnet package add`", markdown, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task GenerateAsync_RendersChooserSectionsAndInstallCommands()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task GenerateAsync_RendersChooserSectionsAndInstallCommands(bool prereleaseInstall, bool configureTool)
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);
         await WriteFileAsync("examples/product-readiness-lab/README.md", "# Product readiness lab");
+        if (prereleaseInstall)
+        {
+            const string manifestPath = "packages/package-index.yml";
+            var manifest = await File.ReadAllTextAsync(TestPathUtils.PathUnder(_repositoryRoot, manifestPath));
+            var targetOrder = configureTool ? "    order: 50" : "    order: 20";
+            await WriteFileAsync(manifestPath, manifest.Replace(targetOrder, $"    prerelease_install: true\n{targetOrder}", StringComparison.Ordinal));
+        }
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -895,12 +905,22 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 outputType: "Exe")
         });
 
+        if (configureTool)
+        {
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+            Assert.Contains("can set 'prerelease_install' only for a public library", error.Message, StringComparison.Ordinal);
+            return;
+        }
+
         var markdown = await generator.GenerateAsync(CreateRequest());
 
         Assert.Contains("# AppSurface package chooser", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
         Assert.Contains("```bash", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", markdown, StringComparison.Ordinal);
+        var openApiInstall = prereleaseInstall ? " --prerelease" : string.Empty;
+        Assert.Contains($"`dotnet package add ForgeTrust.AppSurface.Web.OpenApi{openApiInstall}`", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Web --prerelease", markdown, StringComparison.Ordinal);
         Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
         Assert.Contains("[current release note](../releases/current.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.Web` |", markdown, StringComparison.Ordinal);
