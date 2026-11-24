@@ -116,7 +116,7 @@ internal static class CoverageScheduleHistoryContracts
             [DownloadEndpoint(93)] = archive
         };
 
-        var result = await InvokeAsync(temporary.Path, output, responses);
+        var result = await InvokeAsync(output, responses);
 
         Equal(0, result.ExitCode, "exit code");
         Equal(string.Empty, result.StandardError, "stderr");
@@ -144,8 +144,14 @@ internal static class CoverageScheduleHistoryContracts
         {
             ("empty history", () => Runs(), "no successful completed build runs", false),
             ("gh authentication failure", () => [], "GitHub workflow history is unavailable", true),
-            ("integer exceeds JSON digit limit", () => Encoding.UTF8.GetBytes(
+            ("workflow_runs is an integer instead of an array", () => Encoding.UTF8.GetBytes(
                 "{\"workflow_runs\":" + new string('1', 5000) + "}"), "GitHub workflow history is unavailable", false),
+            ("oversized workflow run ID", () => Encoding.UTF8.GetBytes(
+                "{\"workflow_runs\":[{\"id\":" + new string('1', 4301) + "}]}"), "GitHub workflow history is unavailable", false),
+            ("nonintegral workflow run ID with a long exponent", () => Encoding.UTF8.GetBytes(
+                "{\"workflow_runs\":[{\"id\":1e" + new string('1', 4301) + "}]}"), "no successful completed build runs", false),
+            ("large integer in ignored run metadata", () => Encoding.UTF8.GetBytes(
+                "{\"workflow_runs\":[],\"extra\":" + new string('1', 5000) + "}"), "no successful completed build runs", false),
             ("oversized history JSON", () => new byte[MaxJsonBytes + 1], "GitHub workflow history is unavailable", false),
             ("invalid history JSON", () => Encoding.UTF8.GetBytes("{broken"), "GitHub workflow history is unavailable", false)
         };
@@ -155,17 +161,15 @@ internal static class CoverageScheduleHistoryContracts
             using var temporary = NewTemporaryDirectory();
             var output = Path.Combine(temporary.Path, "coverage-schedule", "timings.json");
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
-                new Dictionary<string, byte[]>(),
-                responder: request =>
+                request =>
                 {
                     Equal(RunsEndpoint, request.Endpoint, testCase.Name + " request endpoint");
                     if (testCase.Throws)
                     {
                         throw new IOException("simulated gh authentication failure");
                     }
-                    return Task.FromResult(testCase.Response());
+                    return testCase.Response();
                 });
 
             Equal(0, result.ExitCode, testCase.Name + " exit code");
@@ -199,7 +203,7 @@ internal static class CoverageScheduleHistoryContracts
             [ArtifactsEndpoint(4)] = Artifacts()
         };
 
-        var result = await InvokeAsync(temporary.Path, Path.Combine(temporary.Path, "none", "timings.json"), responses);
+        var result = await InvokeAsync(Path.Combine(temporary.Path, "none", "timings.json"), responses);
 
         Equal(0, result.ExitCode, "exit code");
         Contains("no valid coverage schedule timings artifact", result.StandardError, "exhausted-history warning");
@@ -217,7 +221,6 @@ internal static class CoverageScheduleHistoryContracts
         const string repository = "forge-trust/AppSurface";
         var runsEndpoint = RunsEndpointFor(repository, branch);
         var result = await InvokeAsync(
-            temporary.Path,
             Path.Combine(temporary.Path, "none", "timings.json"),
             new Dictionary<string, byte[]>
             {
@@ -252,7 +255,6 @@ internal static class CoverageScheduleHistoryContracts
             RunRecord(1)
         };
         var result = await InvokeAsync(
-            temporary.Path,
             Path.Combine(temporary.Path, "none", "timings.json"),
             new Dictionary<string, byte[]>
             {
@@ -278,7 +280,6 @@ internal static class CoverageScheduleHistoryContracts
             using var temporary = NewTemporaryDirectory();
             var output = Path.Combine(temporary.Path, $"invalid-shape-{index}", "timings.json");
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
                 new Dictionary<string, byte[]> { [RunsEndpoint] = payloads[index] });
 
@@ -322,6 +323,12 @@ internal static class CoverageScheduleHistoryContracts
             ("escaped-duplicate-key", MakeZip(new("timings.json", """
                 {"projects":[{"project":"a.csproj","seconds":1}], "a":1, "\u0061" :2}
                 """u8.ToArray()))),
+            ("unpaired-surrogate-project", MakeZip(new("timings.json", """
+                {"projects":[{"project":"src/\ud800.csproj","seconds":1}]}
+                """u8.ToArray()))),
+            ("unpaired-surrogate-property", MakeZip(new("timings.json", """
+                {"projects":[{"project":"a.csproj","seconds":1}], "\ud800":true}
+                """u8.ToArray()))),
             ("escaped-surrogate-duplicate-key", MakeZip(new("timings.json", """
                 {"projects":[{"project":"a.csproj","seconds":1}], "\uD800":1, "\ud800" :2}
                 """u8.ToArray()))),
@@ -356,7 +363,7 @@ internal static class CoverageScheduleHistoryContracts
             using var temporary = NewTemporaryDirectory();
             var output = Path.Combine(temporary.Path, $"invalid-{name}", "timings.json");
             var responses = SingleCandidateResponses(archive);
-            var result = await InvokeAsync(temporary.Path, output, responses);
+            var result = await InvokeAsync(output, responses);
 
             Equal(0, result.ExitCode, name + " exit code");
             Contains("warning:", result.StandardError, name + " warning");
@@ -376,7 +383,6 @@ internal static class CoverageScheduleHistoryContracts
         var invalidNewer = MakeZip(new("timings.json", Encoding.UTF8.GetBytes("{\"projects\":[]}")));
         var validOlder = MakeZip(new("timings.json", fixture));
         var result = await InvokeAsync(
-            temporary.Path,
             Path.Combine(temporary.Path, "fallback", "timings.json"),
             new Dictionary<string, byte[]>
             {
@@ -404,7 +410,6 @@ internal static class CoverageScheduleHistoryContracts
         var fixture = ReadCanonicalFixture();
         var output = Path.Combine(temporary.Path, "size-fallback", "timings.json");
         var result = await InvokeAsync(
-            temporary.Path,
             output,
             new Dictionary<string, byte[]>
             {
@@ -451,7 +456,7 @@ internal static class CoverageScheduleHistoryContracts
         {
             using var temporary = NewTemporaryDirectory();
             var output = Path.Combine(temporary.Path, $"invalid-zip-{name}", "timings.json");
-            var result = await InvokeAsync(temporary.Path, output, SingleCandidateResponses(archive));
+            var result = await InvokeAsync(output, SingleCandidateResponses(archive));
 
             Equal(0, result.ExitCode, name + " exit code");
             Contains("no valid coverage schedule timings artifact", result.StandardError, name + " warning");
@@ -467,27 +472,25 @@ internal static class CoverageScheduleHistoryContracts
         var output = Path.Combine(temporary.Path, "deadline", "timings.json");
         var clock = new ManualTimeProvider();
         var result = await InvokeAsync(
-            temporary.Path,
             output,
-            new Dictionary<string, byte[]>(),
-            clock: clock,
-            responder: request =>
+            request =>
             {
                 switch (request.Endpoint)
                 {
                     case var endpoint when endpoint == RunsEndpoint:
                         clock.Advance(TimeSpan.FromSeconds(20));
-                        return Task.FromResult(Runs(RunRecord(20)));
+                        return Runs(RunRecord(20));
                     case var endpoint when endpoint == ArtifactsEndpoint(20):
                         clock.Advance(TimeSpan.FromSeconds(20));
-                        return Task.FromResult(Artifacts(Artifact(120)));
+                        return Artifacts(Artifact(120));
                     case var endpoint when endpoint == DownloadEndpoint(120):
                         clock.Advance(request.Timeout);
                         throw new IOException("simulated request deadline");
                     default:
                         throw new InvalidOperationException($"Unexpected request {request.Endpoint}.");
                 }
-            });
+            },
+            clock: clock);
 
         Equal(0, result.ExitCode, "exit code");
         Contains("GitHub artifact download is unavailable", result.StandardError, "deadline warning");
@@ -501,19 +504,12 @@ internal static class CoverageScheduleHistoryContracts
     {
         using var temporary = NewTemporaryDirectory();
         var result = await InvokeAsync(
-            temporary.Path,
             Path.Combine(temporary.Path, "api-failure", "timings.json"),
-            new Dictionary<string, byte[]>
+            request => request.Endpoint switch
             {
-                [RunsEndpoint] = Runs(
+                var endpoint when endpoint == RunsEndpoint => Runs(
                     RunRecord(20, createdAt: "2026-11-10T12:00:00Z"),
-                    RunRecord(19, createdAt: "2026-11-09T12:00:00Z"))
-            },
-            responder: request => request.Endpoint switch
-            {
-                var endpoint when endpoint == RunsEndpoint => Task.FromResult(Runs(
-                    RunRecord(20, createdAt: "2026-11-10T12:00:00Z"),
-                    RunRecord(19, createdAt: "2026-11-09T12:00:00Z"))),
+                    RunRecord(19, createdAt: "2026-11-09T12:00:00Z")),
                 var endpoint when endpoint == ArtifactsEndpoint(20) => throw new IOException("simulated artifact list failure"),
                 _ => throw new InvalidOperationException($"Unexpected request {request.Endpoint}.")
             });
@@ -527,21 +523,22 @@ internal static class CoverageScheduleHistoryContracts
         {
             Encoding.UTF8.GetBytes("{}"),
             Encoding.UTF8.GetBytes("{\"artifacts\":null}"),
-            Encoding.UTF8.GetBytes("{\"artifacts\":42}")
+            Encoding.UTF8.GetBytes("{\"artifacts\":42}"),
+            Encoding.UTF8.GetBytes($$"""
+                {"artifacts":[{"name":"coverage-schedule-timings","expired":false,"size_in_bytes":1,"id":{{new string('1', 4301)}}}]}
+                """)
         };
         foreach (var payload in invalidArtifactPayloads)
         {
             using var invalidTemporary = NewTemporaryDirectory();
             var invalidResult = await InvokeAsync(
-                invalidTemporary.Path,
                 Path.Combine(invalidTemporary.Path, "invalid-artifacts", "timings.json"),
-                new Dictionary<string, byte[]>(),
-                responder: request => request.Endpoint == RunsEndpoint
-                    ? Task.FromResult(Runs(
+                request => request.Endpoint == RunsEndpoint
+                    ? Runs(
                         RunRecord(20, createdAt: "2026-11-10T12:00:00Z"),
-                        RunRecord(19, createdAt: "2026-11-09T12:00:00Z")))
+                        RunRecord(19, createdAt: "2026-11-09T12:00:00Z"))
                     : request.Endpoint == ArtifactsEndpoint(20)
-                        ? Task.FromResult(payload)
+                        ? payload
                         : throw new InvalidOperationException($"Unexpected request {request.Endpoint}."));
 
             Equal(0, invalidResult.ExitCode, "invalid artifact shape exit code");
@@ -561,9 +558,8 @@ internal static class CoverageScheduleHistoryContracts
         var original = Encoding.UTF8.GetBytes("keep these exact bytes\n");
         File.WriteAllBytes(output, original);
         var result = await InvokeAsync(
-            temporary.Path,
             output,
-            new Dictionary<string, byte[]>(),
+            UnexpectedRequest,
             environment: new Dictionary<string, string?>());
 
         Equal(2, result.ExitCode, "exit code");
@@ -574,9 +570,8 @@ internal static class CoverageScheduleHistoryContracts
         var directoryOutput = Path.Combine(temporary.Path, "occupied-directory");
         Directory.CreateDirectory(directoryOutput);
         var directoryResult = await InvokeAsync(
-            temporary.Path,
             directoryOutput,
-            new Dictionary<string, byte[]>(),
+            UnexpectedRequest,
             environment: new Dictionary<string, string?>());
         Equal(2, directoryResult.ExitCode, "directory destination exit code");
         Equal(0, directoryResult.Requests.Count, "directory destination request count");
@@ -585,9 +580,8 @@ internal static class CoverageScheduleHistoryContracts
         var danglingLink = Path.Combine(temporary.Path, "dangling-link.json");
         File.CreateSymbolicLink(danglingLink, Path.Combine(temporary.Path, "missing-target"));
         var linkResult = await InvokeAsync(
-            temporary.Path,
             danglingLink,
-            new Dictionary<string, byte[]>(),
+            UnexpectedRequest,
             environment: new Dictionary<string, string?>());
         Equal(2, linkResult.ExitCode, "dangling symlink exit code");
         Equal(0, linkResult.Requests.Count, "dangling symlink request count");
@@ -611,9 +605,8 @@ internal static class CoverageScheduleHistoryContracts
             File.WriteAllBytes(existingTarget, original);
 
             var result = await InvokeAsync(
-                temporary.Path,
                 existingViaParentTraversal,
-                new Dictionary<string, byte[]>(),
+                UnexpectedRequest,
                 environment: new Dictionary<string, string?>());
 
             Equal(2, result.ExitCode, "symlink followed by parent traversal exit code");
@@ -628,7 +621,6 @@ internal static class CoverageScheduleHistoryContracts
             var output = Path.Combine(missingDirectory, "..", "restored.json");
             var fixture = ReadCanonicalFixture();
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
                 SingleCandidateResponses(MakeZip(new("timings.json", fixture))));
 
@@ -643,7 +635,6 @@ internal static class CoverageScheduleHistoryContracts
             var missingDirectory = Path.Combine(temporary.Path, "must-wait-for-valid-payload");
             var output = Path.Combine(missingDirectory, "..", "not-created.json");
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
                 new Dictionary<string, byte[]> { [RunsEndpoint] = Runs() });
 
@@ -659,7 +650,6 @@ internal static class CoverageScheduleHistoryContracts
             var output = Path.Combine(temporary.Path, "dot-parent", ".", "normalized.json");
             var fixture = ReadCanonicalFixture();
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
                 SingleCandidateResponses(MakeZip(new("timings.json", fixture))));
 
@@ -673,7 +663,6 @@ internal static class CoverageScheduleHistoryContracts
             var output = trimmedOutput + Path.DirectorySeparatorChar;
             var fixture = ReadCanonicalFixture();
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
                 SingleCandidateResponses(MakeZip(new("timings.json", fixture))));
 
@@ -690,9 +679,8 @@ internal static class CoverageScheduleHistoryContracts
             using var temporary = NewTemporaryDirectory();
             var output = Path.Combine(temporary.Path, "invalid-repository", "timings.json");
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
-                new Dictionary<string, byte[]>(),
+                UnexpectedRequest,
                 environment: DefaultEnvironment(repository, Branch));
 
             Equal(2, result.ExitCode, $"repository '{repository}' exit code");
@@ -707,9 +695,8 @@ internal static class CoverageScheduleHistoryContracts
             using var temporary = NewTemporaryDirectory();
             var output = Path.Combine(temporary.Path, "invalid-branch", "timings.json");
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
-                new Dictionary<string, byte[]>(),
+                UnexpectedRequest,
                 environment: DefaultEnvironment(Repository, branch));
 
             Equal(2, result.ExitCode, "invalid branch exit code");
@@ -720,43 +707,40 @@ internal static class CoverageScheduleHistoryContracts
         using (var temporary = NewTemporaryDirectory())
         {
             var relative = await InvokeArgumentsAsync(
-                temporary.Path,
                 ["restore", "--output", "relative.json"],
-                new Dictionary<string, byte[]>(),
+                UnexpectedRequest,
                 environment: new Dictionary<string, string?>());
             Equal(2, relative.ExitCode, "relative destination exit code");
             Contains("absolute", relative.StandardError, "relative destination diagnostic");
             Equal(0, relative.Requests.Count, "relative destination request count");
 
             var missingRepository = await InvokeAsync(
-                temporary.Path,
                 Path.Combine(temporary.Path, "missing-repository.json"),
-                new Dictionary<string, byte[]>(),
+                UnexpectedRequest,
                 environment: new Dictionary<string, string?> { ["GITHUB_DEFAULT_BRANCH"] = Branch });
             Equal(2, missingRepository.ExitCode, "missing repository exit code");
             Contains("GITHUB_REPOSITORY", missingRepository.StandardError, "missing repository diagnostic");
             Equal(0, missingRepository.Requests.Count, "missing repository request count");
 
             var missingBranch = await InvokeAsync(
-                temporary.Path,
                 Path.Combine(temporary.Path, "missing-branch.json"),
-                new Dictionary<string, byte[]>(),
+                UnexpectedRequest,
                 environment: new Dictionary<string, string?> { ["GITHUB_REPOSITORY"] = Repository });
             Equal(2, missingBranch.ExitCode, "missing branch exit code");
             Contains("GITHUB_DEFAULT_BRANCH", missingBranch.StandardError, "missing branch diagnostic");
             Equal(0, missingBranch.Requests.Count, "missing branch request count");
 
-            var help = await InvokeArgumentsAsync(temporary.Path, ["--help"], new Dictionary<string, byte[]>());
+            var help = await InvokeArgumentsAsync(["--help"], UnexpectedRequest);
             Equal(0, help.ExitCode, "top-level help exit code");
             Contains("restore", help.StandardOutput, "top-level help usage");
             Equal(0, help.Requests.Count, "top-level help request count");
 
-            var restoreHelp = await InvokeArgumentsAsync(temporary.Path, ["restore", "--help"], new Dictionary<string, byte[]>());
+            var restoreHelp = await InvokeArgumentsAsync(["restore", "--help"], UnexpectedRequest);
             Equal(0, restoreHelp.ExitCode, "restore help exit code");
             Contains("--output", restoreHelp.StandardOutput, "restore help option");
             Equal(0, restoreHelp.Requests.Count, "restore help request count");
 
-            var invalidCommand = await InvokeArgumentsAsync(temporary.Path, ["unknown"], new Dictionary<string, byte[]>());
+            var invalidCommand = await InvokeArgumentsAsync(["unknown"], UnexpectedRequest);
             Equal(2, invalidCommand.ExitCode, "invalid command exit code");
             Equal(0, invalidCommand.Requests.Count, "invalid command request count");
         }
@@ -800,7 +784,6 @@ internal static class CoverageScheduleHistoryContracts
             MaxZipBytes);
         var output = Path.Combine(temporary.Path, "boundary", "timings.json");
         var result = await InvokeAsync(
-            temporary.Path,
             output,
             new Dictionary<string, byte[]>
             {
@@ -820,7 +803,6 @@ internal static class CoverageScheduleHistoryContracts
         using var zipBoundaryDirectory = NewTemporaryDirectory();
         var zipBoundaryOutput = Path.Combine(zipBoundaryDirectory.Path, "zip-boundary.json");
         var zipBoundaryResult = await InvokeAsync(
-            zipBoundaryDirectory.Path,
             zipBoundaryOutput,
             SingleCandidateResponses(archiveAtZipLimit));
         Equal(0, zipBoundaryResult.ExitCode, "exact ZIP size boundary exit code");
@@ -834,7 +816,6 @@ internal static class CoverageScheduleHistoryContracts
         using var unrelatedMemberDirectory = NewTemporaryDirectory();
         var unrelatedMemberOutput = Path.Combine(unrelatedMemberDirectory.Path, "unrelated-member.json");
         var unrelatedMemberResult = await InvokeAsync(
-            unrelatedMemberDirectory.Path,
             unrelatedMemberOutput,
             SingleCandidateResponses(unrelatedMemberAtLimit));
         Equal(0, unrelatedMemberResult.ExitCode, "exact unrelated ZIP member boundary exit code");
@@ -843,14 +824,12 @@ internal static class CoverageScheduleHistoryContracts
         using var oversizedDownloadDirectory = NewTemporaryDirectory();
         var oversizedDownloadOutput = Path.Combine(oversizedDownloadDirectory.Path, "oversized-download", "timings.json");
         var oversizedDownloadResult = await InvokeAsync(
-            oversizedDownloadDirectory.Path,
             oversizedDownloadOutput,
-            new Dictionary<string, byte[]>(),
-            responder: request => request.Endpoint switch
+            request => request.Endpoint switch
             {
-                var endpoint when endpoint == RunsEndpoint => Task.FromResult(Runs(RunRecord(30))),
-                var endpoint when endpoint == ArtifactsEndpoint(30) => Task.FromResult(Artifacts(Artifact(130, size: MaxZipBytes))),
-                var endpoint when endpoint == DownloadEndpoint(130) => Task.FromResult(new byte[MaxZipBytes + 1]),
+                var endpoint when endpoint == RunsEndpoint => Runs(RunRecord(30)),
+                var endpoint when endpoint == ArtifactsEndpoint(30) => Artifacts(Artifact(130, size: MaxZipBytes)),
+                var endpoint when endpoint == DownloadEndpoint(130) => new byte[MaxZipBytes + 1],
                 _ => throw new InvalidOperationException($"Unexpected request {request.Endpoint}.")
             });
         Equal(0, oversizedDownloadResult.ExitCode, "oversized download advisory exit code");
@@ -865,7 +844,6 @@ internal static class CoverageScheduleHistoryContracts
         using var exactEntryDirectory = NewTemporaryDirectory();
         var exactEntryOutput = Path.Combine(exactEntryDirectory.Path, "exact-entry.json");
         var exactEntryResult = await InvokeAsync(
-            exactEntryDirectory.Path,
             exactEntryOutput,
             SingleCandidateResponses(archiveAtLimit));
         Equal(0, exactEntryResult.ExitCode, "exact JSON member boundary exit code");
@@ -876,21 +854,20 @@ internal static class CoverageScheduleHistoryContracts
         using var jsonEdgeDirectory = NewTemporaryDirectory();
         var jsonEdgeOutput = Path.Combine(jsonEdgeDirectory.Path, "json-edge.json");
         var jsonEdgeResult = await InvokeAsync(
-            jsonEdgeDirectory.Path,
             jsonEdgeOutput,
             SingleCandidateResponses(MakeZip(new("timings.json", zeroSeconds))));
         Equal(0, jsonEdgeResult.ExitCode, "negative zero and escaped surrogate edge exit code");
         BytesEqual(zeroSeconds, File.ReadAllBytes(jsonEdgeOutput), "negative zero and escaped surrogate bytes");
 
-        // The baseline accepts escaped unpaired UTF-16 code units and preserves their original JSON bytes.
-        var escaped = """
-            {"projects":[{"project":"src/\ud800.csproj","seconds":1}], "\ud800":true, "\ud801":false}
-            """u8.ToArray();
+        var escaped = Encoding.UTF8.GetBytes($$"""
+            { "projects": [{ "project": "src/\uD83D\uDE80.csproj", "seconds": 1 }], "extra": {{new string('9', 5000)}} }
+            """);
         var escapedOutput = Path.Combine(jsonEdgeDirectory.Path, "escaped.json");
-        var escapedResult = await InvokeAsync(jsonEdgeDirectory.Path, escapedOutput,
+        var escapedResult = await InvokeAsync(
+            escapedOutput,
             SingleCandidateResponses(MakeZip(new("timings.json", escaped))));
-        Equal(0, escapedResult.ExitCode, "escaped project and property names");
-        BytesEqual(escaped, File.ReadAllBytes(escapedOutput), "original bytes with escaped project and property names");
+        Equal(0, escapedResult.ExitCode, "escaped Unicode project and ignored large integer");
+        BytesEqual(escaped, File.ReadAllBytes(escapedOutput), "original bytes with escaped Unicode and ignored large integer");
     }
 
     private static async Task CodecAcceptanceAsync()
@@ -916,7 +893,7 @@ internal static class CoverageScheduleHistoryContracts
             var archive = ReadCodecFixture(name);
             Equal(expectedArchiveHash, Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant(), name + " immutable archive SHA-256");
             var output = Path.Combine(temporary.Path, name, "timings.json");
-            var result = await InvokeAsync(temporary.Path, output, SingleCandidateResponses(archive));
+            var result = await InvokeAsync(output, SingleCandidateResponses(archive));
 
             Equal(0, result.ExitCode, name + " exit code");
             Equal(string.Empty, result.StandardError, name + " stderr");
@@ -931,7 +908,7 @@ internal static class CoverageScheduleHistoryContracts
             var archive = ReadCodecFixture("method-9-deflate64-stored-block");
             Equal(Method9ArchiveSha256, Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant(), "method 9 immutable archive SHA-256");
             var output = Path.Combine(temporary.Path, "method-9", "timings.json");
-            var result = await InvokeAsync(temporary.Path, output, SingleCandidateResponses(archive));
+            var result = await InvokeAsync(output, SingleCandidateResponses(archive));
 
             Equal(0, result.ExitCode, "method 9 advisory exit code");
             Contains("no valid coverage schedule timings artifact", result.StandardError, "method 9 rejection warning");
@@ -952,18 +929,16 @@ internal static class CoverageScheduleHistoryContracts
             var parent = Path.GetDirectoryName(output)!;
             Directory.CreateDirectory(parent);
             var competingBytes = Encoding.UTF8.GetBytes("another process owns this file");
+            var responses = SingleCandidateResponses(validArchive);
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
-                SingleCandidateResponses(validArchive),
-                responder: request =>
+                request =>
                 {
                     if (request.Endpoint == DownloadEndpoint(18))
                     {
                         File.WriteAllBytes(output, competingBytes);
-                        return Task.FromResult(validArchive);
                     }
-                    return Task.FromResult(SingleCandidateResponse(request.Endpoint, validArchive));
+                    return responses[request.Endpoint];
                 });
 
             Equal(2, result.ExitCode, "competing file exit code");
@@ -979,7 +954,6 @@ internal static class CoverageScheduleHistoryContracts
             Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             File.WriteAllText(unrelated, "preserve sibling");
             var result = await InvokeAsync(
-                temporary.Path,
                 output,
                 SingleCandidateResponses(validArchive),
                 writeBytes: (stream, bytes) =>
@@ -1000,7 +974,7 @@ internal static class CoverageScheduleHistoryContracts
             var parentFile = Path.Combine(temporary.Path, "parent-file");
             File.WriteAllText(parentFile, "preserve parent file");
             var output = Path.Combine(parentFile, "timings.json");
-            var result = await InvokeAsync(temporary.Path, output, SingleCandidateResponses(validArchive));
+            var result = await InvokeAsync(output, SingleCandidateResponses(validArchive));
 
             Equal(2, result.ExitCode, "non-directory parent exit code");
             Contains("could not create --output", result.StandardError, "non-directory parent diagnostic");
@@ -1009,32 +983,42 @@ internal static class CoverageScheduleHistoryContracts
         }
     }
 
-    private static async Task<RunResult> InvokeAsync(
-        string temporaryRoot,
+    private static byte[] UnexpectedRequest(RequestTrace request) =>
+        throw new InvalidOperationException($"Unexpected request endpoint '{request.Endpoint}'.");
+
+    private static Task<RunResult> InvokeAsync(
         string output,
-        IReadOnlyDictionary<string, byte[]> responses,
+        Func<RequestTrace, byte[]> responder,
         IReadOnlyDictionary<string, string?>? environment = null,
         ManualTimeProvider? clock = null,
-        Func<RequestTrace, Task<byte[]>>? responder = null,
         Action<Stream, byte[]>? writeBytes = null)
     {
-        return await InvokeArgumentsAsync(
-            temporaryRoot,
+        return InvokeArgumentsAsync(
             ["restore", "--output", output],
-            responses,
+            responder,
             environment,
             clock,
-            responder,
             writeBytes);
     }
 
-    private static async Task<RunResult> InvokeArgumentsAsync(
-        string temporaryRoot,
-        string[] arguments,
+    private static Task<RunResult> InvokeAsync(
+        string output,
         IReadOnlyDictionary<string, byte[]> responses,
         IReadOnlyDictionary<string, string?>? environment = null,
+        Action<Stream, byte[]>? writeBytes = null)
+    {
+        return InvokeAsync(
+            output,
+            request => responses.TryGetValue(request.Endpoint, out var response) ? response : UnexpectedRequest(request),
+            environment,
+            writeBytes: writeBytes);
+    }
+
+    private static async Task<RunResult> InvokeArgumentsAsync(
+        string[] arguments,
+        Func<RequestTrace, byte[]> responder,
+        IReadOnlyDictionary<string, string?>? environment = null,
         ManualTimeProvider? clock = null,
-        Func<RequestTrace, Task<byte[]>>? responder = null,
         Action<Stream, byte[]>? writeBytes = null)
     {
         var env = environment ?? DefaultEnvironment();
@@ -1046,19 +1030,11 @@ internal static class CoverageScheduleHistoryContracts
             name => env.TryGetValue(name, out var value) ? value : null,
             stdout,
             stderr,
-            async (endpoint, maxBytes, timeout) =>
+            (endpoint, maxBytes, timeout) =>
             {
                 var request = new RequestTrace(endpoint, maxBytes, timeout);
                 requests.Add(request);
-                if (responder is not null)
-                {
-                    return await responder(request);
-                }
-                if (!responses.TryGetValue(endpoint, out var response))
-                {
-                    throw new InvalidOperationException($"Unexpected request endpoint '{endpoint}'.");
-                }
-                return response;
+                return Task.FromResult(responder(request));
             },
             clock ?? TimeProvider.System,
             writeBytes);
@@ -1075,14 +1051,6 @@ internal static class CoverageScheduleHistoryContracts
             [DownloadEndpoint(18)] = archive
         };
     }
-
-    private static byte[] SingleCandidateResponse(string endpoint, byte[] archive) => endpoint switch
-    {
-        var value when value == RunsEndpoint => Runs(RunRecord(8)),
-        var value when value == ArtifactsEndpoint(8) => Artifacts(Artifact(18)),
-        var value when value == DownloadEndpoint(18) => archive,
-        _ => throw new InvalidOperationException($"Unexpected request endpoint '{endpoint}'.")
-    };
 
     private static Dictionary<string, string?> DefaultEnvironment(string repository = Repository, string branch = Branch)
     {

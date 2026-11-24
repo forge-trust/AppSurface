@@ -1,7 +1,5 @@
-using System.Buffers;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Text.Unicode;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
@@ -14,17 +12,18 @@ using SharpCompress.Readers;
 /// </summary>
 internal static class CoverageHistoryData
 {
-    private const int MaxJsonBytes = 2 * 1024 * 1024;
-    private const int MaxArchiveBytes = MaxJsonBytes + 64 * 1024;
+    /// <summary>Maximum size of an API JSON response or uncompressed archive entry.</summary>
+    internal const int MaxJsonBytes = 2 * 1024 * 1024;
+
+    /// <summary>Maximum size of a downloaded archive, including its ZIP overhead.</summary>
+    internal const int MaxArchiveBytes = MaxJsonBytes + 64 * 1024;
     private const int MaxProjects = 1000;
     private const int MaxProjectPathCodePoints = 4096;
-    private const int MaxPythonIntegerDigits = 4300;
     private const int MaxJsonDepth = 1000;
 
     /// <summary>
-    /// Parses strict UTF-8 JSON within the artifact size and nesting limits. Duplicate properties at any
-    /// depth and integer tokens beyond Python's default decimal digit limit are rejected. The caller owns
-    /// and must dispose the returned document.
+    /// Parses bounded UTF-8 JSON with unique property names at every depth. Numeric ranges apply
+    /// when a field is consumed. The caller owns the returned document.
     /// </summary>
     internal static JsonDocument ReadJson(byte[] raw)
     {
@@ -43,32 +42,17 @@ internal static class CoverageHistoryData
             throw new InvalidDataException("JSON must be valid UTF-8.");
         }
 
-        JsonDocument document;
         try
         {
-            document = JsonDocument.Parse(
-                raw.AsMemory(),
-                new JsonDocumentOptions
-                {
-                    AllowTrailingCommas = false,
-                    CommentHandling = JsonCommentHandling.Disallow,
-                    MaxDepth = MaxJsonDepth
-                });
+            return JsonDocument.Parse(raw.AsMemory(), new JsonDocumentOptions
+            {
+                AllowDuplicateProperties = false,
+                MaxDepth = MaxJsonDepth
+            });
         }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
             throw new InvalidDataException("Invalid JSON.", exception);
-        }
-
-        try
-        {
-            ValidateJsonTokens(raw);
-            return document;
-        }
-        catch
-        {
-            document.Dispose();
-            throw;
         }
     }
 
@@ -196,94 +180,6 @@ internal static class CoverageHistoryData
         return contents.ToArray();
     }
 
-    private static void ValidateJsonTokens(byte[] raw)
-    {
-        var reader = new Utf8JsonReader(
-            raw,
-            new JsonReaderOptions
-            {
-                AllowTrailingCommas = false,
-                CommentHandling = JsonCommentHandling.Disallow,
-                MaxDepth = MaxJsonDepth
-            });
-        var objectProperties = new Stack<HashSet<string>?>();
-
-        while (reader.Read())
-        {
-            switch (reader.TokenType)
-            {
-                case JsonTokenType.StartObject:
-                    objectProperties.Push(new HashSet<string>(StringComparer.Ordinal));
-                    break;
-                case JsonTokenType.StartArray:
-                    objectProperties.Push(null);
-                    break;
-                case JsonTokenType.EndObject:
-                case JsonTokenType.EndArray:
-                    objectProperties.Pop();
-                    break;
-                case JsonTokenType.PropertyName:
-                    string name;
-                    try
-                    {
-                        name = reader.GetString()!;
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        name = DecodeJsonString(reader.ValueSpan);
-                    }
-
-                    if (!objectProperties.Peek()!.Add(name))
-                    {
-                        throw new InvalidDataException("JSON contains a duplicate object property.");
-                    }
-                    break;
-                case JsonTokenType.Number:
-                    ValidateIntegerDigitCount(Encoding.UTF8.GetString(reader.ValueSpan));
-                    break;
-            }
-        }
-    }
-
-    private static string ReadProjectString(JsonElement value)
-    {
-        try
-        {
-            return value.GetString() ?? throw new InvalidDataException("JSON string is missing.");
-        }
-        catch (InvalidOperationException)
-        {
-            return DecodeJsonString(Encoding.UTF8.GetBytes(value.GetRawText()));
-        }
-    }
-
-    private static string DecodeJsonString(ReadOnlySpan<byte> rawValue)
-    {
-        var value = rawValue;
-        if (value.Length >= 2 && value[0] == (byte)'"' && value[^1] == (byte)'"')
-        {
-            value = value[1..^1];
-        }
-
-        // Utf8JsonReader has already validated the JSON escape alphabet. Regex.Unescape supports those
-        // escapes and preserves unpaired UTF-16 surrogate code units from \uXXXX sequences.
-        return Regex.Unescape(Encoding.UTF8.GetString(value));
-    }
-
-    private static void ValidateIntegerDigitCount(string number)
-    {
-        if (number.IndexOf('.') >= 0 || number.IndexOf('e') >= 0 || number.IndexOf('E') >= 0)
-        {
-            return;
-        }
-
-        var digitCount = number.Length - (number.StartsWith("-", StringComparison.Ordinal) ? 1 : 0);
-        if (digitCount > MaxPythonIntegerDigits)
-        {
-            throw new InvalidDataException("JSON integer exceeds Python's 4,300-digit limit.");
-        }
-    }
-
     private static void ValidateTimings(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object ||
@@ -304,7 +200,16 @@ internal static class CoverageHistoryData
                 throw new InvalidDataException("project must be a safe relative .csproj path.");
             }
 
-            var project = ReadProjectString(projectValue);
+            string project;
+            try
+            {
+                project = projectValue.GetString()!;
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw new InvalidDataException("project must contain valid Unicode.", exception);
+            }
+
             if (!IsSafeProjectPath(project))
             {
                 throw new InvalidDataException("project must be a safe relative .csproj path.");
@@ -327,7 +232,7 @@ internal static class CoverageHistoryData
 
     private static bool IsSafeProjectPath(string project)
     {
-        if (project.Length == 0 || CountCodePoints(project) > MaxProjectPathCodePoints ||
+        if (project.Length == 0 || project.EnumerateRunes().Count() > MaxProjectPathCodePoints ||
             !string.Equals(project, project.Trim(), StringComparison.Ordinal) ||
             project.Contains('\\') || project.Contains(':') ||
             project.StartsWith("/", StringComparison.Ordinal) ||
@@ -362,20 +267,6 @@ internal static class CoverageHistoryData
         }
 
         return true;
-    }
-
-    private static int CountCodePoints(string value)
-    {
-        var count = 0;
-        var index = 0;
-        while (index < value.Length)
-        {
-            var status = Rune.DecodeFromUtf16(value.AsSpan(index), out _, out var consumed);
-            index += status == OperationStatus.Done ? consumed : 1;
-            count++;
-        }
-
-        return count;
     }
 
     private static uint Crc32(ReadOnlySpan<byte> bytes)

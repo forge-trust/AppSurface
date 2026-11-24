@@ -282,7 +282,11 @@ an existing or competing output file.
 
 The restore validator and the CLI timing reader intentionally remain separate. Restore validates safe
 relative `.csproj` paths and nonnegative bounded durations, then writes the artifact's original bytes unchanged.
-It uses .NET ordinal case-insensitive comparison for duplicate project paths and repository names.
+Within the existing byte and nesting limits, the restore helper uses .NET's JSON reader for Unicode
+and duplicate property names. An invalid Unicode escape in a decoded project path makes the candidate
+ineligible. Ignored numeric fields retain their original bytes, including integers longer than 4,300 digits.
+The 4,300-digit conversion bound still applies to GitHub IDs and sizes the helper reads.
+The helper uses .NET ordinal case-insensitive comparison for duplicate project paths and repository names.
 For example, `App.csproj` and `app.csproj` count as duplicates, while `Straße.csproj` and `Strasse.csproj` are distinct.
 The CLI reader normalizes project keys and reads signed 64-bit seconds for scheduling. Sharing a parser would change one of those contracts. The single
 [canonical fixture](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/timings.json)

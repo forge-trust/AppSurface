@@ -6,8 +6,8 @@ using System.Text.Json;
 /// <summary>Restores the newest valid coverage scheduling artifact from successful default-branch builds.</summary>
 internal static class CoverageScheduleHistory
 {
-    private const int MaxJsonBytes = 2 * 1024 * 1024;
-    private const int MaxZipBytes = MaxJsonBytes + 64 * 1024;
+    // Preserve Python's 4,300-decimal-digit conversion bound for consumed GitHub integer metadata.
+    private const int MaxConsumedIntegerDigits = 4300;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan RestoreTimeout = TimeSpan.FromSeconds(45);
     private static readonly string[] TimestampFormats =
@@ -107,13 +107,7 @@ internal static class CoverageScheduleHistory
             return 2;
         }
 
-        var startTimestamp = clock.GetTimestamp();
-        var (content, warning) = await RestoreAsync(
-            repository,
-            defaultBranch,
-            request,
-            clock,
-            startTimestamp);
+        var (content, warning) = await RestoreAsync(repository, defaultBranch, request, clock);
 
         if (content is null)
         {
@@ -183,13 +177,13 @@ internal static class CoverageScheduleHistory
         string repository,
         string defaultBranch,
         Func<string, int, TimeSpan, Task<byte[]>> request,
-        TimeProvider clock,
-        long startTimestamp)
+        TimeProvider clock)
     {
+        var startTimestamp = clock.GetTimestamp();
         List<WorkflowRun> runs;
         try
         {
-            runs = await ReadWorkflowRunsAsync(repository, defaultBranch, request, clock, startTimestamp);
+            runs = await ReadWorkflowRunsAsync(repository, defaultBranch, RequestWithinBudgetAsync);
         }
         catch (IOException)
         {
@@ -205,77 +199,70 @@ internal static class CoverageScheduleHistory
         {
             var runId = run.Id.ToString(CultureInfo.InvariantCulture);
             var endpoint = $"repos/{repository}/actions/runs/{runId}/artifacts?per_page=100";
-            JsonDocument artifactsDocument;
+            List<BigInteger> artifactIds;
             try
             {
-                artifactsDocument = await ReadApiDocumentAsync(
-                    endpoint,
-                    MaxJsonBytes,
-                    request,
-                    clock,
-                    startTimestamp);
+                artifactIds = await ReadArtifactIdsAsync(endpoint, RequestWithinBudgetAsync);
             }
             catch (IOException)
             {
                 return (null, "GitHub artifact history is unavailable");
             }
 
-            using (artifactsDocument)
+            foreach (var artifactId in artifactIds)
             {
-                if (!TryGetArray(artifactsDocument.RootElement, "artifacts", out var artifacts))
+                var artifactIdText = artifactId.ToString(CultureInfo.InvariantCulture);
+                var downloadEndpoint = $"repos/{repository}/actions/artifacts/{artifactIdText}/zip";
+                byte[] archiveBytes;
+                try
                 {
-                    return (null, "GitHub artifact history is unavailable");
+                    archiveBytes = await RequestWithinBudgetAsync(downloadEndpoint, CoverageHistoryData.MaxArchiveBytes);
+                }
+                catch (IOException)
+                {
+                    return (null, "GitHub artifact download is unavailable");
                 }
 
-                foreach (var artifact in artifacts.EnumerateArray())
+                try
                 {
-                    if (!IsEligibleArtifact(artifact, out var artifactId))
-                    {
-                        continue;
-                    }
-
-                    var artifactIdText = artifactId.ToString(CultureInfo.InvariantCulture);
-                    var downloadEndpoint = $"repos/{repository}/actions/artifacts/{artifactIdText}/zip";
-                    byte[] archiveBytes;
-                    try
-                    {
-                        archiveBytes = await RequestAsync(
-                            downloadEndpoint,
-                            MaxZipBytes,
-                            request,
-                            clock,
-                            startTimestamp);
-                    }
-                    catch (IOException)
-                    {
-                        return (null, "GitHub artifact download is unavailable");
-                    }
-
-                    try
-                    {
-                        return (CoverageHistoryData.ReadArchive(archiveBytes), string.Empty);
-                    }
-                    catch (InvalidDataException)
-                    {
-                        // A damaged candidate does not prevent trying an older artifact.
-                    }
+                    return (CoverageHistoryData.ReadArchive(archiveBytes), string.Empty);
+                }
+                catch (InvalidDataException)
+                {
+                    // A damaged candidate does not prevent trying an older artifact.
                 }
             }
         }
 
         return (null, "no valid coverage schedule timings artifact found");
+
+        async Task<byte[]> RequestWithinBudgetAsync(string endpoint, int maxBytes)
+        {
+            var remaining = RestoreTimeout - clock.GetElapsedTime(startTimestamp);
+            if (remaining <= TimeSpan.Zero)
+            {
+                throw new IOException("GitHub API time budget exhausted.");
+            }
+
+            var timeout = remaining < RequestTimeout ? remaining : RequestTimeout;
+            var response = await request(endpoint, maxBytes, timeout);
+            if (response.Length > maxBytes)
+            {
+                throw new IOException("GitHub API response exceeded its size limit.");
+            }
+
+            return response;
+        }
     }
 
     private static async Task<List<WorkflowRun>> ReadWorkflowRunsAsync(
         string repository,
         string defaultBranch,
-        Func<string, int, TimeSpan, Task<byte[]>> request,
-        TimeProvider clock,
-        long startTimestamp)
+        Func<string, int, Task<byte[]>> boundedRequest)
     {
         var endpoint = $"repos/{repository}/actions/workflows/build.yml/runs?" +
             $"branch={FormEncode(defaultBranch)}&event=push&status=success&per_page=10";
-        using var document = await ReadApiDocumentAsync(endpoint, MaxJsonBytes, request, clock, startTimestamp);
+        using var document = await ReadApiDocumentAsync(endpoint, boundedRequest);
         if (!TryGetArray(document.RootElement, "workflow_runs", out var workflowRuns))
         {
             throw new IOException("GitHub workflow runs response had an invalid shape.");
@@ -323,14 +310,33 @@ internal static class CoverageScheduleHistory
         return runs;
     }
 
+    private static async Task<List<BigInteger>> ReadArtifactIdsAsync(
+        string endpoint,
+        Func<string, int, Task<byte[]>> boundedRequest)
+    {
+        using var document = await ReadApiDocumentAsync(endpoint, boundedRequest);
+        if (!TryGetArray(document.RootElement, "artifacts", out var artifacts))
+        {
+            throw new IOException("GitHub artifacts response had an invalid shape.");
+        }
+
+        var ids = new List<BigInteger>();
+        foreach (var artifact in artifacts.EnumerateArray())
+        {
+            if (IsEligibleArtifact(artifact, out var id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
     private static async Task<JsonDocument> ReadApiDocumentAsync(
         string endpoint,
-        int maxBytes,
-        Func<string, int, TimeSpan, Task<byte[]>> request,
-        TimeProvider clock,
-        long startTimestamp)
+        Func<string, int, Task<byte[]>> boundedRequest)
     {
-        var response = await RequestAsync(endpoint, maxBytes, request, clock, startTimestamp);
+        var response = await boundedRequest(endpoint, CoverageHistoryData.MaxJsonBytes);
         try
         {
             return CoverageHistoryData.ReadJson(response);
@@ -339,29 +345,6 @@ internal static class CoverageScheduleHistory
         {
             throw new IOException("GitHub API response was unavailable or invalid.", exception);
         }
-    }
-
-    private static async Task<byte[]> RequestAsync(
-        string endpoint,
-        int maxBytes,
-        Func<string, int, TimeSpan, Task<byte[]>> request,
-        TimeProvider clock,
-        long startTimestamp)
-    {
-        var remaining = RestoreTimeout - clock.GetElapsedTime(startTimestamp);
-        if (remaining <= TimeSpan.Zero)
-        {
-            throw new IOException("GitHub API time budget exhausted.");
-        }
-
-        var timeout = remaining < RequestTimeout ? remaining : RequestTimeout;
-        var response = await request(endpoint, maxBytes, timeout);
-        if (response.Length > maxBytes)
-        {
-            throw new IOException("GitHub API response exceeded its size limit.");
-        }
-
-        return response;
     }
 
     private static bool IsEligibleArtifact(JsonElement artifact, out BigInteger artifactId)
@@ -374,7 +357,7 @@ internal static class CoverageScheduleHistory
             expired.ValueKind == JsonValueKind.False &&
             TryGetInteger(artifact, "size_in_bytes", out var size) &&
             size >= BigInteger.Zero &&
-            size <= MaxZipBytes &&
+            size <= CoverageHistoryData.MaxArchiveBytes &&
             TryGetPositiveInteger(artifact, "id", out artifactId);
     }
 
@@ -420,8 +403,20 @@ internal static class CoverageScheduleHistory
             return false;
         }
 
+        var rawValue = property.GetRawText();
+        if (rawValue.AsSpan().ContainsAny('.', 'e', 'E'))
+        {
+            return false;
+        }
+
+        var digitCount = rawValue.Length - (rawValue.StartsWith("-", StringComparison.Ordinal) ? 1 : 0);
+        if (digitCount > MaxConsumedIntegerDigits)
+        {
+            throw new IOException("GitHub API response was unavailable or invalid.");
+        }
+
         return BigInteger.TryParse(
-            property.GetRawText(),
+            rawValue,
             NumberStyles.AllowLeadingSign,
             CultureInfo.InvariantCulture,
             out value);
