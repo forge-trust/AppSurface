@@ -3227,6 +3227,44 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_LongestFirst_ShouldUseSharedCoverageScheduleFixture()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        repo.WriteFile("tests/Slow.Tests/Slow.Tests.csproj", "<Project />");
+        repo.WriteFile("tests/After.Tests/After.Tests.csproj", "<Project />");
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var priorTimings = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "tests",
+            "coverage-schedule-history",
+            "fixtures",
+            "timings.json");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects:
+            [
+                "tests/First.Tests/First.Tests.csproj",
+                "tests/Slow.Tests/Slow.Tests.csproj",
+                "tests/After.Tests/After.Tests.csproj",
+            ],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: priorTimings,
+            NoDiscoverExclusive: true);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
+        Assert.Equal(
+            ["After.Tests", "Slow.Tests", "First.Tests"],
+            tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
+    }
+
+    [Fact]
     public async Task RunAsync_LongestFirst_ShouldKeepJunitArtifactsOnOriginalIndex()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");

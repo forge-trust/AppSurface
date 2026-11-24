@@ -8,7 +8,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal sealed class PackageArtifactWorkflow
 {
     private const string TailwindMainPackageId = "ForgeTrust.AppSurface.Web.Tailwind";
-    private const string CloudTasksPackageId = "ForgeTrust.AppSurface.Durable.CloudTasks";
+    private const string CloudTasksPackageId = "ForgeTrust.AppSurface.Durable.GoogleCloudTasks";
 
     internal const int RestoreTimeoutMilliseconds = 180_000;
     internal const int BuildTimeoutMilliseconds = 300_000;

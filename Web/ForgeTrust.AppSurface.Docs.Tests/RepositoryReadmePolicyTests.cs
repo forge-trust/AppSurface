@@ -237,7 +237,8 @@ public sealed partial class RepositoryReadmePolicyTests
             .ToArray();
 
         // Public source-only rows remain harvested even when publication is held.
-        Assert.Equal(46, requiredReadmes.Length);
+        Assert.Equal(47, requiredReadmes.Length);
+        Assert.Contains("PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/README.md", requiredReadmes);
         Assert.Contains("Coverage/ForgeTrust.AppSurface.Coverage/README.md", requiredReadmes);
         Assert.Contains("Config/ForgeTrust.AppSurface.Config.Testing/README.md", requiredReadmes);
         Assert.Contains(
@@ -274,7 +275,7 @@ public sealed partial class RepositoryReadmePolicyTests
             "Durable/ForgeTrust.AppSurface.Durable.Provider/README.md",
             requiredReadmes);
         Assert.Contains(
-            "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md",
+            "Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md",
             requiredReadmes);
         Assert.Contains(
             "Durable/ForgeTrust.AppSurface.Durable.Testing/README.md",

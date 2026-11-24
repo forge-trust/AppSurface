@@ -543,10 +543,18 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("requires_coverage == 'true'", collect["if"].AsScalar());
         Assert.Contains("--operation collect-coverage", collect["run"].AsScalar());
         Assert.Contains("--coverage-cli \"$COVERAGE_CLI_PATH\"", collect["run"].AsScalar());
-        Assert.Contains("--coverage-schedule-timings", collect["run"].AsScalar());
+        const string timingFile = "\"$RUNNER_TEMP/coverage-schedule/timings.json\"";
+        Assert.Matches(
+            $@"if \[\[ -f {Regex.Escape(timingFile)} \]\]; then\s+args\+=\(--coverage-schedule-timings {Regex.Escape(timingFile)}\)",
+            collect["run"].AsScalar());
         Assert.DoesNotContain("--native-coverage-directory", collect["run"].AsScalar());
         var history = FindStep(steps, "Restore advisory coverage scheduling history");
+        var contracts = FindStep(steps, "Test C# coverage scheduling history contracts");
+        Assert.Equal("dotnet run --file tests/coverage-schedule-history/contracts.cs", contracts["run"].AsScalar());
+        Assert.Equal($"dotnet run --file .github/scripts/coverage-schedule-history.cs -- restore --output {timingFile}", history["run"].AsScalar());
+        Assert.True(IndexOf(steps, contracts) < IndexOf(steps, history));
         Assert.True(IndexOf(steps, history) < IndexOf(steps, collect));
+        Assert.Equal("${{ github.token }}", history["env"].AsMapping()["GH_TOKEN"].AsScalar());
         Assert.Equal("${{ github.event.repository.default_branch }}", history["env"].AsMapping()["GITHUB_DEFAULT_BRANCH"].AsScalar());
         var upload = FindStep(steps, "Preserve same-attempt coverage collection");
         Assert.Contains("success()", upload["if"].AsScalar());

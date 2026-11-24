@@ -892,15 +892,15 @@ jobs:
       - name: Verify Cloud Run execution fixture comparisons
         run: python3 -m unittest discover -s Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1 -p 'test_*.py'
 
-      - name: Test coverage scheduling history helper
-        run: python3 -m unittest discover -s .github/tests -p 'coverage_schedule_history_tests.py'
+      - name: Test C# coverage scheduling history contracts
+        run: dotnet run --file tests/coverage-schedule-history/contracts.cs
 
       - name: Restore advisory coverage scheduling history
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: python3 .github/scripts/coverage-schedule-history.py restore --output "$RUNNER_TEMP/coverage-schedule/timings.json"
+        run: dotnet run --file .github/scripts/coverage-schedule-history.cs -- restore --output "$RUNNER_TEMP/coverage-schedule/timings.json"
 
       - name: Collect solution coverage
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
@@ -912,7 +912,12 @@ jobs:
           dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
           dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
           args=(--operation collect-coverage --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --coverage-cli "$COVERAGE_CLI_PATH" --output "$RUNNER_TEMP/solution-coverage-collection")
-          if [[ -f "$RUNNER_TEMP/coverage-schedule/timings.json" ]]; then args+=(--coverage-schedule-timings "$RUNNER_TEMP/coverage-schedule/timings.json"); fi
+          if [[ -f "$RUNNER_TEMP/coverage-schedule/timings.json" ]]; then
+            args+=(--coverage-schedule-timings "$RUNNER_TEMP/coverage-schedule/timings.json")
+            echo "Collecting coverage with restored scheduling timings."
+          else
+            echo "Collecting coverage without historical scheduling timings."
+          fi
           dotnet "$validation" "${args[@]}"
 
       - name: Preserve same-attempt coverage collection
