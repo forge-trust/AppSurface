@@ -205,6 +205,7 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
         await using var host = await StartAppSurfaceLightHostAsync();
         var docsUrl = $"{host.BaseUrl}/docs";
         await WaitForAppSurfaceLightDocsReadyAsync(host);
+        await using var release = await AppSurfaceDocsReleaseBaselineFixture.StartAsync(ConfigureAppSurfaceLightServices);
 
         foreach (var viewport in GetAppSurfaceLightBaselineViewports())
         {
@@ -217,7 +218,8 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
             foreach (var route in GetAppSurfaceLightBaselineRoutes(viewport.Name))
             {
                 var page = await context.NewPageAsync();
-                await page.GotoAsync($"{docsUrl}{route.Path}");
+                var url = route.Path == "/releases/unreleased" ? release.PageUrl : $"{docsUrl}{route.Path}";
+                await page.GotoAsync(url);
                 await page.WaitForSelectorAsync(route.ReadySelector, new PageWaitForSelectorOptions
                 {
                     State = WaitForSelectorState.Visible,
@@ -852,22 +854,25 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
 
     private static Task<AppSurfaceDocsInProcessHost> StartAppSurfaceLightHostAsync()
     {
-        return AppSurfaceDocsInProcessHost.StartAsync(
-            "http://127.0.0.1:0",
-            services => services.PostConfigure<AppSurfaceDocsOptions>(options =>
+        return AppSurfaceDocsInProcessHost.StartAsync("http://127.0.0.1:0", ConfigureAppSurfaceLightServices);
+    }
+
+    private static void ConfigureAppSurfaceLightServices(IServiceCollection services)
+    {
+        services.PostConfigure<AppSurfaceDocsOptions>(options =>
+        {
+            options.Theme = new AppSurfaceDocsThemeOptions
             {
-                options.Theme = new AppSurfaceDocsThemeOptions
+                Preset = AppSurfaceDocsThemePreset.AppSurfaceLight,
+                Colors = new AppSurfaceDocsThemeColorOptions
                 {
-                    Preset = AppSurfaceDocsThemePreset.AppSurfaceLight,
-                    Colors = new AppSurfaceDocsThemeColorOptions
-                    {
-                        AccentColor = "#1e3a8a",
-                        AccentStrongColor = "#1e40af",
-                        LinkColor = "#1e3a8a",
-                        VisitedLinkColor = "#5b21b6"
-                    }
-                };
-            }));
+                    AccentColor = "#1e3a8a",
+                    AccentStrongColor = "#1e40af",
+                    LinkColor = "#1e3a8a",
+                    VisitedLinkColor = "#5b21b6"
+                }
+            };
+        });
     }
 
     private static async Task WaitForAppSurfaceLightDocsReadyAsync(AppSurfaceDocsInProcessHost host)
