@@ -208,7 +208,7 @@ jobs:
     if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' }}
     # Leave time for the native suite, candidate installation, and evidence upload.
     # The test command still uses a separate two-minute hang detector.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 35 || matrix.os == 'macos-latest' && 30 || 20 }}
+    timeout-minutes: ${{ (matrix.os == 'macos-latest' || matrix.os == 'windows-latest') && 40 || 20 }}
     strategy:
       fail-fast: false
       matrix:
@@ -322,7 +322,7 @@ jobs:
           APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS: ${{ runner.temp }}/packed-reuse-diagnostics
         run: |
           New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS | Out-Null
-          $filter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceHost|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePrepared|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceProducerKeyMaterialExecution|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceKeyMaterialFailure|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceReusePackageProofTests|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePackedReuseJourneyTests|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.NativeEvidenceProgramTests"
+          $filter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceHost|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePrepared|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceProducerKeyMaterialExecution|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceKeyMaterialFailure|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceReusePackageProofTests|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePackedReuseJourneyTests|FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.NativeEvidenceProgramTests|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests"
           $arguments = @('coverage', 'run',
             '--test-project', 'Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj',
             '--test-project', 'Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj',

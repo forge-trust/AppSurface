@@ -236,7 +236,26 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     [CommandOption("receipt-wait-timeout", Description = "Maximum finite positive wait for another local reuse owner. Defaults to 00:30:00.")]
     public string ReceiptWaitTimeout { get; set; } = "00:30:00";
 
+    /// <summary>Gets or sets the factory for the built-in <c>test</c> producer; tests replace it to supply a fake test-run source.</summary>
+    internal Func<string, TestEvidenceProducerOptions, TestEvidenceProducer> TestProducerFactory { get; set; } =
+        static (id, options) => new TestEvidenceProducer(id, options);
+
+    /// <summary>Gets or sets the resolver for the GitHub step summary file; <see langword="null"/> or blank writes no step summary.</summary>
+    /// <remarks>Tests replace it so a test run never appends to the step summary of the CI job that runs the tests.</remarks>
+    internal Func<string?> StepSummaryPathResolver { get; set; } =
+        static () => Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
+
+    /// <summary>Gets or sets the resolver for the repository root that declared test project paths are relative to.</summary>
+    internal Func<string> RepositoryRootResolver { get; set; } =
+        static () => GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory());
+
     /// <inheritdoc />
+    /// <remarks>
+    /// Order: resolve the plan; reject selections that cannot run truthfully (<c>ASEVD214</c>, <c>ASEVD215</c>);
+    /// retire the earlier manifest, summary and selected <c>test</c> producer artifact directories (<c>ASEVD216</c> when one is a link); write the plan; run producers one at a
+    /// time; confirm returned artifacts on disk and downgrade a producer whose artifact is not there; write the
+    /// manifest and summary. Kinds <c>coverage</c> and <c>test</c> are built in; any other kind is <c>Unavailable</c>.
+    /// </remarks>
     public override async ValueTask ExecuteAsync(IConsole console)
     {
         try
@@ -248,7 +267,10 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             var resolution = await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken);
             var plan = resolution.Plan;
             ValidateReuseContext(Reuse, plan);
+            TestEvidenceRunSupport.ValidateSelection(plan);
 
+            var hasTestProducer = plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer);
+            var testReports = new List<string>();
             string outputDirectory;
             try
             {
@@ -262,7 +284,17 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             {
                 throw new CommandException($"ASEVD217: A fresh Evidence output root could not be claimed ({exception.GetType().Name}). Choose a new --output path or repair access to TestResults/evidence/runs. Code: reuse.output_unavailable.");
             }
+            if (!Reuse)
+            {
+                TestEvidenceRunSupport.RetireOutputs(outputDirectory, plan);
+            }
+
             await Workflow.WritePlanAsync(plan, outputDirectory, cancellationToken);
+            if (hasTestProducer)
+            {
+                await console.Output.WriteLineAsync(TestEvidenceRunSupport.PreviewLine);
+            }
+
             EvidenceManifest manifest;
             IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions = null;
             if (Reuse)
@@ -292,8 +324,22 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
                         "The selected profile requires consumer-owned resources. Run it through ForgeTrust.AppSurface.Evidence.Aspire with explicit registrations.")));
                 }
                 else
+                {
+                    var artifactRoot = Path.Join(outputDirectory, "artifacts");
                     foreach (var producer in plan.Profile.Producers)
-                        results.Add(await RunProducerAsync(producer, resolution.DiffSnapshot, outputDirectory, console, cancellationToken));
+                    {
+                        var produced = TestEvidenceRunSupport.IsTestProducer(producer)
+                            ? await RunTestProducerAsync(plan, producer, artifactRoot, console, testReports, cancellationToken)
+                            : await RunProducerAsync(producer, resolution.DiffSnapshot, outputDirectory, console, cancellationToken);
+                        var checkedResult = await TestEvidenceRunSupport.EnforceArtifactsAsync(artifactRoot, produced, cancellationToken);
+                        if (!ReferenceEquals(checkedResult, produced))
+                        {
+                            await console.Error.WriteLineAsync(checkedResult.Diagnostic);
+                        }
+
+                        results.Add(checkedResult);
+                    }
+                }
                 manifest = EvidenceManifestBuilder.Build(plan, results, ObservationOnly, resourceResults: resourceResults);
             }
 
@@ -301,11 +347,18 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             await console.Output.WriteLineAsync(reuseDecisions is null
                 ? EvidenceCliWorkflow.FormatSummary(manifest)
                 : EvidenceCliWorkflow.FormatSummary(manifest, reuseDecisions));
+            foreach (var report in testReports)
+            {
+                await console.Output.WriteLineAsync(report);
+            }
+
             await console.Output.WriteLineAsync($"Artifacts: {Path.Join(outputDirectory, "evidence-plan.json")}, {Path.Join(outputDirectory, "evidence-manifest.json")}, {Path.Join(outputDirectory, "evidence-summary.json")}");
-            await WriteGitHubSummaryAsync(manifest, cancellationToken);
+            await WriteGitHubSummaryAsync(StepSummaryPathResolver(), manifest, testReports, cancellationToken);
             if (manifest.ClaimKind == EvidenceClaimKind.None)
             {
-                throw new CommandException("ASEVD211: Evidence is incomplete. Inspect evidence-summary.json and the producer output before allowing a gate to proceed.");
+                throw new CommandException(hasTestProducer
+                    ? "ASEVD211: Evidence is incomplete. Read the per-project reasons printed above and evidence-summary.json before allowing a gate to proceed; test producer output is not kept."
+                    : "ASEVD211: Evidence is incomplete. Inspect evidence-summary.json and the producer output before allowing a gate to proceed.");
             }
         }
         catch (EvidencePlanningException exception)
@@ -331,7 +384,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             throw new CommandException("ASEVD214: --receipt-wait-timeout must be a finite positive duration. Fix: pass a value such as 00:30:00. Code: reuse.invalid_wait_timeout. No store or output was created.");
     }
 
-    /// <summary>Rejects local reuse in release or protected CI contexts before execution or receipt inspection.</summary>
+    /// <summary>Rejects local reuse in release or protected CI contexts and in profiles that select the preview test producer.</summary>
     /// <param name="reuse">Whether reuse is enabled; fresh invocations retain their existing behavior.</param>
     /// <param name="plan">The selected policy-bound plan.</param>
     /// <param name="environmentReader">Optional per-call environment seam, without process-wide test mutation.</param>
@@ -340,6 +393,8 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         if (reuse && (plan.Profile.Scope == EvidenceProfileScope.Release
             || string.Equals((environmentReader ?? Environment.GetEnvironmentVariable)("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase)))
             throw new CommandException("ASEVD215: local producer reuse is unavailable for release profiles and protected CI. Fix: run without --reuse in the trusted release workflow. Code: reuse.gate_context_forbidden. No producer or resource was started.");
+        if (reuse && plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer))
+            throw new CommandException("ASEVD219: The preview test producer requires a fresh CLI run. Run the selected profile without --reuse. Code: reuse.test_preview_requires_fresh. No producer or resource was started.");
     }
 
     private async Task<EvidenceProducerResult> RunProducerAsync(
@@ -358,23 +413,69 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             cancellationToken);
     }
 
-    private static async Task WriteGitHubSummaryAsync(EvidenceManifest manifest, CancellationToken cancellationToken)
+    private async Task<EvidenceProducerResult> RunTestProducerAsync(
+        EvidencePlan plan,
+        EvidenceProducerDeclaration declaration,
+        string artifactRoot,
+        IConsole console,
+        List<string> reports,
+        CancellationToken cancellationToken)
     {
-        var summaryPath = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
+        var producer = TestProducerFactory(
+            declaration.Id,
+            new TestEvidenceProducerOptions(RepositoryRootResolver())
+            {
+                DiagnosticsDirectory = Path.Join(OutputDirectory, "diagnostics"),
+                Progress = console.Error,
+            });
+        var result = await producer.ProduceAsync(
+            new EvidenceProducerContext(plan, declaration, TimeProvider.System, new EvidenceArtifactWriter(declaration, Path.Join(artifactRoot, declaration.Id))),
+            cancellationToken);
+
+        // The table is read back from the receipt that was just written, so the console shows exactly what a gate will read.
+        var receiptPath = Path.Join(artifactRoot, declaration.Id, TestEvidenceProducer.ReceiptRelativePath);
+        reports.Add(TestEvidenceRunSupport.FormatCountsTable(
+            declaration.Id,
+            TestEvidenceRunSupport.TryReadReceipt(receiptPath, out var rows) ? rows : null));
+        foreach (var line in TestEvidenceRunSupport.FormatIncomplete(declaration.Id, producer.LastProjects))
+        {
+            await console.Error.WriteLineAsync(line);
+        }
+
+        foreach (var notice in TestEvidenceRunSupport.FormatMinimumNotices(declaration.Test!.Projects, producer.LastProjects))
+        {
+            await console.Output.WriteLineAsync(notice);
+        }
+
+        if (producer.LastTracePath is { } tracePath)
+        {
+            await console.Error.WriteLineAsync($"The test producer stopped on an internal error. Trace (exception type and stack frames only): {tracePath}");
+        }
+
+        return result;
+    }
+
+    private static async Task WriteGitHubSummaryAsync(string? summaryPath, EvidenceManifest manifest, IReadOnlyList<string> testReports, CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(summaryPath))
         {
             return;
         }
 
-        var markdown = $"## AppSurface Evidence{Environment.NewLine}{Environment.NewLine}- Claim: `{manifest.ClaimKind}`{Environment.NewLine}- Execution: `{manifest.ExecutionVerdict}`{Environment.NewLine}- Closed obligations: {manifest.ClosedObligationIds.Count}{Environment.NewLine}- Unmediated obligations: {manifest.UnmediatedObligationIds.Count}{Environment.NewLine}";
-        await File.AppendAllTextAsync(summaryPath, markdown, new UTF8Encoding(false), cancellationToken);
+        var markdown = new StringBuilder($"## AppSurface Evidence{Environment.NewLine}{Environment.NewLine}- Claim: `{manifest.ClaimKind}`{Environment.NewLine}- Execution: `{manifest.ExecutionVerdict}`{Environment.NewLine}- Closed obligations: {manifest.ClosedObligationIds.Count}{Environment.NewLine}- Unmediated obligations: {manifest.UnmediatedObligationIds.Count}{Environment.NewLine}");
+        foreach (var report in testReports)
+        {
+            markdown.AppendLine().AppendLine(report);
+        }
+
+        await File.AppendAllTextAsync(summaryPath, markdown.ToString(), new UTF8Encoding(false), cancellationToken);
     }
 }
 
 /// <summary>
-/// Verifies that an immutable evidence manifest binds to its resolved plan without rerunning producers.
+/// Verifies that an immutable evidence manifest binds to its resolved plan and that its retained artifacts are intact, without rerunning producers.
 /// </summary>
-[Command("evidence verify", Description = "Verify plan and manifest digests without rerunning producers.")]
+[Command("evidence verify", Description = "Verify plan and manifest digests and retained artifacts without rerunning producers.")]
 internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow) : ICommand
 {
     private readonly EvidenceCliWorkflow _workflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
@@ -391,6 +492,10 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
     [CommandOption("for-gate", Description = "Require gate admission in addition to canonical integrity; local reused evidence is informational only.")]
     public bool ForGate { get; set; }
 
+    /// <summary>Gets or sets an explicit artifact directory holding one subdirectory per producer id.</summary>
+    [CommandOption("artifact-root", Description = "Override the original run layout with a directory holding one subdirectory per producer id.")]
+    public string? ArtifactRoot { get; set; }
+
     /// <inheritdoc />
     public async ValueTask ExecuteAsync(IConsole console)
     {
@@ -404,7 +509,7 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
             var planPath = string.IsNullOrWhiteSpace(PlanPath)
                 ? Path.Join(Path.GetDirectoryName(Path.GetFullPath(ManifestPath))!, "evidence-plan.json")
                 : PlanPath;
-            var (_, manifest) = await _workflow.VerifyAsync(planPath, ManifestPath, console.RegisterCancellationHandler(), ForGate);
+            var (_, manifest) = await _workflow.VerifyAsync(planPath, ManifestPath, ArtifactRoot, console.RegisterCancellationHandler(), ForGate);
             await console.Output.WriteLineAsync($"Evidence manifest verified: {manifest.ClaimKind} ({manifest.Eligibility})");
         }
         catch (EvidenceCliException exception)

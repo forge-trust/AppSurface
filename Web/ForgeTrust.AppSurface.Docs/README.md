@@ -2040,6 +2040,18 @@ Use `[AppSurfacePythonModule("sidecar/worker.py")]` on one documented top-level 
 
 Use emitted Python fragment routes when linking to symbols. Anchors are unique within a module, including class members, and normalization collisions receive deterministic suffixes; deriving a fragment directly from a Python name can therefore point to a different symbol. Module pages render declarations beneath the module heading while retaining the compact two-level API outline used by JavaScript.
 
+#### Tree-sitter native assets in build and publish output
+
+When you consume the Docs NuGet package, ordinary builds and publishes without a project runtime identifier (RID) keep the `TreeSitter.DotNet` native assets for the SDK's exact supported host RID. The SDK process architecture determines the match. An x64 SDK running on Arm64 therefore selects x64. This applies to projects that receive Docs transitively. The NuGet archive and restore graph retain the full dependency.
+
+For deployment to one known platform, use `dotnet publish -r <rid>`. Builds and publishes with an explicit or SDK-inferred project RID use the SDK's normal selection. If a no-RID artifact must run across platforms, set `AppSurfaceDocsKeepAllTreeSitterRuntimes=true` in the consuming solution's `Directory.Build.props`, or pass it as a global property when building and publishing:
+
+```sh
+dotnet publish -p:AppSurfaceDocsKeepAllTreeSitterRuntimes=true
+```
+
+Use the same property value and build configuration for `publish --no-build` as for its preceding build. Run a publish that builds when changing the policy. A host-only artifact launched on a different platform can report [`appsurfacedocs.python.parser_unavailable`](#diagnostics) when Python harvesting is active. The existing strict-health rules apply. For an unmatched or ineligible SDK host RID, Docs keeps the SDK's ordinary asset selection. See the [native asset issue](https://github.com/forge-trust/AppSurface/issues/916) and [NuGet native asset reference](https://learn.microsoft.com/en-us/nuget/create-packages/native-files-in-net-packages).
+
 ### JavaScript public API harvesting
 
 JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, typedefs, attributes, config fields, module mount contracts, CSS custom properties, and CSS hooks that application authors need to consume. It is enabled by default, but it is annotation-first: AppSurface Docs publishes only supported public doclets and ignores unannotated JavaScript.

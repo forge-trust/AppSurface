@@ -1,0 +1,72 @@
+<Project>
+  <!-- This import belongs to packed Docs consumers. Read the SDK's selection before either
+       the output copy lists or the dependency manifests consume it. -->
+  <Target Name="_AppSurfaceDocsSelectTreeSitterNatives"
+          AfterTargets="ResolvePackageAssets"
+          Condition="'$(TargetFrameworkIdentifier)' == '.NETCoreApp'
+                     and '$(DesignTimeBuild)' != 'true'
+                     and '$(RuntimeIdentifier)' == ''
+                     and '$(AppSurfaceDocsKeepAllTreeSitterRuntimes)' != 'true'
+                     and '$(PreserveStoreLayout)' != 'true'
+                     and '$(TargetManifestFiles)' == ''
+                     and '@(RuntimeStorePackages)' == ''">
+    <PropertyGroup>
+      <_AppSurfaceDocsTreeSitterHostRid>$(NETCoreSdkPortableRuntimeIdentifier)</_AppSurfaceDocsTreeSitterHostRid>
+      <_AppSurfaceDocsTreeSitterHostRid Condition="'$(_AppSurfaceDocsTreeSitterHostRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</_AppSurfaceDocsTreeSitterHostRid>
+      <_AppSurfaceDocsTreeSitterHostRids>;linux-arm;linux-arm64;linux-x64;osx-arm64;osx-x64;win-arm64;win-x64;win-x86;</_AppSurfaceDocsTreeSitterHostRids>
+    </PropertyGroup>
+    <ItemGroup Condition="$([System.String]::Copy('$(_AppSurfaceDocsTreeSitterHostRids)').Contains(';$(_AppSurfaceDocsTreeSitterHostRid);'))">
+      <_AppSurfaceDocsTreeSitterNative Include="@(RuntimeTargetsCopyLocalItems)"
+          Condition="'%(RuntimeTargetsCopyLocalItems.NuGetPackageId)' == 'TreeSitter.DotNet'
+                     and '%(RuntimeTargetsCopyLocalItems.AssetType)' == 'native'" />
+      <!-- NuGet records package paths with forward slashes. The SDK builds the copy destination with host separators. -->
+      <_AppSurfaceDocsTreeSitterVerifiedNative Include="@(_AppSurfaceDocsTreeSitterNative)"
+          Condition="'%(_AppSurfaceDocsTreeSitterNative.RuntimeIdentifier)' != ''
+                     and '%(_AppSurfaceDocsTreeSitterNative.PathInPackage)' == $([System.String]::Copy('%(_AppSurfaceDocsTreeSitterNative.DestinationSubPath)').Replace('\', '/'))
+                     and $([System.String]::Copy('%(_AppSurfaceDocsTreeSitterNative.PathInPackage)').StartsWith('runtimes/%(_AppSurfaceDocsTreeSitterNative.RuntimeIdentifier)/native/'))" />
+      <_AppSurfaceDocsTreeSitterUnclassified Include="@(RuntimeTargetsCopyLocalItems)"
+          Condition="'%(RuntimeTargetsCopyLocalItems.NuGetPackageId)' == 'TreeSitter.DotNet'
+                     and '%(RuntimeTargetsCopyLocalItems.AssetType)' != 'native'
+                     and '%(RuntimeTargetsCopyLocalItems.AssetType)' != 'runtime'
+                     and '%(RuntimeTargetsCopyLocalItems.AssetType)' != 'resources'" />
+      <_AppSurfaceDocsTreeSitterUnclassified Include="@(_AppSurfaceDocsTreeSitterNative)" Exclude="@(_AppSurfaceDocsTreeSitterVerifiedNative)" />
+      <_AppSurfaceDocsTreeSitterHost Include="@(_AppSurfaceDocsTreeSitterVerifiedNative)"
+          Condition="'%(_AppSurfaceDocsTreeSitterVerifiedNative.RuntimeIdentifier)' == '$(_AppSurfaceDocsTreeSitterHostRid)'
+                     and '%(_AppSurfaceDocsTreeSitterVerifiedNative.CopyLocal)' == 'true'" />
+      <_AppSurfaceDocsTreeSitterForeign Include="@(_AppSurfaceDocsTreeSitterVerifiedNative)"
+          Condition="'%(_AppSurfaceDocsTreeSitterVerifiedNative.RuntimeIdentifier)' != '$(_AppSurfaceDocsTreeSitterHostRid)'" />
+    </ItemGroup>
+    <ItemGroup Condition="'@(_AppSurfaceDocsTreeSitterUnclassified)' == '' and '@(_AppSurfaceDocsTreeSitterHost)' != ''">
+      <RuntimeTargetsCopyLocalItems Remove="@(_AppSurfaceDocsTreeSitterForeign)" />
+    </ItemGroup>
+    <PropertyGroup Condition="'@(_AppSurfaceDocsTreeSitterUnclassified)' == '' and '@(_AppSurfaceDocsTreeSitterHost)' != ''">
+      <_AppSurfaceDocsTreeSitterPolicy>host:$(_AppSurfaceDocsTreeSitterHostRid)</_AppSurfaceDocsTreeSitterPolicy>
+    </PropertyGroup>
+  </Target>
+
+  <!-- The SDK does not include global property values in its incremental deps inputs.
+       Track effective selection per intermediate output so an ordinary rebuild updates deps.json. -->
+  <Target Name="_AppSurfaceDocsTrackTreeSitterPolicy"
+          BeforeTargets="GenerateBuildDependencyFile"
+          DependsOnTargets="ResolvePackageAssets"
+          Condition="'$(TargetFrameworkIdentifier)' == '.NETCoreApp'
+                     and '$(DesignTimeBuild)' != 'true'
+                     and '$(RuntimeIdentifier)' == ''
+                     and '$(GenerateDependencyFile)' == 'true'">
+    <PropertyGroup>
+      <_AppSurfaceDocsTreeSitterPolicyFile>$(IntermediateOutputPath)appsurface-docs-treesitter-policy.txt</_AppSurfaceDocsTreeSitterPolicyFile>
+      <_AppSurfaceDocsTreeSitterPolicy Condition="'$(_AppSurfaceDocsTreeSitterPolicy)' == ''">sdk-default</_AppSurfaceDocsTreeSitterPolicy>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(_AppSurfaceDocsTreeSitterPolicy)' != 'sdk-default' or Exists('$(_AppSurfaceDocsTreeSitterPolicyFile)')">
+      <_AppSurfaceDocsTreeSitterPolicyInput Include="$(_AppSurfaceDocsTreeSitterPolicyFile)" />
+    </ItemGroup>
+    <WriteLinesToFile Condition="'@(_AppSurfaceDocsTreeSitterPolicyInput)' != ''"
+        File="$(_AppSurfaceDocsTreeSitterPolicyFile)" Lines="$(_AppSurfaceDocsTreeSitterPolicy)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <PropertyGroup Condition="'@(_AppSurfaceDocsTreeSitterPolicyInput)' != ''">
+      <MSBuildAllProjects>$(MSBuildAllProjects);$(_AppSurfaceDocsTreeSitterPolicyFile)</MSBuildAllProjects>
+    </PropertyGroup>
+    <ItemGroup>
+      <FileWrites Include="@(_AppSurfaceDocsTreeSitterPolicyInput)" />
+    </ItemGroup>
+  </Target>
+</Project>

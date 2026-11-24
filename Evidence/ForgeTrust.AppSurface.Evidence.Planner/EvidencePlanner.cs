@@ -323,6 +323,8 @@ public sealed class EvidencePlanner
                 ValidateCoverageGate(producer.Id, coverageGate);
             }
 
+            ValidateTestProducer(producer);
+
             foreach (var resourceId in producer.RequiredResources)
             {
                 if (!resources.ContainsKey(resourceId))
@@ -459,6 +461,194 @@ public sealed class EvidencePlanner
             throw new EvidencePlanningException("ASEVD121", $"Evidence {description} is empty or exceeds 128 characters.", "Supply a stable identifier up to 128 characters.");
         }
     }
+
+    /// <summary>
+    /// Applies the preview <c>test</c> producer rules (ASEVD137 through ASEVD149). Other kinds are only checked for a stray <c>test</c> block.
+    /// </summary>
+    /// <remarks>
+    /// Check order, first failure wins: block on another kind (143), producer id (149), block and project count (137, 138),
+    /// per project path, duplicate, filter and minimum (139 through 142), coverage fields (144), assertion id (145),
+    /// receipt slot shape, including its root, and size (146, 147), timeout (148).
+    /// </remarks>
+    private static void ValidateTestProducer(EvidenceProducerDeclaration producer)
+    {
+        var isTest = string.Equals(producer.Kind, EvidenceTestProducerContract.Kind, StringComparison.Ordinal);
+        if (!isTest)
+        {
+            if (producer.Test is not null)
+            {
+                throw new EvidencePlanningException(
+                    "ASEVD143",
+                    $"Producer '{producer.Id}' has kind '{producer.Kind}' and declares a test block; only kind '{EvidenceTestProducerContract.Kind}' may.",
+                    $"Remove the test block or set kind to '{EvidenceTestProducerContract.Kind}'.");
+            }
+
+            return;
+        }
+
+        if (!IsSafePathSegment(producer.Id))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD149",
+                $"Test producer id '{producer.Id}' is not one safe path segment.",
+                "Use only A-Z, a-z, 0-9, '.', '_' and '-', and not '.' or '..'; the id names the artifact directory.");
+        }
+
+        var projects = producer.Test?.Projects;
+        if (projects is null || projects.Count == 0)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD137",
+                $"Test producer '{producer.Id}' declares no test.projects.",
+                "Declare 1 to 32 test projects, for example \"test\": { \"projects\": [ { \"path\": \"tests/My.Tests/My.Tests.csproj\" } ] }.");
+        }
+
+        if (projects.Count > EvidenceTestProducerContract.MaximumProjects)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD138",
+                $"Test producer '{producer.Id}' declares {projects.Count} test.projects; the maximum is {EvidenceTestProducerContract.MaximumProjects}.",
+                "Split the projects across more than one test producer.");
+        }
+
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects)
+        {
+            var path = project?.Path;
+            if (project is null || path is null || !IsTestProjectPath(path))
+            {
+                throw new EvidencePlanningException(
+                    "ASEVD139",
+                    $"Test producer '{producer.Id}' has invalid test.projects path '{path}'.",
+                    $"Use a repository-relative forward-slash path of at most {EvidenceTestProducerContract.MaximumProjectPathLength} characters ending in .csproj, .fsproj or .vbproj, with no '.' or '..' segment and no segment starting with '-'.");
+            }
+
+            if (!seenPaths.Add(path))
+            {
+                throw new EvidencePlanningException(
+                    "ASEVD140",
+                    $"Test producer '{producer.Id}' declares test.projects path '{path}' more than once.",
+                    "Declare each project once; combine filters with '|' in one entry.");
+            }
+
+            if (project.Filter is { } filter && !IsTestFilter(filter))
+            {
+                throw new EvidencePlanningException(
+                    "ASEVD141",
+                    $"Test producer '{producer.Id}' has an invalid filter for '{path}' ({filter.Length} characters).",
+                    $"Use a nonempty VSTest filter of at most {EvidenceTestProducerContract.MaximumFilterLength} characters with no control character or line break, or omit filter.");
+            }
+
+            if (project.MinimumTests is { } minimumTests && minimumTests < 1)
+            {
+                throw new EvidencePlanningException(
+                    "ASEVD142",
+                    $"Test producer '{producer.Id}' has minimumTests {minimumTests} for '{path}'.",
+                    "Set minimumTests to 1 or greater, or omit it for the default of 1.");
+            }
+        }
+
+        if (producer.CoverageGate is not null
+            || producer.CoverageExecution is not null
+            || !string.Equals(producer.CoverageArtifactRetention, "managed", StringComparison.Ordinal))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD144",
+                $"Test producer '{producer.Id}' declares coverageGate, coverageExecution or coverageArtifactRetention.",
+                "Remove the coverage fields; a test producer makes no coverage claim. Use kind 'coverage' for coverage evidence.");
+        }
+
+        if (producer.AssertionIds.Count != 1
+            || !string.Equals(producer.AssertionIds[0], EvidenceTestProducerContract.AssertionId, StringComparison.Ordinal))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD145",
+                $"Test producer '{producer.Id}' declares assertionIds [{string.Join(", ", producer.AssertionIds)}].",
+                $"Use exactly \"assertionIds\": [\"{EvidenceTestProducerContract.AssertionId}\"].");
+        }
+
+        var minimumBytes = EvidenceTestProducerContract.GetMinimumReceiptBytes(projects);
+        var slotJson = $"\"artifactSlots\": [ {{ \"logicalName\": \"{EvidenceTestProducerContract.ReceiptSlotLogicalName}\", \"relativeRoot\": \"{EvidenceTestProducerContract.ReceiptRelativeRoot}\", \"mediaType\": \"{EvidenceTestProducerContract.ReceiptMediaType}\", \"required\": true, \"maximumBytes\": {Math.Max(65536, minimumBytes)} }} ]";
+        if (producer.ArtifactSlots.Count != 1
+            || !string.Equals(producer.ArtifactSlots[0].LogicalName, EvidenceTestProducerContract.ReceiptSlotLogicalName, StringComparison.Ordinal)
+            || !string.Equals(producer.ArtifactSlots[0].MediaType, EvidenceTestProducerContract.ReceiptMediaType, StringComparison.Ordinal)
+            || !producer.ArtifactSlots[0].Required
+            || !string.Equals(producer.ArtifactSlots[0].RelativeRoot, EvidenceTestProducerContract.ReceiptRelativeRoot, StringComparison.Ordinal))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD146",
+                $"Test producer '{producer.Id}' must declare exactly one required '{EvidenceTestProducerContract.ReceiptSlotLogicalName}' artifact slot with media type {EvidenceTestProducerContract.ReceiptMediaType} and relativeRoot '{EvidenceTestProducerContract.ReceiptRelativeRoot}', where the receipt is written; it declares {producer.ArtifactSlots.Count} slot(s).",
+                $"Use {slotJson}.");
+        }
+
+        if (producer.ArtifactSlots[0].MaximumBytes < minimumBytes)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD147",
+                $"Test producer '{producer.Id}' receipt slot maximumBytes is {producer.ArtifactSlots[0].MaximumBytes}; the minimum for its {projects.Count} project(s) is {minimumBytes}.",
+                $"Set maximumBytes to at least {minimumBytes}.");
+        }
+
+        if (producer.TimeoutSeconds < EvidenceTestProducerContract.MinimumTimeoutSeconds)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD148",
+                $"Test producer '{producer.Id}' has timeoutSeconds {producer.TimeoutSeconds}; the minimum is {EvidenceTestProducerContract.MinimumTimeoutSeconds}.",
+                $"Set timeoutSeconds to at least {EvidenceTestProducerContract.MinimumTimeoutSeconds}.");
+        }
+    }
+
+    private static bool IsSafePathSegment(string value)
+    {
+        if (value is "." or "..")
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (!char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsTestProjectPath(string path)
+    {
+        if (path.Length == 0
+            || path.Length > EvidenceTestProducerContract.MaximumProjectPathLength
+            || path.Contains('\\')
+            || Path.IsPathRooted(path)
+            || path.Any(static character => char.IsControl(character))
+            || !(path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".vbproj", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        foreach (var segment in path.Split('/'))
+        {
+            if (segment.Length == 0
+                || segment is "." or ".."
+                || segment[0] == '-'
+                || !string.Equals(segment, segment.Trim(), StringComparison.Ordinal)
+                || segment.Contains(':'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsTestFilter(string filter) =>
+        !string.IsNullOrWhiteSpace(filter)
+        && filter.Length <= EvidenceTestProducerContract.MaximumFilterLength
+        && !filter.Any(static character => char.IsControl(character) || character is '\u2028' or '\u2029');
 
     private static void ValidateCoverageGate(string producerId, EvidenceCoverageGateRequirements coverageGate)
     {

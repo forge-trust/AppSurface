@@ -104,7 +104,7 @@
 ## Coverage-proof follow-ups (#674)
 
 - **What:** Add a synthetic multi-project or multi-target packaged-consumer graph to the semantic coverage proof. **Why:** The owned `Smoke.Tests` sentinel will catch exact-project collection and raw-to-merged loss, but not every graph-specific regression. **Pros:** Covers multiple application assemblies, fan-in shape, and framework-specific output paths. **Cons:** Extends the fixture and release runtime beyond the smallest #674 guard. **Context:** Land only after the canonical manifest-bound sentinel has run reliably; use a demonstrated regression or adopter graph to choose the shape. **Depends on / blocked by:** The #674 semantic proof and observed need.
-- **What:** Extract or formalize a shared runner/integration classifier only if evidence shows the CLI and diagnostic classification need the same contract. **Why:** A separate external classifier can drift from the VSTest-only CLI contract. **Pros:** One tested meaning for runner, direct coverlet package identity, and compatibility errors. **Cons:** Can expand coverage-engine scope or introduce a cross-project dependency without a real fault. **Context:** #674 keeps the external classifier diagnostic-only and does not change VSTest/MTP support. **Depends on / blocked by:** A current classified reproduction showing a CLI contract mismatch.
+- **What:** Extract or formalize a shared runner/integration classifier only if evidence shows the CLI and diagnostic classification need the same contract. **Why:** A separate external classifier can drift from the VSTest-only CLI contract. **Pros:** One tested meaning for runner, direct coverlet package identity, and compatibility errors. **Cons:** Can expand coverage-engine scope or introduce a cross-project dependency without a real fault. **Context:** #674 keeps the external classifier diagnostic-only and does not change VSTest/MTP support. **Depends on / blocked by:** A current classified reproduction showing a CLI contract mismatch. **Update 2026-11-22:** the runner part is done for #929: `VsTestRunnerProbe` in `CoverageRunDrivers.cs` returns a classification that the coverage preflight and the Evidence `test` producer each turn into their own message. The direct coverlet package identity and the external diagnostic classifier are still open.
 
 ## Release provenance follow-up (#798)
 
@@ -196,3 +196,117 @@ Skoolit consumer implementation/adoption is separate future work in the [open ca
 ## Handoff consumer feasibility (#869 follow-up)
 
 - **What:** After a supported coordinated package is available, inventory the actual downstream authority/ledger writers and prove their lock order with a pinned public-package executor flow. **Why:** The [#869 framework plan](docs/plans/issue-869-transaction-bound-handoff-fence.md) proves the generic boundary; it cannot certify an application's competing writers or provider policy. **Pros:** Exposes implicit foreign-key/enqueue locks and confirms that the supported API replaces private SQL in a real integration. **Cons:** Depends on another repository's schema, release availability and consumer-owned provider/reconciliation choices. **Context:** Keep [Skoolit #735](https://github.com/forge-trust/skoolit/issues/735) blocked until its separately owned package upgrade and feasibility proof pass; no consumer business logic or activation is included in #869. **Effort:** M human (1–2 days) / M agent (3–6 hours), estimated after schema access. **Priority:** P3. **Depends on / blocked by:** Published supported package, identified adopter/owner and actual writer audit. User approved autoplan d1a on 2026-10-14: preserve the framework-first milestone and this separately owned downstream proof.
+
+## Evidence test producer follow-ups (#929)
+
+### Typed VSTest test-run source
+
+**What:** Add a second `ITestRunSource` that drives VSTest through its typed API and reconciles by `TestCase` id instead of by printed test name.
+
+**Why:** The v1 source in the [#929 design](docs/designs/issue-929-test-producer.md) matches by name and reports `AmbiguousIdentity` when two cases print the same name, for example deferred theory rows. Those projects cannot close `appsurface/test/discovery-complete@1`.
+
+**Pros:** Exact identity; runs exactly the discovered set; explicit run-complete and abort events.
+
+**Cons:** Adds the `Microsoft.TestPlatform.TranslationLayer` package and a second test execution path beside `dotnet test`; needs `vstest.console` located in the SDK.
+
+**Context:** Deferred at office-hours D7 and tracked at eng-review D10. `TestRunReconciler` already takes plain inventory and result lists, so only the source changes. Start from the probe evidence in the design doc.
+
+**Effort:** L human / M with agent assistance, estimated.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** A declared `test` project that cannot close because of `AmbiguousIdentity`, and an owner decision on the new package dependency.
+
+### Built-in test producer for outside Aspire EvidenceHost consumers
+
+**What:** Give outside [EvidenceHost](Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) consumers a supported way to register the built-in `test` producer, with documentation.
+
+**Why:** The #929 delivery keeps the producer internal to `Evidence.Cli`. An Aspire adopter who wants test-only evidence still has to write a producer.
+
+**Pros:** One producer for CLI and host adopters; no re-implemented completeness check.
+
+**Cons:** Makes the producer a public contract; the host enforces its own deadline, so an overrun yields a manifest verdict of `Invalid` instead of `TimedOut` and that needs a documented answer.
+
+**Context:** Deferred at eng-review D1. The repository validation tool already runs the producer through `EvidenceHostBootstrap`, so host behavior is exercised; only the public surface and its documentation are missing.
+
+**Effort:** M human / S with agent assistance, estimated.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** The #929 producer shipping, and a named Aspire adopter.
+
+### First repository route for the built-in test producer
+
+**What:** Choose and build the first route in [`.github/evidence.policy.json`](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) that uses the built-in `test` producer from the [#929 design](docs/designs/issue-929-test-producer.md).
+
+**Why:** The producer ships proven by fixture tests only. A route in this repository's own CI would exercise it for real.
+
+**Pros:** Dogfoods the producer; a script-only pull request could skip `coverage-collection`, about 25 to 35 minutes estimated from two full runs.
+
+**Cons:** Script-only pull requests are rare (one in the last 40 merged as of 2026-11-22); the route touches required CI checks.
+
+**Context:** Deferred at eng-review D15. The originally chosen route, `.github/workflows/release-prep.yml` to `ReleaseWorkflowPolicyTests`, was dropped because `release-prep.yml` already runs the whole `Release.Tests` project for that path, and that class has one environment-gated early return and three Windows early returns. Pick a path whose tests no workflow runs today and whose tests do their work unconditionally in the lane. Reuse the existing `coverage` scope: a new scope projects the conservative profile to zero producers and the planner throws `ASEVD105`. Also add the receipt to the upload used when coverage is not required, and pass the tool's `--dotnet` host to the producer.
+
+**Effort:** M human / S with agent assistance, estimated.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** The #929 producer shipping, and a candidate path that meets the two conditions above.
+
+### Sample policy and doctor support for the test producer
+
+**What:** Add a `test` producer example to `appsurface evidence init --sample` and per-project checks to `appsurface evidence doctor`.
+
+**Why:** Makes the kind discoverable and catches an unsupported runner or missing project before a run.
+
+**Pros:** Faster first use; the starter shows the receipt slot and the enforced assertion id.
+
+**Cons:** Puts an unproven kind in every new starter. With profile combination off, a change mixing `scripts/**` with an unmatched path selects the conservative profile and drops the script obligation.
+
+**Context:** Accepted and then withdrawn in the #929 /autoplan CEO phase on 2026-11-22 after both reviewers objected. The worked-out detail (profile `targeted-tests`, rule id `scripts`, placeholder path, doctor statuses, file-only `global.json` check) is in the [#929 design](docs/designs/issue-929-test-producer.md) review record under C5, C8, C12 to C14, C16, C17 and C19.
+
+**Effort:** S human / S with agent assistance, estimated.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** One real route closing with the `test` producer, and a sample that keeps the script obligation on mixed changes.
+
+### Microsoft.Testing.Platform support for the test producer
+
+**What:** Let the `test` producer run projects that use Microsoft.Testing.Platform.
+
+**Why:** v1 rejects them with `UnsupportedRunner`, and the .NET test ecosystem is moving to that runner.
+
+**Pros:** Adopters on the new runner can use the kind; structured discovery and results may replace console-text parsing.
+
+**Cons:** A second execution path and identity source to maintain; depends on the platform's reporting formats.
+
+**Context:** No item tracked this before 2026-11-22. The coverage path has the same limit; see the hang-diagnostics item above for the coverage side. Start from the `ITestRunSource` seam in the [#929 design](docs/designs/issue-929-test-producer.md).
+
+**Effort:** L human / M with agent assistance, estimated.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** The first adopter on that runner, or this repository changing runner.
+
+### Escape hatches and a gate flag for the test producer
+
+**What:** Consider `test.configuration` and `projects[].framework` in the policy, `--keep-scratch`, `--dotnet` and `--no-build` on `appsurface evidence run`, and `verify --require-eligible`.
+
+**Why:** The #929 producer fixes Debug, single-target, PATH `dotnet`, deleted scratch and hidden child output. `verify` exits zero for an intact manifest whose claim is `None`.
+
+**Pros:** Multi-targeted and Release-only projects could close; a failing identity match could be inspected locally; a one-line CI gate.
+
+**Cons:** Six new options on a preview contract with no adopter; each policy field is digest-bound and must be versioned.
+
+**Context:** Raised by both reviewers in the #929 /autoplan DX phase on 2026-11-22 and deferred because that review ran in polish mode. The README CI recipe (V3) covers the gate case meanwhile. Start with whichever the closability survey (V4) or the first adopter shows is needed.
+
+**Effort:** M human / S with agent assistance, estimated.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** The #929 producer shipping, the V4 survey result, and a named adopter.
+
+## File-based CLI binding and heavier tooling (#928)
+
+Keep the explicit switch-to-key convention local. The [contributor exercise and canary comparison](guides/repository-tooling.md#canary-comparison-for-configuration-binding) found repeated key and lookup wiring, with validation on the final settings object. Revisit a small helper when a second implemented command repeats that wiring. A public proposal also needs an outside-checkout use case and a compatibility owner. [Ranked tooling candidates](guides/repository-tooling.md)
