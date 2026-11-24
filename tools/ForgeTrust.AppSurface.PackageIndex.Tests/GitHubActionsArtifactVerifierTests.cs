@@ -37,6 +37,31 @@ public sealed class GitHubActionsArtifactVerifierTests : IDisposable
         Assert.Equal(Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(ZipText)), await File.ReadAllTextAsync(result.ArchivePath));
         Assert.Equal(Encoding.UTF8.GetByteCount(ZipText), result.ArchiveBytes);
         Assert.Equal("Bearer", handler.Requests[0].Authorization?.Scheme);
+        Assert.All(handler.Requests, request =>
+            Assert.Equal(GitHubActionsArtifactVerifier.ApiVersion,
+                Assert.Single(request.Headers, header => header.Key == "X-GitHub-Api-Version").Value));
+    }
+
+    [Fact]
+    public async Task VerifyAsync_QueuedTimeoutCallbacksRemainSafeAfterSuccessfulDisposal()
+    {
+        // protects: callbacks already queued by a timer cannot cancel a disposed source.
+        // fails_when: completing a request or the overall operation leaves a throwing callback.
+        // no_claim: the forced callback ordering does not measure scheduler timing.
+        var clock = new QueuedCallbackTimeProvider();
+        using var handler = HandlerForSuccess(Encoding.UTF8.GetBytes(ZipText));
+        using var verifier = new GitHubActionsArtifactVerifier(handler, clock);
+        var receipt = await WriteReceiptAsync();
+
+        var archive = await verifier.VerifyAsync(Expected, receipt, "token", TestPathUtils.PathUnder(_root, "queued-timeout-scratch"));
+
+        Assert.True(File.Exists(archive.ArchivePath));
+        Assert.NotEmpty(clock.Timers);
+        Assert.All(clock.Timers, timer =>
+        {
+            Assert.True(timer.Disposed);
+            timer.FireQueuedCallback();
+        });
     }
 
     [Fact]
@@ -792,6 +817,27 @@ public sealed class GitHubActionsArtifactVerifierTests : IDisposable
         Assert.Equal(raw.Length, archive.ArchiveBytes);
         Assert.Equal(digest, archive.Receipt.ArchiveSha256);
         Assert.Equal(3, handler.Requests.Count);
+    }
+
+    private sealed class QueuedCallbackTimeProvider : TimeProvider
+    {
+        internal List<QueuedTimer> Timers { get; } = [];
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new QueuedTimer(callback, state);
+            Timers.Add(timer);
+            return timer;
+        }
+
+        internal sealed class QueuedTimer(TimerCallback callback, object? state) : ITimer
+        {
+            internal bool Disposed { get; private set; }
+            internal void FireQueuedCallback() => callback(state);
+            public bool Change(TimeSpan dueTime, TimeSpan period) => !Disposed;
+            public void Dispose() => Disposed = true;
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
     }
 
     private QueueHandler HandlerForSuccess(byte[] archive)

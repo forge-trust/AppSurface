@@ -28,13 +28,23 @@ public sealed class TailwindSourceInputPolicyTests : IDisposable
         Assert.True(TailwindSourceIdentity.IsRelevantInputPath(input + "/nested/output"));
         Assert.True(TailwindSourceIdentity.IsRelevantInputPath(input.Replace('/', Path.DirectorySeparatorChar)));
         Assert.False(TailwindSourceIdentity.IsRelevantInputPath(input + "-unrelated/output"));
-        Assert.False(TailwindSourceIdentity.IsRelevantInputPath(input.ToUpperInvariant()));
+        Assert.True(TailwindSourceIdentity.IsRelevantInputPath(input.ToUpperInvariant()));
+        Assert.True(TailwindSourceIdentity.IsRelevantInputPath(input.ToUpperInvariant() + "/nested/output"));
+        Assert.False(TailwindSourceIdentity.IsRelevantInputPath(input.ToUpperInvariant() + "-unrelated/output"));
         Assert.False(TailwindSourceIdentity.IsRelevantInputPath("reports/" + input));
     }
 
     [Theory]
     [MemberData(nameof(RelevantInputs))]
     public async Task EveryRelevantInputRefusesTransportOutputBeforeSourceOrHttp(string input)
+        => await AssertInputOutputRefusedAsync(input);
+
+    [Theory]
+    [MemberData(nameof(RelevantInputs))]
+    public async Task CaseVariantRelevantInputRefusesTransportOutputBeforeSourceOrHttp(string input)
+        => await AssertInputOutputRefusedAsync(input.ToUpperInvariant());
+
+    private async Task AssertInputOutputRefusedAsync(string input)
     {
         var work = TestPathUtils.PathUnder(_root, input.Replace('/', Path.DirectorySeparatorChar));
         var report = TestPathUtils.PathUnder(_root, "report");

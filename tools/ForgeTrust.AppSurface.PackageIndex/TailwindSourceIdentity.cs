@@ -23,14 +23,14 @@ internal static class TailwindSourceIdentity
         "global.json"
     ]);
 
-    /// <summary>Matches a repository-relative release input or its descendants using the source policy's ordinal casing.</summary>
+    /// <summary>Matches a repository-relative release input or its descendants, conservatively excluding case variants on every filesystem.</summary>
     /// <param name="relativePath">A path already made relative to the repository; native directory separators are normalized.</param>
     /// <returns>True only for a listed input or a descendant separated by a directory boundary, never a sibling prefix.</returns>
     internal static bool IsRelevantInputPath(string relativePath)
     {
         var normalized = relativePath.Replace(Path.DirectorySeparatorChar, '/');
-        return RelevantInputPaths.Any(path => normalized.Equals(path, StringComparison.Ordinal)
-            || normalized.StartsWith(path + "/", StringComparison.Ordinal));
+        return RelevantInputPaths.Any(path => normalized.Equals(path, StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase));
     }
 
     internal static async Task RequireAsync(string repositoryRoot, string expectedCommit, CancellationToken cancellationToken)

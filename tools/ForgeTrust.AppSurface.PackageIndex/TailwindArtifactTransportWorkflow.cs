@@ -433,6 +433,11 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
         for (var i = tail.Length - 22; i >= 0; i--)
             if (BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(i, 4)) == 0x06054b50 && i + 22 + BinaryPrimitives.ReadUInt16LittleEndian(tail.AsSpan(i + 20, 2)) == tail.Length) { eocd = i; break; }
         if (eocd < 0) throw Failure("artifact-archive-unsafe", "zip-envelope");
+        // ZipArchive searches for the nearest signature without requiring its comment to end at EOF.
+        // Earlier signatures in entry data cannot win the search; later ones are refused conservatively.
+        for (var i = eocd + 1; i <= tail.Length - 4; i++)
+            if (BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(i, 4)) == 0x06054b50)
+                throw Failure("artifact-archive-unsafe", "zip-envelope");
         var commentLength = BinaryPrimitives.ReadUInt16LittleEndian(tail.AsSpan(eocd + 20, 2));
         if (eocd + 22 + commentLength != tail.Length) throw Failure("artifact-archive-unsafe", "zip-envelope");
         var disk = BinaryPrimitives.ReadUInt16LittleEndian(tail.AsSpan(eocd + 4, 2));
@@ -706,7 +711,7 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
             SafeMessage(failure.Code),
             $"operation={SafeAtom(failure.Operation)}",
             $"stage={SafeAtom(stage)}",
-            "apiVersion=2026-03-10",
+            $"apiVersion={GitHubActionsArtifactVerifier.ApiVersion}",
             $"verifierSource={VerifierSourceStamp()}"
         };
         if (failure.StatusCode is { } statusCode) parts.Add($"httpStatus={statusCode}");
@@ -720,7 +725,7 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
     }
 
     private static string SafeSuccessContext()
-        => $"operation=complete; phase=complete; apiVersion=2026-03-10; verifierSource={VerifierSourceStamp()}";
+        => $"operation=complete; phase=complete; apiVersion={GitHubActionsArtifactVerifier.ApiVersion}; verifierSource={VerifierSourceStamp()}";
 
     private static string SafeAtom(string value)
         => System.Text.RegularExpressions.Regex.IsMatch(value, "^[A-Za-z0-9._:/-]{1,128}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)

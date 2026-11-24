@@ -349,6 +349,8 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             Assert.Equal("succeeded", diagnostics.RootElement.GetProperty("status").GetString());
             Assert.Equal("artifact-transport", diagnostics.RootElement.GetProperty("stage").GetString());
             Assert.Contains("Phase: `complete`", await File.ReadAllTextAsync(Path.Combine(report, "summary.md")), StringComparison.Ordinal);
+            Assert.Contains($"apiVersion={GitHubActionsArtifactVerifier.ApiVersion}",
+                await File.ReadAllTextAsync(Path.Combine(report, "summary.md")), StringComparison.Ordinal);
             Assert.True(File.Exists(TestPathUtils.PathUnder(output, TailwindProofSubjectService.FileName)));
             Assert.False(Directory.Exists(work));
             Assert.Equal(2, sourceCalls); // early checkout and the validator's source boundary
@@ -445,6 +447,112 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             Path.Combine(_root, "output-dir"), Path.Combine(_root, "report-dir")));
         Assert.True(result.Succeeded);
         Assert.Equal("ok", await File.ReadAllTextAsync(Path.Combine(_root, "output-dir", "z-parent", "child.txt")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ArchivePreflight_RejectsEmbeddedEndRecordBeforeExtraction(bool zip64)
+    {
+        // protects: preflight and ZipArchive cannot select different directory authority from one tail.
+        // fails_when: an EOCD inside a comment reaches extraction before envelope refusal.
+        // no_claim: the small alternate directory does not allocate an oversized entry table.
+        var baseline = await CreateFixtureAsync(Attempt);
+        var originalEnd = baseline.ZipBytes.Length - 22;
+        var comment = zip64 ? AddZip64Envelope(baseline.ZipBytes)[originalEnd..] : baseline.ZipBytes[originalEnd..];
+        if (zip64) BinaryPrimitives.WriteUInt64LittleEndian(comment.AsSpan(64), (ulong)baseline.ZipBytes.Length);
+        // One trailing byte keeps the inner zero-length comment from ending at EOF; the BCL still chooses it.
+        var bytes = new byte[baseline.ZipBytes.Length + comment.Length + 1];
+        baseline.ZipBytes.CopyTo(bytes, 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(originalEnd + 20), (ushort)(comment.Length + 1));
+        comment.CopyTo(bytes, baseline.ZipBytes.Length);
+        using (var archive = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read))
+            Assert.NotEmpty(archive.Entries);
+        var fixture = WithArchive(baseline, bytes);
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        using var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier, sourceIdentity: (_, _, _) => Task.CompletedTask);
+        var work = Path.Combine(_root, "work-embedded-end");
+        var output = Path.Combine(_root, "output-embedded-end");
+        var report = Path.Combine(_root, "report-embedded-end");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash, work, output, report));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("artifact-archive-unsafe", result.Code);
+        AssertFailureReport(result, report, "archive-preflight");
+        Assert.False(Directory.Exists(work));
+        Assert.False(Directory.Exists(output));
+        Assert.False(File.Exists(Path.Combine(report, "verified-artifact.json")));
+    }
+
+    [Fact]
+    public async Task ArchivePreflight_AcceptsStoredNestedZipSignatureBeforeEndRecord()
+    {
+        // protects: nested package ZIP end records inside entry data are not ambiguous outer authority.
+        // fails_when: preflight rejects a signature the BCL would encounter only after the real end record.
+        // no_claim: a stored synthetic nested ZIP does not measure hosted compression behavior.
+        var baseline = await CreateFixtureAsync(Attempt);
+        using var nested = new MemoryStream();
+        using (var archive = new ZipArchive(nested, ZipArchiveMode.Create, leaveOpen: true))
+            archive.CreateEntry("nested.txt");
+        using var bytes = new MemoryStream();
+        bytes.Write(baseline.ZipBytes);
+        bytes.Position = 0;
+        using (var archive = new ZipArchive(bytes, ZipArchiveMode.Update, leaveOpen: true))
+        {
+            using var contents = archive.CreateEntry("nested.zip", CompressionLevel.NoCompression).Open();
+            contents.Write(nested.ToArray());
+        }
+        var raw = bytes.ToArray();
+        Assert.True(raw.AsSpan(0, raw.Length - 22).IndexOf(new byte[] { 0x50, 0x4b, 0x05, 0x06 }) >= 0);
+        var fixture = WithArchive(baseline, raw);
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        using var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier, sourceIdentity: (_, _, _) => Task.CompletedTask);
+        var output = Path.Combine(_root, "output-nested-zip");
+        var report = Path.Combine(_root, "report-nested-zip");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash,
+            Path.Combine(_root, "work-nested-zip"), output, report));
+
+        Assert.True(result.Succeeded);
+        Assert.True(File.Exists(Path.Combine(output, "nested.zip")));
+        Assert.True(File.Exists(Path.Combine(report, "verified-artifact.json")));
+    }
+
+    [Theory]
+    [InlineData("ordinary producer comment", true)]
+    [InlineData("ordinary comment with a short suffix PK\u0005\u0006", false)]
+    public async Task ArchivePreflight_ValidatesCommentSignatures(string comment, bool accepted)
+    {
+        var baseline = await CreateFixtureAsync(Attempt);
+        using var bytes = new MemoryStream();
+        bytes.Write(baseline.ZipBytes);
+        bytes.Position = 0;
+        using (var archive = new ZipArchive(bytes, ZipArchiveMode.Update, leaveOpen: true))
+            archive.Comment = comment;
+        var fixture = WithArchive(baseline, bytes.ToArray());
+        var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
+        using var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
+        using var verifier = new GitHubActionsArtifactVerifier(handler);
+        using var workflow = new TailwindArtifactTransportWorkflow(verifier, sourceIdentity: (_, _, _) => Task.CompletedTask);
+        var output = Path.Combine(_root, "output-comment");
+        var report = Path.Combine(_root, "report-comment");
+
+        var result = await workflow.RunAsync(Request(_expected, receipt, fixture.SubjectHash,
+            Path.Combine(_root, "work-comment"), output, report));
+
+        Assert.Equal(accepted, result.Succeeded);
+        Assert.Equal(accepted, File.Exists(TestPathUtils.PathUnder(output, TailwindProofSubjectService.FileName)));
+        Assert.Equal(accepted, File.Exists(Path.Combine(report, "verified-artifact.json")));
+        if (!accepted)
+        {
+            Assert.Equal("artifact-archive-unsafe", result.Code);
+            AssertFailureReport(result, report, "archive-preflight");
+        }
     }
 
     [Fact]
@@ -1722,6 +1830,8 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         Assert.False(diagnostics.RootElement.GetProperty("releaseEligible").GetBoolean());
         Assert.True(File.Exists(Path.Combine(report, "summary.md")));
         Assert.Contains($"Phase: `{stage}`", File.ReadAllText(Path.Combine(report, "summary.md")), StringComparison.Ordinal);
+        Assert.Contains($"apiVersion={GitHubActionsArtifactVerifier.ApiVersion}",
+            File.ReadAllText(Path.Combine(report, "summary.md")), StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(report, "verified-artifact.json")));
     }
 

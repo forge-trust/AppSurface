@@ -69,7 +69,8 @@ internal sealed class ArtifactTransportException : Exception
 internal sealed class GitHubActionsArtifactVerifier : IDisposable
 {
     private const string ApiRoot = "https://api.github.com";
-    private const string ApiVersion = "2026-03-10";
+    /// <summary>Pinned GitHub REST API version shared by API requests and safe transport reports.</summary>
+    internal const string ApiVersion = "2026-03-10";
     private const string ReceiptSchema = "appsurface-github-actions-producer-receipt-v1";
     private const int MaxJsonBytes = 16 * 1024 * 1024;
     private const long MaxArchiveBytes = 1024L * 1024 * 1024;
@@ -519,18 +520,19 @@ internal sealed class GitHubActionsArtifactVerifier : IDisposable
 
     private TimeoutScope NewTimeout(TimeSpan timeout, CancellationToken parent = default)
     {
-        var source = parent.CanBeCanceled
-            ? CancellationTokenSource.CreateLinkedTokenSource(parent)
-            : new CancellationTokenSource();
-        var timer = _time.CreateTimer(static state => ((CancellationTokenSource)state!).Cancel(), source, timeout, Timeout.InfiniteTimeSpan);
-        return new TimeoutScope(source, timer);
+        // The runtime's timed source handles callbacks that were queued before disposal.
+        var deadline = new CancellationTokenSource(timeout, _time);
+        var linked = parent.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(parent, deadline.Token)
+            : null;
+        return new TimeoutScope(deadline, linked);
     }
 
     private sealed class RequestCounter { public int Value; }
-    private sealed class TimeoutScope(CancellationTokenSource source, ITimer timer) : IDisposable
+    private sealed class TimeoutScope(CancellationTokenSource deadline, CancellationTokenSource? linked) : IDisposable
     {
-        public CancellationToken Token => source.Token;
-        public void Dispose() { timer.Dispose(); source.Dispose(); }
+        public CancellationToken Token => (linked ?? deadline).Token;
+        public void Dispose() { linked?.Dispose(); deadline.Dispose(); }
     }
     public void Dispose() => _client.Dispose();
 }
