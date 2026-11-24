@@ -269,10 +269,8 @@ internal static class CoverageScheduleHistory
         }
 
         var runs = new List<WorkflowRun>();
-        var inputOrder = 0;
         foreach (var item in workflowRuns.EnumerateArray())
         {
-            var currentOrder = inputOrder++;
             if (item.ValueKind != JsonValueKind.Object ||
                 !TryGetPositiveInteger(item, "id", out var id) ||
                 !TryGetString(item, "head_branch", out var branch) ||
@@ -293,21 +291,13 @@ internal static class CoverageScheduleHistory
                 continue;
             }
 
-            runs.Add(new WorkflowRun(timestamp, id, currentOrder));
+            runs.Add(new WorkflowRun(timestamp, id));
         }
 
-        runs.Sort(static (left, right) =>
-        {
-            var timestampOrder = right.CreatedAt.CompareTo(left.CreatedAt);
-            if (timestampOrder != 0)
-            {
-                return timestampOrder;
-            }
-
-            var idOrder = right.Id.CompareTo(left.Id);
-            return idOrder != 0 ? idOrder : left.InputOrder.CompareTo(right.InputOrder);
-        });
-        return runs;
+        return runs
+            .OrderByDescending(run => run.CreatedAt)
+            .ThenByDescending(run => run.Id)
+            .ToList();
     }
 
     private static async Task<List<BigInteger>> ReadArtifactIdsAsync(
@@ -566,5 +556,5 @@ internal static class CoverageScheduleHistory
 
     private sealed record ParsedArguments(string? OutputPath, string? Error, bool ShowHelp);
 
-    private sealed record WorkflowRun(DateTimeOffset CreatedAt, BigInteger Id, int InputOrder);
+    private sealed record WorkflowRun(DateTimeOffset CreatedAt, BigInteger Id);
 }
