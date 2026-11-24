@@ -916,35 +916,6 @@ public sealed class GitHubActionsArtifactVerifierTests : IDisposable
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private DateTimeOffset _now = DateTimeOffset.UnixEpoch;
-        private readonly List<ManualTimer> _timers = [];
-        public override DateTimeOffset GetUtcNow() => _now;
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        {
-            var timer = new ManualTimer(this, callback, state, dueTime, period); _timers.Add(timer); return timer;
-        }
-        public void Advance(TimeSpan amount)
-        {
-            _now += amount;
-            foreach (var timer in _timers.ToArray()) timer.FireIfDue(_now);
-        }
-        private sealed class ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state, TimeSpan due, TimeSpan period) : ITimer
-        {
-            private DateTimeOffset? _due = due == Timeout.InfiniteTimeSpan ? null : owner._now + due;
-            private TimeSpan _period = period;
-            public bool Change(TimeSpan dueTime, TimeSpan newPeriod) { _due = dueTime == Timeout.InfiniteTimeSpan ? null : owner._now + dueTime; _period = newPeriod; return true; }
-            public void Dispose() => _due = null;
-            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
-            public bool FireIfDue(DateTimeOffset now)
-            {
-                if (_due is not { } dueAt || dueAt > now) return false;
-                callback(state); _due = _period == Timeout.InfiniteTimeSpan ? null : now + _period; return true;
-            }
-        }
-    }
-
     [Fact]
     public async Task VerifyAsync_CallerCancellationDuringArtifactMetadataBodyRemainsDistinct()
     {

@@ -193,12 +193,23 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
             EnsureNotExpired(overallDeadline, cancellationToken);
 
             stage = "producer-binding";
-            var options = CreateBindingOptions(request, work, report);
             TailwindProducerBinding binding;
             try
             {
-                binding = await TailwindEvidenceWorkflow.ValidateProducerBindingAsync(request.RepositoryRoot, staging,
-                    Path.Combine(staging, "package-artifact-manifest.json"), options, token, BindingSourceIdentityAsync);
+                var bindingRequest = new TailwindProducerBindingRequest(
+                    RepositoryRoot: request.RepositoryRoot,
+                    ArtifactsInputPath: staging,
+                    ArtifactManifestPath: Path.Combine(staging, "package-artifact-manifest.json"),
+                    ProducerSubjectPath: TailwindProofSubjectService.FileName,
+                    ProducerArtifactId: request.Expected.ArtifactId,
+                    ExpectedSubjectSha256: request.ExpectedSubjectSha256,
+                    RepositoryId: request.Expected.RepositoryId,
+                    ProducerRunId: request.Expected.RunId,
+                    SourceCommit: request.Expected.SourceCommit)
+                {
+                    ReportDirectory = report
+                };
+                binding = await TailwindEvidenceWorkflow.ValidateProducerBindingAsync(bindingRequest, token, BindingSourceIdentityAsync);
             }
             catch (OperationCanceledException) when (overallDeadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
@@ -311,19 +322,6 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
             throw Failure("artifact-input-invalid", "arguments", field: "--expected-subject-sha256");
     }
 
-    private static TailwindCommandOptions CreateBindingOptions(TailwindArtifactTransportRequest request, string work, string report)
-        => TailwindCommandOptions.Extract([
-            "--producer-subject", TailwindProofSubjectService.FileName,
-            "--producer-artifact-id", request.Expected.ArtifactId,
-            "--expected-subject-sha256", request.ExpectedSubjectSha256,
-            "--repository-id", request.Expected.RepositoryId,
-            "--producer-run-id", request.Expected.RunId,
-            "--producer-attempt", request.Expected.RunAttempt,
-            "--source-commit", request.Expected.SourceCommit,
-            "--work-directory", work,
-            "--report-directory", report
-        ]);
-
     private static void ValidatePaths(TailwindArtifactTransportRequest request, string work, string output, string report)
     {
         var receipt = Path.GetFullPath(request.ReceiptPath);
@@ -343,7 +341,7 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
             EnsureNoLinkedAncestors(target);
             var relative = Path.GetRelativePath(Path.GetFullPath(request.RepositoryRoot), target);
             if (!relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                && relative != ".." && !Path.IsPathRooted(relative) && IsWatched(relative))
+                && relative != ".." && !Path.IsPathRooted(relative) && TailwindSourceIdentity.IsRelevantInputPath(relative))
                 throw Failure("artifact-input-invalid", "path-validation", field: "watched-source-output");
         }
         EnsureNoLinkedAncestors(receipt);
@@ -355,15 +353,6 @@ internal sealed class TailwindArtifactTransportWorkflow : IDisposable
     {
         var relative = Path.GetRelativePath(parent, child);
         return relative == "." || (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal));
-    }
-
-    private static bool IsWatched(string relative)
-    {
-        var normalized = relative.Replace(Path.DirectorySeparatorChar, '/');
-        string[] watched = ["tools/ForgeTrust.AppSurface.PackageIndex", "tools/ForgeTrust.AppSurface.ReleaseContracts",
-            "Web/ForgeTrust.AppSurface.Web.Tailwind", "packages/package-index.yml", "scripts/verify-tailwind-package-consumer.sh",
-            "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "NuGet.package-gate.config", "NuGet.config", "global.json"];
-        return watched.Any(path => normalized.Equals(path, StringComparison.Ordinal) || normalized.StartsWith(path + "/", StringComparison.Ordinal));
     }
 
     private static void EnsureNoLinkedAncestors(string path)

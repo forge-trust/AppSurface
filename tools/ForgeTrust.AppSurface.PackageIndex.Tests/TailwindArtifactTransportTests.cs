@@ -928,10 +928,10 @@ public sealed class TailwindArtifactTransportTests : IDisposable
     {
         // protects: expiry immediately after successful initial source validation uses the shared deadline classification.
         // fails_when: expired work reaches verifier HTTP or is confused with caller cancellation.
-        // no_claim: ManualClock deterministically exercises the adapter boundary, not scheduler timing.
+        // no_claim: ManualTimeProvider deterministically exercises the adapter boundary, not scheduler timing.
         var fixture = await CreateFixtureAsync(Attempt);
         var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
-        var clock = new ManualClock();
+        var clock = new ManualTimeProvider();
         var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
         using var verifier = new GitHubActionsArtifactVerifier(handler, clock);
         using var workflow = new TailwindArtifactTransportWorkflow(verifier, clock,
@@ -1203,7 +1203,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         // no_claim: fake time validates the cancellation boundary, not scheduler precision.
         var fixture = await CreateFixtureAsync(Attempt);
         var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
-        var clock = new ManualClock();
+        var clock = new ManualTimeProvider();
         var handler = new FakeHandler(fixture.ZipBytes, fixture.ApiDigest);
         var fs = TailwindArtifactTransportFileSystem.Real with
         {
@@ -1232,7 +1232,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         // no_claim: fake time validates the classification boundary, not network timeout precision.
         var fixture = await CreateFixtureAsync(Attempt);
         var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
-        var clock = new ManualClock();
+        var clock = new ManualTimeProvider();
         var handler = new DeadlineHandler(fixture.ZipBytes, fixture.ApiDigest, clock, raceCaller: false);
         using var verifier = new GitHubActionsArtifactVerifier(handler, clock);
         using var workflow = new TailwindArtifactTransportWorkflow(verifier, clock,
@@ -1253,7 +1253,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
         // no_claim: controlled simultaneous cancellation does not establish scheduler ordering outside this seam.
         var fixture = await CreateFixtureAsync(Attempt);
         var receipt = await WriteReceiptAsync(fixture.ApiDigest, Attempt);
-        var clock = new ManualClock();
+        var clock = new ManualTimeProvider();
         using var caller = new CancellationTokenSource();
         var handler = new DeadlineHandler(fixture.ZipBytes, fixture.ApiDigest, clock, raceCaller: true, caller: caller);
         using var verifier = new GitHubActionsArtifactVerifier(handler, clock);
@@ -1773,7 +1773,7 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             => Task.FromCanceled<HttpResponseMessage>(cancellationToken);
     }
 
-    private sealed class DeadlineHandler(byte[] archive, string digest, ManualClock clock, bool raceCaller,
+    private sealed class DeadlineHandler(byte[] archive, string digest, ManualTimeProvider clock, bool raceCaller,
         CancellationTokenSource? caller = null) : HttpMessageHandler
     {
         private int _requests;
@@ -1802,39 +1802,4 @@ public sealed class TailwindArtifactTransportTests : IDisposable
             => new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
     }
 
-    private sealed class ManualClock : TimeProvider
-    {
-        private DateTimeOffset _now = DateTimeOffset.UnixEpoch;
-        private readonly List<ManualTimer> _timers = [];
-        public override DateTimeOffset GetUtcNow() => _now;
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        {
-            var timer = new ManualTimer(this, callback, state, dueTime, period);
-            _timers.Add(timer);
-            return timer;
-        }
-        public void Advance(TimeSpan amount)
-        {
-            _now += amount;
-            foreach (var timer in _timers.ToArray()) timer.Fire(_now);
-        }
-        private sealed class ManualTimer(ManualClock owner, TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) : ITimer
-        {
-            private DateTimeOffset? _due = dueTime == Timeout.InfiniteTimeSpan ? null : owner._now + dueTime;
-            private readonly TimeSpan _period = period;
-            public bool Change(TimeSpan dueTime, TimeSpan period)
-            {
-                _due = dueTime == Timeout.InfiniteTimeSpan ? null : owner._now + dueTime;
-                return true;
-            }
-            public void Dispose() => _due = null;
-            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
-            public void Fire(DateTimeOffset now)
-            {
-                if (_due is not { } due || due > now) return;
-                callback(state);
-                _due = _period == Timeout.InfiniteTimeSpan ? null : now + _period;
-            }
-        }
-    }
 }

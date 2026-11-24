@@ -72,6 +72,26 @@ internal sealed record TailwindCommandOptions(
         };
     }
 
+    /// <summary>Maps parsed CLI values to producer-binding inputs without resolving paths or manufacturing producer identity.</summary>
+    /// <param name="repositoryRoot">Explicit checkout root.</param>
+    /// <param name="artifactsInputPath">Explicit producer bundle directory.</param>
+    /// <param name="artifactManifestPath">Explicit manifest path.</param>
+    /// <returns>Required identity values plus unchanged optional continuation values; the validator owns path normalization and placeholders.</returns>
+    internal TailwindProducerBindingRequest CreateProducerBindingRequest(
+        string repositoryRoot, string artifactsInputPath, string artifactManifestPath)
+        => new(repositoryRoot, artifactsInputPath, artifactManifestPath, ProducerSubject,
+            Require(ProducerArtifactId, "--producer-artifact-id"), Require(ExpectedSubjectSha256, "--expected-subject-sha256"),
+            Require(RepositoryId, "--repository-id"), Require(ProducerRunId, "--producer-run-id"), Require(SourceCommit, "--source-commit"))
+        {
+            AggregateInput = AggregateInput,
+            AggregateArtifactId = AggregateArtifactId,
+            ExpectedAggregateSha256 = ExpectedAggregateSha256,
+            PublicationDirectory = PublicationDirectory,
+            PublicationStartReceipt = PublicationStartReceipt,
+            PublicationStartArtifactId = PublicationStartArtifactId,
+            ReportDirectory = ReportDirectory
+        };
+
     internal TailwindPublicationRequest CreatePublicationRequest(
         string repositoryRoot,
         string artifactsInputPath,
