@@ -80,9 +80,9 @@ Use `System.IO.Path` for operations such as getting the OS temp root, extracting
 
 ### Test fixture path policy
 
-Apply the same rule in fixture setup, cleanup, and assertions. Add a project reference to `tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj` and a `Using Include="ForgeTrust.AppSurface.Testing"` entry when introducing the helper to a test project. See the [fixture examples](./tests/ForgeTrust.AppSurface.Testing/README.md#common-migrations).
+Apply the same rule in fixture setup, cleanup, and assertions. Add a project reference to `tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj` and a `Using Include="ForgeTrust.AppSurface.Testing"` entry when introducing the helper to a test project. See the [fixture examples](https://github.com/forge-trust/AppSurface/blob/a74cd01f9e3624b158a4a260de178859de40db9b/tests/ForgeTrust.AppSurface.Testing/README.md#common-migrations).
 
-Use raw composition when the helper itself needs the primitive or the behavior under test requires platform semantics, such as resolving an authored link containing a parent segment. Document that reason at the call site. The repository [policy test](./tests/ForgeTrust.AppSurface.Testing.Tests/TestFixturePathPolicyTests.cs) flags a subset of dynamic `Combine` and `Join` calls. Apply the full rule in review, including literal-only calls. If the check flags a necessary exception, record its reason in the [allowlist](./tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml).
+Use raw composition when the helper itself needs the primitive or the behavior under test requires platform semantics, such as resolving an authored link containing a parent segment. Document that reason at the call site. The repository [policy test](./tests/ForgeTrust.AppSurface.Testing.Tests/TestFixturePathPolicyTests.cs) flags a subset of dynamic `Combine` and `Join` calls. Apply the full rule in review, including literal-only calls. If the check flags a necessary exception, record its reason in the [allowlist](https://github.com/forge-trust/AppSurface/blob/a74cd01f9e3624b158a4a260de178859de40db9b/tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml).
 
 ## Testing child processes
 
