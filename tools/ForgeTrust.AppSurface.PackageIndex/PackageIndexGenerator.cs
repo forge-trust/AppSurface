@@ -479,11 +479,10 @@ internal sealed class PackageIndexGenerator
         ValidateToolCommandName(entry, metadata);
         if (entry.PrereleaseInstall
             && (entry.Classification != PackageClassification.Public
-                || entry.PublishDecision != PackagePublishDecision.Publish
                 || metadata.IsTool || metadata.IsTemplate))
         {
             throw new PackageIndexException(
-                $"Manifest entry '{entry.Project}' can set 'prerelease_install' only for a public library marked 'publish'.");
+                $"Manifest entry '{entry.Project}' can set 'prerelease_install' only for a public library.");
         }
 
         ValidatePublishContract(entry, knownPackageIds);
@@ -2810,7 +2809,8 @@ internal sealed class PackageManifestEntry
 
     /// <summary>
     /// Gets whether the chooser adds <c>--prerelease</c> to this public library's install command.
-    /// Defaults to false. Set it for a published library whose available releases are prereleases.
+    /// Defaults to false. Set it for a library whose available releases are prereleases.
+    /// Libraries held from publication have no install command.
     /// </summary>
     public bool PrereleaseInstall { get; init; }
 

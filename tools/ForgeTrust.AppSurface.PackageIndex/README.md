@@ -85,9 +85,10 @@ remains authored content; after that, retain the markers exactly.
 
 Set `prerelease_install: true` in the [package manifest](../../packages/package-index.yml) for a public, publishable
 library whose available versions are prereleases. PackageIndex adds `--prerelease` to the generated library command.
-The field defaults to `false` and applies to library installs. Tools and templates have their own commands. Remove the
-flag once the library has a stable install. When adding a package to an existing AppSurface app, pin the coordinated
-version already in use. See the [package chooser](../../packages/README.md) for the generated commands.
+The field defaults to `false` and applies to library installs. The chooser omits install commands for held packages,
+including libraries with this flag set. Tools and templates have their own commands. Remove the flag once the library
+has a stable install. When adding a package to an existing AppSurface app, pin the coordinated version already in use.
+See the [package chooser](../../packages/README.md) for the generated commands.
 
 ## Cloud Tasks packed isolation proof (#892)
 

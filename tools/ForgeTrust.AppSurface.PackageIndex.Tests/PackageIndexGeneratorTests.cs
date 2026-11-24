@@ -908,7 +908,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         if (configureTool)
         {
             var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
-            Assert.Contains("can set 'prerelease_install' only for a public library marked 'publish'", error.Message, StringComparison.Ordinal);
+            Assert.Contains("can set 'prerelease_install' only for a public library", error.Message, StringComparison.Ordinal);
             return;
         }
 
