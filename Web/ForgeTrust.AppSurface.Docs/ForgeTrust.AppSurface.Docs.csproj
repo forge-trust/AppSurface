@@ -64,6 +64,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="buildTransitive/ForgeTrust.AppSurface.Docs.targets" Pack="true" PackagePath="buildTransitive/" />
     <None Include="$(MSBuildProjectDirectory)\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
     <None Include="$(MSBuildProjectDirectory)\THIRD-PARTY-TREE-SITTER-UNICODE-LICENSE.txt" Pack="true" PackagePath="" />
   </ItemGroup>
