@@ -2,7 +2,7 @@
 
 ## A supported PostgreSQL fixture for additional consumers
 
-After the [#931 fixture experiment](docs/designs/issue-931-durable-postgresql-fixtures.md), the Durable maintainers can revisit packaging if another consumer names a workload, provides its own isolation requirements and agrees to maintain compatibility. Review measured seconds saved, failure recovery and the support cost before choosing an API. A shared package could reduce repeated setup across projects, but it would turn an internal lifecycle and its diagnostics into a compatibility commitment. Priority P3. Estimated effort is several engineering days once an adopter and owner are identified.
+The [shared fixture](PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/README.md) now owns the lease lifecycle used by the [Durable experiment](docs/designs/issue-931-durable-postgresql-fixtures.md). The [Skoolit trial](docs/designs/skoolit-persistence-fixture-trial.md) identified a downstream workload and measured the code it could remove. Publication remains on hold. Before supporting an external release, confirm a compatibility owner and run Skoolit's Linux acceptance procedure against a restorable package. Priority P3.
 
 ## Measure real Cloud Run observer adoption after #891
 
