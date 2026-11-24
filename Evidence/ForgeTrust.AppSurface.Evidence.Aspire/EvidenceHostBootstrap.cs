@@ -694,20 +694,11 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
 
     private async Task<string?> DisposePreparedRegistrationsAsync()
     {
-        Exception? failure = null;
-        Exception? fatal = null;
         var disposedOwners = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        foreach (var owner in _registration.Producers.Values.Reverse().Cast<object>())
-        {
-            if (!disposedOwners.Add(owner)) continue;
-            try
-            {
-                if (owner is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
-                else if (owner is IDisposable synchronous) synchronous.Dispose();
-            }
-            catch (Exception exception) when (IsNonFatalException(exception)) { failure ??= exception; }
-            catch (Exception exception) { fatal ??= exception; }
-        }
+        var producers = await EvidenceOwnerDisposal.DisposeAsync(
+            _registration.Producers.Values.Reverse(), disposedOwners).ConfigureAwait(false);
+        var failure = producers.FirstNonFatalFailure;
+        var fatal = producers.FirstFatalFailure;
         if (_resourceScope is not null)
         {
             try { await _resourceScope.DisposeAsync(disposedOwners).ConfigureAwait(false); }
@@ -716,18 +707,12 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
         }
         else
         {
-            foreach (var owner in _registration.Resources.Values.Reverse().Cast<object>())
-            {
-                if (!disposedOwners.Add(owner)) continue;
-                try
-                {
-                    if (owner is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
-                    else if (owner is IDisposable synchronous) synchronous.Dispose();
-                }
-                catch (Exception exception) when (IsNonFatalException(exception)) { failure ??= exception; }
-                catch (Exception exception) { fatal ??= exception; }
-            }
+            var resources = await EvidenceOwnerDisposal.DisposeAsync(
+                _registration.Resources.Values.Reverse(), disposedOwners).ConfigureAwait(false);
+            failure ??= resources.FirstNonFatalFailure;
+            fatal ??= resources.FirstFatalFailure;
         }
+
         if (fatal is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
         return failure is null ? null : $"reuse.cleanup_failed: Owned cleanup failed with {failure.GetType().Name}; execution settlement is unknown.";
     }

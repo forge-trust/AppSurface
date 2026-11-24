@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
-using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
@@ -196,7 +195,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             static _ => throw new InvalidOperationException("Read-only explain cannot allocate producer output."), cancellationToken).ConfigureAwait(false);
         var resolvedSdks = registrations.ToDictionary(static pair => pair.Key,
             static pair => pair.Value.EffectiveToolIdentity.GetValueOrDefault("sdk", "not-applicable"), StringComparer.Ordinal);
-        return ToSummaryDecisions(plan, session.Decisions, solutionPath, resolvedSdks, readOnly: true);
+        return ToSummaryDecisions(plan, session.Decisions, solutionPath, resolvedSdks);
     }
 
     /// <summary>Projects coordinator decisions without replacing an ownership failure with identity ineligibility.</summary>
@@ -204,10 +203,9 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
     /// <param name="decisions">Coordinator decisions for this invocation.</param>
     /// <param name="solutionPath">Explicit built-in coverage solution identity.</param>
     /// <param name="sdkVersions">Resolved per-producer SDK identities.</param>
-    /// <param name="readOnly">Whether hits are inspected candidates rather than restored files. Defaults false for execution.</param>
     internal static IReadOnlyList<EvidenceReuseSummaryDecision> ToSummaryDecisions(
         EvidencePlan plan, IReadOnlyList<EvidenceProducerReuseDecision> decisions, string? solutionPath,
-        IReadOnlyDictionary<string, string> sdkVersions, bool readOnly = false) => decisions
+        IReadOnlyDictionary<string, string> sdkVersions) => decisions
         .Select(decision =>
         {
             var producer = plan.Profile.Producers.Single(item => item.Id == decision.ProducerId);
@@ -228,13 +226,12 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                     ? "The CLI does not register custom producers. Use EvidenceHostBootstrap.PrepareAsync in the consumer host."
                     : sdkUnavailable ? "The actual dotnet SDK version could not be resolved; execute fresh or repair the local SDK installation."
                     : decision.Diagnostic;
-            var publication = decision.Reason switch
+            var publication = decision.Publication switch
             {
-                "reuse.published" => "published",
-                var value when value.Contains("publication_suppressed", StringComparison.Ordinal)
-                    || value.Contains("publication", StringComparison.Ordinal) => "suppressed",
-                _ when decision.Status == EvidenceProducerReuseStatus.Ineligible => "suppressed",
-                _ => decision.Status == EvidenceProducerReuseStatus.Hit && !readOnly ? "restored" : "not-published",
+                EvidenceReceiptPublication.Published => "published",
+                EvidenceReceiptPublication.Suppressed => "suppressed",
+                EvidenceReceiptPublication.Restored => "restored",
+                _ => "not-published",
             };
             return new EvidenceReuseSummaryDecision(decision.ProducerId,
                 missingSolution && decision.Status == EvidenceProducerReuseStatus.Ineligible ? "Ineligible" : decision.Status.ToString(),
@@ -247,7 +244,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
     {
         if (!string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase))
             return new Dictionary<string, string>(StringComparer.Ordinal);
-        var settings = producer.CoverageExecution ?? new EvidenceCoverageExecutionOptions();
+        var settings = new CoverageEvidenceRunSettings(producer.CoverageExecution);
         var solutionIdentity = "missing";
         if (!string.IsNullOrWhiteSpace(solutionPath))
         {
@@ -272,11 +269,11 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             ["configuration"] = settings.Configuration,
             ["parallelism"] = settings.Parallelism.ToString(CultureInfo.InvariantCulture),
             ["testResults"] = settings.TestResults.ToString(),
-            ["coverageDriver"] = "Collector",
-            ["schedule"] = "InputOrder",
-            ["restore"] = "enabled",
-            ["build"] = "enabled",
-            ["testExclusion"] = "[*.Tests]*,[*.IntegrationTests]*",
+            ["coverageDriver"] = CoverageEvidenceRunSettings.Driver.ToString(),
+            ["schedule"] = CoverageEvidenceRunSettings.Schedule.ToString(),
+            ["restore"] = CoverageEvidenceRunSettings.NoRestore ? "disabled" : "enabled",
+            ["build"] = CoverageEvidenceRunSettings.Build ? "enabled" : "disabled",
+            ["testExclusion"] = CoverageEvidenceRunSettings.TestExclusion,
             ["cooperativeProtocol"] = string.Join("\n", EvidenceCoverageProcessRunner.EffectiveArgumentIdentity),
         };
     }
@@ -336,10 +333,8 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         bool useInvocationArtifactRoot = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
-        ArgumentException.ThrowIfNullOrWhiteSpace(producerId);
-        var producerDirectory = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(producerId))).ToLowerInvariant();
-        return (Path.Join(outputDirectory, "execution", producerDirectory),
-            useInvocationArtifactRoot ? outputDirectory : Path.Join(outputDirectory, "producers", producerDirectory));
+        return (Path.Join(outputDirectory, "execution", EvidenceReuseOutput.GetProducerDirectoryName(producerId)),
+            Path.Combine([outputDirectory, .. EvidenceReuseOutput.GetCustodyComponents(producerId, useInvocationArtifactRoot)]));
     }
 
     private static async Task<string> ReadDotnetSdkVersionAsync(string? solutionPath, CancellationToken cancellationToken,

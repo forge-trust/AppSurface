@@ -59,31 +59,9 @@ public sealed class EvidenceHostResourceScope : IAsyncDisposable
 
     private async Task CleanAsync(ISet<object> disposedOwners)
     {
-        Exception? firstFailure = null;
-        Exception? fatalFailure = null;
-        foreach (var owner in Resources.Values.Reverse().Cast<object>().Append(_applicationOwner))
-        {
-            if (!disposedOwners.Add(owner)) continue;
-            try
-            {
-                if (owner is IAsyncDisposable asynchronous)
-                    await asynchronous.DisposeAsync().ConfigureAwait(false);
-                else if (owner is IDisposable synchronous)
-                    synchronous.Dispose();
-            }
-            catch (Exception exception) when (EvidenceHostBootstrap.IsNonFatalException(exception))
-            {
-                firstFailure ??= exception;
-            }
-            catch (Exception exception)
-            {
-                fatalFailure ??= exception;
-            }
-        }
-
-        if (fatalFailure is not null)
-            ExceptionDispatchInfo.Capture(fatalFailure).Throw();
-        if (firstFailure is not null)
-            ExceptionDispatchInfo.Capture(firstFailure).Throw();
+        var result = await EvidenceOwnerDisposal.DisposeAsync(
+            Resources.Values.Reverse().Cast<object>().Append(_applicationOwner), disposedOwners).ConfigureAwait(false);
+        if ((result.FirstFatalFailure ?? result.FirstNonFatalFailure) is { } failure)
+            ExceptionDispatchInfo.Capture(failure).Throw();
     }
 }

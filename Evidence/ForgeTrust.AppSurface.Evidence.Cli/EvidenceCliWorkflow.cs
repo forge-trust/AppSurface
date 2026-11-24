@@ -261,9 +261,7 @@ internal sealed class EvidenceCliWorkflow
         EvidenceArtifactResult artifact,
         CancellationToken cancellationToken)
     {
-        var singleProducer = plan.Profile.Producers.Count == 1;
-        var (_, custodyRoot) = EvidenceReuseExecutionResolver.GetProducerRoots(outputDirectory, producerId, singleProducer);
-        string[] producerPath = singleProducer ? [] : ["producers", Path.GetFileName(custodyRoot)];
+        var producerPath = EvidenceReuseOutput.GetCustodyComponents(producerId, plan.Profile.Producers.Count == 1);
         return EvidenceArtifactFileValidation.CheckUnderRootAsync(outputDirectory, producerPath, artifact, cancellationToken);
     }
 

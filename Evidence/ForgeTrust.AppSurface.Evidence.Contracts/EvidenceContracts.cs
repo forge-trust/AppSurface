@@ -261,6 +261,12 @@ public sealed record EvidenceProducerDeclaration(
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EvidenceTestDeclaration? Test { get; init; }
+
+    /// <summary>Determines whether this declaration uses a feature that requires an Evidence contract 1.1 plan.</summary>
+    /// <returns>True for declared inputs, cooperative child lifetime, or an explicitly multi-file slot.</returns>
+    internal bool RequiresContractVersion11() =>
+        Inputs is not null || CoverageExecution is { CooperativeChildLifetime: true }
+        || ArtifactSlots.Any(static slot => slot.MaximumFiles is not null);
 }
 
 /// <summary>
@@ -1616,9 +1622,8 @@ public static class EvidenceManifestBuilder
         var hasReuseData = producerResults.Any(static result => result.Outcome == EvidenceProducerOutcome.Reused
             || result.ProducerKey is not null || result.OriginManifestDigest is not null || result.OriginCompletedAt is not null);
         var policyDeclarations = (plan.PolicySnapshot?.Profiles ?? []).Append(plan.Profile);
-        var declarationsRequireV11 = policyDeclarations.Any(static profile => profile.Producers.Any(static producer => producer.Inputs is not null
-            || producer.CoverageExecution is { CooperativeChildLifetime: true }
-            || producer.ArtifactSlots.Any(static slot => slot.MaximumFiles is not null)));
+        var declarationsRequireV11 = policyDeclarations.Any(static profile =>
+            profile.Producers.Any(static producer => producer.RequiresContractVersion11()));
         var invalid = plan.ContractVersion is not ("1.0" or "1.1")
             || !Enum.IsDefined(plan.Profile.Scope)
             || !Enum.IsDefined(envelopeStatus)
@@ -1744,9 +1749,8 @@ public static class EvidenceManifestBuilder
             || manifest.ContractVersion is not ("1.0" or "1.1")
             || !string.Equals(plan.ContractVersion, manifest.ContractVersion, StringComparison.Ordinal)
             || plan.ContractVersion == "1.0" && (
-                (plan.PolicySnapshot?.Profiles ?? [plan.Profile]).Append(plan.Profile).Any(static profile => profile.Producers.Any(static producer =>
-                    producer.Inputs is not null || producer.CoverageExecution is { CooperativeChildLifetime: true }
-                    || producer.ArtifactSlots.Any(static slot => slot.MaximumFiles is not null)))
+                (plan.PolicySnapshot?.Profiles ?? [plan.Profile]).Append(plan.Profile).Any(static profile =>
+                    profile.Producers.Any(static producer => producer.RequiresContractVersion11()))
                 || manifest.Metrics.PreparationMilliseconds != 0 || manifest.Metrics.ReceiptWaitMilliseconds != 0 || manifest.Metrics.ArtifactRestoreMilliseconds != 0
                 || manifest.ReuseCount != 0
                 || manifest.ProducerResults.Any(static result => result.ProducerKey is not null || result.OriginManifestDigest is not null || result.OriginCompletedAt is not null)

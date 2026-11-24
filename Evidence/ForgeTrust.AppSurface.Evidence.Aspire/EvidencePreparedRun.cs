@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Runtime.ExceptionServices;
-using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -138,7 +137,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             var bindings = producers.ToDictionary(static pair => pair.Key, static pair =>
                 new EvidenceReuseProducerRegistration(pair.Value.Producer, pair.Value.ImplementationIdentity, pair.Value.ToolIdentity), StringComparer.Ordinal);
             var artifactDirectories = new ReadOnlyDictionary<string, string>(frozen.Profile.Producers.ToDictionary(static producer => producer.Id,
-                producer => Path.Join(output, "producers", EvidenceDigest.Sha256(Encoding.UTF8.GetBytes(producer.Id))), StringComparer.Ordinal));
+                producer => Path.Combine([output, .. EvidenceReuseOutput.GetCustodyComponents(producer.Id)]), StringComparer.Ordinal));
             session = await EvidenceProducerReuseSession.PrepareAsync(frozen, bindings, registration.ResourceIdentities,
                 new(options.Reuse, Path.GetFullPath(options.RepositoryRoot ?? GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory())), options.ReceiptStore,
                     options.ReceiptWaitTimeout, options.ProducerCleanupTimeout, options.VerifyReuse, false, options.CapturedPatch, clock)
@@ -172,16 +171,10 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             catch (Exception exception) when (EvidenceHostBootstrap.IsNonFatalException(exception)) { }
             catch (Exception exception) { fatal = exception; }
         }
-        foreach (var owner in registration.Freeze().Values.Select(static value => (object)value.Producer).Distinct(ReferenceEqualityComparer.Instance))
-        {
-            try
-            {
-                if (owner is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
-                else if (owner is IDisposable synchronous) synchronous.Dispose();
-            }
-            catch (Exception exception) when (EvidenceHostBootstrap.IsNonFatalException(exception)) { }
-            catch (Exception exception) { fatal ??= exception; }
-        }
+        var disposal = await EvidenceOwnerDisposal.DisposeAsync(
+            registration.Freeze().Values.Select(static value => value.Producer),
+            new HashSet<object>(ReferenceEqualityComparer.Instance)).ConfigureAwait(false);
+        fatal ??= disposal.FirstFatalFailure;
         if (session is not null)
         {
             try { await session.DisposeAsync().ConfigureAwait(false); }
@@ -308,15 +301,12 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             else if (_session.AreChildrenSettled)
             {
                 var disposedOwners = new HashSet<object>(ReferenceEqualityComparer.Instance);
-                foreach (var owner in _producers.Values.Select(static producer => (object)producer.Producer))
+                var disposal = await EvidenceOwnerDisposal.DisposeAsync(
+                    _producers.Values.Select(static producer => producer.Producer), disposedOwners).ConfigureAwait(false);
+                if (disposal.FirstFailure is not null)
                 {
-                    if (!disposedOwners.Add(owner)) continue;
-                    try
-                    {
-                        if (owner is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
-                        else if (owner is IDisposable synchronous) synchronous.Dispose();
-                    }
-                    catch (Exception exception) { primary ??= exception; settled = false; }
+                    primary ??= disposal.FirstFailure;
+                    settled = false;
                 }
                 if (_scope is not null) await _scope.DisposeAsync(disposedOwners).ConfigureAwait(false);
             }

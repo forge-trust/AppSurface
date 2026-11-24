@@ -172,8 +172,13 @@ internal sealed class CoverageEvidenceProducer
             using var deadline = new CancellationTokenSource(timeout, _clock);
             deadlineToken = deadline.Token;
             using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadlineToken);
+            var runRequest = CreateRunRequest(solutionPath, outputDirectory, new(producer.CoverageExecution)) with
+            {
+                ProducerDeadline = producerDeadline,
+                ArtifactRetention = producer.CoverageArtifactRetention,
+            };
             var result = await workflow.RunAndGateAsync(
-                CreateRunRequest(solutionPath, outputDirectory, producer.CoverageExecution) with { ProducerDeadline = producerDeadline, ArtifactRetention = producer.CoverageArtifactRetention },
+                runRequest,
                 CreateGateRequest(outputDirectory, diffSnapshot, producer.CoverageGate),
                 writers,
                 executionCancellation.Token,
@@ -301,34 +306,39 @@ internal sealed class CoverageEvidenceProducer
         }
     }
 
-    private static CoverageRunRequest CreateRunRequest(
+    /// <summary>Builds the coverage engine request for the resolved built-in settings.</summary>
+    /// <param name="solutionPath">Solution submitted to the engine.</param>
+    /// <param name="outputDirectory">Invocation root containing the coverage directory.</param>
+    /// <param name="settings">Resolved settings shared with receipt identity.</param>
+    /// <returns>The request before applying the invocation deadline and artifact retention.</returns>
+    internal static CoverageRunRequest CreateRunRequest(
         string solutionPath,
         string outputDirectory,
-        EvidenceCoverageExecutionOptions? execution) => new(
+        CoverageEvidenceRunSettings settings) => new(
         solutionPath,
         TestProjects: [],
         ExcludeTestProjects: [],
         OutputDirectory: Path.Join(outputDirectory, "coverage"),
-        Configuration: (execution ?? new EvidenceCoverageExecutionOptions()).Configuration,
-        Parallelism: (execution ?? new EvidenceCoverageExecutionOptions()).Parallelism,
-        ScheduleMode: CoverageRunScheduleMode.InputOrder,
+        Configuration: settings.Configuration,
+        Parallelism: settings.Parallelism,
+        ScheduleMode: CoverageEvidenceRunSettings.Schedule,
         ScheduleTimingsPath: null,
         PriorityTestProjects: [],
-        NoRestore: false,
-        Build: true,
+        NoRestore: CoverageEvidenceRunSettings.NoRestore,
+        Build: CoverageEvidenceRunSettings.Build,
         NoBuild: false,
         IncludeFilter: null,
-        ExcludeFilter: "[*.Tests]*,[*.IntegrationTests]*",
+        ExcludeFilter: CoverageEvidenceRunSettings.TestExclusion,
         DryRun: false,
         NoDiscoverExclusive: false,
         ExclusiveTestProjects: [],
         Loggers: [],
         TestArguments: [],
-        TestResults: (execution ?? new EvidenceCoverageExecutionOptions()).TestResults switch
+        TestResults: settings.TestResults switch
         {
             EvidenceCoverageTestResultFormat.None => CoverageRunTestResultFormat.None,
             EvidenceCoverageTestResultFormat.Junit => CoverageRunTestResultFormat.Junit,
-            _ => throw new ArgumentOutOfRangeException(nameof(execution)),
+            _ => throw new ArgumentOutOfRangeException(nameof(settings), settings.TestResults, "Unsupported coverage test result format."),
         },
         SlowTestDiagnostics: false,
         Clean: true,
@@ -336,7 +346,7 @@ internal sealed class CoverageEvidenceProducer
         HeartbeatInterval: TimeSpan.FromSeconds(30),
         NoProgressTimeout: TimeSpan.FromMinutes(10),
         WatchdogMode: CoverageRunHangPolicy.DefaultWatchdogMode,
-        CoverageDriver: CoverageRunDriver.Collector,
+        CoverageDriver: CoverageEvidenceRunSettings.Driver,
         RequireNonSandbox: false);
 
     private static CoverageGateRequest CreateGateRequest(

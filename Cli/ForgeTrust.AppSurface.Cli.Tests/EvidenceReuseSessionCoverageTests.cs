@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
@@ -396,8 +397,10 @@ public sealed class EvidenceReuseSessionCoverageTests
             Assert.IsType<string>(Assert.Single(session.Decisions).ProducerKey))?.InFlightExecutionId);
     }
 
-    [Fact]
-    public async Task ArtifactMutationDuringPublicationSuppressesReceiptAndSettlesAuthority()
+    [Theory]
+    [InlineData(false, "reuse.payload-publication-failed")]
+    [InlineData(true, "reuse.payload-quota-full")]
+    public async Task PublicationRefusalSuppressesReceiptAndSettlesAuthority(bool quotaFull, string expectedReason)
     {
         using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
         await repository.WriteAsync("src/input.txt", "publication failure input");
@@ -418,17 +421,36 @@ public sealed class EvidenceReuseSessionCoverageTests
         var result = await producer.ProduceAsync(new EvidenceProducerContext(plan, declaration,
             TimeProvider.System, session.GetWriter(declaration)), CancellationToken.None);
         Assert.True(await session.BeforeCleanupAsync(true, CancellationToken.None));
-        await File.WriteAllTextAsync(TestPathUtils.PathUnder(artifacts, "reports", "report.txt"), "changed after cleanup");
+        var identity = await BuildIdentityAsync(repository.Root, plan, declaration);
+        if (quotaFull)
+        {
+            using var index = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(store, "quota-index.json")));
+            var entry = index.RootElement.GetProperty("Entries").EnumerateArray()
+                .Single(item => item.GetProperty("Key").GetString() == key);
+            var usedBytes = entry.GetProperty("MetadataBytes").GetInt64()
+                + entry.GetProperty("PayloadBytes").GetInt64() + entry.GetProperty("ReservedPayloadBytes").GetInt64();
+            // Reserve quota metadata only, leaving less space than the minimum publication charge.
+            Assert.True(EvidenceReceiptQuota.TryReservePayload(store, identity.RepositoryNamespace, key,
+                EvidenceReceiptQuota.MaximumBytes - usedBytes - 8 * 1024, DateTimeOffset.UtcNow));
+        }
+        else
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(artifacts, "reports", "report.txt"), "changed after cleanup");
+        }
 
         var completed = await session.CompleteAsync(EvidenceManifestBuilder.Build(plan, [result],
             metrics: new EvidenceExecutionMetrics { CleanupCompleted = true }), CancellationToken.None);
 
         Assert.Equal(EvidenceExecutionVerdict.Passed, completed.ExecutionVerdict);
         var decision = Assert.Single(session.Decisions);
-        Assert.Equal("reuse.payload-publication-failed", decision.Reason);
+        Assert.Equal(expectedReason, decision.Reason);
+        Assert.Equal(EvidenceReceiptPublication.Suppressed, decision.Publication);
+        var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], null,
+            new Dictionary<string, string>()));
+        Assert.Equal(expectedReason, summary.Reason);
+        Assert.Equal("suppressed", summary.Publication);
         Assert.Equal(key, decision.ProducerKey);
         Assert.Equal(1, producer.ExecutionCount);
-        var identity = await BuildIdentityAsync(repository.Root, plan, declaration);
         var state = EvidenceReceiptQuota.ReadAuthority(store, identity.RepositoryNamespace, key);
         Assert.Null(state?.InFlightExecutionId);
         var receipt = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions

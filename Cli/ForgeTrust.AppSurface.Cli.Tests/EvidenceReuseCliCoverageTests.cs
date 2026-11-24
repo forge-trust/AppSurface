@@ -286,6 +286,16 @@ public sealed class EvidenceReuseCliCoverageTests
         Assert.Equal("3", identity["parallelism"]);
         Assert.Equal("Junit", identity["testResults"]);
         Assert.Equal(sdkVersion, identity["sdk"]);
+        var request = CoverageEvidenceProducer.CreateRunRequest("App.slnx", "run",
+            new CoverageEvidenceRunSettings(producer.CoverageExecution));
+        Assert.Equal(request.Configuration, identity["configuration"]);
+        Assert.Equal(request.Parallelism.ToString(System.Globalization.CultureInfo.InvariantCulture), identity["parallelism"]);
+        Assert.Equal(request.TestResults.ToString(), identity["testResults"]);
+        Assert.Equal(request.CoverageDriver.ToString(), identity["coverageDriver"]);
+        Assert.Equal(request.ScheduleMode.ToString(), identity["schedule"]);
+        Assert.Equal(request.NoRestore ? "disabled" : "enabled", identity["restore"]);
+        Assert.Equal(request.Build ? "enabled" : "disabled", identity["build"]);
+        Assert.Equal(request.ExcludeFilter, identity["testExclusion"]);
         Assert.Equal("not-applicable", EvidenceReuseExecutionResolver.CreateToolIdentity(
             producer with { Kind = "browser-e2e" }, "/repo", solutionPath, "10.0.100").GetValueOrDefault("sdk", "not-applicable"));
     }
@@ -391,25 +401,6 @@ public sealed class EvidenceReuseCliCoverageTests
         {
             context.Restore();
         }
-    }
-
-    [Fact]
-    public void ReadOnlyCandidateSummaryDoesNotClaimFilesWereRestored()
-    {
-        var producer = new EvidenceProducerDeclaration("custom", "custom", "1", [], [], [], 10);
-        var plan = CreatePlan(new EvidenceProfile("local", EvidenceProfileScope.Targeted, [], [producer], []));
-        var candidate = new EvidenceProducerReuseDecision(producer.Id, EvidenceProducerReuseStatus.Hit,
-            "reuse.hit", "Read-only candidate", new string('a', 64));
-        var sdks = new Dictionary<string, string>();
-
-        var inspected = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [candidate], null,
-            sdks, readOnly: true));
-        var restored = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [candidate], null, sdks));
-
-        Assert.Equal("Hit", inspected.Status);
-        Assert.Equal("not-published", inspected.Publication);
-        Assert.Equal("restored", restored.Publication);
-        Assert.Equal(inspected.ProducerKey, restored.ProducerKey);
     }
 
     [Fact]
@@ -587,6 +578,8 @@ public sealed class EvidenceReuseCliCoverageTests
             {
                 var decision = new EvidenceProducerReuseDecision("coverage", status, "reuse.original-decision",
                     "Original decision diagnostic.", "producer-key", origin, 321);
+                if (status == EvidenceProducerReuseStatus.Hit)
+                    decision = decision with { Publication = EvidenceReceiptPublication.Restored };
                 var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], null,
                     new Dictionary<string, string>(StringComparer.Ordinal) { ["coverage"] = "10.0.402" }));
 
@@ -673,12 +666,14 @@ public sealed class EvidenceReuseCliCoverageTests
             var expectedHashes = await HashArtifactsAsync(freshOutput, freshResult.Artifacts);
             Assert.Equal("Miss", freshDecision.Status);
             Assert.Contains("reuse.published", freshDecision.Reason, StringComparison.Ordinal);
+            Assert.Equal("published", freshDecision.Publication);
 
             var storeBeforeExplainHit = await SnapshotTreeAsync(store);
             var hitExplanation = Assert.Single(await resolver.ExplainAsync(plan, null, solution, store,
                 TimeSpan.FromSeconds(5), CancellationToken.None));
             Assert.Equal("Hit", hitExplanation.Status);
             Assert.Equal("reuse.candidate", hitExplanation.Reason);
+            Assert.Equal("not-published", hitExplanation.Publication);
             Assert.Null(hitExplanation.ExecutionRoot);
             Assert.Null(hitExplanation.ArtifactRoot);
             Assert.Equal(storeBeforeExplainHit.ToArray(), (await SnapshotTreeAsync(store)).ToArray());
@@ -694,6 +689,7 @@ public sealed class EvidenceReuseCliCoverageTests
             Assert.Equal(EvidenceClaimEligibility.Informational, warm.Manifest.Eligibility);
             Assert.Equal(EvidenceExecutionVerdict.Passed, warm.Manifest.ExecutionVerdict);
             Assert.Equal("Hit", Assert.Single(warm.Decisions).Status);
+            Assert.Equal("restored", Assert.Single(warm.Decisions).Publication);
             Assert.Equal(freshInvocationCount, runner.InvocationCount);
             Assert.Equal(expectedHashes.ToArray(), (await HashArtifactsAsync(warmOutput, warmResult.Artifacts!)).ToArray());
 

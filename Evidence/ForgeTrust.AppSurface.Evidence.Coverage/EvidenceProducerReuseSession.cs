@@ -45,9 +45,28 @@ internal sealed record EvidenceProducerReuseOptions(bool Enabled, string Reposit
 /// <summary>Describes whether preparation can reuse, execute freshly, or safely execute nothing.</summary>
 internal enum EvidenceProducerReuseStatus { Hit, Miss, Ineligible, Unavailable }
 
+/// <summary>Records what happened to receipt custody independently of the diagnostic reason.</summary>
+internal enum EvidenceReceiptPublication
+{
+    /// <summary>No current-run restoration or publication occurred.</summary>
+    NotPublished,
+    /// <summary>A verified receipt was restored into the current run.</summary>
+    Restored,
+    /// <summary>Fresh evidence was committed to the receipt store.</summary>
+    Published,
+    /// <summary>Receipt admission was withheld or publication failed.</summary>
+    Suppressed,
+}
+
 /// <summary>Provides bounded diagnostics shared by CLI and prepared-host adapters.</summary>
 internal sealed record EvidenceProducerReuseDecision(string ProducerId, EvidenceProducerReuseStatus Status, string Reason,
-    string Diagnostic, string? ProducerKey = null, DateTimeOffset? OriginCompletedAt = null, long? OriginElapsedMilliseconds = null);
+    string Diagnostic, string? ProducerKey = null, DateTimeOffset? OriginCompletedAt = null, long? OriginElapsedMilliseconds = null)
+{
+    /// <summary>Gets the current-run receipt effect. Read-only candidates leave this at <c>NotPublished</c>.</summary>
+    internal EvidenceReceiptPublication Publication { get; init; } = Status == EvidenceProducerReuseStatus.Ineligible
+        ? EvidenceReceiptPublication.Suppressed
+        : EvidenceReceiptPublication.NotPublished;
+}
 
 /// <summary>Coordinates content preparation, native key ownership and whole-invocation receipt admission.</summary>
 /// <remarks>
@@ -311,7 +330,10 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                     _options.VerifyReuse ? "reuse.audit_requested" : "reuse.hit",
                     _options.VerifyReuse ? "Run freshly and compare outcome and assertions with the verified origin." : "Verified complete local receipt; no producer execution is needed.",
                     identity.Key, read.OriginCompletedAt,
-                    read.OriginManifest?.ProducerResults.Single(result => result.ProducerId == producer.Id).ElapsedMilliseconds);
+                    read.OriginManifest?.ProducerResults.Single(result => result.ProducerId == producer.Id).ElapsedMilliseconds)
+                {
+                    Publication = _options.VerifyReuse ? EvidenceReceiptPublication.NotPublished : EvidenceReceiptPublication.Restored,
+                };
             }
             else
             {
@@ -604,7 +626,10 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             catch (Exception exception) when (IsNonFatal(exception))
             {
                 _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Miss, "reuse.publication_suppressed",
-                    $"Fresh result passed; publication failed ({exception.GetType().Name}). Preserve unresolved authority and retry only after verifying the old environment.", _identities[producer.Id].Key);
+                    $"Fresh result passed; publication failed ({exception.GetType().Name}). Preserve unresolved authority and retry only after verifying the old environment.", _identities[producer.Id].Key)
+                {
+                    Publication = EvidenceReceiptPublication.Suppressed,
+                };
                 if (_auditExpected.ContainsKey(producer.Id)) auditFailed = true;
                 try { SettleKnownExecution(lease); } catch (Exception failure) when (IsNonFatal(failure)) { }
             }
@@ -619,7 +644,10 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                     var publication = publications[request.ProducerId];
                     _decisions[request.ProducerId] = new(request.ProducerId, EvidenceProducerReuseStatus.Miss, "reuse." + publication.Reason,
                         publication.Published ? "Complete fresh receipt published after the whole invocation settled and cleaned."
-                            : "Fresh result passed; receipt publication was suppressed. Inspect store capacity and retry when safe.", _identities[request.ProducerId].Key);
+                            : "Fresh result passed; receipt publication was suppressed. Inspect store capacity and retry when safe.", _identities[request.ProducerId].Key)
+                    {
+                        Publication = publication.Published ? EvidenceReceiptPublication.Published : EvidenceReceiptPublication.Suppressed,
+                    };
                     if (!publication.Published)
                     {
                         if (_auditExpected.ContainsKey(request.ProducerId)) auditFailed = true;
@@ -632,7 +660,10 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                 foreach (var request in publicationRequests)
                 {
                     _decisions[request.ProducerId] = new(request.ProducerId, EvidenceProducerReuseStatus.Miss, "reuse.publication_suppressed",
-                        $"Fresh execution passed; invocation publication failed ({exception.GetType().Name}). Preserve unresolved authority and inspect the private store before retrying.", _identities[request.ProducerId].Key);
+                        $"Fresh execution passed; invocation publication failed ({exception.GetType().Name}). Preserve unresolved authority and inspect the private store before retrying.", _identities[request.ProducerId].Key)
+                    {
+                        Publication = EvidenceReceiptPublication.Suppressed,
+                    };
                     if (_auditExpected.ContainsKey(request.ProducerId)) auditFailed = true;
                     try { SettleKnownExecution(request.Lease); } catch (Exception failure) when (IsNonFatal(failure)) { }
                 }

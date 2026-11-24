@@ -101,9 +101,8 @@ public sealed class EvidencePlanner
             matchedRuleIds = matchedRuleIds.Append($"conservative:{policy.ConservativeProfileId}");
         }
 
-        var hasReuseContract = policy.Profiles.Any(static candidate => candidate.Producers.Any(static producer => producer.Inputs is not null
-            || producer.CoverageExecution is { CooperativeChildLifetime: true }
-            || producer.ArtifactSlots.Any(static slot => slot.MaximumFiles is not null)));
+        var hasReuseContract = policy.Profiles.Any(static candidate =>
+            candidate.Producers.Any(static producer => producer.RequiresContractVersion11()));
         var draft = new EvidencePlan(
             ContractVersion: hasReuseContract ? "1.1" : "1.0",
             PolicyId: policy.Id,

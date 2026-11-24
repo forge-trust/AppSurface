@@ -1,8 +1,27 @@
+using System.Text;
+using ForgeTrust.AppSurface.Evidence.Contracts;
+
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
-/// <summary>Claims one private exclusive output root for a reuse-aware invocation without merging prior artifacts.</summary>
+/// <summary>Claims an exclusive reuse output root and defines the per-producer directories within it.</summary>
 internal static class EvidenceReuseOutput
 {
+    /// <summary>Gets a safe, stable directory name for an opaque producer identifier.</summary>
+    /// <param name="producerId">Producer identifier to hash, potentially containing path characters.</param>
+    /// <returns>The lowercase SHA-256 of the UTF-8 identifier.</returns>
+    internal static string GetProducerDirectoryName(string producerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(producerId);
+        return EvidenceDigest.Sha256(Encoding.UTF8.GetBytes(producerId));
+    }
+
+    /// <summary>Gets the custody directories relative to an invocation output root.</summary>
+    /// <param name="producerId">Opaque producer identifier.</param>
+    /// <param name="useInvocationArtifactRoot">Whether to keep a single CLI producer's artifacts at the invocation root.</param>
+    /// <returns>Safe components suitable for joining or verifying one component at a time.</returns>
+    internal static string[] GetCustodyComponents(string producerId, bool useInvocationArtifactRoot = false) =>
+        useInvocationArtifactRoot ? [] : ["producers", GetProducerDirectoryName(producerId)];
+
     /// <summary>Atomically creates a new explicit root or random child below the ordinary Evidence output parent.</summary>
     /// <param name="explicitPath">Explicit output path, which must not exist; null selects a random default child.</param>
     /// <param name="defaultParent">Ordinary Evidence output parent, containing a runs child for random invocation roots.</param>
