@@ -74,7 +74,8 @@ internal static class CoverageScheduleHistoryContracts
             new("test_required_configuration_and_absolute_output_are_fatal", BadInvocationAsync),
             new("zip_codec_acceptance_and_decodable_method_9_rejection", CodecAcceptanceAsync),
             new("timing_json_and_archive_boundaries", InputBoundariesAsync),
-            new("exclusive_output_ownership_and_partial_write_cleanup", OutputOwnershipAsync)
+            new("exclusive_output_ownership_and_partial_write_cleanup", OutputOwnershipAsync),
+            new("gh_process_runner", GhProcessContracts.RunAsync)
         };
 
         var failures = 0;
@@ -85,25 +86,14 @@ internal static class CoverageScheduleHistoryContracts
                 await testCase.Run();
                 Console.WriteLine($"PASS {testCase.Name}");
             }
-            catch (Exception error)
+            catch (Exception error) when (error is InvalidDataException or IOException or InvalidOperationException)
             {
                 failures++;
                 Console.Error.WriteLine($"FAIL {testCase.Name}: {error}");
             }
         }
 
-        try
-        {
-            await GhProcessContracts.RunAsync();
-            Console.WriteLine("PASS gh_process_runner");
-        }
-        catch (Exception error)
-        {
-            failures++;
-            Console.Error.WriteLine($"FAIL gh_process_runner: {error}");
-        }
-
-        Console.WriteLine($"Coverage schedule history contracts: {cases.Length + 1 - failures}/{cases.Length + 1} passed.");
+        Console.WriteLine($"Coverage schedule history contracts: {cases.Length - failures}/{cases.Length} passed.");
         return failures == 0 ? 0 : 1;
     }
 
@@ -1049,8 +1039,8 @@ internal static class CoverageScheduleHistoryContracts
     {
         var env = environment ?? DefaultEnvironment();
         var requests = new List<RequestTrace>();
-        var stdout = new StringWriter(CultureInfo.InvariantCulture);
-        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        using var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        using var stderr = new StringWriter(CultureInfo.InvariantCulture);
         var result = await CoverageScheduleHistory.RunAsync(
             arguments,
             name => env.TryGetValue(name, out var value) ? value : null,

@@ -18,7 +18,7 @@ internal static class GhProcessContracts
                     ArgumentList =
                     {
                         typeof(GhProcessContracts).Assembly.Location, "--gh-fixture", behavior,
-                        Path.Combine(directory.FullName, behavior)
+                        Path.Join(directory.FullName, behavior)
                     }
                 };
                 start.Environment.Remove("GH_TOKEN");
@@ -43,7 +43,7 @@ internal static class GhProcessContracts
             await ExpectFailureAsync(Child("timeout"), Response.Length, TimeSpan.FromSeconds(3), "time budget");
             foreach (var behavior in new[] { "over-limit", "timeout" })
             {
-                var pid = int.Parse(await File.ReadAllTextAsync(Path.Combine(directory.FullName, behavior)));
+                var pid = int.Parse(await File.ReadAllTextAsync(Path.Join(directory.FullName, behavior)));
                 try
                 {
                     using var child = Process.GetProcessById(pid);
@@ -58,7 +58,7 @@ internal static class GhProcessContracts
                 }
             }
 
-            var missing = new ProcessStartInfo(Path.Combine(directory.FullName, "absent-gh"));
+            var missing = new ProcessStartInfo(Path.Join(directory.FullName, "absent-gh"));
             await ExpectFailureAsync(missing, Response.Length, normalTimeout, "start gh");
             await ExpectFailureAsync(missing, Response.Length, TimeSpan.Zero, "time budget");
         }
@@ -70,9 +70,9 @@ internal static class GhProcessContracts
 
     private static async Task CheckPathLookupAsync(string root, TimeSpan timeout)
     {
-        var pathDirectory = Directory.CreateDirectory(Path.Combine(root, "path"));
-        File.CreateSymbolicLink(Path.Combine(pathDirectory.FullName, "gh"), "/usr/bin/true");
-        File.CreateSymbolicLink(Path.Combine(root, "gh"), "/usr/bin/false");
+        var pathDirectory = Directory.CreateDirectory(Path.Join(root, "path"));
+        File.CreateSymbolicLink(Path.Join(pathDirectory.FullName, "gh"), "/usr/bin/true");
+        File.CreateSymbolicLink(Path.Join(root, "gh"), "/usr/bin/false");
         var previousPath = Environment.GetEnvironmentVariable("PATH");
         var previousDirectory = Environment.CurrentDirectory;
         try
