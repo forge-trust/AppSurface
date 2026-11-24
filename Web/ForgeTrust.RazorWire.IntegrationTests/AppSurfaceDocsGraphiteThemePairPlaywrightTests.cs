@@ -168,6 +168,8 @@ public sealed class AppSurfaceDocsGraphiteThemePairPlaywrightTests
             return;
         }
 
+        await using var release = await AppSurfaceDocsReleaseBaselineFixture.StartAsync(
+            AppSurfaceDocsGraphitePlaywrightFixture.ConfigureGraphiteServices);
         foreach (var mode in GetVisualBaselineModes())
         {
             await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -184,7 +186,8 @@ public sealed class AppSurfaceDocsGraphiteThemePairPlaywrightTests
             foreach (var route in GetVisualBaselineRoutes())
             {
                 var page = await context.NewPageAsync();
-                await page.GotoAsync($"{_fixture.DocsUrl}{route.Path}");
+                var url = route.Name == "release" ? release.PageUrl : $"{_fixture.DocsUrl}{route.Path}";
+                await page.GotoAsync(url);
                 await page.WaitForSelectorAsync(route.ReadySelector, new PageWaitForSelectorOptions
                 {
                     State = WaitForSelectorState.Visible,
@@ -352,7 +355,8 @@ public sealed class AppSurfaceDocsGraphitePlaywrightFixture : IAsyncLifetime
         }
     }
 
-    private static void ConfigureGraphiteServices(IServiceCollection services)
+    /// <summary>Registers the Graphite theme shared by the live and release screenshot hosts.</summary>
+    internal static void ConfigureGraphiteServices(IServiceCollection services)
     {
         services.RemoveAll<AppSurfaceThemeRegistry>();
         services.RemoveAll<IAppSurfaceThemeRegistry>();

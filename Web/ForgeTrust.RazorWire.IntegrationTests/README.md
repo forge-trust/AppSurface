@@ -87,11 +87,14 @@ The contributor-strip rendering regression uses [`AppSurfaceDocsContributorTimes
 ### Release-page visual baselines
 
 The macOS Chromium screenshot tests compare the light and Graphite presets with PNGs in
-[`VisualBaselines`](./VisualBaselines). Their release route is the live
-[`unreleased` page](../../releases/unreleased.md), including its aggregated
-[release entries](../../releases/unreleased.entries). Preparing a release or adding an entry can change the visible
-version, sidebar, and outline even when no styles changed. Inspect the mismatch's `.actual.png` and the corresponding
-release-content diff before deciding whether the image needs updating.
+[`VisualBaselines`](./VisualBaselines). For the release screenshot, both presets serve the
+[fixed release note](./TestData/AppSurfaceDocsReleaseBaseline/unreleased.md) on a separate loopback
+Docs host. The fixture keeps the release metadata, trust bar, and heading outline stable when
+[release preparation](../../releases/release-authoring-checklist.md) archives entries and rolls
+the live release note forward. The other screenshot routes use the repository-backed host.
+The [landing-page tests](./AppSurfaceDocsLandingPlaywrightTests.cs) still navigate to the
+[live unreleased page](../../releases/unreleased.md) and verify its title and trust bar.
+Inspect the mismatch's `.actual.png` before deciding whether the image needs updating.
 
 After reviewing intentional changes, refresh both families on macOS:
 
