@@ -83,7 +83,7 @@ remains authored content; after that, retain the markers exactly.
 
 ## Chooser install commands
 
-Set `prerelease_install: true` in the [package manifest](../../packages/package-index.yml) for a public, publishable
+Set `prerelease_install: true` in the [package manifest](https://github.com/forge-trust/AppSurface/blob/main/packages/package-index.yml) for a public, publishable
 library whose available versions are prereleases. PackageIndex adds `--prerelease` to the generated library command.
 The field defaults to `false` and applies to library installs. The chooser omits install commands for held packages,
 including libraries with this flag set. Tools and templates have their own commands. Remove the flag once the library
