@@ -1,7 +1,7 @@
 using System.IO.Compression;
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests;
 
 // protects: decoded byte limit at the compression boundary before protobuf allocation.
 // fails_when: synchronous/asynchronous readers bypass the limit or unsupported operations acquire behavior.

@@ -24,7 +24,7 @@ if [[ "$(dotnet --version)" != "$required_sdk" ]]; then
   printf 'Use repository CI SDK %s on PATH before running this proof.\n' "$required_sdk" >&2
   exit 1
 fi
-cloudtasks_tests="Durable/ForgeTrust.AppSurface.Durable.CloudTasks.Tests/ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj"
+cloudtasks_tests="Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests/ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests.csproj"
 host_tests="examples/durable-external-activation.tests/ForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj"
 package_tool="tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj"
 for proof_project in "$cloudtasks_tests" "$host_tests" "$package_tool"; do

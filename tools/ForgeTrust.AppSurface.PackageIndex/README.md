@@ -81,6 +81,14 @@ remains authored content; after that, retain the markers exactly.
    paths with Cobertura paths. A fixture nested inside this checkout must use that explicit root: the CLI's
    automatic Git-root detection otherwise selects the outer checkout and cannot match consumer-relative paths.
 
+## Chooser install commands
+
+Set `prerelease_install: true` in the [package manifest](../../packages/package-index.yml) for a public, publishable
+library whose available versions are prereleases. PackageIndex adds `--prerelease` to the generated library command.
+The field defaults to `false` and applies to library installs. Tools and templates have their own commands. Remove the
+flag once the library has a stable install. When adding a package to an existing AppSurface app, pin the coordinated
+version already in use. See the [package chooser](../../packages/README.md) for the generated commands.
+
 ## Cloud Tasks packed isolation proof (#892)
 
 When CloudTasks is in the verification plan, `verify-packages` requires the
@@ -110,15 +118,17 @@ accepts this as its second argument: `./scripts/verify-cloudtasks-activation.sh 
 Only the two allowlisted central declarations (`Google.Cloud.Tasks.V2` and the project-conditioned `Grpc.Net.Client`)
 are normalized. Their versions must match exactly one direct root each in the candidate CloudTasks `packages.lock.json`;
 the lock hash is recorded. The historical baseline may omit both declarations; a candidate-source baseline contains
-both exact validated declarations. Missing, partial, duplicate, mismatched or differently conditioned declarations
-fail. Every other central policy entry and all neutral source/build inputs remain exact.
+both exact validated declarations. The baseline also accepts the exact gRPC condition from before the package was
+renamed to `ForgeTrust.AppSurface.Durable.GoogleCloudTasks`, with the same locked version. The candidate requires the
+renamed project condition. Missing, partial, duplicate or mismatched declarations fail. Every other central policy
+entry and all neutral source/build inputs remain exact.
 
 The [approved plan](../../docs/plans/issue-892-cloudtasks-activation-transport.md)
 allows binary differences only for Core, Flow, Workers and Durable after unchanged authored sources/projects,
 Flow.Generators and shared build inputs are proved. Packed framework/dependency contracts, library entry sets,
 external package IDs/versions/hashes/edges and each restored local archive binding remain exact; both raw archive
 and library hashes are retained. Any failed check withholds the manifest. Normalization approval alone proves
-neither a successful run nor publication authority; use the [package guide](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md#local-proof) for local commands and proof limits.
+neither a successful run nor publication authority; use the [package guide](../../Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md#local-proof) for local commands and proof limits.
 
 ## Tailwind artifact provenance (#798)
 

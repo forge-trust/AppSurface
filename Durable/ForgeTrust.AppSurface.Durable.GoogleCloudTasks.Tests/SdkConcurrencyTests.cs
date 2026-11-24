@@ -4,7 +4,7 @@ using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 using Google.Cloud.Tasks.V2;
 using Google.Protobuf;
 using Microsoft.AspNetCore.Builder;
@@ -18,7 +18,7 @@ using Microsoft.Extensions.Logging;
 using ProviderTask = Google.Cloud.Tasks.V2.Task;
 using Task = System.Threading.Tasks.Task;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests;
 
 // protects: invocation-local credentials and second-connection admission on real SDK HTTP/2 streams.
 // fails_when: credentials bleed, token acquisition repeats, or a stream-limited reusable channel queues work until the first call completes.

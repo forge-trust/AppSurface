@@ -1,4 +1,4 @@
-namespace ForgeTrust.AppSurface.Durable.CloudTasks;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 
 /// <summary>Implements bounded, provider-independent syntax checks for Cloud Tasks caller values.</summary>
 /// <remarks>Validation is local only. It never establishes provider resource existence, IAM, or queue configuration.</remarks>

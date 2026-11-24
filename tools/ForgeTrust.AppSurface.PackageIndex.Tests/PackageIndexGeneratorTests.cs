@@ -868,11 +868,19 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("Published library rows use `dotnet package add`", markdown, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task GenerateAsync_RendersChooserSectionsAndInstallCommands()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GenerateAsync_RendersChooserSectionsAndInstallCommands(bool prereleaseInstall)
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);
         await WriteFileAsync("examples/product-readiness-lab/README.md", "# Product readiness lab");
+        if (prereleaseInstall)
+        {
+            const string manifestPath = "packages/package-index.yml";
+            var manifest = await File.ReadAllTextAsync(Path.Combine(_repositoryRoot, manifestPath));
+            await WriteFileAsync(manifestPath, manifest.Replace("    order: 20", "    prerelease_install: true\n    order: 20", StringComparison.Ordinal));
+        }
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -901,6 +909,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.DoesNotContain("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
         Assert.Contains("```bash", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", markdown, StringComparison.Ordinal);
+        var openApiInstall = prereleaseInstall ? " --prerelease" : string.Empty;
+        Assert.Contains($"`dotnet package add ForgeTrust.AppSurface.Web.OpenApi{openApiInstall}`", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Web --prerelease", markdown, StringComparison.Ordinal);
         Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
         Assert.Contains("[current release note](../releases/current.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.Web` |", markdown, StringComparison.Ordinal);

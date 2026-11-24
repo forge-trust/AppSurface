@@ -27,7 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../examples/durable-external-activation.tests/ForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj" />
-    <ProjectReference Include="../ForgeTrust.AppSurface.Durable.CloudTasks/ForgeTrust.AppSurface.Durable.CloudTasks.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Durable.GoogleCloudTasks/ForgeTrust.AppSurface.Durable.GoogleCloudTasks.csproj" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>

@@ -118,7 +118,7 @@ tests, policy changes, or broader infrastructure changes follows the normal [nat
 
 ### Coverage and package producers
 
-`solution-coverage` invokes the collector over every solution test project and applies the gates to that complete result. CI supplies `--coverage-cli /absolute/installed/appsurface`, verified against its same-source candidate package, for both collection and gate commands. When omitted for a direct local run, the producer uses the repository CLI project; a supplied path must be absolute and name an existing executable. Native fan-in requires the explicit installed command. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md)
+`solution-coverage` invokes the collector over every solution test project and applies the gates to that complete result. CI supplies `--coverage-cli /absolute/installed/appsurface`, verified against its same-source candidate package, for both collection and gate commands. When omitted for a direct local run, the producer uses the repository CLI project; a supplied path must be absolute and name an existing executable. Native fan-in requires the explicit installed command. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md)
 exclusively, matching the [compatibility coverage command](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) so their
 timing and transport fixtures do not compete with another test project. It verifies the complete
 successful timing inventory, and requires 95% line / 85% branch coverage with 0.5-point tolerance. Applicable
@@ -223,7 +223,7 @@ the old duplicate solution restore/build and reuses the PackageIndex driver afte
 The driver's initial implicit restore explicitly selects [NuGet.package-gate.config](https://github.com/forge-trust/AppSurface/blob/main/NuGet.package-gate.config); the package workflow
 also restores its solution with that source policy. Installed-consumer restores retain their own mapped
 feeds rather than inheriting a global restore override.
-When the package plan includes [Cloud Tasks](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md),
+When the package plan includes [Cloud Tasks](../../Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md),
 the installed consumer check also compares the neutral package closure with a committed source snapshot.
 Commit edits to that closure or its shared build inputs before collecting package evidence; the check
 rejects differences between the committed baseline and those working-tree inputs.

@@ -1,8 +1,8 @@
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 using Grpc.Core;
 using Microsoft.Extensions.Time.Testing;
 
-namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
+namespace ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests;
 
 // protects: sanitization and cancellation provenance at each invocation phase.
 // fails_when: source failure races become provider submissions or uncertain evidence is rewritten.
