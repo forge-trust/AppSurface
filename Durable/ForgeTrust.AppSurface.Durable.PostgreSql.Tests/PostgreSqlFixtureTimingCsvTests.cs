@@ -98,13 +98,13 @@ public sealed class PostgreSqlFixtureTimingCsvTests
     }
 
     private static string NewTimingPath() =>
-        Path.Combine(Path.GetTempPath(), $"appsurface-durable-fixture-{Guid.NewGuid():N}.csv");
+        TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-durable-fixture-{Guid.NewGuid():N}.csv");
 
     [Fact]
     public void Create_DoesNotEchoAConnectionStringInAnInvalidDestination()
     {
-        var missingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var path = Path.Combine(missingDirectory, "Host=fixture;Password=sentinel-private-value.csv");
+        var missingDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var path = TestPathUtils.PathUnder(missingDirectory, "Host=fixture;Password=sentinel-private-value.csv");
         var error = Assert.Throws<PostgreSqlFixtureException>(() => PostgreSqlFixtureTimingCsv.Create(path));
 
         Assert.Contains("<requested timing file>", error.Message, StringComparison.Ordinal);

@@ -155,7 +155,7 @@ public sealed class PostgreSqlCohortFixtureTests
         await using var anchor = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var seededEpoch = Guid.NewGuid();
         string? templateName = null;
-        var timingPath = Path.Combine(Path.GetTempPath(), $"postgresql-cohort-failure-{Guid.NewGuid():N}.csv");
+        var timingPath = TestPathUtils.PathUnder(Path.GetTempPath(), $"postgresql-cohort-failure-{Guid.NewGuid():N}.csv");
         var options = PostgreSqlCohortFixtureOptions.Parse(
             nameof(PostgreSqlCohortFixtureTests),
             "template",
@@ -202,7 +202,7 @@ public sealed class PostgreSqlCohortFixtureTests
     public async Task DisposeAsync_WritesSetupAndTeardownTimingRowsForReadyAndEmptyDatabases()
     {
         await using var anchor = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var timingPath = Path.Combine(Path.GetTempPath(), $"postgresql-fixture-{Guid.NewGuid():N}.csv");
+        var timingPath = TestPathUtils.PathUnder(Path.GetTempPath(), $"postgresql-fixture-{Guid.NewGuid():N}.csv");
         var options = PostgreSqlCohortFixtureOptions.Parse(
             nameof(PostgreSqlCohortFixtureTests),
             "template",

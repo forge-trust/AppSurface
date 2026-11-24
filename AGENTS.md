@@ -17,6 +17,7 @@ These guidelines apply to all changes made in this repository.
 
 ### Tests
 
+- Use `TestPathUtils.PathUnder` when building a fixture path beneath a known root. See the [test fixture path policy](./CONTRIBUTING.md#test-fixture-path-policy).
 - Aim for nearly 100% branch verification coverage, especially in changed code and critical execution paths.
 - Test both success paths and failure or edge-case branches.
 - Test behavior through public APIs and internal APIs that are intentionally exposed for testing.

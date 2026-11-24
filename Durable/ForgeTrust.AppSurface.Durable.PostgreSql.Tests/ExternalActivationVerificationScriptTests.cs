@@ -57,11 +57,11 @@ public sealed class ExternalActivationVerificationScriptTests
         var sources = evaluation.RootElement.GetProperty("Items").GetProperty("Compile").EnumerateArray()
             .Select(item => item.GetProperty("FullPath").GetString())
             .ToArray();
-        var durableFixture = Path.Combine(repositoryRoot, "Durable", "ForgeTrust.AppSurface.Durable.PostgreSql.Tests");
-        var sharedFixture = Path.Combine(repositoryRoot, "PostgreSql", "ForgeTrust.AppSurface.PostgreSql.Testing");
-        Assert.Contains(Path.Combine(durableFixture, "PostgreSqlIntegrationTestDatabase.cs"), sources);
-        Assert.Contains(Path.Combine(durableFixture, "PostgreSqlTestContainerImage.cs"), sources);
-        Assert.Contains(Path.Combine(sharedFixture, "PostgreSqlDatabaseLease.cs"), sources);
+        var durableFixture = TestPathUtils.PathUnder(repositoryRoot, "Durable", "ForgeTrust.AppSurface.Durable.PostgreSql.Tests");
+        var sharedFixture = TestPathUtils.PathUnder(repositoryRoot, "PostgreSql", "ForgeTrust.AppSurface.PostgreSql.Testing");
+        Assert.Contains(TestPathUtils.PathUnder(durableFixture, "PostgreSqlIntegrationTestDatabase.cs"), sources);
+        Assert.Contains(TestPathUtils.PathUnder(durableFixture, "PostgreSqlTestContainerImage.cs"), sources);
+        Assert.Contains(TestPathUtils.PathUnder(sharedFixture, "PostgreSqlDatabaseLease.cs"), sources);
     }
 
     [Theory]
@@ -141,11 +141,11 @@ public sealed class ExternalActivationVerificationScriptTests
             "# BEGIN external activation test runner",
             "# END external activation test runner");
         var temporaryDirectory = CreateTemporaryDirectory();
-        var fakeBinDirectory = Path.Combine(temporaryDirectory, "bin");
-        var fakeDotnetPath = Path.Combine(fakeBinDirectory, "dotnet");
-        var harnessPath = Path.Combine(temporaryDirectory, "failed-test.sh");
-        var projectPath = Path.Combine(temporaryDirectory, "activation.tests.csproj");
-        var logPath = Path.Combine(temporaryDirectory, "activation-test.log");
+        var fakeBinDirectory = TestPathUtils.PathUnder(temporaryDirectory, "bin");
+        var fakeDotnetPath = TestPathUtils.PathUnder(fakeBinDirectory, "dotnet");
+        var harnessPath = TestPathUtils.PathUnder(temporaryDirectory, "failed-test.sh");
+        var projectPath = TestPathUtils.PathUnder(temporaryDirectory, "activation.tests.csproj");
+        var logPath = TestPathUtils.PathUnder(temporaryDirectory, "activation-test.log");
         Directory.CreateDirectory(fakeBinDirectory);
 
         try
@@ -231,8 +231,8 @@ public sealed class ExternalActivationVerificationScriptTests
             "# BEGIN strict PostgreSQL TRX proof helper",
             "# END strict PostgreSQL TRX proof helper");
         var temporaryDirectory = CreateTemporaryDirectory();
-        var trxPath = Path.Combine(temporaryDirectory, "activation-proof.trx");
-        var harnessPath = Path.Combine(temporaryDirectory, "validate-trx.sh");
+        var trxPath = TestPathUtils.PathUnder(temporaryDirectory, "activation-proof.trx");
+        var harnessPath = TestPathUtils.PathUnder(temporaryDirectory, "validate-trx.sh");
         var resultNode = outcome.Length == 0 ? string.Empty : $"<UnitTestResult outcome=\"{outcome}\" />";
         var trx = $"<TestRun><ResultSummary><Counters total=\"{total}\" passed=\"{passed}\" failed=\"{failed}\" error=\"{error}\" notExecuted=\"{notExecuted}\" /></ResultSummary><Results>{resultNode}</Results></TestRun>";
 
@@ -271,8 +271,8 @@ public sealed class ExternalActivationVerificationScriptTests
             "# BEGIN activation test output sanitizer",
             "# END activation test output sanitizer");
         var temporaryDirectory = CreateTemporaryDirectory();
-        var logPath = Path.Combine(temporaryDirectory, "activation-test.log");
-        var harnessPath = Path.Combine(temporaryDirectory, "sanitize.sh");
+        var logPath = TestPathUtils.PathUnder(temporaryDirectory, "activation-test.log");
+        var harnessPath = TestPathUtils.PathUnder(temporaryDirectory, "sanitize.sh");
         const string separatePassword = "another-private-marker";
 
         try
@@ -315,8 +315,8 @@ public sealed class ExternalActivationVerificationScriptTests
             "# BEGIN activation test output sanitizer",
             "# END activation test output sanitizer");
         var temporaryDirectory = CreateTemporaryDirectory();
-        var logPath = Path.Combine(temporaryDirectory, "activation-test.log");
-        var harnessPath = Path.Combine(temporaryDirectory, "sanitize.sh");
+        var logPath = TestPathUtils.PathUnder(temporaryDirectory, "activation-test.log");
+        var harnessPath = TestPathUtils.PathUnder(temporaryDirectory, "sanitize.sh");
         var diagnostics = string.Join(
             Environment.NewLine,
             "ordinary failure detail before the connection strings",
@@ -377,8 +377,8 @@ public sealed class ExternalActivationVerificationScriptTests
             "# BEGIN activation test output sanitizer",
             "# END activation test output sanitizer");
         var temporaryDirectory = CreateTemporaryDirectory();
-        var logPath = Path.Combine(temporaryDirectory, "activation-test.log");
-        var harnessPath = Path.Combine(temporaryDirectory, "sanitize.sh");
+        var logPath = TestPathUtils.PathUnder(temporaryDirectory, "activation-test.log");
+        var harnessPath = TestPathUtils.PathUnder(temporaryDirectory, "sanitize.sh");
 
         try
         {
@@ -474,7 +474,7 @@ public sealed class ExternalActivationVerificationScriptTests
             "# BEGIN strict PostgreSQL test process environment helper",
             "# END strict PostgreSQL test process environment helper");
         var temporaryDirectory = CreateTemporaryDirectory();
-        var harnessPath = Path.Combine(temporaryDirectory, "runner-contract.sh");
+        var harnessPath = TestPathUtils.PathUnder(temporaryDirectory, "runner-contract.sh");
         var harness = $$"""
             set +e
             {{runner}}
@@ -585,7 +585,7 @@ public sealed class ExternalActivationVerificationScriptTests
 
     private static string CreateTemporaryDirectory()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"appsurface-activation-proof-{Guid.NewGuid():N}");
+        var path = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-activation-proof-{Guid.NewGuid():N}");
         Directory.CreateDirectory(path);
         return path;
     }
