@@ -34,6 +34,17 @@ artifacts/*
 !/artifacts/issue-728-test-efficiency/
 /artifacts/issue-728-test-efficiency/*
 !/artifacts/issue-728-test-efficiency/*.md
+!/artifacts/issue-931-fixture-benchmark/
+/artifacts/issue-931-fixture-benchmark/*
+!/artifacts/issue-931-fixture-benchmark/inventory/
+/artifacts/issue-931-fixture-benchmark/inventory/*
+!/artifacts/issue-931-fixture-benchmark/inventory/manifest.json
+!/artifacts/issue-931-fixture-benchmark/inventory/provenance.txt
+!/artifacts/issue-931-fixture-benchmark/inventory/work-discovery.txt
+!/artifacts/issue-931-fixture-benchmark/inventory/flow-discovery.txt
+!/artifacts/issue-931-fixture-benchmark/results.md
+!/artifacts/issue-931-fixture-benchmark/timings.md
+!/artifacts/issue-931-fixture-benchmark/shared-fixture-results.md
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt

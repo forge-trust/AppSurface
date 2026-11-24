@@ -57,8 +57,9 @@ The [sample layout](../../examples/razorwire-mvc/Views/Shared/_Layout.cshtml) re
 before parser-blocking runtime scripts. A stalled font response can therefore prevent parsing and runtime initialization,
 even when every local asset has loaded. The context intercepts only `https://fonts.googleapis.com/**`;
 application scripts, styles, requests, and the form-readiness and validation assertions still run normally.
-Keep this interception scoped to functional runtime tests so browser tests that exercise rendering retain their own font policy.
-The nested-collection responsive test explicitly opts out, and the no-JavaScript test retains its ordinary context.
+The [no-JavaScript dialog test](./RazorWireDialogPlaywrightTests.cs) uses the same local stylesheet response.
+After each form POST it checks the HTTP response, the browser's destination URL, and the form or message rendered there.
+Keep this interception scoped to functional tests. The nested-collection responsive and no-JavaScript tests keep their ordinary contexts.
 The functional navigation helper keeps its default 30-second `load` deadline and 15-second runtime-readiness wait.
 Regression cases hold an upstream decorative-font request to verify local fallback and hold a required application script
 to verify that navigation still fails at its original deadline. Held requests are released before context disposal.

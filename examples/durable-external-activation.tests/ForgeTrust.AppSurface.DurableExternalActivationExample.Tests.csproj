@@ -5,11 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <RepositoryRoot Condition="'$(RepositoryRoot)' == ''">$(MSBuildThisFileDirectory)../..</RepositoryRoot>
   </PropertyGroup>
 
+  <Import Project="$(RepositoryRoot)/Durable/packed-consumers/PostgreSqlFixtureSupport.props" />
+
   <ItemGroup>
-    <Compile Include="../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlIntegrationTestDatabase.cs" Link="PackedSupport/PostgreSqlIntegrationTestDatabase.cs" />
-    <Compile Include="../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlTestContainerImage.cs" Link="PackedSupport/PostgreSqlTestContainerImage.cs" />
     <Content Include="../../Durable/configure-postgresql-roles.sql" Link="configure-postgresql-roles.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
