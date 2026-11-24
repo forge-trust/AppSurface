@@ -5,7 +5,6 @@
 #:property Nullable=enable
 #:property PublishAot=false
 #:package SharpCompress
-#:include ../../.github/scripts/CoverageHistoryCaseFoldData.cs
 #:include ../../.github/scripts/CoverageScheduleHistory.cs
 #:include ../../.github/scripts/CoverageHistoryData.cs
 #:include ../../.github/scripts/CoverageHistoryGh.cs

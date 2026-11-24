@@ -282,7 +282,6 @@ internal static class CoverageScheduleHistory
         }
 
         var runs = new List<WorkflowRun>();
-        var foldedRepository = CoverageHistoryData.CaseFold(repository);
         var inputOrder = 0;
         foreach (var item in workflowRuns.EnumerateArray())
         {
@@ -296,7 +295,7 @@ internal static class CoverageScheduleHistory
                 !TryGetProperty(item, "head_repository", out var headRepository) ||
                 headRepository.ValueKind != JsonValueKind.Object ||
                 !TryGetString(headRepository, "full_name", out var fullName) ||
-                CoverageHistoryData.CaseFold(fullName) != foldedRepository ||
+                !string.Equals(fullName, repository, StringComparison.OrdinalIgnoreCase) ||
                 !TryGetString(item, "status", out var status) ||
                 !string.Equals(status, "completed", StringComparison.Ordinal) ||
                 !TryGetString(item, "conclusion", out var conclusion) ||

@@ -281,9 +281,10 @@ any partial file created by that invocation, and may leave newly created parent 
 an existing or competing output file.
 
 The restore validator and the CLI timing reader intentionally remain separate. Restore validates safe
-relative `.csproj` paths, case-insensitive duplicates and nonnegative bounded durations, then writes the
-artifact's original bytes unchanged. The CLI reader normalizes project keys and reads signed 64-bit seconds
-for scheduling. Sharing a parser would change one of those contracts. The single
+relative `.csproj` paths and nonnegative bounded durations, then writes the artifact's original bytes unchanged.
+It uses .NET ordinal case-insensitive comparison for duplicate project paths and repository names.
+For example, `App.csproj` and `app.csproj` count as duplicates, while `Straße.csproj` and `Strasse.csproj` are distinct.
+The CLI reader normalizes project keys and reads signed 64-bit seconds for scheduling. Sharing a parser would change one of those contracts. The single
 [canonical fixture](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/timings.json)
 is consumed by both the restore contracts and the existing
 [longest-first scheduler test](https://github.com/forge-trust/AppSurface/blob/main/Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunTests.cs),

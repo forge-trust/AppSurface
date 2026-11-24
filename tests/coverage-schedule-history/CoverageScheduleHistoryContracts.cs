@@ -235,16 +235,14 @@ internal static class CoverageScheduleHistoryContracts
                     RunRecord(90, branch: branch, eventName: "pull_request", headRepository: "fork-owner/AppSurface"),
                     RunRecord(89, branch: branch, eventName: "workflow_dispatch"),
                     RunRecord(88, branch: branch, headRepository: "another-owner/AppSurface"),
-                    RunRecord(1, branch: branch, headRepository: "FORGE-TRUST/APPSURFACE"),
-                    RunRecord(2, branch: branch, headRepository: "forge-truſt/AppSurface")),
-                [ArtifactsEndpoint(2)] = Artifacts(),
+                    RunRecord(1, branch: branch, headRepository: "FORGE-TRUST/APPSURFACE")),
                 [ArtifactsEndpoint(1)] = Artifacts()
             },
             environment: DefaultEnvironment(repository, branch));
 
         Equal(0, result.ExitCode, "exit code");
         SequenceEqual(
-            [runsEndpoint, ArtifactsEndpoint(2), ArtifactsEndpoint(1)],
+            [runsEndpoint, ArtifactsEndpoint(1)],
             Endpoints(result),
             "push and case-insensitive repository eligibility");
         Contains("branch=release%2F%CE%B2+branch", runsEndpoint, "form-encoded branch query");
@@ -328,8 +326,6 @@ internal static class CoverageScheduleHistoryContracts
                 ("src/App/App.csproj", 1), ("src/App/App.csproj", 2))))),
             ("case-insensitive-duplicate-project", MakeZip(new("timings.json", TimingBytes(
                 ("src/App/App.csproj", 1), ("SRC/app/app.csproj", 2))))),
-            ("full-casefold-duplicate-project", MakeZip(new("timings.json", TimingBytes(
-                ("src/Straße.csproj", 1), ("src/Strasse.csproj", 2))))),
             ("padded-project-path", MakeZip(new("timings.json", TimingBytes(" src/App/App.csproj", 1)))),
             ("empty-projects", MakeZip(new("timings.json", Encoding.UTF8.GetBytes("{\"projects\":[]}")))),
             ("duplicate-json-key", MakeZip(new("timings.json", duplicateTimingKey))),
@@ -791,6 +787,8 @@ internal static class CoverageScheduleHistoryContracts
                     0 => maximumPath,
                     1 => supplementaryPath,
                     2 => "src/Δοκιμή/🚀.csproj",
+                    3 => "src/Straße.csproj",
+                    4 => "src/Strasse.csproj",
                     _ => $"src/Boundary{index}/Boundary{index}.csproj"
                 },
                 ["seconds"] = index switch

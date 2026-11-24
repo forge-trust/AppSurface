@@ -8,7 +8,6 @@
 #:property PublishAot=false
 #:package SharpCompress
 #:include CoverageScheduleHistory.cs
-#:include CoverageHistoryCaseFoldData.cs
 #:include CoverageHistoryData.cs
 #:include CoverageHistoryGh.cs
 

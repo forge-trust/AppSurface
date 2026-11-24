@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -21,8 +20,6 @@ internal static class CoverageHistoryData
     private const int MaxProjectPathCodePoints = 4096;
     private const int MaxPythonIntegerDigits = 4300;
     private const int MaxJsonDepth = 1000;
-
-    private static readonly Dictionary<int, string> FullCaseFolds = CreateFullCaseFolds();
 
     /// <summary>
     /// Parses strict UTF-8 JSON within the artifact size and nesting limits. Duplicate properties at any
@@ -297,7 +294,7 @@ internal static class CoverageHistoryData
             throw new InvalidDataException("projects must be a nonempty array of at most 1000 entries.");
         }
 
-        var seenProjects = new HashSet<string>(StringComparer.Ordinal);
+        var seenProjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var projectTiming in projects.EnumerateArray())
         {
             if (projectTiming.ValueKind != JsonValueKind.Object ||
@@ -313,7 +310,7 @@ internal static class CoverageHistoryData
                 throw new InvalidDataException("project must be a safe relative .csproj path.");
             }
 
-            if (!seenProjects.Add(CaseFold(project)))
+            if (!seenProjects.Add(project))
             {
                 throw new InvalidDataException("Duplicate project path ignoring case.");
             }
@@ -381,36 +378,6 @@ internal static class CoverageHistoryData
         return count;
     }
 
-    /// <summary>Applies the Ubuntu Python baseline's Unicode folding for project and repository comparisons.</summary>
-    internal static string CaseFold(string value)
-    {
-        var folded = new StringBuilder(value.Length);
-        var index = 0;
-        while (index < value.Length)
-        {
-            var status = Rune.DecodeFromUtf16(value.AsSpan(index), out var rune, out var consumed);
-            if (status != OperationStatus.Done)
-            {
-                folded.Append(value[index]);
-                index++;
-                continue;
-            }
-
-            if (FullCaseFolds.TryGetValue(rune.Value, out var mapping))
-            {
-                folded.Append(mapping);
-            }
-            else
-            {
-                folded.Append(rune);
-            }
-
-            index += consumed;
-        }
-
-        return folded.ToString();
-    }
-
     private static uint Crc32(ReadOnlySpan<byte> bytes)
     {
         var crc = uint.MaxValue;
@@ -424,29 +391,5 @@ internal static class CoverageHistoryData
         }
 
         return ~crc;
-    }
-
-    private static Dictionary<int, string> CreateFullCaseFolds()
-    {
-        var mappings = new Dictionary<int, string>(1530);
-        using var reader = new StringReader(CoverageHistoryCaseFoldData.Mappings);
-        while (reader.ReadLine() is { } line)
-        {
-            var separator = line.IndexOf(';');
-            var source = int.Parse(
-                line.AsSpan(0, separator),
-                NumberStyles.HexNumber,
-                CultureInfo.InvariantCulture);
-            var folded = new StringBuilder();
-            foreach (var codePointText in line[(separator + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var codePoint = int.Parse(codePointText, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-                folded.Append(new Rune(codePoint));
-            }
-
-            mappings.Add(source, folded.ToString());
-        }
-
-        return mappings;
     }
 }
