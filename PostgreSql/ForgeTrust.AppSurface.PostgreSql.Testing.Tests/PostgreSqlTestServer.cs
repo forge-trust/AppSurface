@@ -25,17 +25,28 @@ internal static class PostgreSqlTestServer
         return container.GetConnectionString();
     }
 
+    /// <summary>Builds settings for a dedicated backend session. Multiplexing requires pooling in Npgsql.</summary>
+    internal static NpgsqlConnectionStringBuilder NonPooledSettings(string connectionString, string? database = null)
+    {
+        var settings = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            Pooling = false,
+            Multiplexing = false,
+        };
+        if (database is not null)
+        {
+            settings.Database = database;
+        }
+
+        return settings;
+    }
+
     private static async Task VerifyServerAsync(string connectionString)
     {
-        var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false,
-            Timeout = 5,
-            CommandTimeout = 15,
-        }.ConnectionString;
-
-        await using var connection = new NpgsqlConnection(maintenanceConnectionString);
+        var settings = NonPooledSettings(connectionString, "postgres");
+        settings.Timeout = 5;
+        settings.CommandTimeout = 15;
+        await using var connection = new NpgsqlConnection(settings.ConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand("SHOW server_version_num;", connection);
         var value = (string?)await command.ExecuteScalarAsync();
@@ -150,11 +161,7 @@ internal static class PostgreSqlTestServer
 
     internal static async Task<bool> DatabaseExistsAsync(string connectionString, string databaseName)
     {
-        var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false,
-        }.ConnectionString;
+        var maintenanceConnectionString = NonPooledSettings(connectionString, "postgres").ConnectionString;
 
         await using var connection = new NpgsqlConnection(maintenanceConnectionString);
         await connection.OpenAsync();

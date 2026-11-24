@@ -23,7 +23,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
             Assert.StartsWith(leasePrefix, lease.Name, StringComparison.Ordinal);
             Assert.NotEqual(0u, lease.Oid);
             Assert.Equal(lease.Name, new NpgsqlConnectionStringBuilder(lease.ConnectionString).Database);
-            var templateConnection = new NpgsqlConnectionStringBuilder(lease.ConnectionString) { Pooling = false }.ConnectionString;
+            var templateConnection = PostgreSqlTestServer.NonPooledSettings(lease.ConnectionString).ConnectionString;
             await PostgreSqlTestServer.ExecuteAsync(
                 templateConnection,
                 "CREATE TABLE lease_probe (value integer NOT NULL); INSERT INTO lease_probe VALUES (37);");
@@ -45,12 +45,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
                 await lease.VerifyConnectedIdentityAsync(connection, transaction);
             }
 
-            var wrongDatabase = new NpgsqlConnectionStringBuilder(connectionString)
-            {
-                Database = "postgres",
-                Pooling = false,
-            }.ConnectionString;
-            await using (var connection = new NpgsqlConnection(wrongDatabase))
+            await using (var connection = new NpgsqlConnection(maintenanceConnectionString))
             {
                 await connection.OpenAsync();
                 await using var transaction = await connection.BeginTransactionAsync();
@@ -149,10 +144,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
             connectionString,
             PostgreSqlTestServer.NewPrefix("lease_transaction_owner"));
 
-        var templateConnectionString = new NpgsqlConnectionStringBuilder(lease.ConnectionString)
-        {
-            Pooling = false,
-        }.ConnectionString;
+        var templateConnectionString = PostgreSqlTestServer.NonPooledSettings(lease.ConnectionString).ConnectionString;
         await using var suppliedConnection = new NpgsqlConnection(templateConnectionString);
         await using var transactionConnection = new NpgsqlConnection(templateConnectionString);
         await suppliedConnection.OpenAsync();
@@ -174,12 +166,9 @@ public sealed class PostgreSqlDatabaseLeaseTests
             connectionString,
             PostgreSqlTestServer.NewPrefix("lease_wrong_server"));
 
-        var wrongServerConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Host = "wrong-server.invalid",
-            Pooling = false,
-        }.ConnectionString;
-        await using var wrongServer = new NpgsqlConnection(wrongServerConnectionString);
+        var wrongServerSettings = PostgreSqlTestServer.NonPooledSettings(connectionString);
+        wrongServerSettings.Host = "wrong-server.invalid";
+        await using var wrongServer = new NpgsqlConnection(wrongServerSettings.ConnectionString);
 
         await Assert.ThrowsAsync<PostgreSqlDatabaseOwnershipException>(() => lease.ExistsAsync(wrongServer));
 
@@ -297,11 +286,8 @@ public sealed class PostgreSqlDatabaseLeaseTests
                 $"CREATE DATABASE {QuoteIdentifier(replacementName)};");
             replacementOid = await ReadDatabaseOidAsync(maintenanceConnectionString, replacementName);
 
-            replacementSession = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(connectionString)
-            {
-                Database = replacementName,
-                Pooling = false,
-            }.ConnectionString);
+            replacementSession = new NpgsqlConnection(
+                PostgreSqlTestServer.NonPooledSettings(connectionString, replacementName).ConnectionString);
             await replacementSession.OpenAsync();
             var backendPid = await ReadScalarAsync<int>(replacementSession, "SELECT pg_backend_pid();");
 
@@ -493,7 +479,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
     }
 
     private static string MaintenanceConnectionString(string connectionString) =>
-        new NpgsqlConnectionStringBuilder(connectionString) { Database = "postgres", Pooling = false }.ConnectionString;
+        PostgreSqlTestServer.NonPooledSettings(connectionString, "postgres").ConnectionString;
 
     private static string QuoteIdentifier(string identifier)
     {
@@ -540,7 +526,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         var lockAcquired = false;
         try
         {
-            await using (var acquire = new NpgsqlCommand("SELECT pg_catalog.pg_advisory_lock(5300219492281001);", connection))
+            await using (var acquire = new NpgsqlCommand($"SELECT pg_catalog.pg_advisory_lock({PostgreSqlCatalog.DatabaseCatalogLockKey});", connection))
             {
                 await acquire.ExecuteNonQueryAsync();
             }
@@ -555,7 +541,7 @@ public sealed class PostgreSqlDatabaseLeaseTests
         {
             if (lockAcquired)
             {
-                await using var release = new NpgsqlCommand("SELECT pg_catalog.pg_advisory_unlock(5300219492281001);", connection);
+                await using var release = new NpgsqlCommand($"SELECT pg_catalog.pg_advisory_unlock({PostgreSqlCatalog.DatabaseCatalogLockKey});", connection);
                 await release.ExecuteScalarAsync();
             }
         }

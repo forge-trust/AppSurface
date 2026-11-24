@@ -56,15 +56,7 @@ public sealed class PostgreSqlFixture
                 template = existing;
             }
 
-            if (template.Cleaning)
-            {
-                throw new InvalidOperationException("The requested template is being cleaned up.");
-            }
-
-            if (template.Users++ == 0)
-            {
-                template.Idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
+            template.Admit();
         }
 
         try
@@ -76,10 +68,7 @@ public sealed class PostgreSqlFixture
         {
             lock (gate)
             {
-                if (--template.Users == 0)
-                {
-                    template.Idle!.SetResult();
-                }
+                template.Release();
             }
         }
     }
@@ -228,13 +217,10 @@ public sealed class PostgreSqlFixture
         Task idle;
         lock (gate)
         {
-            if (template.Cleaning)
+            if (!template.TryBeginCleanup(out idle))
             {
                 return TemplateCleanupOutcome.AlreadyInProgress(template.Name);
             }
-
-            template.Cleaning = true;
-            idle = template.Idle?.Task ?? Task.CompletedTask;
         }
 
         try
@@ -286,7 +272,7 @@ public sealed class PostgreSqlFixture
         {
             lock (gate)
             {
-                template.Cleaning = false;
+                template.EndCleanup();
             }
         }
     }
@@ -369,7 +355,7 @@ public sealed class PostgreSqlFixture
         }
     }
 
-    // The gate protects Users, Idle and Cleaning. Preparation is shared independently of individual waiters.
+    // Lifecycle methods are called under the fixture gate. Preparation is shared independently of individual waiters.
     private sealed class Template(string connection, string prefix)
     {
         public string Connection { get; } = connection;
@@ -378,8 +364,45 @@ public sealed class PostgreSqlFixture
         public PostgreSqlDatabaseLease? Database { get; set; }
         public HashSet<PostgreSqlDatabaseLease> FailedDrops { get; } = [];
         public Lazy<Task> Preparation { get; set; } = null!;
-        public int Users { get; set; }
-        public TaskCompletionSource? Idle { get; set; }
-        public bool Cleaning { get; set; }
+
+        private int users;
+        private TaskCompletionSource? idle;
+        private bool cleaning;
+
+        public void Admit()
+        {
+            if (cleaning)
+            {
+                throw new InvalidOperationException("The requested template is being cleaned up.");
+            }
+
+            if (users++ == 0)
+            {
+                idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+
+        public void Release()
+        {
+            if (--users == 0)
+            {
+                idle!.SetResult();
+            }
+        }
+
+        public bool TryBeginCleanup(out Task idleTask)
+        {
+            if (cleaning)
+            {
+                idleTask = Task.CompletedTask;
+                return false;
+            }
+
+            cleaning = true;
+            idleTask = idle?.Task ?? Task.CompletedTask;
+            return true;
+        }
+
+        public void EndCleanup() => cleaning = false;
     }
 }

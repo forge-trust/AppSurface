@@ -647,19 +647,11 @@ public sealed class PostgreSqlFixtureIntegrationTests
     [SkippableFact]
     public async Task RunFreshAsync_CancellationAfterCatalogLockAcquisitionCancelsCreateAndCleansDatabase()
     {
-        const long databaseCatalogLockKey = 5_300_219_492_281_001;
         var connectionString = await PostgreSqlTestServer.GetRequiredConnectionStringAsync();
-        var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false,
-        }.ConnectionString;
+        var maintenanceConnectionString = PostgreSqlTestServer.NonPooledSettings(connectionString, "postgres").ConnectionString;
         var applicationName = PostgreSqlTestServer.NewPrefix("cancel_after_catalog_lock");
-        var fixtureConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            ApplicationName = applicationName,
-            Pooling = false,
-        }.ConnectionString;
+        var fixtureSettings = PostgreSqlTestServer.NonPooledSettings(connectionString);
+        fixtureSettings.ApplicationName = applicationName;
         var databaseNamePrefix = PostgreSqlTestServer.NewPrefix("cancel_create_after_lock");
         var ownedDatabasePrefix = databaseNamePrefix[..Math.Min(databaseNamePrefix.Length, 46)];
         var actionInvoked = false;
@@ -678,7 +670,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
         }
 
         var createRun = fixture.RunFreshAsync(
-            fixtureConnectionString,
+            fixtureSettings.ConnectionString,
             databaseNamePrefix,
             (_, _) =>
             {
@@ -705,11 +697,11 @@ public sealed class PostgreSqlFixtureIntegrationTests
             await using var lockProbe = new NpgsqlConnection(maintenanceConnectionString);
             await lockProbe.OpenAsync();
             await using var acquireProbe = new NpgsqlCommand(
-                $"SELECT pg_try_advisory_lock({databaseCatalogLockKey});",
+                $"SELECT pg_try_advisory_lock({PostgreSqlCatalog.DatabaseCatalogLockKey});",
                 lockProbe);
             Assert.True((bool)(await acquireProbe.ExecuteScalarAsync())!);
             await using var releaseProbe = new NpgsqlCommand(
-                $"SELECT pg_advisory_unlock({databaseCatalogLockKey});",
+                $"SELECT pg_advisory_unlock({PostgreSqlCatalog.DatabaseCatalogLockKey});",
                 lockProbe);
             Assert.True((bool)(await releaseProbe.ExecuteScalarAsync())!);
         }
@@ -796,11 +788,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
 
     private static async Task<bool> HasDatabaseWithPrefixAsync(string connectionString, string prefix)
     {
-        var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false,
-        }.ConnectionString;
+        var maintenanceConnectionString = PostgreSqlTestServer.NonPooledSettings(connectionString, "postgres").ConnectionString;
 
         await using var connection = new NpgsqlConnection(maintenanceConnectionString);
         await connection.OpenAsync();
@@ -813,11 +801,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
 
     private static async Task<IReadOnlyList<string>> GetDatabaseNamesWithPrefixAsync(string connectionString, string prefix)
     {
-        var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false,
-        }.ConnectionString;
+        var maintenanceConnectionString = PostgreSqlTestServer.NonPooledSettings(connectionString, "postgres").ConnectionString;
 
         await using var connection = new NpgsqlConnection(maintenanceConnectionString);
         await connection.OpenAsync();
@@ -1062,11 +1046,7 @@ public sealed class PostgreSqlFixtureIntegrationTests
 
     private static async Task SetDatabaseTemplateFlagAsync(string connectionString, string databaseName, bool isTemplate)
     {
-        var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false,
-        }.ConnectionString;
+        var maintenanceConnectionString = PostgreSqlTestServer.NonPooledSettings(connectionString, "postgres").ConnectionString;
 
         await using var connection = new NpgsqlConnection(maintenanceConnectionString);
         await connection.OpenAsync();

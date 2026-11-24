@@ -70,6 +70,23 @@ public sealed class PostgreSqlCatalogTests
             PostgreSqlCatalog.ServerEndpoint(PostgreSqlCatalog.Target(input, "fixture", disablePooling: true))));
     }
 
+    [Theory]
+    [InlineData(null, "app")]
+    [InlineData("postgres", "postgres")]
+    public void NonPooledSettings_DisablesMultiplexingAndPreservesSessionOptions(string? database, string expectedDatabase)
+    {
+        const string input = "Host=localhost;Database=app;Application Name=probe;Timeout=7;Pooling=true;Multiplexing=true";
+
+        var settings = PostgreSqlTestServer.NonPooledSettings(input, database);
+        using var connection = new NpgsqlConnection(settings.ConnectionString);
+
+        Assert.False(settings.Pooling);
+        Assert.False(settings.Multiplexing);
+        Assert.Equal(expectedDatabase, connection.Database);
+        Assert.Equal("probe", settings.ApplicationName);
+        Assert.Equal(7, settings.Timeout);
+    }
+
     [SkippableFact]
     public async Task CatalogLock_PreservesSqlErrorWhenAbortedTransactionRejectsUnlock()
     {
@@ -97,8 +114,7 @@ public sealed class PostgreSqlCatalogTests
         await admin.CloseAsync();
 
         // No connection rents the original pool again before this independent backend takes the lock.
-        settings.Pooling = false;
-        await using var probe = new NpgsqlConnection(settings.ConnectionString);
+        await using var probe = new NpgsqlConnection(PostgreSqlTestServer.NonPooledSettings(settings.ConnectionString).ConnectionString);
         await probe.OpenAsync();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try

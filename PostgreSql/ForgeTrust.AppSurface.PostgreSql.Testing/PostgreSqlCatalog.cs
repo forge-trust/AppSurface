@@ -7,7 +7,8 @@ namespace ForgeTrust.AppSurface.PostgreSql.Testing;
 /// <summary>Runs fixture database catalog operations under the shared PostgreSQL advisory locks.</summary>
 internal static class PostgreSqlCatalog
 {
-    private const long DatabaseCatalogLockKey = 5_300_219_492_281_001;
+    /// <summary>Session advisory lock shared by fixture catalog mutations and their test observers.</summary>
+    internal const long DatabaseCatalogLockKey = 5_300_219_492_281_001;
     private const long ClusterInitializationLockKey = 5_300_219_492_281_002;
     private const int CommandTimeoutSeconds = 300;
     internal static readonly TimeSpan Timeout = TimeSpan.FromMinutes(5);
