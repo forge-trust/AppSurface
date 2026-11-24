@@ -5,24 +5,26 @@ using System.Diagnostics;
 internal static class CoverageHistoryGh
 {
     /// <summary>Returns the binary response to one GET within the remaining shared time budget.</summary>
-    internal static Task<byte[]> RequestAsync(string endpoint, int maxBytes, TimeSpan timeout)
+    internal static async Task<byte[]> RequestAsync(string endpoint, int maxBytes, TimeSpan timeout)
     {
         // On Unix, env uses execvp's PATH lookup, as the Python helper did. A bare
         // ProcessStartInfo executable can also resolve beside the host or in the checkout.
         var start = OperatingSystem.IsWindows()
             ? new ProcessStartInfo("gh.exe")
             : new ProcessStartInfo("/usr/bin/env") { ArgumentList = { "gh" } };
-        return RequestAsync(start, endpoint, maxBytes, timeout);
+        using var process = new Process { StartInfo = start };
+        return await RequestAsync(process, endpoint, maxBytes, timeout);
     }
 
-    /// <summary>Runs a single child, discarding stderr and rejecting responses larger than the caller's limit.</summary>
-    internal static async Task<byte[]> RequestAsync(ProcessStartInfo start, string endpoint, int maxBytes, TimeSpan timeout)
+    /// <summary>Starts a caller-owned, unstarted process and waits for it to exit, discarding stderr and bounding stdout.</summary>
+    internal static async Task<byte[]> RequestAsync(Process process, string endpoint, int maxBytes, TimeSpan timeout)
     {
         if (timeout <= TimeSpan.Zero)
         {
             throw new IOException("GitHub API time budget exhausted.");
         }
 
+        var start = process.StartInfo;
         start.UseShellExecute = false;
         start.RedirectStandardOutput = true;
         start.RedirectStandardError = true;
@@ -31,7 +33,6 @@ internal static class CoverageHistoryGh
         start.ArgumentList.Add("GET");
         start.ArgumentList.Add(endpoint);
         using var deadline = new CancellationTokenSource(timeout);
-        using var process = new Process { StartInfo = start };
         try
         {
             process.Start();

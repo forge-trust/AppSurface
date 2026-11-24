@@ -225,7 +225,8 @@ internal static class CoverageScheduleHistory
 
                 try
                 {
-                    return (CoverageHistoryData.ReadArchive(archiveBytes), string.Empty);
+                    using var archive = new MemoryStream(archiveBytes, writable: false);
+                    return (CoverageHistoryData.ReadArchive(archive), string.Empty);
                 }
                 catch (InvalidDataException)
                 {

@@ -11,19 +11,18 @@ internal static class GhProcessContracts
         var directory = Directory.CreateTempSubdirectory("coverage-gh-");
         try
         {
-            ProcessStartInfo Child(string behavior)
+            static Process Child(string behavior)
             {
                 var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
                 {
                     ArgumentList =
                     {
-                        typeof(GhProcessContracts).Assembly.Location, "--gh-fixture", behavior,
-                        Path.Join(directory.FullName, behavior)
+                        typeof(GhProcessContracts).Assembly.Location, "--gh-fixture", behavior
                     }
                 };
                 start.Environment.Remove("GH_TOKEN");
                 start.Environment.Remove("GITHUB_TOKEN");
-                return start;
+                return new Process { StartInfo = start };
             }
 
             // Writing more than a pipe buffer to stderr before stdout verifies concurrent draining.
@@ -32,33 +31,33 @@ internal static class GhProcessContracts
             {
                 await CheckPathLookupAsync(directory.FullName, normalTimeout);
             }
-            var bytes = await CoverageHistoryGh.RequestAsync(Child("binary"), Endpoint, Response.Length, normalTimeout);
+            using var binary = Child("binary");
+            var bytes = await CoverageHistoryGh.RequestAsync(binary, Endpoint, Response.Length, normalTimeout);
             if (!bytes.SequenceEqual(Response))
             {
                 throw new InvalidDataException("Binary gh stdout changed at the exact byte limit.");
             }
 
-            await ExpectFailureAsync(Child("nonzero"), Response.Length, normalTimeout, "gh api request failed");
-            await ExpectFailureAsync(Child("over-limit"), Response.Length - 1, normalTimeout, "size limit");
-            await ExpectFailureAsync(Child("timeout"), Response.Length, TimeSpan.FromSeconds(3), "time budget");
-            foreach (var behavior in new[] { "over-limit", "timeout" })
+            using var nonzero = Child("nonzero");
+            await ExpectFailureAsync(nonzero, Response.Length, normalTimeout, "gh api request failed");
+            foreach (var (behavior, limit, timeout, reason) in new[]
             {
-                var pid = int.Parse(await File.ReadAllTextAsync(Path.Join(directory.FullName, behavior)));
-                try
+                ("over-limit", Response.Length - 1, normalTimeout, "size limit"),
+                ("timeout", Response.Length, TimeSpan.FromSeconds(3), "time budget")
+            })
+            {
+                using var child = Child(behavior);
+                await ExpectFailureAsync(child, limit, timeout, reason);
+                if (!child.HasExited)
                 {
-                    using var child = Process.GetProcessById(pid);
-                    if (!child.HasExited)
-                    {
-                        throw new InvalidDataException($"The {behavior} fixture was still running after its request returned.");
-                    }
-                }
-                catch (ArgumentException)
-                {
-                    // A reaped child no longer has a process entry.
+                    throw new InvalidDataException($"The {behavior} fixture was still running after its request returned.");
                 }
             }
 
-            var missing = new ProcessStartInfo(Path.Join(directory.FullName, "absent-gh"));
+            using var missing = new Process
+            {
+                StartInfo = new ProcessStartInfo(Path.Join(directory.FullName, "absent-gh"))
+            };
             await ExpectFailureAsync(missing, Response.Length, normalTimeout, "start gh");
             await ExpectFailureAsync(missing, Response.Length, TimeSpan.Zero, "time budget");
         }
@@ -88,11 +87,11 @@ internal static class GhProcessContracts
         }
     }
 
-    private static async Task ExpectFailureAsync(ProcessStartInfo start, int limit, TimeSpan timeout, string reason)
+    private static async Task ExpectFailureAsync(Process process, int limit, TimeSpan timeout, string reason)
     {
         try
         {
-            await CoverageHistoryGh.RequestAsync(start, Endpoint, limit, timeout);
+            await CoverageHistoryGh.RequestAsync(process, Endpoint, limit, timeout);
         }
         catch (IOException error) when (error.Message.Contains(reason, StringComparison.OrdinalIgnoreCase))
         {
@@ -105,12 +104,11 @@ internal static class GhProcessContracts
     /// <summary>Runs a benign child fixture. Only the test entry point dispatches this argument.</summary>
     internal static async Task<int> RunFixtureAsync(string[] args)
     {
-        if (args is not [var behavior, var pidFile, "api", "--method", "GET", Endpoint])
+        if (args is not [var behavior, "api", "--method", "GET", Endpoint])
         {
             return 2;
         }
 
-        await File.WriteAllTextAsync(pidFile, Environment.ProcessId.ToString());
         switch (behavior)
         {
             case "binary":

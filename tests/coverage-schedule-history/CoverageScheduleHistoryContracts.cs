@@ -30,6 +30,11 @@ internal static class CoverageScheduleHistoryContracts
     private sealed record ZipEntry(string Name, byte[] Bytes, CompressionLevel Compression = CompressionLevel.Optimal);
     private sealed record Case(string Name, Func<Task> Run);
 
+    private sealed class FaultingZipStream(byte[] bytes) : MemoryStream(bytes, writable: false)
+    {
+        public override long Seek(long offset, SeekOrigin origin) => throw new IndexOutOfRangeException();
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public string Path { get; } = Directory.CreateTempSubdirectory("coverage-history-contract-").FullName;
@@ -74,6 +79,8 @@ internal static class CoverageScheduleHistoryContracts
             new("test_existing_output_is_never_clobbered_and_is_rejected_before_api_call", ExistingOutputAsync),
             new("test_required_configuration_and_absolute_output_are_fatal", BadInvocationAsync),
             new("zip_codec_acceptance_and_decodable_method_9_rejection", CodecAcceptanceAsync),
+            new("restore_skips_candidates_with_inconsistent_zip_metadata", InconsistentZipMetadataFallbackAsync),
+            new("zip_reader_index_error_marks_candidate_invalid", ZipReaderIndexErrorAsync),
             new("timing_json_and_archive_boundaries", InputBoundariesAsync),
             new("exclusive_output_ownership_and_partial_write_cleanup", OutputOwnershipAsync),
             new("gh_process_runner", GhProcessContracts.RunAsync)
@@ -204,7 +211,7 @@ internal static class CoverageScheduleHistoryContracts
             [ArtifactsEndpoint(4)] = Artifacts()
         };
 
-        var result = await InvokeAsync(Path.Combine(temporary.Path, "none", "timings.json"), responses);
+        var result = await InvokeAsync(Path.Join(temporary.Path, "none", "timings.json"), responses);
 
         Equal(0, result.ExitCode, "exit code");
         Contains("no valid coverage schedule timings artifact", result.StandardError, "exhausted-history warning");
@@ -222,7 +229,7 @@ internal static class CoverageScheduleHistoryContracts
         const string repository = "forge-trust/AppSurface";
         var runsEndpoint = RunsEndpointFor(repository, branch);
         var result = await InvokeAsync(
-            Path.Combine(temporary.Path, "none", "timings.json"),
+            Path.Join(temporary.Path, "none", "timings.json"),
             new Dictionary<string, byte[]>
             {
                 [runsEndpoint] = Runs(
@@ -245,21 +252,25 @@ internal static class CoverageScheduleHistoryContracts
     private static async Task MissingRunFieldsAsync()
     {
         using var temporary = NewTemporaryDirectory();
-        var records = new[]
-        {
-            RunRecord(90, includeEvent: false),
-            RunRecord(89, eventName: null),
-            RunRecord(88, includeHeadRepository: false),
-            RunRecord(87, nullHeadRepository: true),
-            RunRecord(86, headRepository: new Dictionary<string, object?> { ["full_name"] = null }),
-            RunRecord(85, headRepository: new Dictionary<string, object?>()),
-            RunRecord(1)
-        };
+        var missingEvent = RunRecord(90);
+        missingEvent.Remove("event");
+        var nullEvent = RunRecord(89);
+        nullEvent["event"] = null;
+        var missingRepository = RunRecord(88);
+        missingRepository.Remove("head_repository");
+        var nullRepository = RunRecord(87);
+        nullRepository["head_repository"] = null;
+        var nullName = RunRecord(86);
+        nullName["head_repository"] = new Dictionary<string, object?> { ["full_name"] = null };
+        var missingName = RunRecord(85);
+        missingName["head_repository"] = new Dictionary<string, object?>();
+
         var result = await InvokeAsync(
             Path.Combine(temporary.Path, "none", "timings.json"),
             new Dictionary<string, byte[]>
             {
-                [RunsEndpoint] = Runs(records),
+                [RunsEndpoint] = Runs(
+                    missingEvent, nullEvent, missingRepository, nullRepository, nullName, missingName, RunRecord(1)),
                 [ArtifactsEndpoint(1)] = Artifacts()
             });
 
@@ -578,8 +589,9 @@ internal static class CoverageScheduleHistoryContracts
         var directoryResult = await InvokeAsync(
             directoryOutput,
             UnexpectedRequest,
-            environment: new Dictionary<string, string?>());
+            environment: DefaultEnvironment());
         Equal(2, directoryResult.ExitCode, "directory destination exit code");
+        Contains("already exists", directoryResult.StandardError, "occupied directory diagnostic");
         Equal(0, directoryResult.Requests.Count, "directory destination request count");
         Check(Directory.Exists(directoryOutput), "The occupied destination directory was removed.");
 
@@ -588,8 +600,9 @@ internal static class CoverageScheduleHistoryContracts
         var linkResult = await InvokeAsync(
             danglingLink,
             UnexpectedRequest,
-            environment: new Dictionary<string, string?>());
+            environment: DefaultEnvironment());
         Equal(2, linkResult.ExitCode, "dangling symlink exit code");
+        Contains("already exists", linkResult.StandardError, "dangling symlink diagnostic");
         Equal(0, linkResult.Requests.Count, "dangling symlink request count");
         Check(PathExists(danglingLink), "The dangling symlink was removed.");
 
@@ -924,6 +937,58 @@ internal static class CoverageScheduleHistoryContracts
         }
     }
 
+    private static Task ZipReaderIndexErrorAsync()
+    {
+        using var archive = new FaultingZipStream(MakeZip(new("timings.json", ReadCanonicalFixture())));
+        try
+        {
+            CoverageHistoryData.ReadArchive(archive);
+        }
+        catch (InvalidDataException error) when (error.InnerException is IndexOutOfRangeException)
+        {
+            return Task.CompletedTask;
+        }
+
+        throw new InvalidDataException("Expected a ZIP reader index error to invalidate the candidate.");
+    }
+
+    private static async Task InconsistentZipMetadataFallbackAsync()
+    {
+        var expected = ReadCanonicalFixture();
+        var older = MakeZip(new("timings.json", expected));
+        var newer = MakeZip(new("timings.json", TimingBytes("Example.csproj", 7), CompressionLevel.NoCompression));
+        var directory = FindSignature(newer, "PK\x01\x02"u8);
+        var localName = FindSignature(newer, "timings.json"u8);
+
+        // Each copy has one bit of metadata damage. The stored timing payload stays intact.
+        foreach (var (field, offset, bit) in new[]
+        {
+            ("local filename case", localName, 0x20),
+            ("directory compression method", directory + 10, 0x08),
+            ("directory uncompressed size", directory + 24, 0x01),
+            ("directory CRC", directory + 16, 0x01)
+        })
+        {
+            using var temporary = NewTemporaryDirectory();
+            var output = Path.Combine(temporary.Path, "timings.json");
+            var damaged = (byte[])newer.Clone();
+            damaged[offset] ^= (byte)bit;
+            var result = await InvokeAsync(output, new Dictionary<string, byte[]>
+            {
+                [RunsEndpoint] = Runs(RunRecord(8)),
+                [ArtifactsEndpoint(8)] = Artifacts(Artifact(18), Artifact(17)),
+                [DownloadEndpoint(18)] = damaged,
+                [DownloadEndpoint(17)] = older
+            });
+
+            Equal(0, result.ExitCode, field + " exit code");
+            Equal(string.Empty, result.StandardError, field + " stderr");
+            SequenceEqual([RunsEndpoint, ArtifactsEndpoint(8), DownloadEndpoint(18), DownloadEndpoint(17)],
+                Endpoints(result), field + " fallback request order");
+            BytesEqual(expected, File.ReadAllBytes(output), field + " restored bytes");
+        }
+    }
+
     private static async Task OutputOwnershipAsync()
     {
         var fixture = ReadCanonicalFixture();
@@ -1042,7 +1107,7 @@ internal static class CoverageScheduleHistoryContracts
                 requests.Add(request);
                 return Task.FromResult(responder(request));
             },
-            clock ?? TimeProvider.System,
+            clock ?? new ManualTimeProvider(),
             writeBytes);
 
         return new(result, stdout.ToString(), stderr.ToString(), requests);
@@ -1078,33 +1143,19 @@ internal static class CoverageScheduleHistoryContracts
         string status = "completed",
         string conclusion = "success",
         string createdAt = "2026-11-09T12:00:00Z",
-        string? eventName = "push",
-        object? headRepository = null,
-        bool includeEvent = true,
-        bool includeHeadRepository = true,
-        bool nullHeadRepository = false)
+        string eventName = "push",
+        string headRepository = Repository)
     {
-        var result = new Dictionary<string, object?>
+        return new Dictionary<string, object?>
         {
             ["id"] = id,
             ["head_branch"] = branch,
             ["status"] = status,
             ["conclusion"] = conclusion,
-            ["created_at"] = createdAt
+            ["created_at"] = createdAt,
+            ["event"] = eventName,
+            ["head_repository"] = new Dictionary<string, object?> { ["full_name"] = headRepository }
         };
-        if (includeEvent)
-        {
-            result["event"] = eventName;
-        }
-        if (includeHeadRepository)
-        {
-            result["head_repository"] = nullHeadRepository
-                ? null
-                : headRepository is string name
-                    ? new Dictionary<string, object?> { ["full_name"] = name }
-                    : headRepository ?? new Dictionary<string, object?> { ["full_name"] = Repository };
-        }
-        return result;
     }
 
     private static byte[] Artifacts(params Dictionary<string, object?>[] artifacts)

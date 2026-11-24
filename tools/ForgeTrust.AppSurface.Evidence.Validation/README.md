@@ -226,7 +226,8 @@ using the approved [exact SharpCompress 0.50.11 pin](https://github.com/forge-tr
 Its resolved [file-app package graph](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/packages.lock.json)
 contains no `net10.0` transitive package entries. The SharpCompress reader explicitly limits ZIP methods
 to the Python-supported set before decoding, so method 9 remains invalid. Stored and deflate archives remain
-supported, and the selected entry's CRC is checked before its original JSON bytes are accepted.
+supported. The local entry must match the selected directory entry's name, method and uncompressed
+size. The helper checks the decoded bytes against the directory entry's CRC before restoring them.
 
 Run the offline [contracts](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/contracts.cs)
 from the repository root with the SDK pinned by

@@ -4,6 +4,8 @@ using System.Text.Unicode;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
 using SharpCompress.Common;
+using SharpCompress.Providers;
+using SharpCompress.Providers.Default;
 using SharpCompress.Readers;
 
 /// <summary>
@@ -20,6 +22,11 @@ internal static class CoverageHistoryData
     private const int MaxProjects = 1000;
     private const int MaxProjectPathCodePoints = 4096;
     private const int MaxJsonDepth = 1000;
+    // Stored entries need no decoder. Restrict the decoder selected from the local header, too.
+    private static readonly CompressionProviderRegistry TimingDecoders = CompressionProviderRegistry.Empty
+        .With(new DeflateCompressionProvider())
+        .With(new BZip2CompressionProvider())
+        .With(new LzmaCompressingProvider());
 
     /// <summary>
     /// Parses bounded UTF-8 JSON with unique property names at every depth. Numeric ranges apply
@@ -57,28 +64,29 @@ internal static class CoverageHistoryData
     }
 
     /// <summary>
-    /// Reads exactly one non-directory, root-level <c>timings.json</c> entry without extracting files.
+    /// Reads exactly one non-directory, root-level <c>timings.json</c> entry from a caller-owned,
+    /// seekable ZIP stream without extracting files.
     /// The ZIP reader accepts stored, deflate, BZIP2, and LZMA entries, validates the selected entry's CRC
     /// and timing schema, then returns the entry's original bytes.
     /// </summary>
-    internal static byte[] ReadArchive(byte[] raw)
+    internal static byte[] ReadArchive(Stream archiveStream)
     {
-        if (raw is null)
+        if (archiveStream is null)
         {
             throw new InvalidDataException("ZIP archive is missing.");
         }
 
-        if (raw.Length > MaxArchiveBytes)
-        {
-            throw new InvalidDataException("ZIP archive exceeds its size limit.");
-        }
-
+        byte[] contents;
         try
         {
-            using var archiveStream = new MemoryStream(raw, writable: false);
+            if (archiveStream.Length > MaxArchiveBytes)
+            {
+                throw new InvalidDataException("ZIP archive exceeds its size limit.");
+            }
+
             using var archive = ZipArchive.OpenArchive(
                 archiveStream,
-                new ReaderOptions { LeaveStreamOpen = true });
+                new ReaderOptions { LeaveStreamOpen = true, Providers = TimingDecoders });
             IArchiveEntry? timingEntry = null;
 
             foreach (var entry in archive.Entries)
@@ -107,49 +115,56 @@ internal static class CoverageHistoryData
                 throw new InvalidDataException("ZIP must contain exactly one root timings.json.");
             }
 
-            if (timingEntry.CompressionType is not (
-                CompressionType.None or CompressionType.Deflate or CompressionType.BZip2 or CompressionType.LZMA))
-            {
-                throw new InvalidDataException("timings.json uses a ZIP compression method Python does not support.");
-            }
-
-            if (timingEntry.IsEncrypted)
-            {
-                throw new InvalidDataException("Encrypted ZIP entries are not supported.");
-            }
-
-            var contents = ReadEntry(timingEntry);
-            if (Crc32(contents) != unchecked((uint)timingEntry.Crc))
-            {
-                throw new InvalidDataException("ZIP timings.json CRC does not match.");
-            }
-
-            using var document = ReadJson(contents);
-            ValidateTimings(document.RootElement);
-            return contents;
+            contents = ReadEntry(timingEntry);
         }
         catch (InvalidDataException)
         {
             throw;
         }
-        catch (SharpCompressException exception)
+        catch (Exception exception) when (exception is SharpCompressException or IOException or
+            NotSupportedException or IndexOutOfRangeException)
         {
             throw new InvalidDataException("Invalid ZIP archive or timings entry.", exception);
         }
-        catch (IOException exception)
-        {
-            throw new InvalidDataException("Invalid ZIP archive or timings entry.", exception);
-        }
+
+        using var document = ReadJson(contents);
+        ValidateTimings(document.RootElement);
+        return contents;
     }
 
     private static byte[] ReadEntry(IArchiveEntry entry)
     {
+        // OpenEntryStream replaces SharpCompress's central header with the local header.
+        var method = entry.CompressionType;
+        var size = checked((int)entry.Size);
+        var crc = unchecked((uint)entry.Crc);
+        if (method != CompressionType.None && TimingDecoders.GetProvider(method) is null)
+        {
+            throw new InvalidDataException("timings.json uses a ZIP compression method Python does not support.");
+        }
+
+        if (entry.IsEncrypted)
+        {
+            throw new InvalidDataException("Encrypted ZIP entries are not supported.");
+        }
+
         using var entryStream = entry.OpenEntryStream();
-        var contents = new byte[checked((int)entry.Size)];
+        if (entry.Key != "timings.json" || entry.CompressionType != method || entry.IsEncrypted ||
+            entry.Size != size)
+        {
+            throw new InvalidDataException("ZIP timings.json local header does not match the selected entry.");
+        }
+
+        var contents = new byte[size];
         entryStream.ReadExactly(contents);
         if (entryStream.ReadByte() != -1)
         {
             throw new InvalidDataException("timings.json exceeds its declared size.");
+        }
+
+        if (Crc32(contents) != crc)
+        {
+            throw new InvalidDataException("ZIP timings.json CRC does not match.");
         }
 
         return contents;
