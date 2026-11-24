@@ -136,9 +136,15 @@ internal static class PostgreSqlCatalog
                         throw new InvalidOperationException("The PostgreSQL fixture lost its catalog advisory lock.");
                     }
                 }
-                catch when (!operationCompleted)
+                catch
                 {
-                    // Preserve the operation error when releasing the lock also fails.
+                    // A pooled session can retain the advisory lock until its next checkout.
+                    // Retire this maintenance pool so disposal closes the affected physical session.
+                    NpgsqlConnection.ClearPool(admin);
+                    if (operationCompleted)
+                    {
+                        throw;
+                    }
                 }
             }
         }

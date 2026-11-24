@@ -73,8 +73,13 @@ public sealed class PostgreSqlCatalogTests
     [SkippableFact]
     public async Task CatalogLock_PreservesSqlErrorWhenAbortedTransactionRejectsUnlock()
     {
-        var settings = PostgreSqlCatalog.MaintenanceConnectionString(await PostgreSqlTestServer.GetRequiredConnectionStringAsync());
-        await using var admin = new NpgsqlConnection(settings);
+        var settings = new NpgsqlConnectionStringBuilder(PostgreSqlCatalog.MaintenanceConnectionString(
+            await PostgreSqlTestServer.GetRequiredConnectionStringAsync()))
+        {
+            Pooling = true,
+            ApplicationName = PostgreSqlTestServer.NewPrefix("aborted_unlock"),
+        };
+        await using var admin = new NpgsqlConnection(settings.ConnectionString);
         await admin.OpenAsync();
         await using var transaction = await admin.BeginTransactionAsync();
 
@@ -88,6 +93,22 @@ public sealed class PostgreSqlCatalogTests
             CancellationToken.None));
 
         Assert.Equal(PostgresErrorCodes.DivisionByZero, error.SqlState);
+        await transaction.RollbackAsync();
+        await admin.CloseAsync();
+
+        // No connection rents the original pool again before this independent backend takes the lock.
+        settings.Pooling = false;
+        await using var probe = new NpgsqlConnection(settings.ConnectionString);
+        await probe.OpenAsync();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            await PostgreSqlCatalog.WithDatabaseCatalogLockAsync(probe, () => Task.CompletedTask, deadline.Token);
+        }
+        finally
+        {
+            NpgsqlConnection.ClearPool(admin);
+        }
     }
 
     [SkippableFact]
