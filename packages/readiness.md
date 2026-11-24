@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 67
-- Evidence status: manifest evidence complete: 44; transitive package evidence complete: 7; proof-host evidence complete: 2; public preview held from publishing: 2; excluded by publish decision: 12
-- Product families: AppSurface: 44; Forge Trust: 2; Internal support: 18; RazorWire: 3
+- Packages: 68
+- Evidence status: manifest evidence complete: 44; transitive package evidence complete: 7; proof-host evidence complete: 2; public preview held from publishing: 3; excluded by publish decision: 12
+- Product families: AppSurface: 45; Forge Trust: 2; Internal support: 18; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -44,6 +44,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Durable.GoogleCloudTasks` | public | publish | manifest evidence complete | Note: Each coordinated candidate requires packed public API and direct and transitive dependency isolation proof. Verify Google identity, IAM, effective queue routing, and delivery in the target deployment. | None | None | [README](../Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Durable.Testing` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | [README](../Durable/ForgeTrust.AppSurface.Durable.Testing/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.PostgreSql.Testing` | public | do not publish | public preview held from publishing | None | None | None | [README](../PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Durable.Templates` | public | publish | manifest evidence complete | None | None | None | [README](../Durable/ForgeTrust.AppSurface.Durable.Templates/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Dependency.Autofac` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Core` | `ForgeTrust.AppSurface.Core` | [README](../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) | [notes](../releases/current.md) |
 | Internal support | `AppSurfaceDurableWorker` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |

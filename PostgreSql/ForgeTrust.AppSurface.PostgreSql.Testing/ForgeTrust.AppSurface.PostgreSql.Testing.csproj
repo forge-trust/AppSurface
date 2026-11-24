@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageDescription>Owned disposable PostgreSQL databases and reusable schema templates for integration tests.</PackageDescription>
+    <PackageTags>appsurface;postgresql;testing;npgsql</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.PostgreSql.Testing.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Durable.PostgreSql.Tests" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+</Project>

@@ -447,6 +447,21 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
+  - project: PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/ForgeTrust.AppSurface.PostgreSql.Testing.csproj
+    release_guidance_variant: experimental
+    classification: public
+    publish_decision: do_not_publish
+    publish_reason: This trial package remains unpublished until its trial report is reviewed and public publication is explicitly authorized.
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 50
+    use_when: Add this to PostgreSQL integration-test projects that need owned disposable databases and reusable schema templates without adopting a particular test framework.
+    includes: OID-verified database ownership, reusable templates and physical clones, cluster initialization locks, retryable database cleanup, and bounded process-exit cleanup.
+    does_not_include: A test framework, EF Core, application-owned schema or migration behavior, the Durable PostgreSQL provider, or production database provisioning.
+    start_here_path: PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.PostgreSql.Testing` to framework-agnostic integration tests that need disposable PostgreSQL databases or reusable schema templates. This trial package is source-only while publication remains held for trial review.
   - project: Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj
     release_guidance_variant: default
     classification: public
