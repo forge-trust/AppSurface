@@ -175,7 +175,7 @@ public sealed class PostgreSqlFixture
                 {
                     await template.Database.DisposeAsync();
                 }
-                catch (Exception cleanupError)
+                catch (Exception cleanupError) when (!IsFatalCleanupException(cleanupError))
                 {
                     throw new PostgreSqlDatabaseCleanupException(template.Database, cleanupError, initializationError);
                 }
@@ -354,6 +354,12 @@ public sealed class PostgreSqlFixture
             throw new ArgumentException("Database name prefixes may only contain ASCII letters, digits, and underscores.", argumentName);
         }
     }
+
+    /// <summary>Identifies CLR exceptions that must propagate directly from template cleanup.</summary>
+    /// <param name="exception">The cleanup exception to classify.</param>
+    /// <returns><see langword="true"/> when the exception represents a fatal CLR condition.</returns>
+    internal static bool IsFatalCleanupException(Exception exception) =>
+        exception is OutOfMemoryException or StackOverflowException or AccessViolationException;
 
     // Lifecycle methods are called under the fixture gate. Preparation is shared independently of individual waiters.
     private sealed class Template(string connection, string prefix)
