@@ -62,6 +62,15 @@ internal static class RepositoryEvidenceWorkflow
 
         var output = Path.GetFullPath(Required(options, "--output"));
         if (Directory.Exists(output) || File.Exists(output)) throw new ArgumentException("Evidence output must be fresh.");
+        var nativeCoverageDirectory = options.GetValueOrDefault("--native-coverage-directory");
+        var nativeCoverageContractVersion = 2;
+        if (options.TryGetValue("--native-coverage-contract-version", out var nativeContract))
+        {
+            if (string.IsNullOrWhiteSpace(nativeCoverageDirectory) || nativeContract is not ("2" or "3")
+                || !plan.Profile.Producers.Any(producer => producer.Id == "solution-coverage"))
+                throw new ArgumentException("Select native coverage contract 2 or 3 only for a selected solution coverage producer with native captures.");
+            nativeCoverageContractVersion = nativeContract == "3" ? 3 : 2;
+        }
         ValidationSettings? settings = null;
         RepositoryCheckSettings? checks = null;
         if (operation == "run" && plan.Profile.Producers.Count > 0)
@@ -76,7 +85,6 @@ internal static class RepositoryEvidenceWorkflow
                     throw new ArgumentException("The selected coverage CLI must be an existing absolute executable.");
                 coverageCli = Path.GetFullPath(selectedCoverageCli);
             }
-            var nativeCoverageDirectory = options.GetValueOrDefault("--native-coverage-directory");
             if (!string.IsNullOrWhiteSpace(nativeCoverageDirectory) && coverageCli is null)
                 throw new ArgumentException("Native coverage requires --coverage-cli with the installed candidate executable.");
             if (RequiresPackage(plan.Profile))
@@ -86,6 +94,7 @@ internal static class RepositoryEvidenceWorkflow
             checks = new RepositoryCheckSettings(repository, dotnet, output,
                 options.GetValueOrDefault("--diff-base"), nativeCoverageDirectory, options.GetValueOrDefault("--diff-file"), coverageCli)
             {
+                NativeCoverageContractVersion = nativeCoverageContractVersion,
                 VerifyLocalSourceAsync = verifyLocalSourceAsync,
                 CoverageCollectionDirectory = options.GetValueOrDefault("--coverage-collection"),
                 CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
@@ -101,7 +110,8 @@ internal static class RepositoryEvidenceWorkflow
             hasProducers = plan.Profile.Producers.Count > 0,
             requiresCoverage = plan.Profile.Producers.Any(producer => producer.Id == "solution-coverage"),
             requiresNativeCoverage = rootPlan.Profile.Producers.Any(producer => producer.Id == "solution-coverage")
-                && rootPlan.Profile.Producers.Any(producer => producer.Id != "solution-coverage"),
+                && rootPlan.Profile.Producers.Any(producer => producer.Id != "solution-coverage")
+                && !IsToolManifestOnlyChange(rootPlan.ChangedPaths),
             requiresPackageChecks = plan.Profile.Producers.Any(producer => producer.Id == "package-checks"),
             producerIds = plan.Profile.Producers.Select(producer => producer.Id).ToArray(),
         }, Program.JsonOptions), cancellationToken);
@@ -172,31 +182,12 @@ internal static class RepositoryEvidenceWorkflow
             foreach (var artifact in producer.Artifacts ?? [])
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var relative = EvidenceArtifactValidation.NormalizeRelativePath(artifact.RelativePath);
-                var root = Path.GetFullPath(artifactRoot);
-                var components = new[] { producer.ProducerId }.Concat(relative.Split('/'));
-                var path = root;
-                RejectLink(path);
-                foreach (var component in components)
-                {
-                    path = Path.Join(path, component);
-                    RejectLink(path);
-                }
-                await using var stream = File.OpenRead(path);
-                ValidationProof.Require(stream.Length == artifact.LengthBytes, "retained artifact length");
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                var buffer = new byte[64 * 1024];
-                long length = 0;
-                int read;
-                while ((read = await stream.ReadAsync(buffer, cancellationToken)) != 0)
-                {
-                    length += read;
-                    ValidationProof.Require(length <= artifact.LengthBytes, "bounded retained artifact");
-                    hash.AppendData(buffer, 0, read);
-                }
-                ValidationProof.Require(length == artifact.LengthBytes
-                    && string.Equals(Convert.ToHexString(hash.GetHashAndReset()), artifact.Sha256, StringComparison.OrdinalIgnoreCase),
-                    "retained artifact digest");
+                var status = await EvidenceArtifactFileValidation.CheckAsync(artifactRoot, producer.ProducerId, artifact, cancellationToken);
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.InvalidPath, "normalized retained artifact path");
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.Linked, "unlinked retained artifact path");
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.Missing, "retained artifact present");
+                ValidationProof.Require(status != EvidenceArtifactFileStatus.LengthMismatch, "retained artifact length");
+                ValidationProof.Require(status == EvidenceArtifactFileStatus.Valid, "retained artifact digest");
             }
         }
     }
@@ -222,11 +213,26 @@ internal static class RepositoryEvidenceWorkflow
         return EvidenceCanonicalJson.Deserialize<T>(Encoding.UTF8.GetBytes(json.RootElement.GetRawText()));
     }
 
-    private static void RejectLink(string path) => ValidationProof.Require(!File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint), "unlinked retained artifact path");
-
     /// <summary>Whether the selected profile needs the separately packed CLI used by native acceptance journeys.</summary>
     internal static bool RequiresPackage(EvidenceProfile profile) =>
         profile.Producers.Any(producer => producer.Id is "packed-storage" or "installed-consumer");
+
+    /// <summary>
+    /// Identifies an existing local tool manifest update with optional new, direct Markdown release entries.
+    /// Only the native coverage supplement is omitted; all selected producers and direct coverage gates remain required.
+    /// Renames, deletions and any other changed path retain native coverage, including either name of a rename.
+    /// </summary>
+    private static bool IsToolManifestOnlyChange(IReadOnlyList<NormalizedDiffPath> paths)
+    {
+        const string manifest = ".config/dotnet-tools.json";
+        const string entries = "releases/unreleased.entries/";
+        return paths.Any(path => path.Path == manifest && path.Kind == "modified" && path.PreviousPath is null)
+            && paths.All(path => path.PreviousPath is null
+                && ((path.Path == manifest && path.Kind == "modified")
+                    || (path.Kind == "added" && path.Path.StartsWith(entries, StringComparison.Ordinal)
+                        && path.Path.EndsWith(".md", StringComparison.Ordinal)
+                        && !path.Path[entries.Length..].Contains('/'))));
+    }
 
     /// <summary>Projects a validated shared policy into one execution lane without reclassifying changed paths.</summary>
     internal static EvidencePlan ResolveScope(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> paths, string scope)
@@ -273,7 +279,7 @@ internal static class RepositoryEvidenceWorkflow
         string[] selected = operation switch
         {
             "plan" => ["--output"],
-            "run" => ["--plan", "--output", "--package", "--version", "--source-commit", "--dotnet", "--scratch-parent", "--repository", "--diff-base", "--diff-file", "--native-coverage-directory", "--coverage-cli", "--coverage-collection", "--coverage-schedule-timings"],
+            "run" => ["--plan", "--output", "--package", "--version", "--source-commit", "--dotnet", "--scratch-parent", "--repository", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--coverage-collection", "--coverage-schedule-timings"],
             _ => ["--plan", "--manifest", "--artifact-root"],
         };
         if (options.Keys.Except(common.Concat(selected), StringComparer.Ordinal).Any())

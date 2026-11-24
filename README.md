@@ -11,500 +11,87 @@
 [![Security Policy](https://img.shields.io/badge/security-private%20reporting-2ea44f?logo=github)](./SECURITY.md)
 [![License](https://img.shields.io/badge/license-Polyform%20Small%20Business-blue)](./licensing.md)
 
-> ⚠️ **Under Construction:** This library is actively being developed and is not intended for production use yet.
-> Monorepo for the ForgeTrust.AppSurface projects
+AppSurface is a family of .NET 10 libraries and tools you can adopt one capability at a time.
+You might use [RazorWire](./Web/ForgeTrust.RazorWire/README.md) to update part of an MVC page after a form
+submission, or add the [coverage CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)
+to your repository's tool manifest to collect one report across your test projects.
 
-ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a lightweight, modular startup pipeline for both console and web applications.
+## Why we're building AppSurface
 
-If you are deciding which package to install first, start with the [AppSurface package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
-For cross-release Docs identity, authoring, publication, and recovery, use the [concept-preserving version-switching guide](./guides/version-switching.md).
-If your CI gate should distinguish an explicit low-risk change from an incomplete test run, start with the [EvidenceHost guide](./start-here/evidencehost.md).
-For bounded HTTP readiness in tests, see the [EvidenceHost readiness choices](./start-here/evidencehost.md#aspire-http-readiness).
+We want coding agents to be able to follow your team's conventions, and we want you to be able to check their
+work. A good place for a convention is in the repository, where it survives the end of a chat. For example,
+the [Durable worker starter](./start-here/durable-worker.md) gives you C# you own and a test that submits a job
+and checks its result. The next person or agent adding a job has a working example to follow.
 
-For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
-[executable provider proof](examples/config-key-contract/README.md), and
-[coordinated upgrade guide](guides/config-key-migration.md).
-For names-only environment candidate planning and caller-owned source policy, see the
-[environment inspection quickstart](guides/config-logical-keys.md#environment-candidate-inspection)
-and its [packed package consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
-If a shared typed wrapper lives in a Domain assembly outside normal module
-discovery, use the [three-step explicit registration example](Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
-and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
+When tests miss a changed line, the [coverage gate](./Cli/ForgeTrust.AppSurface.Cli/README.md#agent-actionable-patch-targets)
+can report its path and line number in both JSON and Markdown. An agent can go straight to that line to write
+a test. In review, you can open the same code and judge whether the test exercises the case you care about.
 
-For a connected Durable store, use the [non-mutating runtime doctor](./Durable/runtime-doctor.md) to inspect schema, epoch, retention capability and an optional selected heartbeat. Its clean result hands off to application composition verification.
+## Choose a starting point
 
-For Durable executors that need current domain authorization before a provider effect, see the
-[PostgreSQL application handoff fence](Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#prepare-an-application-handoff).
+The [package chooser](./packages/README.md) lists what to install for each job, what comes with it, and which
+packages are in preview. Use AppSurface for evaluation while it is under development. Before upgrading,
+check the [release notes](./releases/README.md) and the [pre-1.0 upgrade policy](./releases/upgrade-policy.md).
 
-## Vision
+- [Add AppSurface to a web app](./start-here/first-success-path.md#package-first-path). Start with a fresh
+  ASP.NET Core project and map a route. For an existing service, the [module guide](./start-here/should-i-use-appsurface.md)
+  helps you decide which setup to keep in `Program.cs`.
+- [Use your existing authorization policies](./start-here/auth-adoption-ladder.md). Switch personas in the
+  [Auth and RazorWire example](./examples/auth-web-razorwire-proof/README.md) to see how one ASP.NET Core
+  policy determines both the API response and what the page shows.
+- [Run background work with PostgreSQL](./start-here/durable-worker.md). Generate a worker, submit its first
+  job, and inspect the saved result.
+- [Publish docs from a repository](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md). Serve Markdown
+  guides alongside API reference generated from source.
+- [Choose CI checks based on what changed](./start-here/evidencehost.md). EvidenceHost can explain which
+  checks a change needs before you run them. AppSurface uses the
+  [same policy locally and in CI](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json).
 
-The primary vision of AppSurface is to simplify application bootstrapping by encouraging **composition through small, focused modules**. Instead of monolithic startup classes or scattered configuration logic, AppSurface allows developers to encapsulate features into reusable modules that handle:
+The [examples directory](./examples/README.md) also has a [console command](./examples/console-app/README.md),
+an [Aspire AppHost](./examples/aspire-apphost/README.md), and a
+[flow that waits for approval](./examples/flow-approval-local/README.md).
 
--   Dependency Injection (DI) registration
--   Host configuration
--   Application-specific startup logic
+## Run the web example
 
-This approach aims to:
--   **Share cross-cutting concerns** between different application types (e.g., sharing logging or database setup between a Web API and a background Console worker).
--   **Keep applications minimal**, with infrastructure heavily decoupled from business logic.
--   **Provide consistency** in how applications are initialized and configured, regardless of whether they are web or console apps.
+An [AppSurface module](./ForgeTrust.AppSurface.Core/README.md) gives startup code a home when several apps
+need the same behavior. A web API and a console worker, for example, can share the
+[module that configures OpenTelemetry](./Observability/ForgeTrust.AppSurface.Observability/README.md).
+A web module can also add routes of its own.
 
-## Key Design Goals
-
-1.  **Modularity**: Everything should be a module that does one thing well. Take what you need and don't get burdened by what you don't.
-2.  **Consistency**: A unified `AppSurfaceStartup` pipeline for different project types.
-3.  **Flexibility**: Open for integration with external libraries (Autofac, OpenApi, etc.) and stick to framework provided abstractions where possible.
-4.  **Performance**: Designed to have minimal overhead on the application startup and execution.
-5.  **Ease of Use**: Simple APIs and clear patterns to make getting started frictionless.
-6.  **Convention over Configuration**: Sensible defaults are provided so only minimal configuration is required.
-7.  **Secure By Default**: Security best practices are applied automatically where appropriate.
-
-## Caching Conventions
-
-- Use `IMemo` for application and service-layer caching (for example, web modules and domain services).
-- Use direct `IMemoryCache` only inside caching infrastructure (the `ForgeTrust.AppSurface.Caching` package) or framework integration points where `IMemo` cannot be injected.
-- If a module depends on `AppSurfaceCachingModule`, do not call `AddMemoryCache()` again in that module.
-- Prefer one cache boundary per data snapshot. In AppSurface Docs, `DocAggregator` owns both docs aggregation and search-index payload caching so downstream controllers consume one shared snapshot.
-
-
-## Project Structure
-
-### [Packages](./packages/README.md)
-
-- [**AppSurface package chooser**](./packages/README.md) - the generated install map for direct-install packages, support/runtime packages, and proof-host surfaces.
-
-### [Core](./ForgeTrust.AppSurface.Core/README.md)
-
-- [**ForgeTrust.AppSurface.Core**](./ForgeTrust.AppSurface.Core/README.md) – Core abstractions for defining modules, starting an application via `AppSurfaceStartup` and `StartupContext`, running AppSurface-owned process workflows, and constructing lexically contained filesystem paths.
-
-### [Auth](./Auth/ForgeTrust.AppSurface.Auth/README.md)
-
-- [**AppSurface Auth adoption ladder**](./start-here/auth-adoption-ladder.md) - Start here when you need to choose between host-owned ASP.NET Core auth, AppSurface Auth contracts, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces.
-- [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, durable external-subject to app-user-id mapping contracts, transition-bound delegated-agent approval contracts, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
-- [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
-- [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-by-default selectable persona auth for local/proof AppSurface policy proofs, with a visible control page, optional request-scoped awaited fixture activation, safe landing targets, an embeddable marker, explicit environment opt-in, and no production identity-provider behavior.
-- [**ForgeTrust.AppSurface.Auth.AspNetCore.Oidc**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) – ASP.NET Core cookie + OIDC convenience registration with explicit AppSurface scheme names, conservative token defaults, passive prompt helpers, and safe diagnostics without silent default-scheme takeover or identity-provider ownership.
-- [**ForgeTrust.AppSurface.Auth.Aspire.Keycloak**](./Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) – AppHost-only local Keycloak proof for real AppSurface OIDC sign-in, with deterministic realm import, a cached finite `RealmReady` gate, ordered consumer-owned local seed projects with scoped typed-secret bindings, secret-safe web projection, fixed-port diagnostics, and no runtime web dependency on Keycloak packages.
-- [**ForgeTrust.AppSurface.Auth.Testing**](./Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) – Test-only ASP.NET Core harness for deterministic AppSurface auth personas, WebApplicationFactory integration tests, canonical auth result assertions, and ProblemDetails checks without becoming production authentication or Dev Auth.
-
-### [Intelligence](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md)
-
-- [**ForgeTrust.AppSurface.Intelligence**](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) - Product-intelligence event contracts, lifecycle metadata, privacy validation, and host-owned sink hooks for forwarding sanitized AppSurface product events to systems such as PostHog without taking a vendor dependency.
-
-### [Observability](./Observability/README.md)
-
-- [**ForgeTrust.AppSurface.Observability**](./Observability/ForgeTrust.AppSurface.Observability/README.md) – Application-side OpenTelemetry logging, tracing, and metrics registration for Aspire or another OTLP collector.
-
-### [Flow](./Flow/README.md)
-
-- [**ForgeTrust.AppSurface.Flow**](./Flow/ForgeTrust.AppSurface.Flow/README.md) – Typed long-running process contracts, generated-case authoring, graph validation, definition registry, and an in-memory runner for local tests and hello-world flows.
-- [**ForgeTrust.AppSurface.Flow.DurableTask**](./Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md) – Durable Task adapter boundary with runner/client services, resume-event authorization, timeout, late-event and retry behavior, and context serialization validation.
-
-### [Durable](./Durable/README.md)
-
-- [**Durable worker start guide**](./start-here/durable-worker.md) – installs the public-preview ForgeTrust.AppSurface.Durable.Templates package, generates a standalone .NET 10 PostgreSQL external-activation host, and runs the four-checkpoint first-Work proof. The generated project is application-owned and requires manual upgrades.
-- [**ForgeTrust.AppSurface.Durable**](./Durable/ForgeTrust.AppSurface.Durable/README.md) – Public-preview contracts for portable Work, resumable Flow, schedules, payloads, registration, and clients without installing a runtime. Use [typed Work definitions](./Durable/migrations/typed-work-definitions-v1.md) to share contract facts between registration and requests.
-- [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, controlled repair, and verified Flow-retention lifecycle contracts.
-- [**ForgeTrust.AppSurface.Durable.CloudTasks**](./Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md) – Optional GCP-specific, payload-free named task creation adapter for existing Durable external-activation hosts; token source and worker OIDC identity are explicit, and receipts report creation evidence only. See the [approved design](./docs/designs/issue-892-cloudtasks-activation-transport.md) for the ownership decisions.
-- [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Public-preview PostgreSQL provider for passive storage registration, explicit schema management, atomic Work acceptance, manually driven Flow persistence, [Work-first Schedule storage](./Durable/schedule-protocol-v1.md), and verified per-Flow retention; hosted processing requires an explicit `AddWorkerHost()` opt-in.
-
-For bounded cleanup of old PostgreSQL runtime heartbeat identities and the complete reviewed-manifest preflight, use the [schema-11 retention and deployment guide](./Durable/heartbeat-retention-operations.md). Activation requires distinct credential evidence for every pair and the staged candidate/public/deployment receipts described there.
-
-The Durable packages are coordinated public previews. The [Durable operational-assessment adoption guide](./Durable/operational-assessments.md) is the task-oriented entry point for existing-host upgrades, the four-kind admission contract, schema/role rollout, diagnostics, and rollback. The [Slice 7 discovery and reconciliation guide](./Durable/README.md#slice-7-discovery-and-reconciliation) documents schema ownership, the `durable schema` command family, and the local proof boundary; production support remains outside the preview contract.
-
-### [Console](./Console/README.md)
-
-- [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx), source-generated command descriptors, a `CriticalService`-based command runner, and helpers for configuring services.
-
-### [Web](./Web/README.md)
-
-- [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes the [shared semantic theme-pair quickstart](./Web/ForgeTrust.AppSurface.Web/README.md#theme-pairs-quickstart), [browser-local presentation preferences with one canonical document](./Web/ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences), [host-owned selection of registered theme pairs](./Web/ForgeTrust.AppSurface.Web/README.md#host-owned-theme-selection), [protected preview named deploy canary evaluation and bounded snapshots](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
-- [**ForgeTrust.AppSurface.Web.Push**](./Web/ForgeTrust.AppSurface.Web.Push/README.md) – Optional protected Web Push subscription and one-attempt delivery rail with app-owned custody, explicit cookie-antiforgery or bearer mapping, exact push-service origin allowlisting, and safe terminal cleanup.
-- [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
-- [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps, including [nested form collections](./Web/ForgeTrust.RazorWire/Docs/form-interactions.md#nested-collections-and-index-tokens).
-- [**ForgeTrust.RazorWire.Auth.AspNetCore**](./Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) – ASP.NET Core adapter for RazorWire auth projection helpers, delegating rendered UI state to host-owned AppSurface policy evaluation without adding auth schemes, redirects, or endpoint enforcement.
-- [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, optional published-version archive surfaces, [retargetable exact-release aliases](./Web/ForgeTrust.AppSurface.Docs/README.md#version-aliases), [metadata-driven recommended next reads](./Web/ForgeTrust.AppSurface.Docs/README.md#recommended-next-reads), and [concept-preserving version switching](./Web/ForgeTrust.AppSurface.Docs/README.md#concept-switch-artifacts). The [consumer guide](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md) covers a [three-page next-read example](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#build-a-three-page-next-read-example) and [independently configured named Docs products](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) with separate source, route, branding, and authorization boundaries; the [version-switching guide](./guides/version-switching.md) walks through authoring and legacy release adoption.
-- [**ForgeTrust.AppSurface.Docs.Standalone**](./Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) – Thin export host for exporting or serving AppSurface Docs as an application.
-- [**ForgeTrust.AppSurface.Web.Scalar**](./Web/ForgeTrust.AppSurface.Web.Scalar/README.md) – Optional module that serves the Scalar API reference UI when both Scalar and OpenAPI exposure gates allow it.
-
-### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
-
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, [`appsurface deployment gcp-cloud-run observe-execution`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-deployment-gcp-cloud-run-observe-execution) exact read-only Cloud Run execution observation, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` local threshold enforcement, [`appsurface coverage fan-in`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-fan-in) source/run-bound capture, composition, acceptance and independent verification, and [`appsurface coverage storage`](./guides/coverage-storage.md) history, warning, pin, restore, and cleanup controls.
-
-### [EvidenceHost](./start-here/evidencehost.md)
-
-- [**EvidenceHost guide**](./start-here/evidencehost.md) – Contract-first changed-risk planning so CI can require meaningful coverage or E2E evidence without turning an intentionally low-risk change or an incomplete test profile into a misleading coverage claim.
-- [**Repository EvidenceHost acceptance**](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) – AppSurface's own solution coverage, package checks, packed CLI and installed-consumer journeys, selected locally and in CI by the same checked-in policy and gated on verified manifests. Start with the [local evidence command](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) for current branch and working-tree changes.
-- [**ForgeTrust.AppSurface.Evidence.Contracts**](./Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) – Versioned plans, producers, manifests, claims, and canonical digest verification.
-- [**ForgeTrust.AppSurface.Evidence.Planner**](./Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) – Deterministic explicit-diff policy resolution with conservative fallback and ambiguity rejection.
-- [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate, explicit consumer-owned lifecycle for Aspire readiness and browser/E2E producers; it is never mixed into normal application startup.
-
-### [Dependency](./Dependency/README.md)
-
-- [**ForgeTrust.AppSurface.Dependency.Autofac**](./Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) – Optional integration with the Autofac IoC container so modules can participate in Autofac service registration.
-
-### [Aspire](./Aspire/README.md)
-
-- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, reusable Aspire components, and native publish/verification integration for explicitly annotated resources.
-- [Aspire repository-relative assets](./Aspire/ForgeTrust.AppSurface.Aspire/README.md#repository-relative-assets) – Resolve checked-out asset paths independently of process working directory and test output.
-- [**ForgeTrust.AppSurface.Aspire.Testing**](./Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) – Typed profile testing with per-call pre-activation hooks; see its [configured graph-only proof](./Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#configured-graph-only-proof).
-- [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Test/CI-only explicit EvidenceHost lifecycle for consumer-owned Aspire readiness and E2E producers, separate from the normal AppHost.
-
-### [Deployment](./Deployment/README.md)
-
-- [**ForgeTrust.AppSurface.Deployment**](./Deployment/ForgeTrust.AppSurface.Deployment/README.md) – Portable, schema-versioned deployment intent, validation, diagnostics, deterministic serialization, and provider contracts with no Aspire or cloud dependency.
-- [**ForgeTrust.AppSurface.Deployment.GcpCloudRun**](./Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) – Deterministic Cloud Run migration-job Terraform/evidence compilation, read-only shadow or owned parity verification, and exact execution observation.
-
-These packages are designed to work together so that features can be shared
-across different application types while maintaining a consistent startup
-approach.
-
-## Getting started
-
-If you want to see value first, run the web hello world:
+To see a module in a running app, clone this repository and install the .NET SDK version pinned in
+[global.json](https://github.com/forge-trust/AppSurface/blob/main/global.json). From the repository root, run the
+[web example](./examples/web-app/README.md).
 
 ```bash
 dotnet run --project examples/web-app -- --port 5055
 ```
 
-Then, from another terminal, prove the running endpoint:
+In another terminal, request the route the app defines in `Program.cs`, then the route that
+[ExampleModule](https://github.com/forge-trust/AppSurface/blob/main/examples/web-app/ExampleModule.cs) adds.
 
-```bash
-curl http://127.0.0.1:5055
-```
-
-Expected response:
-
-```text
+```console
+$ curl http://127.0.0.1:5055
 Hello World from the root!
+$ curl http://127.0.0.1:5055/module
+Hello from the example module!
 ```
 
-That example is the smallest concrete path through `ForgeTrust.AppSurface.Web`: a root module, one mapped endpoint, and the AppSurface startup pipeline doing the hosting work.
-
-To verify the browser/API error-page contract instead, run the focused proof:
-
-```bash
-bash examples/web-error-pages/verify.sh
-```
-
-That proof starts a local production-mode web app, checks conventional browser `401`, `403`, `404`, and `500` pages, and verifies API requests do not receive surprise browser HTML.
-
-If you are evaluating packages from your own app project rather than running this repo, use the [package-first path](./start-here/first-success-path.md#package-first-path) to create a fresh ASP.NET Core app, install `ForgeTrust.AppSurface.Web`, and verify the first route. Run the package command from the app project directory, or pass the project path explicitly. The generated package chooser in [packages/README.md](./packages/README.md) is the install map for picking optional modules after that first proof.
-
-```bash
-dotnet package add ForgeTrust.AppSurface.Web
-```
-
-Add optional modules only when the generated chooser points you to them.
-
-If you need a composed product-shaped proof instead of a single package slice, run the [product-readiness lab](./examples/product-readiness-lab/README.md):
-
-```bash
-dotnet run --project examples/product-readiness-lab/ProductReadinessLab.csproj -- --report
-```
-
-That fast command emits a no-infrastructure readiness report. To exercise every row the local lab can prove, including Postgres-backed product-state persistence, run the AppHost verifier:
-
-```bash
-aspire run --non-interactive --apphost examples/product-readiness-lab-apphost/ProductReadinessLabAppHost.csproj -- verify
-```
-
-The lab emits a readiness report with `proven-locally`, `host-owned`, `deferred`, `unsafe-to-copy`, and `blocked` rows. Its in-process host proof shows where `IDurableTaskFlowRunner<TContext>` and `IDurableTaskFlowClient<TContext>` fit, while keeping Durable Task worker/client hosting and storage provider setup explicitly host-owned.
-
-For contributor verification, install the **10.0.402** SDK pinned by [`global.json`](https://github.com/forge-trust/AppSurface/blob/main/global.json), then build the solution. The [contributor setup guide](./CONTRIBUTING.md#local-setup) explains SDK selection and the matching isolated CI toolchain.
-
-```bash
-dotnet build
-dotnet test --no-build
-```
-
-Plan and run the evidence selected for the current branch and working tree:
-
-```bash
-dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local-plan
-dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local
-```
-
-The shared [repository evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) selects solution coverage,
-package checks and native acceptance locally and in CI. Use `--scope coverage` to execute only the
-coverage projection of the plan or `--scope packages` for package validation. Explicit documentation
-exemptions avoid these producers; unknown inputs select the conservative set. The
-[repository evidence reference](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#shared-policy-and-ci)
-documents the producers, prerequisites, scoped manifests and CI gates.
-
-For a local checkout, the default patch comparison is the merge base with `origin/main`, including
-staged, unstaged and untracked content in a captured patch. Coverage uses
-[`--patch-line-mode codecov`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
-so changed-line gates handle partial conditions consistently. CI checks out the event's exact PR head
-and uses its merge base with the pinned event base; main baseline runs enforce aggregate coverage.
-The older `scripts/coverage-solution.sh` remains available as an unconditional compatibility recipe.
-
-Matching local and hosted patch results also requires the same coverage artifact and changed-line
-inventory. If the results disagree, compare the commit and base, source paths, and measurable
-changed-line counts. A file can have coverage in a hosted report while contributing no diff lines;
-a passing local gate does not establish that the hosted patch status passed.
-
-For repository-native code that needs platform-specific execution, the [native coverage
-fan-in guide](./guides/coverage-fan-in.md) documents the matching-source and SDK manifest checks that
-extend the existing aggregate and patch gates without changing their thresholds or scope. The
-[issue #897 design](./docs/designs/issue-897-native-coverage-fan-in.md) and
-[test parity audit](./docs/plans/issue-897-test-parity.md) record the migration contract and evidence limits;
-the audit links the Linux, Windows and macOS runs that qualified the legacy producer for removal.
-Those runs predate the deletion commit; the final pull request head must also pass the validation gates.
-
-The repository lane requires a non-sandboxed host by default. Set
-`COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check
-deliberately leaves ordinary CI and container hosts valid; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
-
-The policy-selected coverage producer writes to the printed run's `proof/coverage` directory
-(CI uses `TestResults/coverage-evidence/coverage`). CI overlaps collection with native and packed-consumer
-checks, then verifies same-attempt collection and all existing gates in the final `build` job. Non-exclusive
-projects use longest-first scheduling with optional advisory main-branch timing history; exclusive suites
-retain their ordering. Docs export runs alongside validation, and Pages deployment waits for acceptance.
-See the [CI collection and scheduling contract](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#ci-collection-overlap-and-scheduling)
-for handoff provenance, fallback behavior and full-workflow reruns. The compatibility wrapper has the same collection
-and threshold behavior and uses the fixed `TestResults/coverage-merged` paths listed below:
-
-- Runs each solution test project.
-- Leaves assembly scope to the public CLI and Coverlet defaults; the merged artifact
-  includes RazorWire production sources when their tests exercise them.
-- Uses the public CLI's default test-module exclusions (`*.Tests` and
-  `*.IntegrationTests`).
-- Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
-- Produces AppSurface-managed JUnit files as `TestResults/coverage-merged/junit-coverage-<index>-<project-name-hash>.xml`.
-- Writes a summary to `TestResults/coverage-merged/summary.txt`.
-- Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
-- Writes bounded, failure-first test-result and slow-test diagnostics to
-  `TestResults/coverage-merged/slow-test-diagnostics.md` and
-  `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
-  overhead in seconds and as a percent of elapsed runner time at diagnostics generation. The
-  Markdown reports test counts, failed projects, and safely truncated failure evidence before
-  slow-test timings; use the managed JUnit files and project logs for complete evidence.
-- When a patch source is configured, emits `coverage-patch-targets.json` and
-  `coverage-patch-targets.md` beside the other gate artifacts, even when no patch thresholds
-  are configured.
-- Uses the source AppSurface CLI and its package-owned ReportGenerator dependency for the default
-  full-solution lane.
-- Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
-  the selected patch when a diff base is configured.
-- Uses the same configured 95% patch-line threshold and 0.5-point tolerance as
-  [`codecov.yml`](./codecov.yml), with `--patch-line-mode codecov` for partial-condition semantics;
-  the local gate remains authoritative for patch branches.
-
-### Coverage efficiency evidence for issue #728
-
-The ordinary coverage lane remains the pull-request gate. Use the manually dispatched
-[Coverage Efficiency Evidence workflow](https://github.com/forge-trust/AppSurface/actions/workflows/coverage-efficiency.yml)
-only to establish or compare the coverage lane’s contributor-visible duration for
-[issue #728](https://github.com/forge-trust/AppSurface/issues/728). It runs the same Release,
-no-restore, parallelism-2 lane as CI with aggregate coverage only, then retains a private
-`coverage-efficiency-evidence` artifact for 14 days. The artifact contains the exact coverage-step
-start/end and duration, environment manifest, `timings.json`, derived actual serial-set and
-preceding-parallel-batch evidence, managed JUnit results, project logs, slow-test diagnostics,
-coverage outputs, and coverage-gate reports. It has read-only repository
-permissions, uses no secrets, and does not change ordinary pull-request validation.
-Dispatch the workflow from the repository’s default branch only: evidence branches are rejected so a
-candidate cannot redefine the command or its retained evidence while it is being measured.
-
-For a local **screening** run, use the CI-equivalent wrapper environment:
-
-```bash
-BUILD_CONFIGURATION=Release \
-BUILD_NO_RESTORE=true \
-COVERAGE_PARALLELISM=2 \
-COVERAGE_GATE_DIFF_BASE= \
-./scripts/coverage-solution.sh
-```
-
-Do not set `COVERAGE_REQUIRE_NON_SANDBOX=false` unless the local automation is intentionally
-restricted; the GitHub-hosted evidence workflow keeps the guard enabled. A local sample supports a
-CI or issue-level claim only when its recorded OS/image, SDK, Docker/PostgreSQL image,
-Playwright/browser inventory, configuration, restore state, parallelism, and cold/warm declaration
-match the workflow artifact. Otherwise it is screening-only.
-
-The workflow accepts `cold` or `warm`: cold clears NuGet global packages and prunes pnpm’s store
-before the locked restore; warm uses the declared dependency caches. Neither mode may reuse a test
-container, test database, browser context/profile, host process, or coverage output. Use
-`appsurface coverage run --dry-run` only to inspect discovery, exclusive scheduling, and output
-paths: it runs no tests and is never a timing sample.
-
-Read the artifact’s `environment-manifest.json` first, then use `resolved-serial-set.json` alongside
-`timings.json` to review the actual serial set and each barrier’s preceding parallel batch. The outcome
-is the high-resolution monotonic duration of the coverage-wrapper invocation.
-Each per-project `seconds` value is launch-through-normalization attribution, not test-process time.
-Record the baseline, candidate inventory, and result links in the committed
-[`issue-728-test-efficiency`](./artifacts/issue-728-test-efficiency/) evidence pages before changing
-any fixture or scheduler boundary. If the runner/runtime differs, the artifact is incomplete, or the
-five-sample spread exceeds 10% twice, label the samples non-comparable and make no time claim.
-
-For Docker/PostgreSQL failures, inspect the project `dotnet-test.log` and the manifest, restore the
-documented prerequisite, then discard the failed sample. For browser/runtime mismatch, match the
-recorded inventory rather than averaging incompatible runs. An incomplete artifact fails its
-workflow upload contract; repair it before baselining. A safe no-change ceiling is a complete result:
-record the evidence, owner, focused follow-up, and the 2027-02-11 or topology/runtime/runner-image
-re-evaluation trigger in [`results.md`](./artifacts/issue-728-test-efficiency/results.md).
-
-Patch target files are private local artifacts in `TestResults/coverage-merged`, which is already
-covered by the repository's existing [`TestResults` ignore rule](./.gitignore); they are
-intentionally not added as separate `.gitignore` entries. When the gate receives exactly one of
-`--diff-base`, `--diff-file`, or `--diff-stdin`, it refreshes both target files regardless of
-whether `--min-patch-line` or `--min-patch-branch` is present. An active patch comparison with an
-empty target queue means the patch is fully covered for the selected gate semantics; a nonpatch gate removes
-the two target files so an old queue cannot be mistaken for current work.
-
-For the local remediation loop, read the target brief, open each `path:line`, identify the
-relevant test project, run `dotnet test <project> --no-restore`, then run the full coverage lane
-and one final full `coverage gate`. The [CLI coverage-gate reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#agent-actionable-patch-targets)
-documents the target semantics, `coverage run --no-clean` retention behavior, `ASCOV019`, and
-optional artifact-upload guidance.
-
-Private package-consuming repositories should use the public CLI runner instead of
-this repository's no-argument script. Start with this copy-pasteable path:
-
-```bash
-dotnet new tool-manifest
-dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
-dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.collector
-dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
-dotnet tool run appsurface coverage run --solution ./MyApp.slnx
-dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
-```
-
-The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. `--dry-run` performs the same collector capability preflight before tests or output cleanup, so it is the safe first command for a new repository. The default driver requires a direct `coverlet.collector` reference in every selected VSTest project and never falls back; native Microsoft Testing Platform projects are rejected, while `--coverage-driver msbuild` remains an explicit compatibility path. See [coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) for prerequisites, migration guidance, and pitfalls. Its [no-progress watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) emits 30-second heartbeats by default, fails after 10 minutes without observable progress by default, and can be changed to `warn` or `off`. Solution-discovery consumers can use repeatable [`--exclude-test-project`](./Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) globs to omit selected test projects from coverage execution while leaving the solution build unchanged. Use explicit [`--include` and `--exclude` filters](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) only when a consumer owns that assembly-scope policy. No separate merge command is required for ordinary package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. Managed test results are opt-in with `--test-results junit`; this requires selected test projects to reference `JunitXml.TestLogger`. `--slow-test-diagnostics` implies managed JUnit results and writes a bounded, failure-first test-result summary plus slow-test evidence to `slow-test-diagnostics.md` and `.json` beside the merged coverage file; the managed JUnit XML and per-project logs retain the complete details. Use `appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged` when a matrix job or custom test workflow already produced shard files named `coverage.cobertura.xml`. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, and, when one patch source is supplied, also writes both `coverage-patch-targets.json` and `coverage-patch-targets.md`. It appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage accepts exactly one source: `--diff-base` for local Git history, `--diff-file` for a CI-produced unified diff artifact, or `--diff-stdin` for piped unified diff text. External diff artifacts are private local inputs, are bounded at 20 MiB, and fail closed when non-empty content is not unified diff text. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
-
-When repeated test runs leave gigabytes of stale local results in a worktree, use [coverage cleanup](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-clean). `appsurface coverage clean` previews only the AppSurface-owned `coverage-merged` artifacts; add `--apply` to remove them. For every local `TestResults` folder in one worktree, use `appsurface coverage clean --all --root .` and add `--apply` only after reviewing the exact directories it found. The broad scan retains its root and does not follow linked paths.
-
-The [coverage-run watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) now defaults to `fail`: a 10-minute no-progress stall is terminated with exit `124` (`ASCOV121`). During VSTest test execution, no-dump hang blame is enabled when at least 90 seconds remain, reserving time for sequence output. Review the [#815 CLI diagnostics reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-hang-diagnostics) and [migration note](./releases/issue-815-vstest-hang.md), especially when a healthy individual test can run longer than its computed VSTest timeout.
-
-### Focused and sharded coverage
-
-For the versioned native coverage fan-in contract, including opt-in v3 patch applicability and the current v2 repository default, see the [coverage fan-in guide](./guides/coverage-fan-in.md).
-
-`scripts/coverage-solution.sh` accepts no arguments and exists only for this
-repository's full run-and-gate policy. It enables VSTest's
-`console;verbosity=normal` logger so completed tests reach the
-[output-sensitive watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog).
-A large suite can otherwise run healthy short tests for more than ten minutes
-while the minimal logger stays silent until its final summary. This keeps the
-existing ten-minute watchdog and nine-minute VSTest hang timer active; a hung
-test still produces no completion output. The
-[coverage progress fixture](./scripts/verify-coverage-progress-fixture.sh) proves
-that a quiet healthy sequence trips the watchdog, completion logging lets all
-tests finish, and a hung test still trips the same watchdog. Run it with
-`./scripts/verify-coverage-progress-fixture.sh`; its ten-second diagnostic budget
-keeps the probe short and does not change the full solution policy.
-Use the public CLI when selecting a subset,
-changing output, or merging shards:
-
-```bash
-dotnet tool run appsurface coverage run \
-  --test-project Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj \
-  --test-project tools/ForgeTrust.AppSurface.MarkdownSnippets.Tests/ForgeTrust.AppSurface.MarkdownSnippets.Tests.csproj
-dotnet tool run appsurface coverage run \
-  --solution ./ForgeTrust.AppSurface.slnx \
-  --exclude-test-project "**/*IntegrationTests.csproj" \
-  --dry-run
-dotnet tool run appsurface coverage merge \
-  --source ./TestResults/coverage-shards \
-  --output ./TestResults/coverage-merged
-```
-
-The former repository-only group taxonomy has no public CLI replacement. Select exact
-test projects with repeated `--test-project`, or use solution discovery with repeatable
-`--exclude-test-project` globs. If a shell or CI configuration still supplies a retired
-wrapper argument or `TEST_GROUP`, `INCLUDE_FILTER`, `EXCLUDE_FILTER`, or
-`BUILD_SOLUTION`, unset it and use the public command named in the wrapper's exit-2
-diagnostic.
-
-Default PR validation keeps solution coverage in one lane until a future public-CLI
-matrix design proves it reduces total GitHub Actions minutes, not just wall-clock time.
-
-The current CI critical-path policy and timing baseline live in [eng/ci-critical-path.md](./eng/ci-critical-path.md).
-
-When tests need to launch child processes, prefer CliWrap-backed helpers over raw `System.Diagnostics.Process` setup. Keep process-output capture in the helper result so CI failures include stdout and stderr, and reserve raw `Process` usage for tests that intentionally exercise process-wrapper behavior.
-
-Check out the examples to see how modules are composed in practice:
-
-```bash
-dotnet run --project examples/auth-aspnetcore-bridge
-dotnet run --project examples/auth-aspnetcore-dev-auth -- --urls http://127.0.0.1:5058
-dotnet run --project examples/auth-web-razorwire-proof/AuthWebRazorWireProofExample.csproj
-dotnet run --project examples/console-app
-dotnet run --project examples/flow-approval-local/FlowApprovalLocalExample.csproj
-dotnet run --project examples/product-readiness-lab/ProductReadinessLab.csproj -- --report
-aspire run --non-interactive --apphost examples/product-readiness-lab-apphost/ProductReadinessLabAppHost.csproj -- verify
-dotnet run --project examples/web-app
-dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
-```
-
-For the intentional validation-failure shape, run `dotnet run --project examples/config-validation`.
-
-The [RazorWire MVC example](./examples/razorwire-mvc/README.md#server-selected-dialogs) includes explicit [server-selected dialog responses](./Web/ForgeTrust.RazorWire/Docs/dialog-responses.md) at `/Reactivity/DialogResponses`, with status responses, follow-up forms, validation, and full HTML fallbacks.
-
-On Linux, the [RazorWire MVC publish preflight](./examples/razorwire-mvc/README.md#check-publish-output-before-full-coverage) checks the sample's publish paths and output modes before you start the full coverage run.
-
-The [nested collections quickstart](./examples/razorwire-mvc/NESTED-COLLECTIONS.md) in the same MVC host runs a minimal DateOnly editor at `/Reactivity/NestedCollections` with physical/mark removal, sparse-key invalid redisplay, and ordinary server commands. The separate [faithful V4 fixture](./examples/razorwire-mvc/NESTED-COLLECTIONS.md#faithful-v4-consumer-fixture) at `/Reactivity/SkoolitV4Collections` retains the source's temporal policy and explains the exact-package proof. See the [Form Interactions guide](./Web/ForgeTrust.RazorWire/Docs/form-interactions.md) for the shared API and migration contract; fixture results do not establish live adoption.
-
-The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFailures` that shows server-handled validation, development anti-forgery diagnostics, default fallback rendering, and consumer styling hooks. It also includes `/Reactivity/FormLoading` for local and shared status indicators, the package fallback, and Turbo Frame loading; see the [Form Loading Feedback guide](./Web/ForgeTrust.RazorWire/Docs/form-loading.md) for the public contract.
-
-## Release notes and upgrade policy
-
-AppSurface releases the entire monorepo in unison. The public release contract lives in the repository so teams can see what is queued for the next version, how pre-1.0 changes are handled, and where migration notes live.
-
-- [Package chooser](./packages/README.md) - the generated first-install map for web, console, Aspire, and optional package add-ons.
-- [Release hub](./releases/README.md) - start here for the narrative release surface.
-- [Unreleased proof artifact](./releases/unreleased.md) - the living notes for the next coordinated version.
-- [Changelog](./CHANGELOG.md) - the compact ledger for tagged and in-flight changes.
-- [Pre-1.0 upgrade policy](./releases/upgrade-policy.md) - the stability and migration contract before `v1.0.0`.
-- [Contribution and release entry rules](./CONTRIBUTING.md) - how PR titles and unreleased entries feed the release surface.
+For a module you might share across services, see the [error-page example](./guides/from-program-cs-to-module.md).
+Every service that opts in can show a readable 404 to someone using a browser and preserve the response
+its API clients expect.
 
 ## Feedback and contributing
 
-AppSurface uses GitHub issue forms to keep bug reports, feature requests, and docs/developer-experience feedback concrete enough to reproduce or evaluate. If an example, README, quickstart, or package API leaves you stuck, start with the [contribution guide](./CONTRIBUTING.md), [choose an issue template](https://github.com/forge-trust/AppSurface/issues/new/choose), and file the form that matches the problem.
+Use the [issue forms](https://github.com/forge-trust/AppSurface/issues/new/choose) for bugs, feature requests,
+or a quickstart that left you stuck. The [contributor guide](./CONTRIBUTING.md) covers local setup.
+Run `task` to list the [repository tasks](./CONTRIBUTING.md#repository-tasks) for building, testing, and
+verifying a change. Report vulnerabilities through the [private security reporting process](./SECURITY.md).
 
-Use docs/DX feedback for confusing guidance, missing concepts, broken links, snippet drift, or first-run friction. Use feature requests for focused product capabilities, API shapes, workflows, or examples. Use bug reports when runtime behavior, generated output, or package APIs do something unexpected.
-Do not file suspected vulnerabilities, leaked secrets, or exploit details in public issues; follow the [security policy](./SECURITY.md) instead.
+<a id="coverage-efficiency-evidence-for-issue-728"></a>
 
-## Examples
-
-The [examples](examples/README.md) directory contains sample applications that demonstrate
-how to use this project.
-
-- [Auth ASP.NET Core bridge example](examples/auth-aspnetcore-bridge/README.md) – proves an ASP.NET Core host-owned auth stack can flow named policy results into AppSurface auth contracts.
-- [Auth ASP.NET Core DevAuth example](examples/auth-aspnetcore-dev-auth/README.md) – shows selectable local personas, request-scoped fixture activation for two operator roles, a shared candidate with independent progress, and the marker's responsive placement.
-- [Auth Web/RazorWire proof](examples/auth-web-razorwire-proof/README.md) – shows one host-owned ASP.NET Core policy driving both a Minimal API response and RazorWire-rendered auth state.
-- [Console app example](examples/console-app/README.md) – builds a simple command line
-  application using [CliFx](https://github.com/Tyrrrz/CliFx) source-generated command
-  descriptors.
-- [Aspire AppHost example](examples/aspire-apphost/README.md) – shows local Aspire AppHost
-  composition with AppSurface profiles and reusable Aspire components.
-- [Auth Aspire Keycloak AppHost proof](examples/auth-aspire-keycloak-apphost/README.md) – starts local Keycloak, proves its finite baseline-readiness gate before the OIDC web proof, and provides a noninteractive verifier for the real-provider flow without adding a runtime Keycloak dependency.
-- [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
-  composes middleware and endpoints from modules.
-- [Web error-page proof](examples/web-error-pages/README.md) – runs a one-command verifier
-  for AppSurface Web browser status pages, production exception pages, and API-friendly
-  non-HTML behavior.
-- [Config validation example](examples/config-validation/README.md) – shows scalar
-  validation on a strongly typed config wrapper and the startup failure shape.
-- [Local secrets example](examples/local-secrets/README.md) – shows OS-backed local
-  secret posture, CLI setup, provider precedence, and paste-safe diagnostics for
-  solo development before a remote vault exists.
-- [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
-  flow that waits for an approval event and resumes through the in-memory runner.
-- [Durable PostgreSQL example](examples/durable-postgresql/README.md) – demonstrates disposable one-pair and complete two-pair manifests, distinct runtime preflight commands, and the boundary between local source proof and candidate/public package receipts. For the canonical legacy, deadline-only, and planned retry chooser, see the [execution-policy guide](Durable/execution-policies-v1.md).
-- [Durable external activation example](examples/durable-external-activation/README.md) – documents the public host/service contract and explicit PostgreSQL provisioning for an existing custom HTTP host; for a new standalone host, use the [Durable worker template guide](start-here/durable-worker.md).
-- [Product readiness lab](examples/product-readiness-lab/README.md) – runs a composed
-  local evaluator with AppSurface Web, Auth.AspNetCore, Flow, DurableTask-facing
-  host-shape guidance, and Postgres product-state proof. Use its AppHost `verify`
-  profile when the report should exercise Postgres and require that row to be
-  `proven-locally`.
+If you're investigating a slow coverage run, see the [coverage timing workflow](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-efficiency-evidence-workflow).
 
 ## License
 
-AppSurface is licensed under the [Polyform Small Business License 1.0.0](./licensing.md).
-
-Free for individuals and businesses with fewer than 100 people and under
-$1,000,000 USD prior-year revenue (inflation-adjusted). Larger companies
-require a commercial license.
-
-For identity-bound cross-platform coverage, use the neutral [Coverage package](Coverage/ForgeTrust.AppSurface.Coverage/README.md) and [native fan-in guide](guides/coverage-fan-in.md). The supported API and installed CLI retain complete primary execution and independent aggregate/patch acceptance, with explicit consumer policy and owned output custody.
+AppSurface uses the [PolyForm Small Business License 1.0.0](https://github.com/forge-trust/AppSurface/blob/main/LICENSE).
+See [licensing](./licensing.md) for commercial terms and support.

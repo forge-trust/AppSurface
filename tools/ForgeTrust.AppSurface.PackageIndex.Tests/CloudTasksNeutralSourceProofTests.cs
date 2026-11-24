@@ -20,11 +20,11 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.Equal(evidence.Keys.Order(StringComparer.Ordinal), evidence.Keys);
         Assert.Contains("baseline/ForgeTrust.AppSurface.Core/Source.cs", evidence.Keys);
         Assert.Contains("candidate/Directory.Packages.props", evidence.Keys);
-        Assert.Contains("candidate/Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json", evidence.Keys);
+        Assert.Contains("candidate/Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json", evidence.Keys);
         Assert.All(evidence.Values, hash => Assert.Matches("^[a-f0-9]{64}$", hash));
         Assert.Equal(Hash(fixture.CandidatePath("ForgeTrust.AppSurface.Core/Source.cs")), evidence["candidate/ForgeTrust.AppSurface.Core/Source.cs"]);
-        Assert.Equal(Hash(fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json")),
-            evidence["candidate/Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json"]);
+        Assert.Equal(Hash(fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json")),
+            evidence["candidate/Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json"]);
 
         fixture.WriteCentralPackages(candidate: false, includeApprovedPins: true);
         _ = CloudTasksNeutralSourceProof.Verify(fixture.BaselineRoot, fixture.CandidateRoot);
@@ -43,7 +43,26 @@ public sealed class CloudTasksNeutralSourceProofTests
 
         var evidence = CloudTasksNeutralSourceProof.Verify(fixture.BaselineRoot, fixture.CandidateRoot);
 
-        Assert.Contains("candidate/Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json", evidence.Keys);
+        Assert.Contains("candidate/Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json", evidence.Keys);
+    }
+
+    // protects=pre-rename baselines remain verifiable; fails_when=the legacy condition is rejected for a baseline or accepted for a candidate; no_claim=does not restore packages.
+    [Fact]
+    public void Verify_AcceptsTheExactPreRenameGrpcConditionOnlyInTheBaseline()
+    {
+        using var fixture = new NeutralSourceFixture();
+        fixture.WriteCentralPackages(candidate: false, includeApprovedPins: true);
+        fixture.WriteCentralPackages(candidate: true, includeApprovedPins: true);
+        var preRenameProps = File.ReadAllText(fixture.BaselinePath("Directory.Packages.props"))
+            .Replace(".Durable.GoogleCloudTasks", ".Durable.CloudTasks", StringComparison.Ordinal);
+        fixture.WriteBaseline("Directory.Packages.props", preRenameProps);
+
+        var evidence = CloudTasksNeutralSourceProof.Verify(fixture.BaselineRoot, fixture.CandidateRoot);
+        Assert.Contains("baseline/Directory.Packages.props", evidence.Keys);
+
+        fixture.WriteCandidate("Directory.Packages.props", preRenameProps);
+        var exception = Assert.Throws<PackageIndexException>(() => CloudTasksNeutralSourceProof.Verify(fixture.BaselineRoot, fixture.CandidateRoot));
+        Assert.Contains("candidate pin 'Grpc.Net.Client'", exception.Message, StringComparison.Ordinal);
     }
 
     // protects=generated build outputs cannot hide drift or destabilize authored-source comparison; fails_when=bin or obj contents affect parity; no_claim=does not prove those ignored outputs are safe to package.
@@ -143,17 +162,17 @@ public sealed class CloudTasksNeutralSourceProofTests
             switch (mutation)
             {
                 case "lock-missing":
-                    File.Delete(fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json"));
+                    File.Delete(fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json"));
                     break;
                 case "lock-malformed":
-                    fixture.WriteCandidate("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json", "{");
+                    fixture.WriteCandidate("Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json", "{");
                     break;
                 case "lock-oversized":
-                    fixture.WriteCandidate("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json", new string(' ', 1024 * 1024 + 1));
+                    fixture.WriteCandidate("Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json", new string(' ', 1024 * 1024 + 1));
                     break;
                 case "lock-symlink":
-                    var lockPath = fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json");
-                    var targetPath = fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/lock-target.json");
+                    var lockPath = fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json");
+                    var targetPath = fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/lock-target.json");
                     File.WriteAllText(targetPath, "{\"dependencies\":{\"net10.0\":{}}}");
                     File.Delete(lockPath);
                     File.CreateSymbolicLink(lockPath, targetPath);
@@ -182,7 +201,7 @@ public sealed class CloudTasksNeutralSourceProofTests
                 candidateProps = candidateProps.Replace("Google.Cloud.Tasks.V2\" Version=\"3.7.0\"", "Google.Cloud.Tasks.V2\" Version=\"3.7.1\"", StringComparison.Ordinal);
                 break;
             case "wrong-grpc-condition":
-                candidateProps = candidateProps.Replace("ForgeTrust.AppSurface.Durable.CloudTasks.Tests'", "ForgeTrust.AppSurface.Durable.CloudTasks.Test'", StringComparison.Ordinal);
+                candidateProps = candidateProps.Replace("ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests'", "ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Test'", StringComparison.Ordinal);
                 break;
             case "extra-pin-attribute":
                 candidateProps = candidateProps.Replace("Include=\"Google.Cloud.Tasks.V2\"", "Include=\"Google.Cloud.Tasks.V2\" Condition=\"true\"", StringComparison.Ordinal);
@@ -191,7 +210,7 @@ public sealed class CloudTasksNeutralSourceProofTests
                 candidateProps = candidateProps.Replace("  </ItemGroup>", "    <PackageVersion Include=\"Google.Cloud.Tasks.V2\" Version=\"3.7.0\" />\n  </ItemGroup>", StringComparison.Ordinal);
                 break;
             case "candidate-missing-grpc":
-                candidateProps = candidateProps.Replace("    <PackageVersion Include=\"Grpc.Net.Client\" Version=\"2.80.0\" Condition=\"'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks.Tests'\" />\n", string.Empty, StringComparison.Ordinal);
+                candidateProps = candidateProps.Replace("    <PackageVersion Include=\"Grpc.Net.Client\" Version=\"2.80.0\" Condition=\"'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.GoogleCloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests'\" />\n", string.Empty, StringComparison.Ordinal);
                 break;
             case "wrong-baseline-pin":
             case "partial-baseline-pins":
@@ -343,7 +362,7 @@ public sealed class CloudTasksNeutralSourceProofTests
             }
             if (includeGrpcRoot) roots.Add($"\"Grpc.Net.Client\": {{ \"type\": \"Direct\", \"resolved\": \"{grpcVersion}\" }}");
             Write(candidate ? CandidateRoot : BaselineRoot,
-                "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json",
+                "Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json",
                 "{\"dependencies\":{\"net10.0\":{" + string.Join(",", roots) + "}}}");
         }
 
@@ -374,7 +393,7 @@ public sealed class CloudTasksNeutralSourceProofTests
         {
             var pins = includeApprovedPins
                 ? (includeTaskPin ? $"    <PackageVersion Include=\"Google.Cloud.Tasks.V2\" Version=\"{taskVersion}\" />\n" : string.Empty)
-                    + (includeGrpcPin ? $"    <PackageVersion Include=\"Grpc.Net.Client\" Version=\"{grpcVersion}\" Condition=\"'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks.Tests'\" />\n" : string.Empty)
+                    + (includeGrpcPin ? $"    <PackageVersion Include=\"Grpc.Net.Client\" Version=\"{grpcVersion}\" Condition=\"'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.GoogleCloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests'\" />\n" : string.Empty)
                 : string.Empty;
             return $"<Project>\n  <ItemGroup>\n    <PackageVersion Include=\"Existing\" Version=\"1.0.0\" />\n{pins}  </ItemGroup>\n</Project>\n";
         }

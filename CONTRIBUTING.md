@@ -29,9 +29,32 @@ Every [CI workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/
 
 Run the sample or package-specific command you changed, and include that command in your pull request notes. For broad changes, also run the full test suite and coverage command listed in [Local verification](#local-verification).
 
+### Repository tasks
+
+Install [Task v3](https://taskfile.dev/docs/installation) to run common contributor commands by name.
+Run `task` from the checkout to list them, or `task --dry build` to see the underlying command.
+The [root Taskfile](https://github.com/forge-trust/AppSurface/blob/main/Taskfile.yml) runs commands from
+the repository root, even when invoked from a subdirectory. Use root-relative project paths.
+
+| Command | When to use it |
+| --- | --- |
+| `task restore` | Check that the solution restores with the committed NuGet lock files. |
+| `task build` | Build the solution. |
+| `task test` | Build and run the solution's tests. After a matching build, use `task test -- --no-build`. |
+| `task format:check` | Check whether .NET formatting would change files. Use `task format` to apply the edits. |
+| `task evidence:plan` | Preview the checks selected for changes against `origin/main`. |
+| `task evidence` | Run the selected checks and verify their results. See [local verification](#local-verification) for scope and prerequisites. |
+| `task coverage` | Run the [compatibility coverage script](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) for the entire solution. It requires Bash and defaults to a non-sandboxed host. Configure it through the script's environment variables. |
+
+Pass arguments to the underlying command after `--`. For example, run one test project with
+`task test -- ForgeTrust.AppSurface.Core.Tests`, or compare against another revision with
+`task evidence:plan -- --base HEAD~1`. Run the underlying `dotnet` commands directly if you prefer.
+
 ## Working on docs
 
 Documentation changes should explain both how to use an API and why a reader would choose it. When a docs change touches public behavior, update the package-level README, repository-level entry point, or release note surface that helps someone discover the change.
+
+For repository command choices, start with the [script inventory](./guides/script-inventory.md) for the audited source baseline and the [repository tooling guide](./guides/repository-tooling.md) for audience, prerequisites, command-form selection, and migration criteria.
 
 Good docs pull requests usually include:
 
@@ -48,6 +71,10 @@ Tests that build a full filesystem path under a repository root, temp workspace,
 Use `PathUnder` for dynamic repo-relative, temp-relative, or output-relative values such as `projectPath`, `relativePath`, and `outputRelativePath`. Use `TestPathUtils.RelativePath` only when the test needs a validated relative string rather than a full filesystem path.
 
 Literal expected paths and tests intentionally exercising `Path.Join` or `Path.Combine` platform behavior may continue to use the BCL APIs directly. If the policy test flags an intentional case, add a reasoned entry to `tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml`; entries without reasons or entries that no longer match a violation fail validation.
+
+For tests that launch a child process, use a [CliWrap-backed helper](./ForgeTrust.AppSurface.Core/README.md#process-execution-utilities)
+that returns the exit code, stdout and stderr. Assert the expected exit code and include both output streams in the
+assertion’s failure message. Use `System.Diagnostics.Process` directly when the process wrapper itself is under test.
 
 ## Release contract
 
@@ -134,13 +161,18 @@ Pages service investigation; deployment serialization does not resolve a backend
 
 ### CI test-result diagnostics
 
-The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) resolves the shared evidence policy first. Coverage selections run full solution coverage and a separate packed Durable consumer proof. The native coverage-security matrix and PR fan-in run only when the root policy selection includes coverage plus another producer; test-only selections use the direct patch gate. The consumer
+The [tool-manifest-only exception](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#tool-manifest-coverage-selection)
+uses the direct patch gate for an existing local-tool manifest update with optional new release entries.
+All four evidence producers, their obligations, and the 95/85 aggregate and applicable patch coverage
+thresholds remain required. Mixed implementation or policy changes retain native coverage selection.
+
+The current [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) resolves the shared evidence policy first. Coverage selections run full solution coverage and a separate packed Durable consumer proof. The native coverage-security matrix and PR fan-in run when the root policy selection includes coverage plus another producer and the tool manifest exception does not apply. Test-only selections and qualifying tool updates use the direct patch gate. The consumer
 job runs the same [packed-consumer verification](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) with the exact
 coverage SDK and locked restore. Its failure blocks the build and downstream documentation export.
 The coverage lane runs the complete solution through the C# repository evidence validation tool and preserves the existing aggregate and patch gates; see the [coverage fan-in guide](./guides/coverage-fan-in.md) for the current workflow and artifact layout.
 Keeping the packed consumer proof in its own job preserves the build job's 60-minute budget for solution verification; it does not reduce the selected tests, change exclusive scheduling, or relax either coverage gate.
 
-The direct Codecov-mode patch gate follows the [CLI's documented no-measurable-points behavior](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate). Native fan-in keeps its strict nonempty-denominator verification. Package checks are not exempted based on Git ignore status: ignored local artifacts in paths the existing package checks inspect can still cause a package-check failure; review the package diagnostics and remove or resolve unintended local artifacts.
+The direct Codecov-mode patch gate follows the [CLI's documented no-measurable-points behavior](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate). The required [v3 native fan-in](./guides/coverage-fan-in.md#current-ci-path) accepts independently verified `notApplicable` dimensions when the approved collector reports zero changed points. Measured composed patch dimensions must meet the patch thresholds. Primary patch metrics are diagnostic, and the independent primary aggregate gate must also pass. Ignored local artifacts in paths the existing package checks inspect can still cause a package-check failure. Review the package diagnostics and remove or resolve unintended local artifacts.
 
 The GitHub Actions full-solution coverage lane publishes a bounded, failure-first test summary from
 the AppSurface-managed JUnit output. The CLI owns this report alongside its slow-test diagnostics:

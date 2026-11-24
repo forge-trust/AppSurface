@@ -2,9 +2,11 @@
 
 This is the operator and private-tool reference for the approved [#798 design](designs/issue-798-tailwind-artifact-provenance.md) and [implementation plan](plans/issue-798-tailwind-artifact-provenance.md). The flags, records and workflow behavior below describe the release provenance implementation. There is no consumer-facing package API change.
 
+For the separate internal verifier and local PackageIndex replay, see [offline release artifact binding](../tools/ForgeTrust.AppSurface.ReleaseContracts/README.md#offline-release-artifact-binding).
+
 ## Exact GitHub Actions artifact transport (#910)
 
-The internal `artifact-transport` mode is a maintainer-only, nonpublishing transport gate in the protected manual Tailwind rehearsal. It verifies one artifact by exact ID and current run attempt before passing the extracted bundle to the existing producer-binding validator. It adds no public package API or dependency. This feature and its internal contract are documented in the [PackageIndex maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#exact-artifact-transport-910) and wired only by the protected [Package Artifacts workflow](https://github.com/forge-trust/AppSurface/blob/3d1a69e1db4dfea8eacf4927e34e6440f9dde6f1/.github/workflows/package-artifacts.yml).
+The internal `artifact-transport` mode is a maintainer-only, nonpublishing transport gate in the protected manual Tailwind rehearsal on `main`. Opt-in branch rehearsals retain the existing exact-ID download action and producer/content checks; they do not invoke this v1 transport gate. The rehearsal selects its producer directory from the triggering ref, so a failed `main` verification cannot fall back to the branch download. It verifies one artifact by exact ID and current run attempt before passing the extracted bundle to the existing producer-binding validator. It adds no public package API or dependency. This feature and its internal contract are documented in the [PackageIndex maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#exact-artifact-transport-910) and wired only by the protected [Package Artifacts workflow](https://github.com/forge-trust/AppSurface/blob/3d1a69e1db4dfea8eacf4927e34e6440f9dde6f1/.github/workflows/package-artifacts.yml).
 
 ### Receipt and authority
 

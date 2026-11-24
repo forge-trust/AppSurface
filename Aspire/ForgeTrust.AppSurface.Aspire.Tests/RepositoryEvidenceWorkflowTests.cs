@@ -73,6 +73,89 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
     }
 
     [Theory]
+    [InlineData("all")]
+    [InlineData("coverage")]
+    [InlineData("native")]
+    [InlineData("packages")]
+    public async Task ToolManifestOnlySelection_UsesDirectCoverageWithoutDroppingProducersOrThresholds(string scope)
+    {
+        const string manifest = ".config/dotnet-tools.json";
+        const string entry = "releases/unreleased.entries/2026-11-07-tool-update.md";
+        var baseline = RepositoryEvidenceWorkflow.ResolveScope(ReadCheckedInPolicy(), [new(manifest)], scope);
+        foreach (var inventory in new[]
+                 {
+                     new[] { new NormalizedDiffPath(manifest) },
+                     [new(manifest), new(entry, "added")],
+                 })
+        {
+            var paths = await WritePathsAsync(inventory);
+            var planned = await PlanAsync(paths, CheckedInPolicyPath, scope);
+            using var selection = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(planned.Output, "selection.json")));
+
+            Assert.False(selection.RootElement.GetProperty("requiresNativeCoverage").GetBoolean());
+            Assert.Equal(scope is "all" or "coverage", selection.RootElement.GetProperty("requiresCoverage").GetBoolean());
+            Assert.Equal(baseline.Profile.Producers.OrderBy(producer => producer.Id, StringComparer.Ordinal)
+                    .Select(producer => EvidenceDigest.CanonicalSha256(producer)),
+                planned.Plan.Profile.Producers.OrderBy(producer => producer.Id, StringComparer.Ordinal)
+                    .Select(producer => EvidenceDigest.CanonicalSha256(producer)));
+            Assert.Equal(baseline.Profile.Obligations.OrderBy(obligation => obligation.Id, StringComparer.Ordinal)
+                    .Select(obligation => EvidenceDigest.CanonicalSha256(obligation)),
+                planned.Plan.Profile.Obligations.OrderBy(obligation => obligation.Id, StringComparer.Ordinal)
+                    .Select(obligation => EvidenceDigest.CanonicalSha256(obligation)));
+            if (scope == "all")
+            {
+                Assert.Equal(["installed-consumer", "package-checks", "packed-storage", "solution-coverage"],
+                    planned.Plan.Profile.Producers.Select(producer => producer.Id).Order(StringComparer.Ordinal));
+            }
+            if (scope is "all" or "coverage")
+            {
+                var coverage = Assert.Single(planned.Plan.Profile.Producers, producer => producer.Id == "solution-coverage");
+                Assert.Equal(new EvidenceCoverageGateRequirements(95, 85, 95, 85, "codecov", 0.5m), coverage.CoverageGate);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("src/feature.cs", "modified", null)]
+    [InlineData("src/Feature.Tests/Tests.cs", "modified", null)]
+    [InlineData(".github/evidence.policy.json", "modified", null)]
+    [InlineData("docs/guide.md", "modified", null)]
+    [InlineData(".config/other.json", "modified", null)]
+    [InlineData("assets/new-format.bin", "added", null)]
+    [InlineData(".config/dotnet-tools.json", "added", null)]
+    [InlineData("releases/unreleased.entries/2026-11-07-tool-update.md", "modified", null)]
+    [InlineData("releases/unreleased.entries/2026-11-07-tool-update.md", "deleted", null)]
+    [InlineData("releases/unreleased.entries/2026-11-07-tool-update.md", "renamed", "src/feature.cs")]
+    [InlineData("releases/unreleased.entries/2026-11-07-tool-update.md", "copied", "src/feature.cs")]
+    [InlineData("releases/unreleased.entries/nested/note.md", "added", null)]
+    [InlineData("releases/unreleased.entries/recipe.json", "added", null)]
+    [InlineData("releases/unreleased.entries/note.MD", "added", null)]
+    public async Task ToolManifestMixedSelection_RetainsNativeCoverage(string path, string kind, string? previousPath)
+    {
+        var paths = await WritePathsAsync([new(".config/dotnet-tools.json"), new(path, kind, previousPath)]);
+        var planned = await PlanAsync(paths, CheckedInPolicyPath, "coverage");
+        using var selection = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(planned.Output, "selection.json")));
+
+        Assert.True(selection.RootElement.GetProperty("requiresNativeCoverage").GetBoolean());
+        Assert.True(selection.RootElement.GetProperty("requiresCoverage").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("added", null)]
+    [InlineData("deleted", null)]
+    [InlineData("renamed", "src/feature.cs")]
+    [InlineData("copied", "src/feature.cs")]
+    [InlineData("modified", "src/feature.cs")]
+    public async Task ToolManifestNonUpdateSelection_RetainsNativeCoverage(string kind, string? previousPath)
+    {
+        var paths = await WritePathsAsync([new(".config/dotnet-tools.json", kind, previousPath)]);
+        var planned = await PlanAsync(paths, CheckedInPolicyPath);
+        using var selection = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(planned.Output, "selection.json")));
+
+        Assert.True(selection.RootElement.GetProperty("requiresNativeCoverage").GetBoolean());
+    }
+
+    [Theory]
     [InlineData("coverage", new[] { "solution-coverage" })]
     [InlineData("packages", new[] { "package-checks" })]
     [InlineData("native", new[] { "installed-consumer", "packed-storage" })]
@@ -539,6 +622,50 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
             Assert.False(Directory.Exists(output));
         }
+    }
+
+    [Theory]
+    [InlineData("3", false, "tests/Coverage.Tests/ExampleTests.cs")]
+    [InlineData("2", false, "tests/Coverage.Tests/ExampleTests.cs")]
+    [InlineData("4", true, "tests/Coverage.Tests/ExampleTests.cs")]
+    [InlineData("03", true, "tests/Coverage.Tests/ExampleTests.cs")]
+    [InlineData("3", true, "docs/README.md")]
+    public async Task CoverageRunPreflight_RejectsNativeContractWithoutSupportedCoverageInputs(
+        string version, bool withCaptures, string changedPath)
+    {
+        var planned = await PlanAsync([changedPath]);
+        var output = NewPath("native-contract-output");
+        var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
+            ("--plan", Path.Join(planned.Output, "evidence-plan.json")), ("--output", output),
+            ("--dotnet", ExistingProcessPath()), ("--coverage-cli", ExistingProcessPath()),
+            ("--native-coverage-contract-version", version));
+        if (withCaptures) options["--native-coverage-directory"] = NewPath("native");
+
+        await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Theory]
+    [InlineData("2")]
+    [InlineData("3")]
+    public async Task CoverageRunPreflight_AdmitsSupportedNativeContractForSelectedCoverage(string version)
+    {
+        var planned = await PlanAsync(["tests/Coverage.Tests/ExampleTests.cs"]);
+        var output = NewPath("native-contract-output");
+        var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
+            ("--plan", Path.Join(planned.Output, "evidence-plan.json")), ("--output", output),
+            ("--dotnet", ExistingProcessPath()), ("--coverage-cli", ExistingProcessPath()),
+            ("--repository", NewPath("missing-repository")),
+            ("--native-coverage-directory", NewPath("native")),
+            ("--native-coverage-contract-version", version));
+
+        // Admission succeeds; the producer then rejects the absent checkout before running any commands.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
+        var producer = Assert.Single(manifest.ProducerResults);
+        Assert.Equal("solution-coverage", producer.ProducerId);
+        Assert.Equal(EvidenceProducerOutcome.Failed, producer.Outcome);
     }
 
     private async Task<PlannedEvidence> PlanAsync(string[] pathValues, string? policyPath = null, string? scope = null)

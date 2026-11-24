@@ -12,6 +12,8 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageFanInSolutionCoverageProducerTests
 {
+    private const string NativeV3DiffBase = "0123456789abcdef0123456789abcdef01234567";
+
     [Fact]
     public async Task ProduceAsync_RejectsInvalidProducerContextBeforeRunningCommands()
     {
@@ -61,7 +63,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         var exclusiveProjects = run.Arguments.Zip(run.Arguments.Skip(1))
             .Where(pair => pair.First == "--exclusive-test-project").Select(pair => pair.Second).ToArray();
         Assert.Equal(9, exclusiveProjects.Length);
-        Assert.Contains("ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj", exclusiveProjects);
+        Assert.Contains("ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests.csproj", exclusiveProjects);
         Assert.Equal("2", ValueAfter(run.Arguments, "--parallelism"));
         Assert.Equal("longest-first", ValueAfter(run.Arguments, "--schedule"));
         Assert.DoesNotContain("--schedule-timings", run.Arguments);
@@ -857,6 +859,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData("historical")]
     [InlineData("wrong-policy")]
     [InlineData("wrong-source")]
+    [InlineData("wrong-receipt-version")]
     [InlineData("wrong-run")]
     [InlineData("altered-gate")]
     [InlineData("failed-aggregate")]
@@ -911,6 +914,207 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             else await AssertFailedWithoutClaimsAsync(fixture, result, "native-fan-in");
         }
         finally { foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value); }
+    }
+
+    [Theory]
+    [InlineData("measured")]
+    [InlineData("both-not-applicable")]
+    [InlineData("mixed")]
+    [InlineData("exact-thresholds")]
+    [InlineData("repeating-ratio")]
+    [InlineData("primary-below-threshold")]
+    public async Task ProduceAsync_AcceptsVerifiedNativeV3ApplicabilityAndComposedThresholds(string scenario)
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var settings = fixture.NativeSettings(NativeV3DiffBase) with { NativeCoverageContractVersion = 3 };
+            fixture.CreateNativeCaptureDirectories(settings);
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                commands.Add(request);
+                if (request.Arguments.Contains("fanin"))
+                {
+                    Assert.Equal(fixture.Dotnet, request.FileName);
+                    Assert.Equal(settings.CoverageCliPath, ValueAfter(request.Arguments, "--cli"));
+                    Assert.Equal(NativeV3DiffBase, ValueAfter(request.Arguments, "--diff-base"));
+                    Assert.Equal(settings.NativeCoverageDirectory, ValueAfter(request.Arguments, "--native-inputs"));
+                    Assert.Equal("3", ValueAfter(request.Arguments, "--contract-version"));
+                    Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(request.Arguments, "--diff-policy-id"));
+                    await fixture.WriteNativeV3ProofAsync(ValueAfter(request.Arguments, "--output"), scenario);
+                }
+                else await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+            Assert.Equal(["coverage/solution-complete@1", "coverage/thresholds@1"], result.SatisfiedAssertionIds);
+            Assert.Equal(3, Directory.GetDirectories(settings.NativeCoverageDirectory!).Length);
+            Assert.Single(commands, command => command.Arguments.Contains("--solution"));
+            var fanIn = Assert.Single(commands, command => command.Arguments.Contains("fanin"));
+            Assert.Equal("3", ValueAfter(fanIn.Arguments, "--contract-version"));
+            Assert.Equal(NativeV3DiffBase, ValueAfter(fanIn.Arguments, "--diff-base"));
+            Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(fanIn.Arguments, "--diff-policy-id"));
+
+            var fanInOutput = Path.Join(fixture.Output, "coverage-fanin");
+            using var applicability = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                Path.Join(fanInOutput, "accepted", "patch-applicability.json")));
+            var claim = applicability.RootElement;
+            Assert.Equal(3, claim.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal("coverlet-collector-cobertura-v1", claim.GetProperty("reportProfileId").GetString());
+            using (var metadata = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                Path.Join(fanInOutput, "accepted", "diff-metadata.json"))))
+                Assert.Equal("appsurface-visual-baseline-png-v1", metadata.RootElement.GetProperty("diffPolicyId").GetString());
+            if (scenario == "both-not-applicable")
+                foreach (var set in new[] { "primary", "composed" })
+                    foreach (var metric in new[] { "line", "branch" }.Select(claim.GetProperty(set).GetProperty))
+                    {
+                        Assert.Equal("notApplicable", metric.GetProperty("outcome").GetString());
+                        Assert.Equal("no-reported-patch-points", metric.GetProperty("reason").GetString());
+                        Assert.Equal(0, metric.GetProperty("measurable").GetInt32());
+                        Assert.Equal(0, metric.GetProperty("covered").GetInt32());
+                        Assert.Equal(JsonValueKind.Null, metric.GetProperty("percent").ValueKind);
+                    }
+            if (scenario == "mixed")
+            {
+                Assert.Equal("measured", claim.GetProperty("primary").GetProperty("line").GetProperty("outcome").GetString());
+                Assert.Equal("notApplicable", claim.GetProperty("primary").GetProperty("branch").GetProperty("outcome").GetString());
+                Assert.Equal("measured", claim.GetProperty("composed").GetProperty("line").GetProperty("outcome").GetString());
+                Assert.Equal("measured", claim.GetProperty("composed").GetProperty("branch").GetProperty("outcome").GetString());
+            }
+            if (scenario == "exact-thresholds")
+            {
+                var composed = claim.GetProperty("composed");
+                Assert.Equal(94.5m, composed.GetProperty("line").GetProperty("percent").GetDecimal());
+                Assert.Equal(84.5m, composed.GetProperty("branch").GetProperty("percent").GetDecimal());
+            }
+            if (scenario == "repeating-ratio")
+                Assert.Equal(95.2381m, claim.GetProperty("primary").GetProperty("line").GetProperty("percent").GetDecimal());
+            if (scenario == "primary-below-threshold")
+            {
+                Assert.True(claim.GetProperty("primary").GetProperty("line").GetProperty("percent").GetDecimal() < 94.5m);
+                Assert.True(claim.GetProperty("composed").GetProperty("line").GetProperty("percent").GetDecimal() >= 94.5m);
+            }
+
+            foreach (var operation in new[] { "accept", "verify" })
+            {
+                using var terminal = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                    TestPathUtils.PathUnder(fanInOutput, operation + "-result.json")));
+                Assert.Equal(3, terminal.RootElement.GetProperty("schemaVersion").GetInt32());
+                Assert.Equal("succeeded", terminal.RootElement.GetProperty("result").GetProperty("outcome").GetString());
+            }
+            using var producerResult = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                Path.Join(fixture.Root, "artifacts", "proof", "result.json")));
+            Assert.Equal(3, producerResult.RootElement.GetProperty("nativeFanInContractVersion").GetInt32());
+            Assert.Equal(64, producerResult.RootElement.GetProperty("nativeFanInProofSha256").GetString()!.Length);
+            Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
+        });
+    }
+
+    [Theory]
+    [InlineData("wrong-terminal-version")]
+    [InlineData("wrong-acceptance-version")]
+    [InlineData("wrong-acceptance-intent")]
+    [InlineData("missing-verify")]
+    [InlineData("not-verified")]
+    [InlineData("unverified")]
+    [InlineData("wrong-result-outcome")]
+    [InlineData("false-not-applicable-measured")]
+    [InlineData("invalid-primary-not-applicable")]
+    [InlineData("invalid-primary-metric")]
+    [InlineData("invalid-composed-not-applicable")]
+    [InlineData("invalid-composed-metric")]
+    [InlineData("below-threshold")]
+    [InlineData("result-primary-mismatch")]
+    [InlineData("result-composed-mismatch")]
+    [InlineData("primary-report-mismatch")]
+    [InlineData("composed-report-mismatch")]
+    [InlineData("tampered-applicability")]
+    [InlineData("tampered-diff")]
+    [InlineData("tampered-diff-metadata")]
+    [InlineData("tampered-primary-gate")]
+    [InlineData("tampered-composed-gate")]
+    [InlineData("tampered-composition-receipt")]
+    [InlineData("metadata-schema-version")]
+    [InlineData("metadata-requested-base")]
+    [InlineData("metadata-head-commit")]
+    [InlineData("wrong-diff-policy")]
+    [InlineData("metadata-merge-base-short")]
+    [InlineData("metadata-merge-base-invalid-hex")]
+    [InlineData("metadata-diff-policy")]
+    [InlineData("metadata-diff-sha256")]
+    [InlineData("applicability-schema-version")]
+    [InlineData("applicability-report-profile")]
+    [InlineData("applicability-policy-digest")]
+    [InlineData("applicability-source")]
+    [InlineData("applicability-run")]
+    [InlineData("applicability-diff-sha256")]
+    [InlineData("applicability-diff-metadata-sha256")]
+    [InlineData("negative-changed-lines")]
+    [InlineData("negative-covered-lines")]
+    public async Task ProduceAsync_RejectsInvalidOrTamperedNativeV3ApplicabilityEvidence(string defect)
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var settings = fixture.NativeSettings(NativeV3DiffBase) with { NativeCoverageContractVersion = 3 };
+            fixture.CreateNativeCaptureDirectories(settings);
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                commands.Add(request);
+                if (request.Arguments.Contains("fanin"))
+                {
+                    Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(request.Arguments, "--diff-policy-id"));
+                    await fixture.WriteNativeV3ProofAsync(ValueAfter(request.Arguments, "--output"), defect);
+                }
+                else await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            await AssertFailedWithoutClaimsAsync(fixture, result, "native-fan-in");
+            Assert.Single(commands, command => command.Arguments.Contains("--solution"));
+            var fanIn = Assert.Single(commands, command => command.Arguments.Contains("fanin"));
+            Assert.Equal("3", ValueAfter(fanIn.Arguments, "--contract-version"));
+            Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(fanIn.Arguments, "--diff-policy-id"));
+            Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "result");
+        });
+    }
+
+    [Theory]
+    [InlineData(3, true, null)]
+    [InlineData(3, true, "main")]
+    [InlineData(3, true, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData(3, true, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData(3, true, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData(3, true, "cccccccccccccccccccccccccccccccccccccccg")]
+    [InlineData(3, false, NativeV3DiffBase)]
+    [InlineData(4, true, NativeV3DiffBase)]
+    public async Task ProduceAsync_RejectsUnsupportedNativeContractOrMissingV3Prerequisites(
+        int contractVersion, bool withCaptures, string? diffBase)
+    {
+        using var fixture = new Fixture();
+        var settings = fixture.NativeSettings(diffBase) with { NativeCoverageContractVersion = contractVersion };
+        if (withCaptures)
+            fixture.CreateNativeCaptureDirectories(settings);
+        else
+            settings = settings with { NativeCoverageDirectory = null };
+        var commands = new List<EvidenceCommandRequest>();
+        var producer = fixture.CreateWithSettings(settings, (request, _) =>
+        {
+            commands.Add(request);
+            return Task.FromResult(Success());
+        });
+
+        var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+        await AssertFailedWithoutClaimsAsync(fixture, result, "settings");
+        Assert.Empty(commands);
     }
 
     [Theory]
@@ -985,6 +1189,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             Assert.Equal(Path.Join(fixture.Output, "coverage", "coverage.cobertura.xml"), ValueAfter(fanIn.Arguments, "--primary"));
             Assert.Equal(Path.Join(fixture.Output, "coverage", "timings.json"), ValueAfter(fanIn.Arguments, "--timings"));
             Assert.Equal(nativeRoot, ValueAfter(fanIn.Arguments, "--native-inputs"));
+            Assert.DoesNotContain("--diff-policy-id", fanIn.Arguments);
             Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
             Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
             using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(
@@ -1094,6 +1299,236 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         public RepositoryCheckSettings NativeSettings(string? diffBase, string? diffFile = null) =>
             new(_root, _dotnet, _output, diffBase, TestPathUtils.PathUnder(_root, "native-captures"), diffFile, _dotnet);
 
+        public void CreateNativeCaptureDirectories(RepositoryCheckSettings settings)
+        {
+            foreach (var platform in new[] { "linux", "windows", "darwin" })
+                Directory.CreateDirectory(TestPathUtils.PathUnder(settings.NativeCoverageDirectory!, platform));
+        }
+
+        public async Task WriteNativeV3ProofAsync(string output, string scenario)
+        {
+            // This command-orchestration fixture supplies the installed adapter's retained v3 receipt shape.
+            var accepted = Path.Join(output, "accepted");
+            var composed = Path.Join(output, "composed");
+            Directory.CreateDirectory(accepted);
+            Directory.CreateDirectory(composed);
+
+            const int addedLines = 200;
+            static object Metric(string outcome, string reason, int changedLines, int measurable, int covered, decimal? percent) =>
+                new { outcome, reason, changedLines, measurable, covered, percent };
+            static object Reported(int measurable, int covered, decimal percent) =>
+                Metric("measured", "reported-points", addedLines, measurable, covered, percent);
+
+            var notApplicable = Metric("notApplicable", "no-reported-patch-points", addedLines, 0, 0, null);
+            var measuredLine = Reported(100, 99, 99m);
+            var measuredBranch = Reported(100, 90, 90m);
+            var lineBelow = Reported(100, 94, 94m);
+            var branchBelow = Reported(100, 80, 80m);
+            var repeatingRatioLine = Reported(21, 20, 95.2381m);
+            var primaryLine = scenario switch
+            {
+                "both-not-applicable" => notApplicable,
+                "invalid-primary-not-applicable" => Metric("notApplicable", "no-reported-patch-points", addedLines, 0, 1, null),
+                "primary-below-threshold" => Reported(100, 90, 90m),
+                "invalid-primary-metric" => Reported(100, 98, 99m),
+                "repeating-ratio" => repeatingRatioLine,
+                "negative-changed-lines" => Metric("measured", "reported-points", -1, 100, 99, 99m),
+                "negative-covered-lines" => Reported(100, -1, 99m),
+                _ => measuredLine,
+            };
+            var primaryBranch = scenario switch
+            {
+                "both-not-applicable" or "mixed" => notApplicable,
+                "primary-below-threshold" => branchBelow,
+                "exact-thresholds" => Reported(200, 169, 84.5m),
+                _ => measuredBranch,
+            };
+            var composedLine = scenario switch
+            {
+                "both-not-applicable" => notApplicable,
+                "invalid-composed-not-applicable" => Metric("notApplicable", "no-reported-patch-points", addedLines, 0, 1, null),
+                "below-threshold" => lineBelow,
+                "false-not-applicable-measured" => Metric("notApplicable", "no-reported-patch-points", addedLines, 1, 1, 100m),
+                "unverified" => Metric("unverified", "verification-failed", addedLines, 0, 0, null),
+                "exact-thresholds" => Reported(200, 189, 94.5m),
+                "repeating-ratio" => repeatingRatioLine,
+                "invalid-composed-metric" => Reported(100, 98, 99m),
+                _ => measuredLine,
+            };
+            var composedBranch = scenario switch
+            {
+                "both-not-applicable" => notApplicable,
+                "exact-thresholds" => Reported(200, 169, 84.5m),
+                _ => measuredBranch,
+            };
+            var primary = new { line = primaryLine, branch = primaryBranch };
+            var composedMetrics = new { line = composedLine, branch = composedBranch };
+
+            var additions = string.Concat(Enumerable.Range(1, addedLines).Select(line => $"+if (value < {line}) value++;\n"));
+            var patchBytes = System.Text.Encoding.UTF8.GetBytes(
+                $"diff --git a/src/Example.cs b/src/Example.cs\nindex {new string('d', 40)}..{new string('e', 40)} 100644\n--- a/src/Example.cs\n+++ b/src/Example.cs\n@@ -1 +1,{addedLines} @@\n-before\n{additions}");
+            var diffSha256 = Hash(patchBytes);
+            var metadataBytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schemaVersion = scenario == "metadata-schema-version" ? 2 : 3,
+                requestedBaseCommit = scenario == "metadata-requested-base" ? new string('a', 40) : NativeV3DiffBase,
+                mergeBaseCommit = scenario switch
+                {
+                    "metadata-merge-base-short" => new string('a', 39),
+                    "metadata-merge-base-invalid-hex" => new string('A', 40),
+                    _ => NativeV3DiffBase,
+                },
+                headCommit = scenario == "metadata-head-commit" ? new string('f', 40) : Commit,
+                diffPolicyId = scenario switch
+                {
+                    "wrong-diff-policy" => "appsurface-git-patch-v1",
+                    "metadata-diff-policy" => "another-policy",
+                    _ => "appsurface-visual-baseline-png-v1"
+                },
+                diffSha256 = scenario == "metadata-diff-sha256" ? new string('a', 64) : diffSha256,
+                empty = false,
+                changes = new[]
+                {
+                    new
+                    {
+                        kind = "modified",
+                        oldPath = "src/Example.cs",
+                        newPath = "src/Example.cs",
+                        addedRanges = new[] { new { start = 1, count = addedLines } },
+                    },
+                },
+            });
+            var diffMetadataSha256 = Hash(metadataBytes);
+            var source = new { commit = Commit, tree = new string('b', 40), sdk = "10.0.100", configuration = "Release" };
+            var run = new { runScope = "forge-trust/AppSurface", runId = "123", attempt = 1 };
+            var claimSource = new
+            {
+                commit = scenario == "applicability-source" ? new string('f', 40) : Commit,
+                tree = new string('b', 40),
+                sdk = "10.0.100",
+                configuration = "Release",
+            };
+            var claimRun = new
+            {
+                runScope = "forge-trust/AppSurface",
+                runId = scenario == "applicability-run" ? "124" : "123",
+                attempt = 1,
+            };
+
+            object primaryReportLine = scenario == "primary-report-mismatch"
+                ? Reported(100, 98, 98m) : primaryLine;
+            object composedReportLine = scenario == "composed-report-mismatch"
+                ? Reported(100, 98, 98m) : composedLine;
+            var primaryGateBytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                passed = true,
+                tolerancePercent = .5m,
+                thresholds = new { line = 95m, branch = 85m, patchLine = 95m, patchBranch = 85m },
+                patchLineMode = "codecov",
+                line = new { percent = 99m },
+                branch = new { percent = 90m },
+                patchLine = primaryReportLine,
+                patchBranch = primaryBranch,
+            });
+            var composedGateBytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                passed = true,
+                tolerancePercent = .5m,
+                thresholds = new { line = 95m, branch = 85m, patchLine = 95m, patchBranch = 85m },
+                patchLineMode = "codecov",
+                line = new { percent = 99m },
+                branch = new { percent = 90m },
+                patchLine = composedReportLine,
+                patchBranch = composedBranch,
+            });
+            var compositionReceiptBytes = JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 3, outcome = "succeeded" });
+            var applicabilityBytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schemaVersion = scenario == "applicability-schema-version" ? 2 : 3,
+                reportProfileId = scenario == "applicability-report-profile" ? "another-profile" : "coverlet-collector-cobertura-v1",
+                policyDigest = scenario == "applicability-policy-digest" ? "another-policy" : "policy",
+                source = claimSource,
+                run = claimRun,
+                diffSha256 = scenario == "applicability-diff-sha256" ? new string('a', 64) : diffSha256,
+                diffMetadataSha256 = scenario == "applicability-diff-metadata-sha256" ? new string('a', 64) : diffMetadataSha256,
+                primary,
+                composed = composedMetrics,
+            });
+
+            await File.WriteAllBytesAsync(Path.Join(accepted, "diff.patch"), patchBytes);
+            await File.WriteAllBytesAsync(Path.Join(accepted, "diff-metadata.json"), metadataBytes);
+            await File.WriteAllBytesAsync(Path.Join(accepted, "patch-applicability.json"), applicabilityBytes);
+            await File.WriteAllBytesAsync(Path.Join(accepted, "primary-gate.json"), primaryGateBytes);
+            await File.WriteAllBytesAsync(Path.Join(accepted, "composed-gate.json"), composedGateBytes);
+            await File.WriteAllBytesAsync(Path.Join(composed, "verification.json"), compositionReceiptBytes);
+
+            object resultPrimary = scenario == "result-primary-mismatch"
+                ? new { line = Reported(100, 98, 98m), branch = primaryBranch }
+                : primary;
+            object resultComposed = scenario == "result-composed-mismatch"
+                ? new { line = Reported(100, 98, 98m), branch = composedBranch }
+                : composedMetrics;
+            var resultApplicability = new { primary = resultPrimary, composed = resultComposed };
+            foreach (var operation in new[] { "accept", "verify" }
+                         .Where(operation => operation != "verify" || scenario != "missing-verify"))
+            {
+                var terminal = new
+                {
+                    schemaVersion = scenario == "wrong-terminal-version" && operation == "verify" ? 2 : 3,
+                    operation,
+                    status = "succeeded",
+                    operationOutcome = "succeeded",
+                    delivery = new { resultFileCommitted = true },
+                    result = new
+                    {
+                        operation,
+                        outcome = scenario == "wrong-result-outcome" && operation == "verify" ? "failed" : "succeeded",
+                        verified = scenario != "not-verified",
+                        accepted = true,
+                        effects = new { cleanupComplete = true },
+                        patchOutcome = "PatchAccepted",
+                        evaluationIntent = "currentTrustedRun",
+                        policyDigest = "policy",
+                        patchApplicability = resultApplicability,
+                    },
+                };
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, operation + "-result.json"), JsonSerializer.Serialize(terminal));
+            }
+
+            var acceptance = new
+            {
+                schemaVersion = scenario == "wrong-acceptance-version" ? 2 : 3,
+                evaluationIntent = scenario == "wrong-acceptance-intent" ? "historicalReplay" : "currentTrustedRun",
+                patchOutcome = "PatchAccepted",
+                policyDigest = "policy",
+                source,
+                run,
+                primaryGateSha256 = Hash(primaryGateBytes),
+                composedGateSha256 = Hash(composedGateBytes),
+                compositionReceiptSha256 = Hash(compositionReceiptBytes),
+                applicabilitySha256 = Hash(applicabilityBytes),
+                diffSha256,
+                diffMetadataSha256,
+            };
+            await File.WriteAllTextAsync(Path.Join(accepted, "acceptance.json"), JsonSerializer.Serialize(acceptance));
+
+            var tamperedPath = scenario switch
+            {
+                "tampered-applicability" => Path.Join(accepted, "patch-applicability.json"),
+                "tampered-diff" => Path.Join(accepted, "diff.patch"),
+                "tampered-diff-metadata" => Path.Join(accepted, "diff-metadata.json"),
+                "tampered-primary-gate" => Path.Join(accepted, "primary-gate.json"),
+                "tampered-composed-gate" => Path.Join(accepted, "composed-gate.json"),
+                "tampered-composition-receipt" => Path.Join(composed, "verification.json"),
+                _ => null,
+            };
+            if (tamperedPath is not null)
+                await File.AppendAllTextAsync(tamperedPath, " ");
+        }
+
+        private static string Hash(byte[] bytes) =>
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+
         public async Task WriteNativeV2ProofAsync(string output, string defect)
         {
             // This is a command-orchestration fixture using the CLI's delivered v2 shape.
@@ -1121,7 +1556,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                         policyDigest = operation == "verify" && defect == "wrong-policy" ? "another-policy" : "policy",
                     },
                 };
-                await File.WriteAllTextAsync(Path.Join(output, operation + "-result.json"), JsonSerializer.Serialize(terminal));
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, operation + "-result.json"), JsonSerializer.Serialize(terminal));
             }
             foreach (var patch in new[] { false, true })
             {
@@ -1143,6 +1578,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, relative))));
             var acceptance = new
             {
+                schemaVersion = defect == "wrong-receipt-version" ? 3 : 2,
                 policyDigest = "policy",
                 source = new { commit = defect == "wrong-source" ? new string('c', 40) : Commit, tree = new string('b', 40), sdk = "10.0.100", configuration = "Release" },
                 run = new { runScope = "forge-trust/appsurface", runId = "12345", attempt = defect == "wrong-run" ? 1 : 2 },

@@ -8,6 +8,9 @@ internal sealed record CoverageFanInExpected(JsonElement Policy, string Digest)
 {
     /// <summary>Explicit report contract version; policies without the additive selector retain legacy v2.</summary>
     internal int ContractVersion => Policy.TryGetProperty("contractVersion", out var version) ? version.GetInt32() : 2;
+    /// <summary>The pinned Git interpretation used for v3 patch evaluation and independent replay.</summary>
+    internal string DiffPolicyId => Policy.TryGetProperty("diffPolicyId", out var id)
+        ? id.GetString()! : CoverageFanInDiffContext.PolicyId;
     internal JsonElement Source => Policy.GetProperty("source");
     internal JsonElement Run => Policy.GetProperty("run");
     internal JsonElement Gate => Policy.GetProperty("gate");

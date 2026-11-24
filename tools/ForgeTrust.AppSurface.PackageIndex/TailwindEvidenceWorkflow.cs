@@ -1,6 +1,8 @@
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -395,6 +397,7 @@ internal static class TailwindEvidenceWorkflow
         using var aggregate = ParseStrict(aggregateBytes, "native aggregate");
         var invocation = await ValidateAggregateAsync(aggregate.RootElement, request, subject, aggregateRoot, cancellationToken);
 
+        var docsEvidence = ValidateDocsNativeEvidence(request, manifest);
         var publicationRoot = Path.GetFullPath(request.PublicationDirectory);
         RequireFreshDirectory(publicationRoot, "publication");
         PackageProofWorkDirectory.RequireDisjoint(publicationRoot, request.ReportDirectory);
@@ -422,7 +425,7 @@ internal static class TailwindEvidenceWorkflow
         var startReceiptPath = Path.Combine(request.ReportDirectory, StartReceiptFile);
         var draft = new
         {
-            schema = "appsurface-tailwind-publication-start-v1",
+            schema = docsEvidence is null ? "appsurface-tailwind-publication-start-v1" : "appsurface-tailwind-publication-start-v2",
             repositoryId = subject.RepositoryId,
             sourceCommit = subject.SourceCommit,
             producerRunId = subject.ProducerRunId,
@@ -437,7 +440,17 @@ internal static class TailwindEvidenceWorkflow
             nativeInvocationId = invocation,
             packages = prepared.Select(package => new { packageId = package.PackageId, packageVersion = package.PackageVersion, artifactFileName = package.ArtifactFileName, packageSha512 = package.PackageSha512 }).ToArray()
         };
-        await WriteCreateNewJsonAsync(startReceiptPath, draft, cancellationToken);
+        var receipt = JsonSerializer.SerializeToNode(draft)!.AsObject();
+        if (docsEvidence is not null)
+        {
+            receipt["docsNativeEvidence"] = new JsonObject
+            {
+                ["artifactId"] = docsEvidence.ArtifactId,
+                ["sha256"] = docsEvidence.Sha256
+            };
+        }
+
+        await WriteCreateNewJsonAsync(startReceiptPath, receipt, cancellationToken);
         await WriteDiagnosticReportAsync(request.ReportDirectory, "succeeded", "publish-preflight", true, [],
             $"Validated aggregate `{request.AggregateArtifactId}` and prepared {prepared.Count} packages. Upload `{StartReceiptFile}` and pass its returned artifact ID to the publisher.", cancellationToken);
         return new PreparedTailwindPublication(subject.PackageVersion, aggregateHash, invocation, prepared);
@@ -496,7 +509,8 @@ internal static class TailwindEvidenceWorkflow
         RequireDecimal(request.PublicationStartArtifactId, "publication-start artifact ID");
         var startBytes = await ReadBoundedAsync(startPath, cancellationToken);
         using var startDocument = ParseStrict(startBytes, "publication-start receipt");
-        var invocation = ValidateStartReceipt(startDocument.RootElement, request, subject, aggregateHash, originalEntries);
+        var docsEvidence = ValidateDocsNativeEvidence(request, manifest);
+        var invocation = ValidateStartReceipt(startDocument.RootElement, request, subject, aggregateHash, originalEntries, docsEvidence);
         if (!string.Equals(invocation, aggregateInvocation, StringComparison.Ordinal))
             throw new PackageIndexException("Publication-start receipt nativeInvocationId differs from the validated aggregate.");
 
@@ -737,10 +751,64 @@ internal static class TailwindEvidenceWorkflow
         return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 
-    private static string ValidateStartReceipt(JsonElement root, TailwindPublicationRequest request, TailwindProofSubject subject, string aggregateHash, IReadOnlyList<PlannedPackageArtifact> entries)
+    private static DocsNativeReleaseIdentity? ValidateDocsNativeEvidence(
+        TailwindPublicationRequest request,
+        PackageArtifactManifest manifest)
     {
-        RequireExactFields(root, ["schema", "repositoryId", "sourceCommit", "producerRunId", "producerAttempt", "producerArtifactId", "subjectSha256", "artifactManifestSha256", "packageVersion", "payloadProjectionVersion", "aggregateArtifactId", "aggregateSha256", "nativeInvocationId", "packages"], "publication-start receipt");
-        RequireString(root, "schema", "appsurface-tailwind-publication-start-v1");
+        var docs = manifest.Entries.SingleOrDefault(entry =>
+            string.Equals(entry.PackageId, DocsNativeReleaseEvidence.PackageId, StringComparison.OrdinalIgnoreCase));
+        if (docs is not null)
+        {
+            TailwindProofSubjectService.ValidateBasename(docs.ArtifactFileName, "Docs artifact filename");
+            var path = Path.Join(request.ArtifactsInputPath, docs.ArtifactFileName);
+            RequireRegularFileWithoutLinks(path);
+            using var archive = ZipFile.OpenRead(path);
+            if (archive.GetEntry(DocsNativeReleaseEvidence.TargetPath) is not null)
+            {
+                var input = request.DocsNativeEvidence
+                    ?? throw new PackageIndexException("Publication requires the frozen Docs native proof.");
+                return DocsNativeReleaseEvidence.Validate(
+                    input, request.ProducerArtifactId, request.SourceCommit, manifest.PackageVersion, docs.Sha512);
+            }
+        }
+
+        if (request.DocsNativeEvidence is not null)
+        {
+            throw new PackageIndexException("The selected candidate does not carry the Docs native asset target.");
+        }
+
+        return null;
+    }
+
+    private static string ValidateStartReceipt(
+        JsonElement root,
+        TailwindPublicationRequest request,
+        TailwindProofSubject subject,
+        string aggregateHash,
+        IReadOnlyList<PlannedPackageArtifact> entries,
+        DocsNativeReleaseIdentity? docsEvidence)
+    {
+        string[] fields =
+        [
+            "schema", "repositoryId", "sourceCommit", "producerRunId", "producerAttempt", "producerArtifactId",
+            "subjectSha256", "artifactManifestSha256", "packageVersion", "payloadProjectionVersion", "aggregateArtifactId",
+            "aggregateSha256", "nativeInvocationId", "packages"
+        ];
+        if (docsEvidence is null)
+        {
+            RequireExactFields(root, fields, "publication-start receipt");
+            RequireString(root, "schema", "appsurface-tailwind-publication-start-v1");
+        }
+        else
+        {
+            RequireExactFields(root, [.. fields, "docsNativeEvidence"], "publication-start receipt");
+            RequireString(root, "schema", "appsurface-tailwind-publication-start-v2");
+            var docs = root.GetProperty("docsNativeEvidence");
+            RequireExactFields(docs, ["artifactId", "sha256"], "publication-start Docs native proof");
+            RequireString(docs, "artifactId", docsEvidence.ArtifactId);
+            RequireString(docs, "sha256", docsEvidence.Sha256);
+        }
+
         ValidateCommonBinding(root, request, subject);
         RequireString(root, "aggregateArtifactId", request.AggregateArtifactId);
         RequireString(root, "aggregateSha256", aggregateHash);

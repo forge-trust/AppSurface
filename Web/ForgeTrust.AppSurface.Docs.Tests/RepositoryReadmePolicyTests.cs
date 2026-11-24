@@ -88,6 +88,10 @@ public sealed partial class RepositoryReadmePolicyTests
         Assert.True(policy.ShouldIncludeFilePath("LICENSE", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.True(
             policy.ShouldIncludeFilePath(
+                "scripts/web-pwa/README.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(
+            policy.ShouldIncludeFilePath(
                 "Intelligence/ForgeTrust.AppSurface.Intelligence/README.md",
                 AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
@@ -115,11 +119,56 @@ public sealed partial class RepositoryReadmePolicyTests
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/TestResults/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(policy.ShouldIncludeFilePath("unpublished/scratch/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/AppSurfaceDocsOptions.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
+        Assert.False(
+            policy.ShouldIncludeFilePath(
+                "scripts/web-pwa/verify.cs",
+                AppSurfaceDocsHarvestSourceKind.CSharp));
+        Assert.False(
+            policy.ShouldIncludeFilePath(
+                "scripts/web-pwa/PwaVerifier.cs",
+                AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.False(policy.ShouldIncludeFilePath("examples/web-app/Program.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Web.Tests/Fixture.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js", AppSurfaceDocsHarvestSourceKind.JavaScript));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js", AppSurfaceDocsHarvestSourceKind.JavaScript));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Web.Tests/fixture.js", AppSurfaceDocsHarvestSourceKind.JavaScript));
+    }
+
+    [Fact]
+    public void RepositoryHarvestPolicy_ShouldIncludeWebPwaVerifierReadme()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        using var provider = CreatePolicyProvider(repoRoot, "appsettings.json");
+        var policy = provider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>();
+
+        Assert.True(
+            policy.ShouldIncludeFilePath(
+                "scripts/web-pwa/README.md",
+                AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.False(
+            policy.ShouldIncludeFilePath(
+                "scripts/web-pwa/verify.cs",
+                AppSurfaceDocsHarvestSourceKind.CSharp));
+        Assert.False(
+            policy.ShouldIncludeFilePath(
+                "scripts/web-pwa/PwaVerifier.cs",
+                AppSurfaceDocsHarvestSourceKind.CSharp));
+    }
+
+    [Fact]
+    public void WebPwaVerifierGuide_ShouldLinkReportSourceOnGitHub()
+    {
+        const string reportSourceUrl =
+            "https://github.com/forge-trust/AppSurface/blob/main/Cli/ForgeTrust.AppSurface.Cli/PwaVerificationV3Report.cs";
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var markdown = File.ReadAllText(TestPathUtils.PathUnder(repoRoot, "scripts/web-pwa/README.md"));
+        var html = Markdig.Markdown.ToHtml(markdown);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var reference = Assert.Single(
+            document.QuerySelectorAll("a[href]"),
+            anchor => anchor.GetAttribute("href")!.EndsWith("PwaVerificationV3Report.cs", StringComparison.Ordinal));
+
+        Assert.Equal(reportSourceUrl, reference.GetAttribute("href"));
     }
 
     [Fact]
@@ -188,7 +237,8 @@ public sealed partial class RepositoryReadmePolicyTests
             .ToArray();
 
         // Public source-only rows remain harvested even when publication is held.
-        Assert.Equal(46, requiredReadmes.Length);
+        Assert.Equal(47, requiredReadmes.Length);
+        Assert.Contains("PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/README.md", requiredReadmes);
         Assert.Contains("Coverage/ForgeTrust.AppSurface.Coverage/README.md", requiredReadmes);
         Assert.Contains("Config/ForgeTrust.AppSurface.Config.Testing/README.md", requiredReadmes);
         Assert.Contains(
@@ -225,7 +275,7 @@ public sealed partial class RepositoryReadmePolicyTests
             "Durable/ForgeTrust.AppSurface.Durable.Provider/README.md",
             requiredReadmes);
         Assert.Contains(
-            "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md",
+            "Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md",
             requiredReadmes);
         Assert.Contains(
             "Durable/ForgeTrust.AppSurface.Durable.Testing/README.md",
@@ -476,13 +526,14 @@ public sealed partial class RepositoryReadmePolicyTests
             .ToArray();
     }
 
-    private static ServiceProvider CreatePolicyProvider(string repoRoot)
+    private static ServiceProvider CreatePolicyProvider(
+        string repoRoot,
+        string configurationRelativePath = "Web/ForgeTrust.AppSurface.Docs.Standalone/appsettings.json")
     {
-        var standaloneConfigRelativePath = Path.Join("Web", "ForgeTrust.AppSurface.Docs.Standalone", "appsettings.json");
-        var standaloneConfigPath = TestPathUtils.PathUnder(repoRoot, standaloneConfigRelativePath);
+        var configurationPath = TestPathUtils.PathUnder(repoRoot, configurationRelativePath);
         var configuration = new ConfigurationBuilder()
             .AddJsonFile(
-                standaloneConfigPath,
+                configurationPath,
                 optional: false,
                 reloadOnChange: false)
             .Build();

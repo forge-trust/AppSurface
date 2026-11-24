@@ -38,6 +38,11 @@ internal static class CloudTasksNeutralSourceProof
         [.. RequiredSharedFiles, "Directory.Packages.props", .. OptionalSharedFiles];
 
     private static readonly IReadOnlyList<string> ApprovedSdkRootIds = ["Google.Cloud.Tasks.V2", "Grpc.Net.Client"];
+    private const string CloudTasksLockPath = "Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/packages.lock.json";
+    private const string CandidateGrpcCondition =
+        "'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.GoogleCloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests'";
+    private const string HistoricalGrpcCondition =
+        "'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks.Tests'";
     private const int MaximumCloudTasksLockBytes = 1024 * 1024;
     private static readonly Regex CanonicalVersion = new(
         @"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$",
@@ -122,8 +127,8 @@ internal static class CloudTasksNeutralSourceProof
         var candidatePackagesPath = Resolve(candidateRoot, "Directory.Packages.props");
         RequireFile(baselinePackagesPath, "baseline Directory.Packages.props");
         RequireFile(candidatePackagesPath, "candidate Directory.Packages.props");
-        var normalizedBaselinePackages = NormalizeCentralPackages(baselinePackagesPath, sdkPins, allowMatchingOrNoPins: true);
-        var normalizedCandidatePackages = NormalizeCentralPackages(candidatePackagesPath, sdkPins, allowMatchingOrNoPins: false);
+        var normalizedBaselinePackages = NormalizeCentralPackages(baselinePackagesPath, sdkPins, isBaseline: true);
+        var normalizedCandidatePackages = NormalizeCentralPackages(candidatePackagesPath, sdkPins, isBaseline: false);
         if (!XNode.DeepEquals(normalizedBaselinePackages, normalizedCandidatePackages))
         {
             throw new PackageIndexException("Neutral source parity failed: Directory.Packages.props changed beyond the two approved Cloud Tasks pins.");
@@ -138,18 +143,16 @@ internal static class CloudTasksNeutralSourceProof
             evidence.Add($"baseline/{relativePath}", HashFile(paths.BaselinePath));
             evidence.Add($"candidate/{relativePath}", HashFile(paths.CandidatePath));
         }
-        evidence.Add("candidate/Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json",
-            HashFile(Resolve(candidateRoot, "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json")));
+        evidence.Add($"candidate/{CloudTasksLockPath}", HashFile(Resolve(candidateRoot, CloudTasksLockPath)));
 
         return evidence;
     }
 
     private static IReadOnlyDictionary<string, string> ReadCloudTasksLockPins(string candidateRoot)
     {
-        const string relativePath = "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json";
-        var directory = Resolve(candidateRoot, "Durable/ForgeTrust.AppSurface.Durable.CloudTasks");
+        var directory = Resolve(candidateRoot, Path.GetDirectoryName(CloudTasksLockPath)!);
         RequireDirectory(directory, "candidate Cloud Tasks SDK lock directory", candidateRoot);
-        var path = Resolve(candidateRoot, relativePath);
+        var path = Resolve(candidateRoot, CloudTasksLockPath);
         RequireFile(path, "candidate Cloud Tasks SDK packages.lock.json");
         byte[] lockBytes;
         try
@@ -302,7 +305,7 @@ internal static class CloudTasksNeutralSourceProof
     private static XDocument NormalizeCentralPackages(
         string path,
         IReadOnlyDictionary<string, string> sdkPins,
-        bool allowMatchingOrNoPins)
+        bool isBaseline)
     {
         XDocument document;
         try
@@ -332,15 +335,15 @@ internal static class CloudTasksNeutralSourceProof
                 throw new PackageIndexException($"Neutral source parity failed: Directory.Packages.props pin '{approved}' is duplicated.");
         }
 
-        if (allowMatchingOrNoPins && presentPins.Values.All(static matches => matches.Length == 0))
+        if (isBaseline && presentPins.Values.All(static matches => matches.Length == 0))
             return document;
 
         foreach (var approved in ApprovedSdkRootIds)
         {
             var matches = presentPins[approved];
-            if (matches.Length != 1 || !HasExactApprovedPin(matches[0], approved, sdkPins[approved]))
+            if (matches.Length != 1 || !HasExactApprovedPin(matches[0], approved, sdkPins[approved], isBaseline))
             {
-                var tree = allowMatchingOrNoPins ? "baseline" : "candidate";
+                var tree = isBaseline ? "baseline" : "candidate";
                 throw new PackageIndexException($"Neutral source parity failed: Directory.Packages.props {tree} pin '{approved}' is missing, partial, or differs from its Cloud Tasks SDK lock version/condition.");
             }
 
@@ -350,7 +353,7 @@ internal static class CloudTasksNeutralSourceProof
         return document;
     }
 
-    private static bool HasExactApprovedPin(XElement node, string packageId, string version)
+    private static bool HasExactApprovedPin(XElement node, string packageId, string version, bool isBaseline)
     {
         if (node.Attributes().Count() != (packageId == "Grpc.Net.Client" ? 3 : 2)) return false;
         if (!string.Equals((string?)node.Attribute("Include"), packageId, StringComparison.Ordinal)) return false;
@@ -358,10 +361,9 @@ internal static class CloudTasksNeutralSourceProof
         if (node.HasElements || node.Nodes().Any(static child => child is not XText text || !string.IsNullOrWhiteSpace(text.Value))) return false;
 
         if (packageId == "Google.Cloud.Tasks.V2") return node.Attribute("Condition") is null;
-        return string.Equals(
-            (string?)node.Attribute("Condition"),
-            "'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks.Tests'",
-            StringComparison.Ordinal);
+        var condition = (string?)node.Attribute("Condition");
+        return string.Equals(condition, CandidateGrpcCondition, StringComparison.Ordinal)
+            || (isBaseline && string.Equals(condition, HistoricalGrpcCondition, StringComparison.Ordinal));
     }
 
     private static void RemovePackagePinWithIndent(XElement node)

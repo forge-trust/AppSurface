@@ -181,7 +181,7 @@ internal static partial class CoverageFanInEngine
 
     private static IReadOnlyDictionary<string, string> V3Context(CoverageFanInEngineRequest r, string? exceptionType = null)
     {
-        var context = new Dictionary<string, string>(StringComparer.Ordinal) { ["contractVersion"] = "3", ["diffPolicyId"] = CoverageFanInDiffContext.PolicyId };
+        var context = new Dictionary<string, string>(StringComparer.Ordinal) { ["contractVersion"] = "3", ["diffPolicyId"] = r.Expected.DiffPolicyId };
         if (r.Expected.Policy.TryGetProperty("reportProfileId", out var profile)) context["reportProfileId"] = profile.GetString()!;
         if (r.Expected.Gate.GetProperty("diffBase").GetString() is { } basis) context["baseCommit"] = basis;
         context["headCommit"] = r.Expected.Source.GetProperty("commit").GetString()!;
@@ -266,9 +266,15 @@ internal static partial class CoverageFanInEngine
         if (Full(await IdentityAsync("git", ["rev-parse", "--show-toplevel"], r, token).ConfigureAwait(false)) != root
             || await IdentityAsync("git", ["rev-parse", "HEAD"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("commit").GetString()
             || await IdentityAsync("git", ["rev-parse", "HEAD^{tree}"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("tree").GetString()
-            || await IdentityAsync("dotnet", ["--version"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("sdk").GetString()
-            || (await IdentityAsync("git", ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"], r, token).ConfigureAwait(false)).Length != 0)
-            throw new InvalidDataException("Source, SDK or clean state differs from trusted expectations.");
+            || await IdentityAsync("dotnet", ["--version"], r, token).ConfigureAwait(false) != r.Expected.Source.GetProperty("sdk").GetString())
+            throw new InvalidDataException("Source or SDK differs from trusted expectations.");
+        if ((await IdentityAsync("git", ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"], r, token).ConfigureAwait(false)).Length != 0)
+        {
+            if (r.DiffContext is not null)
+                throw new CoverageFanInEvidenceException("identity-mismatch", "source",
+                    "Use a fresh, clean checkout that preserves committed file bytes and rerun collection and capture.");
+            throw new InvalidDataException("Source checkout is not clean.");
+        }
         var projects = new HashSet<string>(r.Expected.TestProjects, StringComparer.Ordinal);
         foreach (var producer in r.Expected.Supplements)
         {

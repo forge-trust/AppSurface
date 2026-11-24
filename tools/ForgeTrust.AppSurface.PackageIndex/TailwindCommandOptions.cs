@@ -23,7 +23,10 @@ internal sealed record TailwindCommandOptions(
     string? PublicationStartReceipt,
     string? PublicationStartArtifactId,
     string? ResolvedBindingOutput,
-    string[] RemainingArguments)
+    string[] RemainingArguments,
+    string? DocsNativeProof = null,
+    string? DocsNativeArtifactId = null,
+    string? DocsNativeSha256 = null)
 {
     /// <summary>Gets the explicit owner/repository expected by artifact transport; never inferred from a receipt.</summary>
     internal string? Repository { get; init; }
@@ -37,7 +40,9 @@ internal sealed record TailwindCommandOptions(
         "--producer-run-id", "--producer-attempt", "--source-commit", "--native-invocation-id", "--expected-rid",
         "--work-directory", "--report-directory", "--evidence-input", "--host-artifacts-map", "--aggregate-input",
         "--aggregate-artifact-id", "--expected-aggregate-sha256", "--publication-directory",
-        "--publication-start-receipt", "--publication-start-artifact-id", "--resolved-binding-output", "--repository", "--producer-receipt"
+        "--publication-start-receipt", "--publication-start-artifact-id", "--resolved-binding-output",
+        "--docs-native-proof", "--docs-native-artifact-id", "--docs-native-sha256",
+        "--repository", "--producer-receipt"
     };
 
     internal static TailwindCommandOptions Extract(string[] args)
@@ -59,7 +64,8 @@ internal sealed record TailwindCommandOptions(
             Get("--source-commit"), Get("--native-invocation-id"), Get("--expected-rid"), Get("--work-directory"),
             Get("--report-directory"), Get("--evidence-input"), Get("--host-artifacts-map"), Get("--aggregate-input"),
             Get("--aggregate-artifact-id"), Get("--expected-aggregate-sha256"), Get("--publication-directory"),
-            Get("--publication-start-receipt"), Get("--publication-start-artifact-id"), Get("--resolved-binding-output"), remaining.ToArray())
+            Get("--publication-start-receipt"), Get("--publication-start-artifact-id"), Get("--resolved-binding-output"), remaining.ToArray(),
+            Get("--docs-native-proof"), Get("--docs-native-artifact-id"), Get("--docs-native-sha256"))
         {
             Repository = Get("--repository"),
             ProducerReceipt = Get("--producer-receipt")
@@ -87,7 +93,8 @@ internal sealed record TailwindCommandOptions(
             ResolveRequiredPath(PublicationDirectory, repositoryRoot, "--publication-directory"),
             ResolveRequiredPath(PublicationStartReceipt, repositoryRoot, "--publication-start-receipt"),
             Require(PublicationStartArtifactId, "--publication-start-artifact-id"),
-            ResolveRequiredPath(ReportDirectory, repositoryRoot, "--report-directory"));
+            ResolveRequiredPath(ReportDirectory, repositoryRoot, "--report-directory"),
+            CreateDocsNativeEvidenceInput(repositoryRoot));
     }
 
     internal TailwindPublicationRequest CreatePreflightRequest(
@@ -104,7 +111,8 @@ internal sealed record TailwindCommandOptions(
             ResolveRequiredPath(AggregateInput, repositoryRoot, "--aggregate-input"), Require(AggregateArtifactId, "--aggregate-artifact-id"),
             Require(ExpectedAggregateSha256, "--expected-aggregate-sha256"),
             ResolveRequiredPath(PublicationDirectory, repositoryRoot, "--publication-directory"),
-            Path.Join(reportDirectory, "publication-start-receipt.json"), string.Empty, reportDirectory);
+            Path.Join(reportDirectory, "publication-start-receipt.json"), string.Empty, reportDirectory,
+            CreateDocsNativeEvidenceInput(repositoryRoot));
     }
 
     internal TailwindPublicationRequest CreateStartValidationRequest(
@@ -122,7 +130,21 @@ internal sealed record TailwindCommandOptions(
             Require(AggregateArtifactId, "--aggregate-artifact-id"), Require(ExpectedAggregateSha256, "--expected-aggregate-sha256"),
             ResolveRequiredPath(PublicationDirectory, repositoryRoot, "--publication-directory"),
             ResolveRequiredPath(PublicationStartReceipt, repositoryRoot, "--publication-start-receipt"),
-            Require(PublicationStartArtifactId, "--publication-start-artifact-id"), reportDirectory);
+            Require(PublicationStartArtifactId, "--publication-start-artifact-id"), reportDirectory,
+            CreateDocsNativeEvidenceInput(repositoryRoot));
+    }
+
+    private DocsNativeEvidenceInput? CreateDocsNativeEvidenceInput(string repositoryRoot)
+    {
+        if (DocsNativeProof is null && DocsNativeArtifactId is null && DocsNativeSha256 is null)
+        {
+            return null;
+        }
+
+        return new DocsNativeEvidenceInput(
+            ResolveRequiredPath(DocsNativeProof, repositoryRoot, "--docs-native-proof"),
+            Require(DocsNativeArtifactId, "--docs-native-artifact-id"),
+            Require(DocsNativeSha256, "--docs-native-sha256"));
     }
 
     internal string ResolveRequiredPath(string? value, string root, string flag)

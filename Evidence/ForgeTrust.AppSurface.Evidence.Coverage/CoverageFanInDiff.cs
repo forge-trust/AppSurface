@@ -12,6 +12,7 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 internal sealed class CoverageFanInDiffContext(CoverageFanInEngineRequest request, CoverageFanInBudget budget)
 {
     internal const string PolicyId = "appsurface-git-patch-v1";
+    internal const string VisualBaselinePngPolicyId = "appsurface-visual-baseline-png-v1";
     internal const int StreamLimit = 1024 * 1024;
     internal const int PatchLimit = 20 * 1024 * 1024;
     internal const long BlobLimit = 20 * 1024 * 1024;
@@ -152,6 +153,9 @@ internal sealed class CoverageFanInDiffContext(CoverageFanInEngineRequest reques
     internal async Task<CoverageFanInDiffInput> ReadAsync(CancellationToken token)
     {
         await VerifyMetadataAsync(token).ConfigureAwait(false);
+        var diffPolicyId = request.Expected.DiffPolicyId;
+        if (diffPolicyId is not (PolicyId or VisualBaselinePngPolicyId))
+            throw Fail("unsupported-diff", "Use a supported pinned Git diff policy before regenerating v3 evidence.");
         var head = request.Expected.Source.GetProperty("commit").GetString()!;
         var requestedBase = request.Expected.Gate.GetProperty("diffBase").GetString()!;
         var format = (await RunAsync(["rev-parse", "--show-object-format"], token).ConfigureAwait(false)).TrimEnd('\r', '\n');
@@ -177,31 +181,40 @@ internal sealed class CoverageFanInDiffContext(CoverageFanInEngineRequest reques
         var preflight = await RunAsync(DiffOptions(false).Concat(["--raw", "-z", "--no-abbrev"]).Concat(endpoints).ToArray(), token).ConfigureAwait(false);
         var candidates = CoverageFanInDiffParser.ReadRaw(preflight, length);
         if (candidates.Count(x => x.Kind is "added" or "deleted") > 1000)
-            throw Fail("limit-exceeded", "Over1000 rename candidates require owner-approved restructuring or a separately qualified policy; no automatic no-renames fallback.");
+            throw Fail("limit-exceeded", "Over 1000 rename candidates require owner-approved restructuring or a separately qualified policy; no automatic no-renames fallback.");
         var objects = candidates.SelectMany(x => new[] { x.OldObject, x.NewObject }).Where(x => x.Any(c => c != '0'))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         var stdin = Utf8.GetBytes(string.Concat(objects.Select(x => x + "\n")));
         if (stdin.Length > StreamLimit) throw Fail("limit-exceeded", "The object inventory exceeds the fixed input limit; ask the maintainer to restructure the change.");
+        IReadOnlyDictionary<string, long> objectSizes = new Dictionary<string, long>(StringComparer.Ordinal);
         if (objects.Length != 0)
         {
             var sizes = await RunAsync(["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], token, input: stdin).ConfigureAwait(false);
-            AdmitBlobSizes(objects, sizes, budget);
+            objectSizes = AdmitBlobSizes(objects, sizes, budget);
         }
         var raw = await RunAsync(DiffOptions(true).Concat(["--raw", "-z", "--no-abbrev"]).Concat(endpoints).ToArray(), token).ConfigureAwait(false);
+        var qualifiedPngPaths = diffPolicyId == VisualBaselinePngPolicyId
+            ? await QualifyPngPathsAsync(CoverageFanInDiffParser.ReadRaw(raw, length), objectSizes, token).ConfigureAwait(false)
+            : new HashSet<string>(StringComparer.Ordinal);
         var patch = await RunAsync(DiffOptions(true).Concat(["--patch", "--unified=0", "--inter-hunk-context=0", "--full-index",
             "--src-prefix=a/", "--dst-prefix=b/", "--output-indicator-new=+", "--output-indicator-old=-", "--output-indicator-context= "])
             .Concat(endpoints).ToArray(), token, maximumOutput: PatchLimit).ConfigureAwait(false);
         await VerifyMetadataAsync(token).ConfigureAwait(false);
         return new(requestedBase, bases[0], head, length, Utf8.GetBytes(patch), raw)
-        { MaximumRecords = request.Expected.Bounds.TotalRecords };
+        {
+            MaximumRecords = request.Expected.Bounds.TotalRecords,
+            DiffPolicyId = diffPolicyId,
+            QualifiedPngPaths = qualifiedPngPaths
+        };
     }
 
     /// <summary>Validates exactly one result per distinct object and charges logical blob work before content/rename diff.</summary>
-    internal static void AdmitBlobSizes(IReadOnlyList<string> objects, string output, CoverageFanInBudget budget)
+    internal static IReadOnlyDictionary<string, long> AdmitBlobSizes(IReadOnlyList<string> objects, string output, CoverageFanInBudget budget)
     {
         var lines = output.Split('\n');
         if (lines.Length != objects.Count + 1 || lines[^1] != string.Empty) throw Fail("malformed-diff", "Restore a complete supported Git object inventory before retrying.");
         long total = 0;
+        var sizes = new Dictionary<string, long>(objects.Count, StringComparer.Ordinal);
         for (var i = 0; i < objects.Count; i++)
         {
             var fields = lines[i].Split(' ');
@@ -209,10 +222,88 @@ internal sealed class CoverageFanInDiffContext(CoverageFanInEngineRequest reques
                 || !long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out var size))
                 throw Fail("malformed-diff", "The pinned object inventory is missing, invalid or unsupported; restore complete objects.");
             if (size > BlobLimit || size > BlobTotalLimit - total)
-                throw Fail("limit-exceeded", "The patch exceeds20MiB/blob or256MiB distinct blob work; restructure with owner approval or separately qualify a policy.");
+                throw Fail("limit-exceeded", "The patch exceeds 20 MiB per blob or 256 MiB across distinct blobs. Restructure the change with owner approval or qualify a separate policy.");
             total = checked(total + size);
+            sizes.Add(objects[i], size);
         }
         budget.Charge(total);
+        return sizes;
+    }
+
+    private async Task<IReadOnlySet<string>> QualifyPngPathsAsync(IReadOnlyList<CoverageFanInDiffChange> changes,
+        IReadOnlyDictionary<string, long> objectSizes, CancellationToken token)
+    {
+        var qualified = new HashSet<string>(StringComparer.Ordinal);
+        if (changes.Count == 0) return qualified;
+        await ValidateDiffAttributesAsync(changes, token).ConfigureAwait(false);
+        var verifiedObjects = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var change in changes)
+        {
+            var path = change.NewPath ?? change.OldPath!;
+            if (!CoverageFanInPngValidator.IsQualifiedPath(path)
+                && !(change.Kind == "renamed" && CoverageFanInPngValidator.IsQualifiedPath(change.OldPath!))) continue;
+            if (change.Kind != "modified" || change.OldMode != "100644" || change.NewMode != "100644")
+                throw Fail("unsupported-diff", "The screenshot policy supports replacements at existing regular baseline paths.");
+
+            foreach (var objectId in new[] { change.OldObject, change.NewObject })
+            {
+                if (!verifiedObjects.Add(objectId)) continue;
+                if (!objectSizes.TryGetValue(objectId, out var size))
+                    throw Fail("malformed-diff", "The pinned PNG object is missing from the admitted blob inventory.");
+
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(request.Expected.Limits.GetProperty("identitySeconds").GetInt32()));
+                var bytes = await ReadBlobAsync(objectId, size, deadline.Token).ConfigureAwait(false);
+                if (!CoverageFanInPngValidator.IsSupportedScreenshot(bytes, deadline.Token, budget.Charge))
+                    throw Fail("unsupported-diff", "Both pinned versions of a selected visual baseline must be supported PNG screenshots.");
+            }
+            qualified.Add(path);
+        }
+        return qualified;
+    }
+
+    /// <summary>Keep the pinned attributes from representing binary changes as ordinary text hunks.</summary>
+    private async Task ValidateDiffAttributesAsync(IReadOnlyList<CoverageFanInDiffChange> changes, CancellationToken token)
+    {
+        var paths = changes.SelectMany(change => new[] { change.OldPath, change.NewPath })
+            .OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
+        var input = Utf8.GetBytes(string.Join('\0', paths) + '\0');
+        var values = (await RunAsync(["check-attr", "-z", "--stdin", "diff"], token, input: input)
+            .ConfigureAwait(false)).Split('\0');
+        if (values.Length != paths.Length * 3 + 1 || values[^1].Length != 0)
+            throw Fail("malformed-diff", "Git did not return a complete diff attribute inventory.");
+        for (var i = 0; i < paths.Length; i++)
+        {
+            var offset = i * 3;
+            if (values[offset] != paths[i] || values[offset + 1] != "diff")
+                throw Fail("malformed-diff", "Git returned a diff attribute for an unexpected path.");
+            if (values[offset + 2] is not ("unspecified" or "unset"))
+                throw Fail("unsupported-diff", "The screenshot policy requires Git's automatic diff classification or a binary marker.");
+        }
+    }
+
+    /// <summary>Reads one admitted Git blob into bounded raw stdout without a temporary file or text decoding.</summary>
+    private async Task<byte[]> ReadBlobAsync(string objectId, long expectedSize, CancellationToken token)
+    {
+        var runner = request.IdentityRunner ?? new CliWrapCoverageRunProcessRunner();
+        var command = new CoverageRunProcessRequest("git", Prefix().Concat(["cat-file", "blob", objectId]).ToArray(), _root,
+            null, null, CoverageRunProcessLease.Detached())
+        {
+            EnvironmentOverrides = _environment,
+            CaptureBinaryStandardOutput = true,
+            StandardOutputLimitBytes = checked((int)expectedSize),
+            BudgetCharge = budget.Charge
+        };
+        var result = await runner.RunAsync(command, token).ConfigureAwait(false);
+        if (result.OutputTruncated)
+            throw Fail("truncated-diff", "Read the complete bounded pinned PNG blob before regenerating evidence.");
+        if (result.ExitCode != 0 || !string.IsNullOrEmpty(result.StandardError))
+            throw Fail("unsupported-diff", "Read the complete pinned PNG blob from the matching Git object database before regenerating evidence.");
+
+        var bytes = result.BinaryStandardOutput;
+        if (bytes is null || bytes.Length != expectedSize)
+            throw Fail("malformed-diff", "The pinned PNG blob length differs from its admitted Git object size.");
+        return bytes;
     }
 
     internal static bool IsOid(string text, int length) => text.Length == length && text.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
@@ -224,6 +315,10 @@ internal sealed record CoverageFanInDiffInput(string RequestedBase, string Merge
 {
     /// <summary>Existing total-record bound applied to added-line expansion, never a new exemption or increased budget.</summary>
     internal int MaximumRecords { get; init; } = 2000000;
+    /// <summary>The expected pinned interpretation; omitted policy values retain the strict Git patch policy.</summary>
+    internal string DiffPolicyId { get; init; } = CoverageFanInDiffContext.PolicyId;
+    /// <summary>Same-path visual baselines authenticated from the pinned old and new Git blobs during fresh admission.</summary>
+    internal IReadOnlySet<string> QualifiedPngPaths { get; init; } = new HashSet<string>(StringComparer.Ordinal);
 }
 
 /// <summary>Exact raw-object change with independently cross-checked surviving addition ranges.</summary>
@@ -288,8 +383,11 @@ internal static class CoverageFanInDiffParser
     /// <summary>Pairs every patch file with one raw record, validating object/mode headers and complete hunk counts.</summary>
     internal static IReadOnlyList<CoverageFanInDiffChange> Parse(CoverageFanInDiffInput input)
     {
+        if (input.DiffPolicyId is not (CoverageFanInDiffContext.PolicyId or CoverageFanInDiffContext.VisualBaselinePngPolicyId)) throw Unsupported();
         var changes = ReadRaw(input.Raw, input.ObjectIdLength);
         var patch = new UTF8Encoding(false, true).GetString(input.Patch);
+        if (input.DiffPolicyId == CoverageFanInDiffContext.VisualBaselinePngPolicyId && patch.Contains('\0'))
+            throw Unsupported();
         if (patch.Length == 0)
         {
             if (changes.Count != 0) throw Invalid();
@@ -302,7 +400,7 @@ internal static class CoverageFanInDiffParser
         var records = 0;
         for (var i = 0; i < changes.Count; i++)
         {
-            var parsed = ParseFile(changes[i], sections[i + 1], input.MaximumRecords - records);
+            var parsed = ParseFile(changes[i], sections[i + 1], input.MaximumRecords - records, input.DiffPolicyId, input.QualifiedPngPaths);
             records = checked(records + parsed.AddedRanges.Sum(x => x.Count));
             result.Add(parsed);
         }
@@ -310,10 +408,23 @@ internal static class CoverageFanInDiffParser
             .ThenBy(x => x.OldPath, StringComparer.Ordinal).ThenBy(x => x.Kind, StringComparer.Ordinal).ToArray();
     }
 
-    private static CoverageFanInDiffChange ParseFile(CoverageFanInDiffChange change, string section, int remainingRecords)
+    private static CoverageFanInDiffChange ParseFile(CoverageFanInDiffChange change, string section, int remainingRecords,
+        string diffPolicyId, IReadOnlySet<string> qualifiedPngPaths)
     {
         var lines = section.Split('\n');
         if (lines[0] != Quote("a/" + (change.OldPath ?? change.NewPath)) + " " + Quote("b/" + (change.NewPath ?? change.OldPath))) throw Invalid();
+        if (change.NewPath is { } path && qualifiedPngPaths.Contains(path))
+        {
+            var marker = $"Binary files a/{path} and b/{path} differ";
+            if (diffPolicyId != CoverageFanInDiffContext.VisualBaselinePngPolicyId
+                || !CoverageFanInPngValidator.IsQualifiedPath(path)
+                || change.Kind != "modified" || change.OldPath != path
+                || change.OldMode != "100644" || change.NewMode != "100644"
+                || lines.Length != 4 || lines[1] != $"index {change.OldObject}..{change.NewObject} 100644"
+                || lines[2] != marker)
+                throw Unsupported();
+            return change;
+        }
         var oldRemaining = 0; var newRemaining = 0; var position = 0;
         var previousOldEnd = -1; var previousNewEnd = -1;
         var additions = new SortedSet<int>();

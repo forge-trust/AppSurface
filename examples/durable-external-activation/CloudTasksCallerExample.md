@@ -1,6 +1,6 @@
 # Cloud Tasks caller example
 
-This example shows how a GCP-targeted caller can compose the optional [Cloud Tasks activation package](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md) with an existing external activation host. The sample host and its test project stay provider-neutral; they do not reference the Cloud Tasks SDK or package. For the full contract, diagnostics, bounds, registration ordering, and recovery guidance, see the [Cloud Tasks activation reference](../../Durable/cloudtasks-activation.md).
+This example shows how a GCP-targeted caller can compose the optional [Cloud Tasks activation package](../../Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md) with an existing external activation host. The sample host and its test project stay provider-neutral; they do not reference the Cloud Tasks SDK or package. For the full contract, diagnostics, bounds, registration ordering, and recovery guidance, see the [Cloud Tasks activation reference](../../Durable/cloudtasks-activation.md).
 
 ## Production caller setup
 
@@ -9,7 +9,7 @@ Register the metadata token source explicitly before the activation client. The 
 Use an existing target queue and give the caller identity `cloudtasks.tasks.create` for that queue plus `iam.serviceAccounts.actAs` for the selected worker OIDC service account. See the [creator permission and identity requirements](../../Durable/cloudtasks-activation.md#caller-token-versus-worker-oidc-identity) for the corresponding role and the separate worker authorization contract.
 
 ```csharp
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();

@@ -206,27 +206,68 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var preflight = jobs["coverage-evidence-plan"].AsMapping();
         var preflightOutputs = preflight["outputs"].AsMapping();
         Assert.Equal("${{ steps.plan.outputs.requires_native_coverage }}", preflightOutputs["requires_native_coverage"].AsScalar());
+        Assert.Equal("${{ steps.plan.outputs.diff_base }}", preflightOutputs["diff_base"].AsScalar());
+        Assert.Equal("${{ steps.plan.outputs.v3_diff_base }}", preflightOutputs["v3_diff_base"].AsScalar());
         var checkout = FindStep(preflight["steps"].AsSequence(), "Checkout exact event head with full history");
         var checkoutWith = checkout["with"].AsMapping();
         Assert.Equal("${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}", checkoutWith["ref"].AsScalar());
         Assert.Equal("0", checkoutWith["fetch-depth"].AsScalar());
 
-        var preflightRun = FindStep(preflight["steps"].AsSequence(), "Collect and plan solution coverage")["run"].AsScalar();
+        var preflightPlan = FindStep(preflight["steps"].AsSequence(), "Collect and plan solution coverage");
+        Assert.Equal("${{ github.event.pull_request.base.sha }}", preflightPlan["env"].AsMapping()["GITHUB_PULL_REQUEST_BASE_SHA"].AsScalar());
+        var preflightRun = preflightPlan["run"].AsScalar();
         Assert.Contains("--operation collect", preflightRun);
         Assert.Contains("source.baseCommit", preflightRun);
         Assert.Contains("--operation plan --scope coverage", preflightRun);
         Assert.Contains("selection.requiresCoverage", preflightRun);
         Assert.Contains("selection.requiresNativeCoverage", preflightRun);
         Assert.Contains("requires_native_coverage=$nativeRequired", preflightRun);
+        Assert.Contains("\"diff_base=$diffBase\"", preflightRun);
+        Assert.Contains("$env:GITHUB_PULL_REQUEST_BASE_SHA", preflightRun);
+        Assert.Contains("\"v3_diff_base=$v3DiffBase\"", preflightRun);
+        Assert.Equal(1, preflightRun.Split("v3_diff_base=", StringSplitOptions.None).Length - 1);
+        Assert.Contains("$v3DiffBase -cnotmatch '^[0-9a-f]{40}$'", preflightRun);
         Assert.Contains("ForgeTrust.AppSurface.Evidence.Validation.dll", preflightRun);
         Assert.DoesNotContain("python", preflightRun, StringComparison.OrdinalIgnoreCase);
 
         var coverageSecurity = jobs["coverage-security-platform"].AsMapping();
         Assert.Equal(["coverage-evidence-plan", "coverage-cli-candidate"], coverageSecurity["needs"].AsSequence().Select(node => node.AsScalar()));
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true'", coverageSecurity["if"].AsScalar());
-        var capture = FindStep(coverageSecurity["steps"].AsSequence(), "Attest successful native coverage evidence")["run"].AsScalar();
+        Assert.Equal(["ubuntu-latest", "windows-latest", "macos-latest"],
+            coverageSecurity["strategy"].AsMapping()["matrix"].AsMapping()["os"].AsSequence().Select(os => os.AsScalar()));
+        var securitySteps = coverageSecurity["steps"].AsSequence();
+        var canonicalCheckout = FindStep(securitySteps, "Preserve committed bytes on Windows");
+        Assert.Equal("${{ runner.os == 'Windows' }}", canonicalCheckout["if"].AsScalar());
+        Assert.Equal("git config --global core.autocrlf false", canonicalCheckout["run"].AsScalar());
+        Assert.True(IndexOf(securitySteps, canonicalCheckout) < IndexOf(securitySteps, FindStep(securitySteps, "Checkout code")));
+        var captureStep = FindStep(securitySteps, "Attest successful native coverage evidence");
+        Assert.Equal("pwsh", captureStep["shell"].AsScalar());
+        var capture = captureStep["run"].AsScalar();
         Assert.Contains("'--operation', 'native'", capture);
         Assert.Contains("'--cli', $env:COVERAGE_CLI_PATH", capture);
+        Assert.Contains("$contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }", capture);
+        Assert.Contains("'--contract-version', $contractVersion", capture);
+        Assert.Contains("if ($contractVersion -eq '3') { $adapter += @('--diff-policy-id', 'appsurface-visual-baseline-png-v1') }", capture);
+        Assert.Contains("$diffBase = if ($contractVersion -eq '3') { $env:COVERAGE_V3_DIFF_BASE } else { $env:COVERAGE_GATE_DIFF_BASE }", capture);
+        Assert.Contains("$diffBase -cnotmatch '^[0-9a-f]{40}$'", capture);
+        Assert.Equal(1, capture.Split("$env:COVERAGE_V3_DIFF_BASE", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, capture.Split("'--diff-base'", StringSplitOptions.None).Length - 1);
+        Assert.Contains("/usr/bin/time -l dotnet @command", capture);
+        Assert.Contains("$resourceLog = \"$env:COVERAGE_DOGFOOD_OUTPUT.time.log\"", capture);
+        Assert.Contains("darwin-rss.json", capture);
+        Assert.Contains("if ($rss.Count -ne 1) { throw \"Native coverage capture omitted the macOS maximum RSS.\" }", capture);
+        var captureOutput = captureStep["env"].AsMapping()["COVERAGE_DOGFOOD_OUTPUT"].AsScalar();
+        Assert.Equal("${{ runner.temp }}/coverage-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}", captureOutput);
+        var nativeUpload = FindStep(securitySteps, "Upload attested native coverage")["with"].AsMapping();
+        Assert.Equal("coverage-native-${{ matrix.os }}-${{ github.run_attempt }}", nativeUpload["name"].AsScalar());
+        Assert.Equal("${{ steps.capture-native-coverage.outputs.capture-path }}", nativeUpload["path"].AsScalar());
+        var failureUpload = FindStep(securitySteps, "Upload failed native capture result");
+        Assert.Equal("${{ !cancelled() && steps.capture-native-coverage.outcome == 'failure' }}", failureUpload["if"].AsScalar());
+        var failureArtifact = failureUpload["with"].AsMapping();
+        Assert.Equal("coverage-capture-failure-${{ matrix.os }}-${{ github.run_attempt }}", failureArtifact["name"].AsScalar());
+        Assert.Equal(captureOutput + "/native-result.json\n" + captureOutput + ".time.log\n", failureArtifact["path"].AsScalar());
+        Assert.Equal("ignore", failureArtifact["if-no-files-found"].AsScalar());
+        Assert.Contains("capture-path=$env:COVERAGE_DOGFOOD_OUTPUT", capture);
         Assert.DoesNotContain("python", capture, StringComparison.OrdinalIgnoreCase);
 
         var build = jobs["build"].AsMapping();
@@ -242,6 +283,15 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var download = FindStep(steps, "Download same-run native coverage evidence");
         Assert.Contains("github.event_name == 'pull_request'", download["if"].AsScalar());
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true'", download["if"].AsScalar());
+        var nativeDownloadInputs = download["with"].AsMapping();
+        Assert.Equal("coverage-native-*-${{ github.run_attempt }}", nativeDownloadInputs["pattern"].AsScalar());
+        Assert.Equal("${{ runner.temp }}/coverage-native-inputs", nativeDownloadInputs["path"].AsScalar());
+
+        var buildStepNames = string.Join("\n", steps.Select(step => step.AsMapping()["name"].AsScalar()));
+        Assert.DoesNotContain("shadow", buildStepNames, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("replay", buildStepNames, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("COVERAGE_V3_SHADOW", buildStepNames, StringComparison.Ordinal);
+
         var run = FindStep(steps, "Run solution coverage and gate");
         Assert.DoesNotContain(new YamlScalarNode("if"), run.Children.Keys);
         var command = run["run"].AsScalar();
@@ -249,13 +299,24 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("--operation run --scope coverage", command);
         Assert.Contains("--operation verify --scope coverage", command);
         Assert.Contains("--native-coverage-directory", command);
+        Assert.Contains("--native-coverage-contract-version 3", command);
         Assert.Contains("--coverage-cli \"$COVERAGE_CLI_PATH\"", command);
         Assert.Contains("--coverage-collection \"$RUNNER_TEMP/solution-coverage-collection\"", command);
         Assert.Contains("jq -r '.requiresCoverage'", command);
         Assert.Contains("jq -r '.requiresNativeCoverage'", command);
         Assert.Contains("GITHUB_EVENT_NAME" + "\" == \"pull_request\"", command);
+        Assert.Equal(1, command.Split("--diff-base", StringSplitOptions.None).Length - 1);
+        Assert.Contains("patch_base=\"$COVERAGE_V3_DIFF_BASE\"", command);
+        Assert.Contains("--diff-base \"$patch_base\"", command);
+        Assert.Contains("dotnet \"$validation\" \"${args[@]}\"", command);
         Assert.DoesNotContain("coverage-solution.sh", command, StringComparison.Ordinal);
+        Assert.DoesNotContain("--operation fanin", command, StringComparison.Ordinal);
+        Assert.DoesNotContain("Coverage.Dogfood.csproj", command, StringComparison.Ordinal);
         Assert.DoesNotContain("HEAD^1", command, StringComparison.Ordinal);
+        var qualification = FindStep(steps, "Verify retained v3 fan-in qualification");
+        Assert.True(IndexOf(steps, run) < IndexOf(steps, qualification));
+        Assert.Contains("$fanin/shadow-proof.json", qualification["run"].AsScalar());
+        Assert.Contains("darwin-rss.json", qualification["run"].AsScalar());
 
         foreach (var name in new[] { "Upload test-result diagnostics", "Upload coverage gate reports" })
             Assert.Contains("needs.coverage-evidence-plan.outputs.requires_coverage == 'true'", FindStep(steps, name)["if"].AsScalar());
@@ -353,10 +414,18 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("requires_coverage == 'true'", collect["if"].AsScalar());
         Assert.Contains("--operation collect-coverage", collect["run"].AsScalar());
         Assert.Contains("--coverage-cli \"$COVERAGE_CLI_PATH\"", collect["run"].AsScalar());
-        Assert.Contains("--coverage-schedule-timings", collect["run"].AsScalar());
+        const string timingFile = "\"$RUNNER_TEMP/coverage-schedule/timings.json\"";
+        Assert.Matches(
+            $@"if \[\[ -f {Regex.Escape(timingFile)} \]\]; then\s+args\+=\(--coverage-schedule-timings {Regex.Escape(timingFile)}\)",
+            collect["run"].AsScalar());
         Assert.DoesNotContain("--native-coverage-directory", collect["run"].AsScalar());
         var history = FindStep(steps, "Restore advisory coverage scheduling history");
+        var contracts = FindStep(steps, "Test C# coverage scheduling history contracts");
+        Assert.Equal("dotnet run --file tests/coverage-schedule-history/contracts.cs", contracts["run"].AsScalar());
+        Assert.Equal($"dotnet run --file .github/scripts/coverage-schedule-history.cs -- restore --output {timingFile}", history["run"].AsScalar());
+        Assert.True(IndexOf(steps, contracts) < IndexOf(steps, history));
         Assert.True(IndexOf(steps, history) < IndexOf(steps, collect));
+        Assert.Equal("${{ github.token }}", history["env"].AsMapping()["GH_TOKEN"].AsScalar());
         Assert.Equal("${{ github.event.repository.default_branch }}", history["env"].AsMapping()["GITHUB_DEFAULT_BRANCH"].AsScalar());
         var upload = FindStep(steps, "Preserve same-attempt coverage collection");
         Assert.Contains("success()", upload["if"].AsScalar());

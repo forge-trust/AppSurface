@@ -3227,6 +3227,44 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_LongestFirst_ShouldUseSharedCoverageScheduleFixture()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        repo.WriteFile("tests/Slow.Tests/Slow.Tests.csproj", "<Project />");
+        repo.WriteFile("tests/After.Tests/After.Tests.csproj", "<Project />");
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var priorTimings = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "tests",
+            "coverage-schedule-history",
+            "fixtures",
+            "timings.json");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(
+            TestProjects:
+            [
+                "tests/First.Tests/First.Tests.csproj",
+                "tests/Slow.Tests/Slow.Tests.csproj",
+                "tests/After.Tests/After.Tests.csproj",
+            ],
+            ScheduleMode: CoverageRunScheduleMode.LongestFirst,
+            ScheduleTimingsPath: priorTimings,
+            NoDiscoverExclusive: true);
+
+        var result = await workflow.RunAsync(request, console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
+        Assert.Equal(
+            ["After.Tests", "Slow.Tests", "First.Tests"],
+            tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
+    }
+
+    [Fact]
     public async Task RunAsync_LongestFirst_ShouldKeepJunitArtifactsOnOriginalIndex()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -4806,6 +4844,7 @@ public sealed class CoverageRunTests
             CancellationToken.None));
 
         Assert.Contains("TestingPlatformDotnetTestSupport=true", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("TestingPlatformDotnetTestSupport=true requires coverlet.MTP, not the VSTest ", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("missing direct coverlet.collector", exception.Message, StringComparison.Ordinal);
     }
 
@@ -5651,6 +5690,42 @@ public sealed class CoverageRunTests
 
         Assert.Contains("ASCOV113", exception.Message, StringComparison.Ordinal);
         Assert.Contains("global.json", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+    }
+
+    /// <summary>
+    /// Characterizes the exact ASCOV113 wording for each global.json runner shape, so the shared
+    /// <c>VsTestRunnerProbe</c> classification (issue 929) cannot change coverage preflight messages.
+    /// </summary>
+    [Theory]
+    [InlineData("{ \"test\": { \"runner\": \"Microsoft.Testing.Platform\" } }", "Microsoft.Testing.Platform")]
+    [InlineData("{ \"test\": { \"runner\": \"xunit\" } }", "xunit")]
+    [InlineData("[]", "malformed root object")]
+    [InlineData("{ \"test\": null }", "malformed test configuration")]
+    [InlineData("{ \"test\": \"VSTest\" }", "malformed test configuration")]
+    [InlineData("{ \"test\": { \"runner\": null } }", "malformed runner (Null)")]
+    [InlineData("{ \"test\": { \"runner\": {} } }", "malformed runner (Object)")]
+    [InlineData("{ \"test\": { \"runner\": \"\" } }", "malformed runner (String)")]
+    [InlineData("{ invalid json", "malformed JSON (JsonReaderException)")]
+    public async Task RunAsync_Preflight_ShouldKeepExactGlobalJsonRunnerDiagnosticText(string globalJson, string runnerDetail)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var globalJsonPath = repo.WriteFile("global.json", globalJson);
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("ASCOV113", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("The selected coverage driver requires VSTest.", exception.Message, StringComparison.Ordinal);
+        Assert.Contains($"{Path.GetFileName(globalJsonPath)} selects unsupported test runner '{runnerDetail}'.", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Use VSTest for collector or msbuild mode; native Microsoft Testing Platform coverage requires coverlet.MTP and is outside #672.", exception.Message, StringComparison.Ordinal);
         Assert.Empty(runner.Commands);
     }
 

@@ -1,0 +1,279 @@
+name: Docs native release evidence
+
+on:
+  workflow_call:
+    inputs:
+      package_version:
+        required: true
+        type: string
+      source_commit:
+        required: true
+        type: string
+      producer_artifact_id:
+        required: true
+        type: string
+      artifact_manifest_file:
+        required: true
+        type: string
+    outputs:
+      artifact_id:
+        value: ${{ jobs.aggregate.outputs.artifact_id }}
+      sha256:
+        value: ${{ jobs.aggregate.outputs.sha256 }}
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  PACKAGE_VERSION: ${{ inputs.package_version }}
+  SOURCE_COMMIT: ${{ inputs.source_commit }}
+  PRODUCER_ARTIFACT_ID: ${{ inputs.producer_artifact_id }}
+  MANIFEST_FILE: ${{ inputs.artifact_manifest_file }}
+
+jobs:
+  select-runners:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.hosts.outputs.matrix }}
+    steps:
+      - name: Select the Linux Arm32 execution host
+        id: hosts
+        env:
+          ARM32_RUNNER: ${{ vars.APPSURFACE_DOCS_LINUX_ARM32_RUNNER }}
+        run: |
+          set -euo pipefail
+          arm32_runner="${ARM32_RUNNER:-ubuntu-24.04-arm}"
+          if [[ ! "$arm32_runner" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ ]]; then
+            echo "::error::APPSURFACE_DOCS_LINUX_ARM32_RUNNER must be a single trusted runner label."
+            exit 1
+          fi
+          jq -cn --arg arm "$arm32_runner" '{include:[
+            {rid:"linux-arm",runner:$arm,architecture:"arm"},
+            {rid:"linux-arm64",runner:"ubuntu-24.04-arm",architecture:"arm64"},
+            {rid:"linux-x64",runner:"ubuntu-24.04",architecture:"x64"},
+            {rid:"osx-arm64",runner:"macos-15",architecture:"arm64"},
+            {rid:"osx-x64",runner:"macos-15-intel",architecture:"x64"},
+            {rid:"win-arm64",runner:"windows-11-arm",architecture:"arm64"},
+            {rid:"win-x64",runner:"windows-2025",architecture:"x64"},
+            {rid:"win-x86",runner:"windows-2025",architecture:"x86"}
+          ]}' | sed 's/^/matrix=/' >> "$GITHUB_OUTPUT"
+
+  host:
+    name: Docs runtime on ${{ matrix.rid }}
+    needs: select-runners
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select-runners.outputs.matrix) }}
+    steps:
+      - name: Checkout candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+
+      - name: Download frozen candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ inputs.producer_artifact_id }}
+          path: ${{ runner.temp }}/docs-producer
+
+      - name: Install pinned SDK for the exact host RID
+        if: matrix.rid != 'linux-arm'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
+        with:
+          dotnet-version: 10.0.402
+          architecture: ${{ matrix.architecture }}
+
+      - name: Verify direct and transitive packed consumers
+        if: matrix.rid != 'linux-arm'
+        shell: bash
+        env:
+          PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+          EXPECTED_RID: ${{ matrix.rid }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          [[ "$MANIFEST_FILE" == package-artifact-manifest.unapproved.json || "$MANIFEST_FILE" == package-artifact-manifest.json ]]
+          transfer=()
+          if [[ "$EXPECTED_RID" == linux-x64 ]]; then
+            transfer=(--transfer-dir "$RUNNER_TEMP/docs-transfer")
+          fi
+          "$PYTHON" -B scripts/verify-docs-native-consumer.py host \
+            --artifacts "$RUNNER_TEMP/docs-producer" --manifest "$RUNNER_TEMP/docs-producer/$MANIFEST_FILE" \
+            --fixture tests/fixtures/docs-native-consumer --rid "$EXPECTED_RID" \
+            --producer-id "$PRODUCER_ARTIFACT_ID" --source-commit "$SOURCE_COMMIT" \
+            --work "$RUNNER_TEMP/docs-native-work" --output "$RUNNER_TEMP/host.json" \
+            ${transfer[@]+"${transfer[@]}"}
+
+      - name: Verify native Linux Arm32 execution and packed consumers
+        if: matrix.rid == 'linux-arm'
+        shell: bash
+        env:
+          ARM32_SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0.402-noble-arm32v7@sha256:0d752973134e13d538ffd19a32a24e85162468c33877cb1b86cff35355dfaf4f
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          [[ "$MANIFEST_FILE" == package-artifact-manifest.unapproved.json || "$MANIFEST_FILE" == package-artifact-manifest.json ]]
+          case "$(docker version --format '{{.Server.Arch}}')" in
+            arm|arm64) ;;
+            *) echo "::error::Linux Arm32 proof requires a native Arm Docker host."; exit 1 ;;
+          esac
+          binfmt=/proc/sys/fs/binfmt_misc
+          if [[ -r "$binfmt/status" && "$(<"$binfmt/status")" == enabled ]]; then
+            for handler in "$binfmt"/*; do
+              if [[ -f "$handler" && -r "$handler" && "$handler" != "$binfmt/register" ]] \
+                  && grep -qx enabled "$handler" && grep -qi '^interpreter .*qemu-arm' "$handler"; then
+                echo "::error::Disable Arm32 QEMU handlers before collecting native Linux Arm32 evidence."
+                exit 1
+              fi
+            done
+          fi
+          docker run --rm --platform linux/arm/v7 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/docs-producer,dst=/candidate,readonly" \
+            --env SOURCE_COMMIT --env PRODUCER_ARTIFACT_ID --env MANIFEST_FILE \
+            "$ARM32_SDK_IMAGE" /bin/bash -euc '
+              apt-get -qq update >&2
+              apt-get -qq install -y --no-install-recommends python3 >&2
+              python3 -B /source/scripts/verify-docs-native-consumer.py host \
+                --artifacts /candidate --manifest "/candidate/$MANIFEST_FILE" \
+                --fixture /source/tests/fixtures/docs-native-consumer --rid linux-arm \
+                --producer-id "$PRODUCER_ARTIFACT_ID" --source-commit "$SOURCE_COMMIT" \
+                --work /tmp/docs-native-work --output /tmp/host.json
+              cat /tmp/host.json
+            ' > "$RUNNER_TEMP/host.json"
+
+      - name: Upload host proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-native-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.rid }}
+          path: ${{ runner.temp }}/host.json
+          if-no-files-found: error
+
+      - name: Upload Linux publish artifacts
+        if: matrix.rid == 'linux-x64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-native-${{ github.run_id }}-${{ github.run_attempt }}-transfer
+          path: ${{ runner.temp }}/docs-transfer
+          compression-level: 0
+          if-no-files-found: error
+
+  windows-startup:
+    needs: host
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+
+      - name: Resolve immutable source transfer
+        id: transfer
+        shell: bash
+        env:
+          PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/docs-artifact-pages.json"
+          "$PYTHON" -B scripts/verify-docs-native-consumer.py resolve-artifacts \
+            --listing "$RUNNER_TEMP/docs-artifact-pages.json" --run-id "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" --kind transfer --output "$RUNNER_TEMP/docs-artifact-refs.json"
+          echo "id=$(jq -er '.transfer.id' "$RUNNER_TEMP/docs-artifact-refs.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact Linux published bytes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.transfer.outputs.id }}
+          path: ${{ runner.temp }}/docs-transfer
+
+      - name: Install Windows x64 runtime and SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
+        with:
+          dotnet-version: 10.0.402
+          architecture: x64
+
+      - name: Start both Linux-published consumers on Windows
+        shell: bash
+        env:
+          PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+          TRANSFER_ARTIFACT_ID: ${{ steps.transfer.outputs.id }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          "$PYTHON" -B scripts/verify-docs-native-consumer.py destination \
+            --transfer-dir "$RUNNER_TEMP/docs-transfer" --transfer-artifact-id "$TRANSFER_ARTIFACT_ID" \
+            --producer-id "$PRODUCER_ARTIFACT_ID" --source-commit "$SOURCE_COMMIT" --package-version "$PACKAGE_VERSION" \
+            --work "$RUNNER_TEMP/docs-destination" --output "$RUNNER_TEMP/destination.json"
+
+      - name: Upload cross-platform execution proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-native-${{ github.run_id }}-${{ github.run_attempt }}-destination
+          path: ${{ runner.temp }}/destination.json
+          if-no-files-found: error
+
+  aggregate:
+    needs: [host, windows-startup]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.proof.outputs.sha256 }}
+    steps:
+      - name: Checkout candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+
+      - name: Resolve all exact receipt artifacts
+        id: refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/docs-artifact-pages.json"
+          python3 -B scripts/verify-docs-native-consumer.py resolve-artifacts \
+            --listing "$RUNNER_TEMP/docs-artifact-pages.json" --run-id "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" --kind receipts --output "$RUNNER_TEMP/docs-artifact-refs.json"
+          echo "ids=$(jq -er 'del(.transfer) | map(.id) | join(",")' "$RUNNER_TEMP/docs-artifact-refs.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Download eight host receipts and Windows receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.refs.outputs.ids }}
+          path: ${{ runner.temp }}/docs-receipts
+          merge-multiple: false
+
+      - name: Bind the separate Docs proof to the candidate
+        id: proof
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          python3 -B scripts/verify-docs-native-consumer.py aggregate \
+            --receipts "$RUNNER_TEMP/docs-receipts" --references "$RUNNER_TEMP/docs-artifact-refs.json" \
+            --producer-id "$PRODUCER_ARTIFACT_ID" --source-commit "$SOURCE_COMMIT" --package-version "$PACKAGE_VERSION" \
+            --output "$RUNNER_TEMP/docs-native-proof.json"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/docs-native-proof.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload separate Docs native proof
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-native-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/docs-native-proof.json
+          if-no-files-found: error

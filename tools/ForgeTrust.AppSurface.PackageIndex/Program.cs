@@ -45,7 +45,8 @@ internal static class Program
                                 --expected-subject-sha256 --work-directory --artifacts-output --report-directory.
                                 GH_TOKEN is environment-only. All output directories must be fresh/disjoint,
                                 without link ancestors; work and bundle must be on the same volume.
-                      Validate producer-binding, aggregate five native receipts, prepare publication inputs, or validate an uploaded publication-start receipt before credentials.
+                      Verify Tailwind release evidence and prepare or validate the immutable publication-start receipt.
+                      For candidates with the Docs native target, pass --docs-native-proof, --docs-native-artifact-id, and --docs-native-sha256.
           verify-durable-template-evidence
                       Validate the trusted three-OS receipts against --preflight-source-commit and the exact producer manifest before credentials.
           verify-durable-template

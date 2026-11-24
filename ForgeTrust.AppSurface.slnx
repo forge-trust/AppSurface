@@ -79,8 +79,8 @@
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Templates.VerificationHost/ForgeTrust.AppSurface.Durable.Templates.VerificationHost.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Testing.Tests/ForgeTrust.AppSurface.Durable.Testing.Tests.csproj" />
-    <Project Path="Durable/ForgeTrust.AppSurface.Durable.CloudTasks.Tests/ForgeTrust.AppSurface.Durable.CloudTasks.Tests.csproj" />
-    <Project Path="Durable/ForgeTrust.AppSurface.Durable.CloudTasks/ForgeTrust.AppSurface.Durable.CloudTasks.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests/ForgeTrust.AppSurface.Durable.GoogleCloudTasks.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/ForgeTrust.AppSurface.Durable.GoogleCloudTasks.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Provider.Tests/ForgeTrust.AppSurface.Durable.Provider.Tests.csproj" />
@@ -131,6 +131,7 @@
     <Project Path="examples/web-error-pages/WebErrorPagesExample.csproj" />
     <Project Path="examples/tenant-theme-selection/TenantThemeSelectionExample.csproj" />
     <Project Path="examples/web-pwa-install/WebPwaInstallExample.csproj" />
+    <Project Path="examples/web-pwa-install.tests/WebPwaInstallExample.Tests.csproj" />
   </Folder>
   <Folder Name="/Flow/">
     <Project Path="Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj" />
@@ -153,6 +154,10 @@
   <Folder Name="/Observability/">
     <Project Path="Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj" />
     <Project Path="Observability/ForgeTrust.AppSurface.Observability.Tests/ForgeTrust.AppSurface.Observability.Tests.csproj" />
+  </Folder>
+  <Folder Name="/PostgreSql/">
+    <Project Path="PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/ForgeTrust.AppSurface.PostgreSql.Testing.csproj" />
+    <Project Path="PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing.Tests/ForgeTrust.AppSurface.PostgreSql.Testing.Tests.csproj" />
   </Folder>
   <Folder Name="/Examples/config-key-contract/">
     <Project Path="examples/config-key-contract/ConfigKeyContract.csproj" />

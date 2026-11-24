@@ -287,74 +287,11 @@ internal static class CoverageRunDriverPreflight
 
     private static void ValidateEngine(string solutionDirectory)
     {
-        var globalJson = FindNearestGlobalJson(solutionDirectory);
-        if (globalJson is null)
+        var classification = VsTestRunnerProbe.ClassifyGlobalJson(solutionDirectory);
+        if (!classification.IsSupported)
         {
-            return;
+            throw IncompatibleEngine(classification.GlobalJsonPath!, classification.Detail!);
         }
-
-        try
-        {
-            using var stream = File.OpenRead(globalJson);
-            using var document = JsonDocument.Parse(stream, new JsonDocumentOptions
-            {
-                AllowTrailingCommas = true,
-                CommentHandling = JsonCommentHandling.Skip,
-            });
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                throw IncompatibleEngine(globalJson, "malformed root object");
-            }
-
-            if (!document.RootElement.TryGetProperty("test", out var test))
-            {
-                return;
-            }
-
-            if (test.ValueKind != JsonValueKind.Object)
-            {
-                throw IncompatibleEngine(globalJson, "malformed test configuration");
-            }
-
-            if (!test.TryGetProperty("runner", out var runner))
-            {
-                return;
-            }
-
-            var value = runner.ValueKind == JsonValueKind.String ? runner.GetString() : null;
-            if (string.Equals(value, "VSTest", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            throw IncompatibleEngine(globalJson, string.IsNullOrWhiteSpace(value) ? $"malformed runner ({runner.ValueKind})" : value);
-        }
-        catch (JsonException ex)
-        {
-            throw IncompatibleEngine(globalJson, $"malformed JSON ({ex.GetType().Name})");
-        }
-        catch (IOException ex)
-        {
-            throw IncompatibleEngine(globalJson, $"unreadable global.json ({ex.GetType().Name})");
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            throw IncompatibleEngine(globalJson, $"unreadable global.json ({ex.GetType().Name})");
-        }
-    }
-
-    private static string? FindNearestGlobalJson(string startDirectory)
-    {
-        for (var directory = new DirectoryInfo(Path.GetFullPath(startDirectory)); directory is not null; directory = directory.Parent)
-        {
-            var candidate = Path.Join(directory.FullName, "global.json");
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
     }
 
     private static Exception IncompatibleEngine(string path, string runner)
@@ -395,26 +332,10 @@ internal static class CoverageRunDriverPreflight
                 return false;
             }
 
-            if (properties.TryGetProperty("TestingPlatformDotnetTestSupport", out var mtpProperty))
-            {
-                usesMtp = mtpProperty.ValueKind == JsonValueKind.String
-                    && string.Equals(mtpProperty.GetString(), "true", StringComparison.OrdinalIgnoreCase);
-            }
-
-            if (properties.TryGetProperty("TargetFrameworks", out var targetFrameworksProperty)
-                && targetFrameworksProperty.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(targetFrameworksProperty.GetString()))
-            {
-                targetFrameworks = targetFrameworksProperty.GetString()!
-                    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                requiresPerFrameworkEvaluation = true;
-            }
-            else if (properties.TryGetProperty("TargetFramework", out var targetFrameworkProperty)
-                && targetFrameworkProperty.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(targetFrameworkProperty.GetString()))
-            {
-                targetFrameworks = [targetFrameworkProperty.GetString()!.Trim()];
-            }
+            var evaluated = VsTestRunnerProbe.ReadEvaluatedProperties(properties);
+            usesMtp = evaluated.UsesTestingPlatform;
+            targetFrameworks = evaluated.TargetFrameworks;
+            requiresPerFrameworkEvaluation = evaluated.DeclaresTargetFrameworks;
 
             var matches = packageReferences.EnumerateArray()
                 .Count(item => item.ValueKind == JsonValueKind.Object
@@ -439,6 +360,154 @@ internal static class CoverageRunDriverPreflight
     internal static string DriverName(CoverageRunDriver driver) => driver.ToString().ToLowerInvariant();
 
     private static string Quote(string value) => value.Contains(' ', StringComparison.Ordinal) ? $"\"{value}\"" : value;
+}
+
+/// <summary>
+/// Result of the file-only <c>global.json</c> runner check performed by <see cref="VsTestRunnerProbe"/>.
+/// </summary>
+/// <param name="IsSupported">True when no <c>global.json</c> was found, or the nearest one selects VSTest or no runner.</param>
+/// <param name="GlobalJsonPath">The nearest <c>global.json</c>, or <see langword="null"/> when none exists.</param>
+/// <param name="Detail">The selected runner name or a description of the malformed or unreadable file; <see langword="null"/> when supported.</param>
+internal sealed record VsTestRunnerClassification(bool IsSupported, string? GlobalJsonPath, string? Detail);
+
+/// <summary>
+/// Evaluated MSBuild properties that decide whether a test project can run through VSTest <c>dotnet test</c>.
+/// </summary>
+/// <param name="UsesTestingPlatform">True when <c>TestingPlatformDotnetTestSupport</c> evaluates to the string <c>true</c>, ignoring case.</param>
+/// <param name="TargetFrameworks">The frameworks from <c>TargetFrameworks</c>, or the single <c>TargetFramework</c>, or empty.</param>
+/// <param name="DeclaresTargetFrameworks">True when a nonblank <c>TargetFrameworks</c> property supplied the list.</param>
+/// <param name="RunSettingsFilePath">The trimmed <c>RunSettingsFilePath</c>, or <see langword="null"/> when absent or blank.</param>
+internal sealed record VsTestEvaluatedProperties(
+    bool UsesTestingPlatform,
+    IReadOnlyList<string> TargetFrameworks,
+    bool DeclaresTargetFrameworks,
+    string? RunSettingsFilePath);
+
+/// <summary>
+/// Classifies whether a directory or project selects the VSTest runner, without owning any caller's message.
+/// </summary>
+/// <remarks>
+/// Shared by the coverage preflight and the Evidence <c>test</c> producer. It has two entry points: a file-only
+/// <c>global.json</c> check that starts no process, and a reader for properties a caller already evaluated with
+/// <c>dotnet msbuild -getProperty</c>. Each caller turns the classification into its own diagnostic, so wording
+/// can differ between coverage (<c>ASCOV113</c>) and test evidence. Pitfall: the file-only check alone does not
+/// see <c>TestingPlatformDotnetTestSupport</c>; callers that run tests must also read the evaluated properties.
+/// </remarks>
+internal static class VsTestRunnerProbe
+{
+    /// <summary>
+    /// Reads the nearest <c>global.json</c> at or above <paramref name="startDirectory"/> and classifies its <c>test.runner</c>.
+    /// </summary>
+    /// <param name="startDirectory">Directory where the upward search starts; it walks to the filesystem root.</param>
+    /// <returns>Supported when no file exists or it selects VSTest (any case) or no runner; otherwise unsupported with a detail.</returns>
+    public static VsTestRunnerClassification ClassifyGlobalJson(string startDirectory)
+    {
+        var globalJson = FindNearestGlobalJson(startDirectory);
+        if (globalJson is null)
+        {
+            return new VsTestRunnerClassification(true, null, null);
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(globalJson);
+            using var document = JsonDocument.Parse(stream, new JsonDocumentOptions
+            {
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip,
+            });
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return Unsupported(globalJson, "malformed root object");
+            }
+
+            if (!document.RootElement.TryGetProperty("test", out var test))
+            {
+                return new VsTestRunnerClassification(true, globalJson, null);
+            }
+
+            if (test.ValueKind != JsonValueKind.Object)
+            {
+                return Unsupported(globalJson, "malformed test configuration");
+            }
+
+            if (!test.TryGetProperty("runner", out var runner))
+            {
+                return new VsTestRunnerClassification(true, globalJson, null);
+            }
+
+            var value = runner.ValueKind == JsonValueKind.String ? runner.GetString() : null;
+            if (string.Equals(value, "VSTest", StringComparison.OrdinalIgnoreCase))
+            {
+                return new VsTestRunnerClassification(true, globalJson, null);
+            }
+
+            return Unsupported(globalJson, string.IsNullOrWhiteSpace(value) ? $"malformed runner ({runner.ValueKind})" : value);
+        }
+        catch (JsonException ex)
+        {
+            return Unsupported(globalJson, $"malformed JSON ({ex.GetType().Name})");
+        }
+        catch (IOException ex)
+        {
+            return Unsupported(globalJson, $"unreadable global.json ({ex.GetType().Name})");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unsupported(globalJson, $"unreadable global.json ({ex.GetType().Name})");
+        }
+    }
+
+    /// <summary>
+    /// Reads runner-relevant values from the <c>Properties</c> object printed by <c>dotnet msbuild -getProperty</c>.
+    /// </summary>
+    /// <param name="properties">The JSON <c>Properties</c> object; non-string values are treated as absent.</param>
+    /// <returns>The evaluated runner, target framework, and run-settings values.</returns>
+    public static VsTestEvaluatedProperties ReadEvaluatedProperties(JsonElement properties)
+    {
+        var usesTestingPlatform = string.Equals(ReadString(properties, "TestingPlatformDotnetTestSupport"), "true", StringComparison.OrdinalIgnoreCase);
+        var runSettings = ReadString(properties, "RunSettingsFilePath");
+        runSettings = string.IsNullOrWhiteSpace(runSettings) ? null : runSettings.Trim();
+        var targetFrameworks = ReadString(properties, "TargetFrameworks");
+        if (!string.IsNullOrWhiteSpace(targetFrameworks))
+        {
+            return new VsTestEvaluatedProperties(
+                usesTestingPlatform,
+                targetFrameworks.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                true,
+                runSettings);
+        }
+
+        var targetFramework = ReadString(properties, "TargetFramework");
+        return new VsTestEvaluatedProperties(
+            usesTestingPlatform,
+            string.IsNullOrWhiteSpace(targetFramework) ? [] : [targetFramework.Trim()],
+            false,
+            runSettings);
+    }
+
+    private static string? ReadString(JsonElement properties, string name) =>
+        properties.ValueKind == JsonValueKind.Object
+        && properties.TryGetProperty(name, out var value)
+        && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static VsTestRunnerClassification Unsupported(string path, string detail) => new(false, path, detail);
+
+    private static string? FindNearestGlobalJson(string startDirectory)
+    {
+        for (var directory = new DirectoryInfo(Path.GetFullPath(startDirectory)); directory is not null; directory = directory.Parent)
+        {
+            var candidate = Path.Join(directory.FullName, "global.json");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
 }
 
 /// <summary>

@@ -388,25 +388,23 @@ packages:
       - ForgeTrust.AppSurface.Durable
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
-  - project: Durable/ForgeTrust.AppSurface.Durable.CloudTasks/ForgeTrust.AppSurface.Durable.CloudTasks.csproj
-    release_guidance_variant: experimental
+  - project: Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/ForgeTrust.AppSurface.Durable.GoogleCloudTasks.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
+    prerelease_install: true
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_track: coordinated
-    readiness_blocker: "#892"
     readiness_note: >-
-      Publication remains blocked until the packed public API and direct/transitive consumer dependency-graph isolation
-      proof completes and the coordinated release artifacts are reviewed. The real local SDK fixture has verified explicit
-      credentials, configured bounds, and protocol-declared pre-acceptance REFUSED_STREAM replay; it does not establish
-      live Google identity, IAM, effective queue routing, or real task delivery.
+      Each coordinated candidate requires packed public API and direct and transitive dependency isolation proof.
+      Verify Google identity, IAM, effective queue routing, and delivery in the target deployment.
     order: 49
     use_when: Add this only to a Google Cloud application that already uses Durable external activation and needs an explicitly credentialed payload-free named task creation transport.
     includes: Explicit singleton OAuth token source, validated queue and worker OIDC target, empty POST task projection, bounded official SDK transport, and safe creation receipts.
     does_not_include: Durable execution or storage, application outboxes or recovery, worker authentication, queue configuration, task payloads, automatic retry or resubmission, live IAM setup, or proof of real delivery.
-    start_here_path: Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md
     recipe_summary: Add this optional package only to a GCP-targeted Durable external-activation producer; review the [activation reference](../Durable/cloudtasks-activation.md) for creator token versus worker OIDC identity, safe receipt meanings, retained task IDs, and the simulated-delivery boundary.
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
     release_guidance_variant: default
@@ -449,6 +447,21 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
+  - project: PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/ForgeTrust.AppSurface.PostgreSql.Testing.csproj
+    release_guidance_variant: experimental
+    classification: public
+    publish_decision: do_not_publish
+    publish_reason: This trial package remains unpublished until its trial report is reviewed and public publication is explicitly authorized.
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 50
+    use_when: Add this to PostgreSQL integration-test projects that need owned disposable databases and reusable schema templates without adopting a particular test framework.
+    includes: OID-verified database ownership, reusable templates and physical clones, cluster initialization locks, retryable database cleanup, and bounded process-exit cleanup.
+    does_not_include: A test framework, EF Core, application-owned schema or migration behavior, the Durable PostgreSQL provider, or production database provisioning.
+    start_here_path: PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.PostgreSql.Testing` to framework-agnostic integration tests that need disposable PostgreSQL databases or reusable schema templates. This trial package is source-only while publication remains held for trial review.
   - project: Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj
     release_guidance_variant: default
     classification: public

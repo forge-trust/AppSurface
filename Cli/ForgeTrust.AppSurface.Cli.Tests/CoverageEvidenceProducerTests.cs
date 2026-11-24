@@ -351,6 +351,10 @@ public sealed class CoverageEvidenceProducerTests
         Assert.DoesNotContain(processRunner.TestArguments[0], argument => argument.StartsWith("--logger:junit;", StringComparison.Ordinal));
     }
 
+    /// <summary>Creates a coverage producer for tests that must never reach the coverage core.</summary>
+    internal static CoverageEvidenceProducer CreateUnusedProducer() =>
+        CreateProducer(new ThrowingCoverageRunProcessRunner(new InvalidOperationException("The coverage core should not start.")));
+
     private static CoverageEvidenceProducer CreateProducer(ICoverageRunProcessRunner processRunner, TimeProvider? clock = null) => new(
         new CoverageEvidenceExecutionWorkflow(
             new CoverageRunWorkflow(processRunner, new PassingCoverageReportGenerator(), TimeProvider.System)),

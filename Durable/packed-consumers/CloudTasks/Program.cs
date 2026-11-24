@@ -1,4 +1,4 @@
-using ForgeTrust.AppSurface.Durable.CloudTasks;
+using ForgeTrust.AppSurface.Durable.GoogleCloudTasks;
 using Microsoft.Extensions.DependencyInjection;
 
 await ProveCustomTokenRegistrationAsync();

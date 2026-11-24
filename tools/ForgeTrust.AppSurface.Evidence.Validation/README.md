@@ -47,7 +47,7 @@ coverage checks template contracts, while the installed package proof executes t
 The template-specific rule takes precedence over ordinary test-only selection, including test project files.
 Native CLI and shared infrastructure changes select the conservative set of all four producers.
 `local` creates a fresh package only when required, using locked restore, then calls the same
-[`RepositoryEvidenceWorkflow`](./RepositoryEvidenceWorkflow.cs) and producers as CI. Optional
+[`RepositoryEvidenceWorkflow`](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Evidence.Validation/RepositoryEvidenceWorkflow.cs) and producers as CI. Optional
 `--dotnet /absolute/dotnet` selects the host used for packing and producer commands; otherwise the current
 SDK host is discovered. No result cache or historical manifest is used to skip required work.
 
@@ -60,7 +60,7 @@ The projection applies its already selected profile to the complete inventory th
 rule. Actual paths remain in the canonical plan and diff digest; long names are not converted into
 policy rule patterns with their shorter identifier limit.
 
-The [C# Git collector](./RepositoryGitChanges.cs) records source content and index state in
+The [C# Git collector](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Evidence.Validation/RepositoryGitChanges.cs) records source content and index state in
 `source-state.json` alongside `changed-paths.json`. Its `sourceDigest` is included in the derived
 `local-policy.json` policy ID, so the canonical plan and resulting manifest bind the exact local source
 state while preserving the checked-in rules and producer contracts. Local execution rechecks source and policy before the
@@ -99,19 +99,52 @@ Unmatched files still select the conservative profile, and policy edits cannot e
 New exceptions deserve the same review as test exemptions. Packaged README changes require package
 documentation verification; the root README and explicitly listed authored guides are exempt.
 
-`solution-coverage` invokes the collector over every solution test project and applies the gates to that complete result. CI supplies `--coverage-cli /absolute/installed/appsurface`, verified against its same-source candidate package, for both collection and gate commands. When omitted for a direct local run, the producer uses the repository CLI project; a supplied path must be absolute and name an existing executable. Native fan-in requires the explicit installed command. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md)
+### Tool-manifest coverage selection
+
+An update to the existing [local .NET tool manifest](https://github.com/forge-trust/AppSurface/blob/main/.config/dotnet-tools.json), by itself or with
+new direct Markdown files under [`releases/unreleased.entries/`](../../releases/README.md#append-only-unreleased-entries),
+uses the direct patch gate instead of the native coverage supplement. The manifest must have change kind
+`modified`, each release entry must be `added`, and no path may have a previous rename/copy name. Paths
+are matched exactly and case-sensitively; nested release paths and non-Markdown additions do not qualify.
+Any other changed path, manifest addition/deletion, or rename retains the normal native selection.
+
+This exception changes only `selection.json.requiresNativeCoverage`. It preserves the shared policy's
+four producers, every obligation, full-solution coverage, package verification, and the native installed
+consumer and storage journeys. Aggregate and applicable patch thresholds remain 95% line / 85% branch,
+with 0.5-point tolerance and Codecov patch mode. The direct gate follows its documented
+[no-measurable-patch behavior](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate).
+A manifest-only patch has no Cobertura source lines. A tool update accompanied by C# implementation,
+tests, policy changes, or broader infrastructure changes follows the normal [native fan-in selection](../../guides/coverage-fan-in.md#current-ci-path).
+
+### Coverage and package producers
+
+`solution-coverage` invokes the collector over every solution test project and applies the gates to that complete result. CI supplies `--coverage-cli /absolute/installed/appsurface`, verified against its same-source candidate package, for both collection and gate commands. When omitted for a direct local run, the producer uses the repository CLI project; a supplied path must be absolute and name an existing executable. Native fan-in requires the explicit installed command. It runs the [Cloud Tasks transport tests](../../Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md)
 exclusively, matching the [compatibility coverage command](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) so their
 timing and transport fixtures do not compete with another test project. It verifies the complete
 successful timing inventory, and requires 95% line / 85% branch coverage with 0.5-point tolerance. Applicable
 patch gates retain 95/85 and Codecov mode. The [CLI patch gate](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
-documents that a patch metric with no measurable changed lines or branches reports 100%. Native fan-in
-keeps its strict nonempty-denominator verification. Local patch snapshots include current tracked and
-untracked content, so uncommitted code participates. CI PRs whose root policy selection includes coverage
-and another producer retain native Linux/Windows/macOS supplementation, independent aggregate acceptance
-and nondecreasing measurable patch denominators through the installed
-[schema-v2-default, v3-opt-in fan-in commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-fan-in). The repository [dogfood adapter](../ForgeTrust.AppSurface.Coverage.Dogfood/README.md) supplies AppSurface policy and invokes capture/import, composition, acceptance and separate independent verification. Its `--contract-version` defaults to 2 and accepts explicit value `3`; the selected repository policy remains v2 pending fresh same-run/attempt shadow proof.
+documents that a direct patch metric with no measurable changed lines or branches reports 100%. Local patch snapshots include current tracked and
+untracked content, so uncommitted code participates. Subject to the [tool manifest exception](#tool-manifest-coverage-selection), CI PRs whose root policy
+selects coverage and another producer require native Linux/Windows/macOS supplementation and independent aggregate acceptance.
+Native PR captures and the receiving producer select the [screenshot diff policy](../../guides/coverage-fan-in.md#screenshot-baseline-updates). The producer checks its ID in the verified diff metadata before it closes the coverage obligation.
+The checked-in `build.yml` PR-native path explicitly selects v3 with
+`--native-coverage-contract-version 3`, paired with the full pinned event PR base in AppSurface's 40-digit
+lowercase SHA-1 format and exactly three Linux,
+Windows and macOS captures from the current workflow attempt. The installed CLI must accept the fan-in and
+then verify it independently in read-only mode. The validator checks and retains the typed primary and
+composed patch applicability with its bound diff and acceptance proof under the producer evidence. The
+acceptance receipt must use the same schema version as the verified CLI result. For v3, the retained diff
+metadata must name `appsurface-visual-baseline-png-v1` and carry the hash of the accepted patch. V3
+`notApplicable` is valid only when the accepted collector reported no patch points for that dimension; it
+does not certify that changed code is non-executable or allow a narrower producer inventory. The existing
+95/85 thresholds, 0.5-point tolerance, Codecov mode, instrumentation, producer selection and required jobs
+are unchanged. Test-only PRs and qualifying tool updates use the direct patch gate, aggregate-only main runs remain aggregate-only,
+and local paths keep their existing behavior. The reusable installed [schema-v2-default, v3-opt-in fan-in
+commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-fan-in) and the repository
+[Dogfood adapter](../ForgeTrust.AppSurface.Coverage.Dogfood/README.md) retain their v2 defaults and
+historical behavior. See the [v3 rollout section](../../guides/coverage-fan-in.md#rollout-qualification) for deployment qualification requirements and status.
 Main baseline runs enforce aggregate coverage without inventing a PR patch. Reports and diagnostics live
-under `coverage/`, with optional `coverage-fanin/` request/result files and `primary/`, `native-*`, `composed/` and `accepted/` children. Test-only PRs
+under `coverage/`, with optional `coverage-fanin/` request/result files and `primary/`, `native-*`, `composed/` and `accepted/` children. Test-only PRs and qualifying tool updates
 run the direct patch gate and do not produce those fan-in directories; source-code-plus-package PRs require
 the three native captures and fan-in verification.
 The native producer requires the adapter's delivered `accept-result.json` and separate
@@ -173,15 +206,101 @@ for non-exclusive projects. Exclusive suites still run first in stable input ord
 `--coverage-schedule-timings <timings.json>` forwards duration hints to `coverage run --schedule-timings`;
 both `run` and `collect-coverage` resolve relative hint paths against the caller's current directory before
 starting collection in the selected repository. Use an absolute path when invoking from automation.
-Without history, unknown projects keep input order. The
-[history helper](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/coverage-schedule-history.py) reads the newest available
-`coverage-schedule-timings` artifact from successful `build.yml` push runs on the default branch of this repository.
-Fork PRs, other events and mismatched head repositories are never eligible. Only main push
-collections publish this advisory artifact; it becomes eligible for reuse only after the full workflow succeeds. The history lookup has a 45-second total API budget. API failures, expired/missing artifacts or invalid bounded
-history fall back to a fresh run without hints. It never restores coverage results or changes project
-selection, exclusions, parallelism, gates or thresholds. The first run after introducing this artifact
-has no history; the next successful main workflow supplies it. Do not confuse faster scheduling with
-reusable acceptance evidence.
+Without history, unknown projects keep input order.
+
+### Coverage scheduling history
+
+The repository-only [`coverage-schedule-history.cs` file app](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/coverage-schedule-history.cs)
+restores the newest valid `coverage-schedule-timings` artifact from successful push runs in the
+[build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) on this
+repository's default branch. Fork pull requests, other events and runs whose head repository differs from
+the current repository are ineligible. The lookup uses `gh api` with a 45-second total API budget. It
+downloads timing data only and never restores coverage results or changes project selection, exclusions,
+parallelism, gates or thresholds.
+
+On Ubuntu, a separate comparison measured Python's ZIP behavior against the .NET base-library
+`ZipArchive` reader. Python accepts stored, deflate, BZIP2 and LZMA, while `ZipArchive` rejects BZIP2 and
+LZMA and accepts method 9, which Python rejects. The production file app's sole ZIP reader is the
+[SharpCompress implementation](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/CoverageHistoryData.cs),
+using the approved [exact SharpCompress 0.50.11 pin](https://github.com/forge-trust/AppSurface/blob/main/Directory.Packages.props).
+Its resolved [file-app package graph](https://github.com/forge-trust/AppSurface/blob/main/.github/scripts/packages.lock.json)
+contains no `net10.0` transitive package entries. The SharpCompress reader explicitly limits ZIP methods
+to the Python-supported set before decoding, so method 9 remains invalid. Stored and deflate archives remain
+supported. The local entry must match the selected directory entry's name, method and uncompressed
+size. The helper checks the decoded bytes against the directory entry's CRC before restoring them.
+
+Run the offline [contracts](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/contracts.cs)
+from the repository root with the SDK pinned by
+[`global.json`](https://github.com/forge-trust/AppSurface/blob/main/global.json), currently `10.0.402`.
+
+```sh
+dotnet run --file tests/coverage-schedule-history/contracts.cs
+```
+
+The codec contracts decode the Base64 fixtures for
+[BZIP2](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/bzip2.zip.b64),
+[LZMA](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/lzma.zip.b64),
+and [method 9](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/method-9-deflate64-stored-block.zip.b64).
+They verify each archive's SHA-256 before testing it alongside stored, deflate and CRC cases.
+
+For a live lookup, run from the repository root with `gh` installed and authenticated for the repository.
+Set `GITHUB_REPOSITORY` to its `owner/name`, set `GITHUB_DEFAULT_BRANCH` to its default branch, and let
+`gh` use the existing `GH_TOKEN` or login credentials. Give each invocation a new absolute output path.
+
+```sh
+output_dir="$(mktemp -d)"
+GITHUB_REPOSITORY=forge-trust/AppSurface \
+GITHUB_DEFAULT_BRANCH=main \
+dotnet run --file .github/scripts/coverage-schedule-history.cs -- \
+  restore --output "$output_dir/timings.json"
+```
+
+The restore command is advisory when no usable history is available. It exits `0`, writes the applicable
+warning to stderr and creates neither the requested file nor its parent directory. This includes missing
+eligible runs or artifacts, invalid artifact contents, GitHub API errors, authentication failures and
+timeouts. `build.yml` supplies `--coverage-schedule-timings` to collection only when the file exists, so
+collection proceeds without hints on these runs. The successful main-branch workflow publishes a new
+artifact for a later eligible run.
+
+Each advisory warning gives the recovery stage.
+
+- `warning: GitHub workflow history is unavailable`, `warning: GitHub artifact history is unavailable`,
+  and `warning: GitHub artifact download is unavailable` indicate a `gh api` or response failure. Check
+  `gh auth status`, repository access and network availability, then retry on a later run.
+- `warning: no successful completed build runs found on the default branch` means there is no eligible
+  history yet. Complete a successful default-branch build, then retry after the workflow publishes its
+  artifact.
+- `warning: no valid coverage schedule timings artifact found` means eligible artifacts were expired,
+  malformed or otherwise unusable. The restore skips invalid candidates. A later successful workflow can
+  publish a fresh artifact.
+
+Invalid arguments or required environment values, a relative output path, an already occupied output
+path, and local write failures are fatal with exit code `2`. Path, occupancy and configuration errors are
+reported before the GitHub request. Choose a fresh absolute output path and correct the named configuration
+problem before retrying. A write failure after valid history reports `could not create --output`, removes
+any partial file created by that invocation, and may leave newly created parent directories. It preserves
+an existing or competing output file.
+
+The restore validator and the CLI timing reader intentionally remain separate. Restore validates safe
+relative `.csproj` paths and nonnegative bounded durations, then writes the artifact's original bytes unchanged.
+Within the existing byte and nesting limits, the restore helper uses .NET's JSON reader for Unicode
+and duplicate property names. An invalid Unicode escape in a decoded project path makes the candidate
+ineligible. Ignored numeric fields retain their original bytes, including integers longer than 4,300 digits.
+The 4,300-digit conversion bound still applies to GitHub IDs and sizes the helper reads.
+The helper uses .NET ordinal case-insensitive comparison for duplicate project paths and repository names.
+For example, `App.csproj` and `app.csproj` count as duplicates, while `Straße.csproj` and `Strasse.csproj` are distinct.
+The CLI reader normalizes project keys and reads signed 64-bit seconds for scheduling. Sharing a parser would change one of those contracts. The single
+[canonical fixture](https://github.com/forge-trust/AppSurface/blob/main/tests/coverage-schedule-history/fixtures/timings.json)
+is consumed by both the restore contracts and the existing
+[longest-first scheduler test](https://github.com/forge-trust/AppSurface/blob/main/Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunTests.cs),
+which verifies the measured project order while retaining extra JSON fields and whitespace for the byte-preservation check.
+
+Before the Python helper was retired, the
+[hosted Ubuntu comparison](https://github.com/forge-trust/AppSurface/actions/runs/45081126217/job/137389961156)
+ran both entry points against the same GitHub responses. It checked request order, exit codes, warnings,
+file and directory creation, and exact restored bytes. The permanent C# suite retains all 14 baseline
+tests and their subcases. For the original helper and its callers, see the
+[revision-pinned script inventory](../../guides/script-inventory.md).
 
 `package-checks` runs the existing [PackageIndex](../ForgeTrust.AppSurface.PackageIndex/README.md)
 `gate`, `verify` and `verify-packages` commands, using a fresh exact version and an isolated NuGet cache.
@@ -190,7 +309,7 @@ the old duplicate solution restore/build and reuses the PackageIndex driver afte
 The driver's initial implicit restore explicitly selects [NuGet.package-gate.config](https://github.com/forge-trust/AppSurface/blob/main/NuGet.package-gate.config); the package workflow
 also restores its solution with that source policy. Installed-consumer restores retain their own mapped
 feeds rather than inheriting a global restore override.
-When the package plan includes [Cloud Tasks](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md),
+When the package plan includes [Cloud Tasks](../../Durable/ForgeTrust.AppSurface.Durable.GoogleCloudTasks/README.md),
 the installed consumer check also compares the neutral package closure with a committed source snapshot.
 Commit edits to that closure or its shared build inputs before collecting package evidence; the check
 rejects differences between the committed baseline and those working-tree inputs.
@@ -249,8 +368,9 @@ dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/Forge
 `plan` writes `evidence-plan.json`, `selection.json` (`profileId`, `requiresPackage`, `hasProducers`,
 `requiresCoverage`, `requiresNativeCoverage`, `requiresPackageChecks`, `producerIds`) and
 `evidence-summary.md` into a fresh directory. `requiresNativeCoverage` reflects the root policy selection:
-it is true when `solution-coverage` and at least one other producer are selected. CI uses it to select the
-native matrix and PR fan-in; a test-only coverage selection stays on the direct patch gate. `run` requires
+it is true when `solution-coverage` and at least one other producer are selected, except for the
+[tool-manifest-only inventory](#tool-manifest-coverage-selection). CI uses it to select the
+native matrix and PR fan-in; test-only coverage and qualifying tool updates use the direct patch gate. `run` requires
 that exact plan and independently resolves
 the policy and paths again before executing only its selected registrations through EvidenceHost. It
 writes the same plan/selection/summary plus `evidence-manifest.json` and declared artifacts. For an explicit
@@ -276,7 +396,7 @@ change (including its rename) if it selects a narrower profile. A policy edit ca
 the full repository acceptance baseline. The executable and workflow remain reviewed repository code; this
 is not a security boundary against a PR that rewrites the gate implementation itself.
 
-The [C# changed-path collector](./RepositoryGitChanges.cs) reads the event file and obtains a
+The [C# changed-path collector](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Evidence.Validation/RepositoryGitChanges.cs) reads the event file and obtains a
 NUL-delimited Git inventory, including binary and mode-only files and rename provenance. PR runs use the
 PR head with the merge base of the exact event base/head commits; the synthetic merge commit is not the
 test source. Pushes use the event's before/after commits, and manual runs use the complete tracked file
@@ -289,9 +409,9 @@ dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/Forge
 ```
 
 `collect` writes `changed-paths.json` and `source-state.json`; it never selects a synthetic fallback path
-for an empty CI diff. The [C# collector tests](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/RepositoryGitChangesTests.cs)
+for an empty CI diff. The [C# collector tests](https://github.com/forge-trust/AppSurface/blob/main/Aspire/ForgeTrust.AppSurface.Aspire.Tests/RepositoryGitChangesTests.cs)
 exercise real Git repositories and malformed inputs, and the
-[workflow contract tests](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/RepositoryEvidenceWorkflowContractTests.cs)
+[workflow contract tests](https://github.com/forge-trust/AppSurface/blob/main/Aspire/ForgeTrust.AppSurface.Aspire.Tests/RepositoryEvidenceWorkflowContractTests.cs)
 verify the CI integration using the existing .NET test project. This path requires only Git and .NET.
 
 `LocalEvidenceWorkflow` has internal package-command and execution delegates for deterministic orchestration
@@ -361,8 +481,8 @@ Only `TargetedComplete` returns exit zero. Missing prerequisites, failed asserti
 
 `--fan-in-request /absolute/trusted-request.json` adds a required producer using [native fan-in verification](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#verified-coverage-fan-in). Supply the trusted expected source commit/tree, SDK, Release/Debug configuration, workflow run and attempt, full solution project inventory, primary capture, exactly three native captures, composed reports and gate JSON. The request is trusted configuration, not an automatically authenticated attestation.
 
-The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and 95/85 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. This `--fan-in-request` option retains the historical schema-v1 compatibility contract. The current [coverage workflow](../../guides/coverage-fan-in.md#current-ci-path) selects v2; the dogfood adapter defaults `--contract-version` to 2 and offers v3 only by explicit value `3`. Repository acceptance remains v2, and the required fresh v3 shadow proof using the same workflow run and attempt across all selected lanes has not run. See the [v3 reference](../../guides/coverage-fan-in.md#opt-in-schema-v3-report-based-patch-applicability); v1, v2 and v3 captures cannot mix or be relabeled.
+The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and historical v1 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. This `--fan-in-request` option retains the historical schema-v1 compatibility contract. For the checked-in [build.yml PR-native path](../../guides/coverage-fan-in.md#rollout-qualification), the repository validator selects v3 with `--native-coverage-contract-version 3` and pairs it with the full pinned event PR base and three current-attempt native captures. The installed CLI acceptance and separate read-only verification must agree on the complete typed applicability and retained diff proof. The validator option defaults to v2 for compatibility callers; the installed CLI and Dogfood defaults and historical v1/v2 behavior also remain unchanged. V1, v2 and v3 captures cannot mix or be relabeled.
 
 The packed-storage fixture writes its explicit retention policy with owner-only access: mode `0600` on Unix and a protected current-user ACL on Windows. This satisfies the existing [private storage contract](../../guides/coverage-storage.md); it does not relax policy-file access validation. Failure artifacts redact the owned workspace path and retain at most 16 KiB of UTF-8 bytes per captured output stream, keeping the most recent complete UTF-8 text. External consumer output remains withheld. A size cap is not general secret redaction: do not pass secrets to fixture commands, because other failure details can appear in CI logs. Installed CLI assembly identity is checked only beneath the installed tool path private `.store`; at least one candidate must exist and every matching assembly must match the package archive hash, so workspace decoys cannot mask a mismatch.
 
-The internal `PackedStorageProducer.WritePrivateRetentionPolicyAsync` seam writes that policy only inside freshly owned journey scratch, before maintenance reads it; it is not a consumer-policy repair API. The [native coverage regression](../../Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageArtifactFixturePolicyTests.cs) checks policy bytes, Unix permissions or Windows ownership and protected access rules, cancellation, and unrelated-file preservation. Its CLI test-project reference and friend access let the existing [native coverage selection](../../guides/coverage-fan-in.md) instrument the same implementation as the acceptance journey without changing filters or coverage policy.
+The internal `PackedStorageProducer.WritePrivateRetentionPolicyAsync` seam writes that policy only inside freshly owned journey scratch, before maintenance reads it; it is not a consumer-policy repair API. The [native coverage regression](https://github.com/forge-trust/AppSurface/blob/main/Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageArtifactFixturePolicyTests.cs) checks policy bytes, Unix permissions or Windows ownership and protected access rules, cancellation, and unrelated-file preservation. Its CLI test-project reference and friend access let the existing [native coverage selection](../../guides/coverage-fan-in.md) instrument the same implementation as the acceptance journey without changing filters or coverage policy.
