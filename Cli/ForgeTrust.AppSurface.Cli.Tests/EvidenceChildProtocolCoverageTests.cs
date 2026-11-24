@@ -10,6 +10,39 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidenceChildProtocolCoverageTests
 {
     [Fact]
+    public void ChildWireMessagesKeepTheirLiteralRepresentationsAndParsingRules()
+    {
+        var childId = Guid.ParseExact("00112233445566778899aabbccddeeff", "N");
+
+        Assert.Equal("BEGIN|execution-1|nonce-1", EvidenceOwnedChildWire.FormatBegin("execution-1", "nonce-1"));
+        Assert.True(EvidenceOwnedChildWire.TryParseBegin("BEGIN|execution-1|nonce-1", out var executionId, out var nonce));
+        Assert.Equal("execution-1", executionId);
+        Assert.Equal("nonce-1", nonce);
+        Assert.False(EvidenceOwnedChildWire.TryParseBegin("BEGIN|execution-1|nonce-1|extra", out _, out _));
+        Assert.False(EvidenceOwnedChildWire.TryParseBegin("begin|execution-1|nonce-1", out _, out _));
+
+        Assert.Equal("ACK|00112233445566778899aabbccddeeff", EvidenceOwnedChildWire.FormatAcknowledgement(childId));
+        Assert.True(EvidenceOwnedChildWire.TryParseAcknowledgement(
+            "ACK|00112233445566778899aabbccddeeff", out var acknowledgedChildId));
+        Assert.Equal(childId, acknowledgedChildId);
+        Assert.True(EvidenceOwnedChildWire.TryParseAcknowledgement(
+            "ACK|00112233445566778899AABBCCDDEEFF", out var uppercaseChildId));
+        Assert.Equal(childId, uppercaseChildId);
+        Assert.False(EvidenceOwnedChildWire.TryParseAcknowledgement(
+            "ACK|00112233445566778899aabbccddeeff|extra", out _));
+        Assert.False(EvidenceOwnedChildWire.TryParseAcknowledgement("ACK|invalid", out _));
+
+        Assert.Equal("COMPLETE|00112233445566778899aabbccddeeff", EvidenceOwnedChildWire.FormatCompletion(childId));
+        Assert.True(EvidenceOwnedChildWire.IsCompletion("COMPLETE|00112233445566778899aabbccddeeff", childId));
+        Assert.False(EvidenceOwnedChildWire.IsCompletion("COMPLETE|00112233445566778899AABBCCDDEEFF", childId));
+        Assert.False(EvidenceOwnedChildWire.IsCompletion("COMPLETE|ffeeddccbbaa99887766554433221100", childId));
+        Assert.Equal("DONE|00112233445566778899aabbccddeeff", EvidenceOwnedChildWire.FormatDone(childId));
+        Assert.True(EvidenceOwnedChildWire.IsDoneAcknowledgement("DONE|00112233445566778899aabbccddeeff", childId));
+        Assert.False(EvidenceOwnedChildWire.IsDoneAcknowledgement("DONE|ffeeddccbbaa99887766554433221100", childId));
+        Assert.Equal("REJECT|capacity", EvidenceOwnedChildWire.FormatRejection("capacity"));
+    }
+
+    [Fact]
     public async Task BeginHandlerJoinsTimerCallbackBeforeDisposingItsCancellationSource()
     {
         var clock = new ControlledTimerProvider();

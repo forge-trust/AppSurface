@@ -37,7 +37,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
     }
 
     [Fact]
-    public void InputIdentityCreationRejectsOversizedEncodedInventoriesThroughBothOverloads()
+    public void InputIdentityValidationRejectsOversizedEncodedInventoriesThroughTypedAndPersistedPaths()
     {
         const int fileCount = 60_000;
         var hash = Hash("oversized-receipt-input").ToLowerInvariant();
@@ -48,7 +48,8 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var producerFiles = receiptFiles.Select(file => new EvidenceProducerInputFile(
             file.RelativePath, file.Mode, file.LengthBytes, file.Sha256)).ToArray();
 
-        Assert.Throws<InvalidDataException>(() => EvidenceReceiptInputIdentity.Create(null, receiptFiles));
+        Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(
+            new Dictionary<string, string>(StringComparer.Ordinal), receiptFiles).ValidateAndEncode());
         Assert.Throws<InvalidDataException>(() => EvidenceReceiptInputIdentity.Create(new EvidenceProducerIdentity(
             Hash("oversized-receipt-key"), Hash("oversized-receipt-repository"), producerFiles,
             new Dictionary<string, string>(StringComparer.Ordinal))));
@@ -69,7 +70,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
             report.Write("operator-owned report"u8);
 
         var failure = Assert.Throws<InvalidDataException>(() =>
-            EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(artifactRoot, [relativeFile]));
+            EvidenceReceiptPayload.VerifyExactTree(artifactRoot, [relativeFile]));
 
         Assert.Contains("nesting exceeds its bound", failure.Message, StringComparison.Ordinal);
         Assert.Equal("operator-owned report", File.ReadAllText(filePath));
@@ -110,7 +111,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
             + entry.GetProperty("PayloadBytes").GetInt64() + entry.GetProperty("ReservedPayloadBytes").GetInt64();
         // A legacy reservation has no staged path to reconcile, so it keeps this charge without allocating gigabytes.
         var reservedBytes = EvidenceReceiptQuota.MaximumBytes - existingCharge - 8 * 1024;
-        Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, key, reservedBytes, DateTimeOffset.UtcNow));
+        await LegacyAggregateReservationFixture.SeedAsync(root, repository, key, reservedBytes);
 
         var outcomes = await store.PublishInvocationAsync(execution, plan, manifest,
             [new EvidenceReceiptPublicationRequest(lease, producer.Id, sourceRoot, DateTimeOffset.UtcNow)],
@@ -478,12 +479,16 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var expectedPayloadBytes = QuotaEntry(fixture.StoreRoot, fixture.Key).GetProperty("PayloadBytes").GetInt64();
 
         using var lease = Assert.Single(await fixture.Store.AcquireAsync([fixture.Key], CancellationToken.None));
+        var readOnly = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
+        { RootDirectory = fixture.StoreRoot, RepositoryNamespace = fixture.Repository });
+        var explanation = readOnly.Peek(fixture.Key);
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
         Assert.False(result.IsCandidate);
         Assert.False(result.IsUnavailable);
         Assert.Equal(expectedReason, result.Reason);
+        Assert.Equal(result, explanation);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.True(Directory.Exists(payloadPath));
         Assert.Equal(fixture.PayloadName, lease.ReadState()?.PayloadDirectoryName);
@@ -809,8 +814,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         {
             lease.EstablishAuthority(execution);
             var outcomes = await store.PublishInvocationAsync(execution, plan, manifest,
-                [new EvidenceReceiptPublicationRequest(lease, producer.Id, sourceRoot, DateTimeOffset.UtcNow,
-                    new Dictionary<string, string>(StringComparer.Ordinal) { ["tools"] = Hash("empty-artifact-tools") })],
+                [new EvidenceReceiptPublicationRequest(lease, producer.Id, sourceRoot, DateTimeOffset.UtcNow)],
                 CancellationToken.None);
             Assert.True(outcomes[producer.Id].Published, outcomes[producer.Id].Reason);
             payloadName = outcomes[producer.Id].PayloadDirectoryName!;
@@ -824,8 +828,12 @@ public sealed class EvidenceReceiptStoreCoverageTests
         Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
         Assert.Empty(restored.Result?.Artifacts ?? []);
         Assert.Equal(payloadName, readLease.ReadState()?.PayloadDirectoryName);
+        var usedAt = Assert.IsType<DateTimeOffset>(readLease.ReadState()?.LastSuccessfulUse);
+        Assert.Equal(usedAt, QuotaEntry(storeRoot, key).GetProperty("LastSuccessfulUse").GetDateTimeOffset());
         Assert.Equal(createDirectories, Directory.Exists(sourceRoot));
         Assert.Equal(createDirectories, Directory.Exists(restoreRoot));
+        Assert.Null(readLease.ReadState()?.InputIdentityDigest);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(storeRoot, repository, key, payloadName, "identity.json")));
     }
 
     [Fact]
@@ -2423,10 +2431,14 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var before = SnapshotStoreBytes(fixture.StoreRoot);
 
         var proposal = lease.ProposeReadReceipt();
+        var readOnly = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
+        { RootDirectory = fixture.StoreRoot, RepositoryNamespace = fixture.Repository });
+        var explanation = readOnly.Peek(fixture.Key);
 
         Assert.False(proposal.IsCandidate);
         Assert.False(proposal.IsUnavailable);
         Assert.Equal("no-passed-receipt", proposal.Reason);
+        Assert.Equal(proposal with { State = lease.ReadState() }, explanation);
         Assert.Equal(fixture.PayloadName, lease.ReadState()?.PayloadDirectoryName);
         AssertStoreSnapshotUnchanged(before, fixture.StoreRoot);
         Assert.Equal("operator-owned sentinel", await File.ReadAllTextAsync(fixture.SentinelPath));
@@ -2486,6 +2498,24 @@ public sealed class EvidenceReceiptStoreCoverageTests
 
         Assert.False(Directory.Exists(payload));
         Assert.Equal("preserved source", File.ReadAllText(origin));
+    }
+
+    [Theory]
+    [InlineData("legacy")]
+    [InlineData("0123456789ABCDEF0123456789ABCDEF")]
+    public void CommittedLegacyPayloadDoesNotAuthorizeInferredStageCleanup(string suffix)
+    {
+        using var temporary = TestDirectory.Create();
+        var keyDirectory = TestPathUtils.PathUnder(temporary.Path, "key");
+        var payload = "payload-" + suffix;
+        var stage = "payload-stage-" + suffix;
+        using (var root = CoverageRunOutputLease.AcquireArtifactDirectory(keyDirectory, true, true)!)
+        using (root.CreateArtifactDirectory(stage)) { }
+
+        Assert.True(EvidenceReceiptStore.EvidenceReceiptKeyLease.TryDeleteOwnedPayload(keyDirectory, payload,
+            recoverCommittedStage: true));
+
+        Assert.True(Directory.Exists(TestPathUtils.PathUnder(keyDirectory, stage)));
     }
 
     [Theory]
@@ -2738,8 +2768,10 @@ public sealed class EvidenceReceiptStoreCoverageTests
             lease.EstablishAuthority("receipt-matrix-execution");
             var components = new Dictionary<string, string>(StringComparer.Ordinal)
             { ["tools"] = Hash("receipt-matrix-tools").ToLowerInvariant() };
+            var identity = new EvidenceProducerIdentity(key, repository, [], components);
             var outcomes = await store.PublishInvocationAsync("receipt-matrix-execution", plan, manifest,
-                [new EvidenceReceiptPublicationRequest(lease, producer.Id, sourceRoot, DateTimeOffset.UtcNow, components)],
+                [new EvidenceReceiptPublicationRequest(lease, producer.Id, sourceRoot, DateTimeOffset.UtcNow)
+                    { Identity = identity }],
                 CancellationToken.None);
             Assert.True(outcomes[producer.Id].Published, outcomes[producer.Id].Reason);
             payloadName = outcomes[producer.Id].PayloadDirectoryName!;

@@ -185,6 +185,7 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
     private readonly EvidenceHostOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly string _artifactDirectory;
+    private EvidenceResourceGraph? _resourceGraph;
     private readonly SemaphoreSlim _execution = new(1, 1);
     private readonly List<Task> _producerExecutions = [];
     private readonly List<Task> _readinessExecutions = [];
@@ -206,12 +207,14 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
         EvidencePlan plan,
         EvidenceHostRegistration registration,
         EvidenceHostOptions options,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        EvidenceResourceGraph? resourceGraph = null)
     {
         _plan = plan;
         _registration = registration;
         _options = options;
         _timeProvider = timeProvider;
+        _resourceGraph = resourceGraph;
         _artifactDirectory = Path.GetFullPath(options.ArtifactDirectory ?? Path.Join("TestResults", "evidence", "artifacts"));
     }
 
@@ -255,6 +258,7 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
     /// <param name="preparedResults">Framework-verified reused results, never supplied by producer callbacks.</param>
     /// <param name="requiredResourceIds">Immutable transitive closure of fresh producers' resources.</param>
     /// <param name="scope">Transferred application owner, or null for a resource-free execution.</param>
+    /// <param name="resourceGraph">Validated graph shared with preparation.</param>
     /// <param name="writer">Coordinator-owned writer for each selected producer.</param>
     /// <param name="beforeCleanup">Post-execution preparation work that must settle before registration disposal.</param>
     /// <param name="envelopeStatus">Envelope result verified before resource startup.</param>
@@ -269,13 +273,14 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
         IReadOnlyDictionary<string, EvidenceProducerResult> preparedResults,
         IReadOnlySet<string> requiredResourceIds,
         EvidenceHostResourceScope? scope,
+        EvidenceResourceGraph resourceGraph,
         Func<EvidenceProducerDeclaration, EvidenceArtifactWriter> writer,
         Func<bool, CancellationToken, Task<bool>> beforeCleanup,
         EvidenceEnvelopeStatus envelopeStatus,
         string executionId,
         Func<string, IReadOnlyDictionary<string, string>?> childEnvironment)
     {
-        return new EvidenceHostBootstrap(plan, registration, options, timeProvider)
+        return new EvidenceHostBootstrap(plan, registration, options, timeProvider, resourceGraph)
         {
             _preparedResults = preparedResults,
             _requiredResourceIds = requiredResourceIds,
@@ -430,9 +435,8 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
 
     private async Task<ResourceReadiness> WaitForResourcesAsync(CancellationToken cancellationToken)
     {
-        var declarations = _plan.Profile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
         var results = new List<EvidenceResourceResult>();
-        foreach (var resource in OrderResources(declarations))
+        foreach (var resource in GetResourceGraph().GetOrderedResources())
         {
             var result = await ProbeResourceReadinessAsync(
                 resource,
@@ -797,9 +801,8 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
 
     private async Task<ResourceReadiness> WaitForPreparedResourcesAsync(CancellationToken cancellationToken)
     {
-        var declarations = _plan.Profile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
         var results = new Dictionary<string, EvidenceResourceResult>(StringComparer.Ordinal);
-        foreach (var resource in OrderResources(declarations))
+        foreach (var resource in GetResourceGraph().GetOrderedResources())
         {
             if (!_requiredResourceIds!.Contains(resource.Id))
             {
@@ -827,61 +830,11 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
         return new ResourceReadiness(results.Values.ToArray(), null);
     }
 
-    private IEnumerable<string> ProducerResourceClosure(EvidenceProducerDeclaration producer)
-    {
-        var declarations = _plan.Profile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>(producer.RequiredResources);
-        while (pending.TryPop(out var id))
-        {
-            if (!visited.Add(id))
-                continue;
-            yield return id;
-            foreach (var dependency in declarations[id].Requires)
-                pending.Push(dependency);
-        }
-    }
+    private IReadOnlySet<string> ProducerResourceClosure(EvidenceProducerDeclaration producer) =>
+        GetResourceGraph().GetProducerResourceClosure(producer);
 
-    private static IReadOnlyList<EvidenceResourceDeclaration> OrderResources(IReadOnlyDictionary<string, EvidenceResourceDeclaration> declarations)
-    {
-        var ordered = new List<EvidenceResourceDeclaration>();
-        var visiting = new HashSet<string>(StringComparer.Ordinal);
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var resource in declarations.Values.OrderBy(static resource => resource.Id, StringComparer.Ordinal))
-        {
-            Visit(resource);
-        }
-
-        return ordered;
-
-        void Visit(EvidenceResourceDeclaration resource)
-        {
-            if (visited.Contains(resource.Id))
-            {
-                return;
-            }
-
-            if (!visiting.Add(resource.Id))
-            {
-                throw new EvidenceHostException("ASEVD304", $"Resource dependency cycle includes '{resource.Id}'.", "Declare an acyclic resource dependency graph.");
-            }
-
-            foreach (var dependencyId in resource.Requires)
-            {
-                if (!declarations.TryGetValue(dependencyId, out var dependency))
-                {
-                    throw new EvidenceHostException("ASEVD305", $"Resource '{resource.Id}' requires undeclared resource '{dependencyId}'.", "Declare every required resource in the selected profile.");
-                }
-
-                Visit(dependency);
-            }
-
-            visiting.Remove(resource.Id);
-            visited.Add(resource.Id);
-            ordered.Add(resource);
-        }
-    }
+    private EvidenceResourceGraph GetResourceGraph() =>
+        _resourceGraph ??= new EvidenceResourceGraph(_plan.Profile.Resources);
 
     private sealed record EnvelopeValidation(EvidenceEnvelopeStatus Status, IReadOnlyList<EvidenceProducerResult>? Results);
 

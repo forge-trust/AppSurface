@@ -108,7 +108,9 @@ public sealed class EvidenceIdentityInputValidationCoverageTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
+    [InlineData("   ")]
     [InlineData("/absolute")]
+    [InlineData("C:src/input")]
     [InlineData("src\\input")]
     [InlineData("src//input")]
     [InlineData("src/./input")]
@@ -117,8 +119,17 @@ public sealed class EvidenceIdentityInputValidationCoverageTests
     [InlineData("src/in?ut")]
     [InlineData("src/[input")]
     [InlineData("src/input]")]
+    [InlineData("src/{input,other}")]
+    [InlineData("src/input\n")]
     [InlineData("src/in\0put")]
-    public async Task InvalidSelectionPatternFailsBeforeAnyRepositoryQuery(string? pattern)
+    public Task InvalidSelectionPatternFailsBeforeAnyRepositoryQuery(string? pattern)
+        => AssertSelectionPatternRejectedAsync(pattern);
+
+    [Fact]
+    public Task UnpairedSurrogateInSelectionPatternFailsBeforeAnyRepositoryQuery()
+        => AssertSelectionPatternRejectedAsync("src/in\uD800put");
+
+    private static async Task AssertSelectionPatternRejectedAsync(string? pattern)
     {
         var producer = Producer() with { Inputs = new([pattern!], []) };
 

@@ -77,6 +77,17 @@ internal sealed record EvidenceProducerReuseDecision(string ProducerId, Evidence
 /// </remarks>
 internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
 {
+    private enum AuditComparisonState
+    {
+        QuarantinedExpectation,
+        UnmatchedVerifiedCandidate,
+        MatchedVerifiedCandidate,
+    }
+
+    private sealed record AuditComparison(IReadOnlyList<string> ExpectedAssertions, AuditComparisonState State);
+
+    private const string PendingKeyCallbackDiagnostic =
+        "The actual key callback is still active. No producer or resource may start; wait for ownership to settle before retrying.";
     private readonly EvidencePlan _plan;
     private readonly IReadOnlyDictionary<string, EvidenceReuseProducerRegistration> _registrations;
     private readonly IReadOnlyDictionary<string, string> _resourceIdentities;
@@ -87,14 +98,12 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
     private readonly Dictionary<string, EvidenceArtifactWriter> _writers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, EvidenceProducerResult> _reused = new(StringComparer.Ordinal);
     private readonly Dictionary<string, EvidenceReceiptStore.EvidenceReceiptKeyLease> _leases = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, IReadOnlyList<string>> _auditExpected = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _verifiedAuditCandidates = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _matchedAuditCandidates = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AuditComparison> _auditComparisons = new(StringComparer.Ordinal);
     private readonly Dictionary<string, EvidenceChildLifetimeSession> _children = new(StringComparer.Ordinal);
     private readonly HashSet<string> _admitted = new(StringComparer.Ordinal);
     private readonly HashSet<string> _quarantined = new(StringComparer.Ordinal);
     private readonly HashSet<string> _publicationSuppressed = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _lastMaterial = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, EvidenceKeyMaterialSnapshot> _lastMaterial = new(StringComparer.Ordinal);
     private readonly List<EvidenceProducerKeyMaterialExecution> _keyCallbacks = [];
     private readonly Stopwatch _waitBudget = new();
     private readonly object _disposeSync = new();
@@ -135,7 +144,8 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
     /// <param name="producerId">Opaque selected producer identifier.</param>
     /// <returns>True only after CompleteAsync compared a verified candidate. This proves neither cleanup nor publication;
     /// callers must still require the completed manifest and final receipt decision.</returns>
-    internal bool HasMatchedVerifiedAudit(string producerId) => _matchedAuditCandidates.Contains(producerId);
+    internal bool HasMatchedVerifiedAudit(string producerId) => _auditComparisons.TryGetValue(producerId, out var audit)
+        && audit.State == AuditComparisonState.MatchedVerifiedCandidate;
 
     /// <summary>Gets whether safe ownership could not be established; adapters must start no resources or producers.</summary>
     internal bool IsUnavailable { get; private set; }
@@ -214,9 +224,10 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
 
         foreach (var producer in _plan.Profile.Producers)
         {
-            var identity = await PrepareIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
-            if (identity is not null) _identities.Add(producer.Id, identity);
+            var (probe, callbackPending) = await ProbeIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
+            RecordPreparationDecision(producer.Id, probe, callbackPending);
             if (IsUnavailable) return;
+            if (probe.Identity is { } identity) _identities.Add(producer.Id, identity);
         }
         if (_identities.Count == 0) return;
         var namespaces = _identities.Values.Select(static identity => identity.RepositoryNamespace).Distinct(StringComparer.Ordinal).ToArray();
@@ -262,8 +273,10 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             foreach (var producer in _plan.Profile.Producers.Where(producer => _identities.ContainsKey(producer.Id)))
             {
                 var prior = _identities[producer.Id];
-                var current = await PrepareIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
+                var (probe, callbackPending) = await ProbeIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
+                RecordPreparationDecision(producer.Id, probe, callbackPending);
                 if (IsUnavailable) return; // Actual late callback and key leases remain owned until disposal joins it.
+                var current = probe.Identity;
                 if (current is not null && current.RepositoryNamespace != prior.RepositoryNamespace)
                 {
                     Unavailable("reuse.repository_changed", "The physical repository identity changed while waiting. Prepare from a stable verified checkout before retrying.");
@@ -300,7 +313,9 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             {
                 _quarantined.Add(producer.Id);
                 if (_options.VerifyReuse)
-                    _auditExpected[producer.Id] = DecodeAssertions(state.AuditExpectedAssertions, producer.AssertionIds);
+                    _auditComparisons[producer.Id] = new(
+                        DecodeAssertions(state.AuditExpectedAssertions, producer.AssertionIds),
+                        AuditComparisonState.QuarantinedExpectation);
                 _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Miss, "reuse.audit_required",
                     "The key is quarantined. Ordinary fresh execution cannot publish; use an explicit successful fresh audit to recover.", identity.Key);
                 continue;
@@ -322,8 +337,9 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             {
                 if (_options.VerifyReuse)
                 {
-                    _auditExpected[producer.Id] = restored.SatisfiedAssertionIds.ToArray();
-                    _verifiedAuditCandidates.Add(producer.Id);
+                    _auditComparisons[producer.Id] = new(
+                        restored.SatisfiedAssertionIds.ToArray(),
+                        AuditComparisonState.UnmatchedVerifiedCandidate);
                 }
                 else _reused.Add(producer.Id, restored);
                 _decisions[producer.Id] = new(producer.Id, _options.VerifyReuse ? EvidenceProducerReuseStatus.Miss : EvidenceProducerReuseStatus.Hit,
@@ -373,21 +389,22 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                 : $"The {comparable.DifferingComponent} identity changed; execute fresh with the current effective configuration.", identity.Key, comparable.OriginCompletedAt);
     }
 
-    private async Task<EvidenceProducerIdentity?> PrepareIdentityAsync(EvidenceProducerDeclaration producer, CancellationToken cancellationToken)
+    /// <summary>Captures current key material and identity without changing the producer's receipt decision.</summary>
+    /// <remarks>Reports an unjoined callback separately so the calling phase can block the session while retaining ownership.</remarks>
+    private async Task<(EvidenceProducerIdentityResult Result, bool CallbackPending)> ProbeIdentityAsync(
+        EvidenceProducerDeclaration producer, CancellationToken cancellationToken)
     {
         if (producer.Inputs is null)
         {
-            _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Ineligible, "reuse.inputs_required", "No Inputs declaration; execute fresh.");
-            return null;
+            return (new(null, "reuse.inputs_required", "No Inputs declaration; execute fresh."), false);
         }
         if (string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
             && producer.CoverageExecution is not { CooperativeChildLifetime: true })
         {
-            _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Ineligible, "reuse.child_lifetime_required",
-                "Coverage reuse requires the explicit cooperative child-lifetime contract. Run fresh or enroll and join every test child before opting in.");
-            return null;
+            return (new(null, "reuse.child_lifetime_required",
+                "Coverage reuse requires the explicit cooperative child-lifetime contract. Run fresh or enroll and join every test child before opting in."), false);
         }
-        IReadOnlyDictionary<string, string> material = new Dictionary<string, string>();
+        var material = EvidenceKeyMaterialSnapshot.NoMaterial;
         var registration = _registrations[producer.Id];
         if (registration.Producer is IEvidenceProducerKeyMaterial callback)
         {
@@ -398,29 +415,41 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             if (result.CallerCancelled) IsCancelled = true;
             if (!result.Settled)
             {
-                Unavailable(result.Reason, "The actual key callback is still active. No producer or resource may start; wait for ownership to settle before retrying.");
-                return null;
+                return (new(null, result.Reason, PendingKeyCallbackDiagnostic), true);
             }
             if (result.Material is null)
             {
-                _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Ineligible, result.Reason,
+                return (new(null, result.Reason,
                     "Key material failed or exceeded its deadline and has settled. Execute fresh; fix the local side-effect-free callback before retrying reuse."
-                    + (result.Diagnostic is null ? string.Empty : " " + result.Diagnostic));
-                return null;
+                    + (result.Diagnostic is null ? string.Empty : " " + result.Diagnostic)), false);
             }
             material = result.Material;
         }
-        material = new ReadOnlyDictionary<string, string>(material.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal));
         _lastMaterial[producer.Id] = material;
         cancellationToken.ThrowIfCancellationRequested();
-        var identity = await EvidenceProducerIdentityBuilder.BuildAsync(new(_options.RepositoryRoot, _plan, producer,
-            registration.ImplementationIdentity, _resourceIdentities, registration.EffectiveToolIdentity, material, _patchSha256), cancellationToken).ConfigureAwait(false);
-        if (identity.Identity is null)
-            _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Ineligible, identity.Reason,
-                identity.Diagnostic ?? "Identity is incomplete; execute fresh.");
-        else
-            _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Miss, "reuse.key_ready", "Content key prepared; receipt lookup follows ownership acquisition.", identity.Identity.Key);
-        return identity.Identity;
+        return (await BuildIdentityAsync(producer, cancellationToken).ConfigureAwait(false), false);
+    }
+
+    /// <summary>Rebuilds the identity from disk and the last material captured while the producer was owned.</summary>
+    private Task<EvidenceProducerIdentityResult> BuildIdentityAsync(EvidenceProducerDeclaration producer, CancellationToken cancellationToken)
+    {
+        var registration = _registrations[producer.Id];
+        return EvidenceProducerIdentityBuilder.BuildAsync(new(_options.RepositoryRoot, _plan, producer,
+            registration.ImplementationIdentity, _resourceIdentities, registration.EffectiveToolIdentity, _lastMaterial[producer.Id], _patchSha256), cancellationToken);
+    }
+
+    /// <summary>Records the preparation decision before receipt lookup or after the key becomes ineligible.</summary>
+    private void RecordPreparationDecision(string producerId, EvidenceProducerIdentityResult probe, bool callbackPending)
+    {
+        if (callbackPending)
+        {
+            Unavailable(probe.Reason, PendingKeyCallbackDiagnostic);
+            return;
+        }
+
+        _decisions[producerId] = probe.Identity is { } identity
+            ? new(producerId, EvidenceProducerReuseStatus.Miss, "reuse.key_ready", "Content key prepared; receipt lookup follows ownership acquisition.", identity.Key)
+            : new(producerId, EvidenceProducerReuseStatus.Ineligible, probe.Reason, probe.Diagnostic ?? "Identity is incomplete; execute fresh.");
     }
 
     /// <summary>Gets the same bounded writer for a fresh producer and its later receipt publication.</summary>
@@ -448,25 +477,24 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             foreach (var producer in _plan.Profile.Producers.Where(producer => _identities.ContainsKey(producer.Id)))
             {
                 var prepared = _identities[producer.Id];
-                var decision = _decisions[producer.Id];
-                var current = await PrepareIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
+                var (probe, _) = await ProbeIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
+                var current = probe.Identity;
                 if (current is null || current.Key != prepared.Key
                     || current.RepositoryNamespace != prepared.RepositoryNamespace || IsUnavailable)
                 {
                     Unavailable("reuse.prepared_inputs_changed", "Prepared repository namespace or inputs changed before execution. Start a new preparation; no resource or producer was started.");
                     return false;
                 }
-                _decisions[producer.Id] = decision;
             }
             foreach (var producer in _plan.Profile.Producers.Where(producer => _identities.ContainsKey(producer.Id) && !_reused.ContainsKey(producer.Id)))
             {
                 var lease = _leases[_identities[producer.Id].Key];
-                var audit = _auditExpected.ContainsKey(producer.Id);
+                var comparison = _auditComparisons.GetValueOrDefault(producer.Id);
                 cancellationToken.ThrowIfCancellationRequested();
                 _options.BeforeAuthorityWriteForTests?.Invoke(producer.Id);
                 cancellationToken.ThrowIfCancellationRequested();
-                lease.EstablishAuthority(ExecutionId, audit, allowQuarantinedFresh: _quarantined.Contains(producer.Id),
-                    expectedAssertions: audit ? EncodeAssertions(_auditExpected[producer.Id]) : null);
+                lease.EstablishAuthority(ExecutionId, comparison is not null, allowQuarantinedFresh: _quarantined.Contains(producer.Id),
+                    expectedAssertions: comparison is null ? null : EncodeAssertions(comparison.ExpectedAssertions));
                 _admitted.Add(producer.Id);
             }
             // Channel creation is an execution side effect, so it follows admission of the complete key set.
@@ -535,9 +563,13 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                     "The fresh producer passed its execution contract but did not provide a complete bounded receipt inventory. Original reports are preserved; no receipt is published.", _identities[producer.Id].Key);
             }
             var before = _identities[producer.Id];
-            var decision = _decisions[producer.Id];
-            var after = cancellationToken.IsCancellationRequested ? null
-                : await PrepareIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
+            EvidenceProducerIdentity? after = null;
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                var (probe, callbackPending) = await ProbeIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
+                if (callbackPending) Unavailable(probe.Reason, PendingKeyCallbackDiagnostic);
+                after = probe.Identity;
+            }
             if (after is null || after.Key != before.Key || after.RepositoryNamespace != before.RepositoryNamespace)
             {
                 _publicationSuppressed.Add(producer.Id);
@@ -546,7 +578,6 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                     path is null ? "Repository namespace, inputs, or effective key material changed during execution; receipt publication is suppressed. Pin restore inputs and retry."
                     : $"Input '{path}' changed during execution; receipt publication is suppressed. Pin this input and retry.", before.Key);
             }
-            else _decisions[producer.Id] = decision;
             if (_keyCallbacks.Any(static callback => !callback.IsSettled)) return false;
         }
         foreach (var session in _children.Values)
@@ -561,17 +592,18 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         if (_plan.ContractVersion == "1.0" && _identities.Count == 0) return manifest;
         var results = manifest.ProducerResults.ToArray();
         var auditFailed = false;
-        foreach (var pair in _auditExpected)
+        foreach (var pair in _auditComparisons)
         {
             var result = results.SingleOrDefault(result => result.ProducerId == pair.Key);
             if (result?.Outcome == EvidenceProducerOutcome.Passed
-                && result.SatisfiedAssertionIds.Order(StringComparer.Ordinal).SequenceEqual(pair.Value.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+                && result.SatisfiedAssertionIds.Order(StringComparer.Ordinal).SequenceEqual(pair.Value.ExpectedAssertions.Order(StringComparer.Ordinal), StringComparer.Ordinal))
             {
-                if (_verifiedAuditCandidates.Contains(pair.Key)) _matchedAuditCandidates.Add(pair.Key);
+                if (pair.Value.State == AuditComparisonState.UnmatchedVerifiedCandidate)
+                    _auditComparisons[pair.Key] = pair.Value with { State = AuditComparisonState.MatchedVerifiedCandidate };
                 continue;
             }
             auditFailed = true;
-            try { _leases[_identities[pair.Key].Key].MarkAuditMismatch(ExecutionId, EncodeAssertions(pair.Value)); }
+            try { _leases[_identities[pair.Key].Key].MarkAuditMismatch(ExecutionId, EncodeAssertions(pair.Value.ExpectedAssertions)); }
             catch (Exception exception) when (IsNonFatal(exception)) { /* Durable pre-execution intent remains authoritative. */ }
             results = results.Select(item => item.ProducerId == pair.Key
                 ? item with { Outcome = EvidenceProducerOutcome.Failed, Diagnostic = "reuse.audit_mismatch: Fresh outcome or assertions differ from the origin. The key remains quarantined; fix the workload's declared inputs and rerun an explicit audit." }
@@ -597,9 +629,9 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         foreach (var producer in _plan.Profile.Producers.Where(producer => _admitted.Contains(producer.Id)))
         {
             var lease = _leases[_identities[producer.Id].Key];
-            if (_publicationSuppressed.Contains(producer.Id) || _quarantined.Contains(producer.Id) && !_auditExpected.ContainsKey(producer.Id))
+            if (_publicationSuppressed.Contains(producer.Id) || _quarantined.Contains(producer.Id) && !_auditComparisons.ContainsKey(producer.Id))
             {
-                if (_auditExpected.ContainsKey(producer.Id)) auditFailed = true;
+                if (_auditComparisons.ContainsKey(producer.Id)) auditFailed = true;
                 try { SettleKnownExecution(lease); } catch (Exception failure) when (IsNonFatal(failure)) { }
                 continue;
             }
@@ -607,16 +639,14 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             {
                 // Resource disposal can also rewrite declared files. Recheck disk bytes after all cleanup;
                 // key material was captured after producer completion while its registration was still alive.
-                var identity = await EvidenceProducerIdentityBuilder.BuildAsync(new(_options.RepositoryRoot, _plan, producer,
-                    _registrations[producer.Id].ImplementationIdentity, _resourceIdentities,
-                    _registrations[producer.Id].EffectiveToolIdentity, _lastMaterial[producer.Id], _patchSha256), cancellationToken).ConfigureAwait(false);
+                var identity = await BuildIdentityAsync(producer, cancellationToken).ConfigureAwait(false);
                 if (identity.Identity?.Key != _identities[producer.Id].Key
                     || identity.Identity?.RepositoryNamespace != _identities[producer.Id].RepositoryNamespace)
                 {
                     _publicationSuppressed.Add(producer.Id);
                     _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Ineligible, "reuse.inputs_changed",
                         "Repository namespace or prepared input identity changed during execution or cleanup; the fresh result is preserved and no receipt is published.", _identities[producer.Id].Key);
-                    if (_auditExpected.ContainsKey(producer.Id)) auditFailed = true;
+                    if (_auditComparisons.ContainsKey(producer.Id)) auditFailed = true;
                     SettleKnownExecution(lease);
                     continue;
                 }
@@ -630,7 +660,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                 {
                     Publication = EvidenceReceiptPublication.Suppressed,
                 };
-                if (_auditExpected.ContainsKey(producer.Id)) auditFailed = true;
+                if (_auditComparisons.ContainsKey(producer.Id)) auditFailed = true;
                 try { SettleKnownExecution(lease); } catch (Exception failure) when (IsNonFatal(failure)) { }
             }
         }
@@ -650,7 +680,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                     };
                     if (!publication.Published)
                     {
-                        if (_auditExpected.ContainsKey(request.ProducerId)) auditFailed = true;
+                        if (_auditComparisons.ContainsKey(request.ProducerId)) auditFailed = true;
                         SettleKnownExecution(request.Lease);
                     }
                 }
@@ -664,7 +694,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                     {
                         Publication = EvidenceReceiptPublication.Suppressed,
                     };
-                    if (_auditExpected.ContainsKey(request.ProducerId)) auditFailed = true;
+                    if (_auditComparisons.ContainsKey(request.ProducerId)) auditFailed = true;
                     try { SettleKnownExecution(request.Lease); } catch (Exception failure) when (IsNonFatal(failure)) { }
                 }
             }
@@ -672,7 +702,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         else if (auditFailed)
             await CompleteUnsuccessfulSettlementAsync(true).ConfigureAwait(false);
         if (auditFailed)
-            completed = EvidenceManifestBuilder.Build(_plan, results.Select(result => _auditExpected.ContainsKey(result.ProducerId)
+            completed = EvidenceManifestBuilder.Build(_plan, results.Select(result => _auditComparisons.ContainsKey(result.ProducerId)
                 ? result with { Outcome = EvidenceProducerOutcome.Failed, Diagnostic = "reuse.audit_finalization_failed: Fresh audit could not atomically finalize its receipt and clear intent. The key remains blocked; inspect store health and retry an explicit audit." }
                 : result).ToArray(), observationOnly: manifest.ClaimKind == EvidenceClaimKind.ObservationOnly,
                 envelopeStatus: manifest.EnvelopeStatus, resourceResults: manifest.ResourceResults, metrics: metrics);

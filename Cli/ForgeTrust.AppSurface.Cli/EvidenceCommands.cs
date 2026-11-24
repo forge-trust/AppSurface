@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text;
 using CliFx;
 using CliFx.Binding;
@@ -137,9 +138,10 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
         try
         {
             var cancellationToken = console.RegisterCancellationHandler();
+            TimeSpan receiptWait = default;
             if (Reuse)
             {
-                EvidenceRunCommand.ValidateReuseOptions(true, false, ReceiptWaitTimeout);
+                receiptWait = EvidenceRunCommand.ParseReuseOptions(true, false, ReceiptWaitTimeout);
                 ValidateReadOnlyOutput(OutputDirectory, ReceiptStore);
             }
             var resolution = Reuse
@@ -150,7 +152,7 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
             var decisions = Reuse
                 ? await (_reuseResolver ?? throw new CommandException("ASEVD216: Read-only reuse explanation requires the built-in coverage adapter. Fix: run the installed appsurface tool with its Evidence services registered. Code: reuse.explain_unavailable."))
                     .ExplainAsync(plan, resolution?.DiffSnapshot, SolutionPath, ReceiptStore,
-                        TimeSpan.Parse(ReceiptWaitTimeout, System.Globalization.CultureInfo.InvariantCulture), cancellationToken)
+                        receiptWait, cancellationToken)
                 : null;
             await Workflow.WritePlanAsync(plan, OutputDirectory, cancellationToken, decisions);
             await console.Output.WriteLineAsync(decisions is null
@@ -260,8 +262,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     {
         try
         {
-            ValidateReuseOptions(Reuse, VerifyReuse, ReceiptWaitTimeout);
-            var receiptWait = TimeSpan.Parse(ReceiptWaitTimeout, System.Globalization.CultureInfo.InvariantCulture);
+            var receiptWait = ParseReuseOptions(Reuse, VerifyReuse, ReceiptWaitTimeout);
 
             var cancellationToken = console.RegisterCancellationHandler();
             var resolution = await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken);
@@ -371,17 +372,19 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         }
     }
 
-    /// <summary>Rejects invalid opt-in and duration options before any output, store, resource or producer work.</summary>
+    /// <summary>Parses the wait duration and rejects invalid options before output, store, resource or producer work.</summary>
     /// <param name="reuse">Whether local receipt reuse is requested.</param>
     /// <param name="verifyReuse">Whether a fresh receipt audit is requested.</param>
     /// <param name="receiptWaitTimeout">Invariant finite positive duration string.</param>
-    internal static void ValidateReuseOptions(bool reuse, bool verifyReuse, string receiptWaitTimeout)
+    /// <returns>The validated receipt wait duration.</returns>
+    internal static TimeSpan ParseReuseOptions(bool reuse, bool verifyReuse, string receiptWaitTimeout)
     {
         if (verifyReuse && !reuse)
             throw new CommandException("ASEVD213: --verify-reuse requires --reuse. Fix: pass both options or remove --verify-reuse. Code: reuse.verify_requires_reuse. No store or output was created.");
-        if (!TimeSpan.TryParse(receiptWaitTimeout, System.Globalization.CultureInfo.InvariantCulture, out var receiptWait)
-            || receiptWait <= TimeSpan.Zero || receiptWait == Timeout.InfiniteTimeSpan)
+        if (!TimeSpan.TryParse(receiptWaitTimeout, CultureInfo.InvariantCulture, out var receiptWait)
+            || receiptWait <= TimeSpan.Zero)
             throw new CommandException("ASEVD214: --receipt-wait-timeout must be a finite positive duration. Fix: pass a value such as 00:30:00. Code: reuse.invalid_wait_timeout. No store or output was created.");
+        return receiptWait;
     }
 
     /// <summary>Rejects local reuse in release or protected CI contexts and in profiles that select the preview test producer.</summary>

@@ -13,10 +13,10 @@ public sealed class EvidenceReceiptTreeContractTests
         using var temporary = TestDirectory.Create();
         using var root = CoverageRunOutputLease.AcquireArtifactDirectory(
             TestPathUtils.PathUnder(temporary.Path, "artifacts"), true, true)!;
-        EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(root, [], maximumTreeEntries: budget);
+        EvidenceReceiptPayload.VerifyExactTree(root, [], maximumTreeEntries: budget);
         using (var file = root.OpenArtifactFile("report.txt", createNew: true)) file.Write("report"u8);
 
-        EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(root, ["report.txt"], maximumTreeEntries: budget);
+        EvidenceReceiptPayload.VerifyExactTree(root, ["report.txt"], maximumTreeEntries: budget);
 
         Assert.Equal("report.txt", Assert.Single(root.EnumerateArtifactEntries(8)).Name);
         Assert.Equal("report", File.ReadAllText(TestPathUtils.PathUnder(root.ArtifactDirectoryPath, "report.txt")));
@@ -30,9 +30,9 @@ public sealed class EvidenceReceiptTreeContractTests
             TestPathUtils.PathUnder(temporary.Path, "artifacts"), true, true)!;
 
         Assert.Throws<ArgumentNullException>(() =>
-            EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(null!, []));
+            EvidenceReceiptPayload.VerifyExactTree(null!, []));
         Assert.Throws<ArgumentNullException>(() =>
-            EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(root, null!));
+            EvidenceReceiptPayload.VerifyExactTree(root, null!));
 
         _ = root.EnumerateArtifactEntries(8);
         Assert.Empty(Directory.GetFileSystemEntries(root.ArtifactDirectoryPath));
@@ -48,7 +48,7 @@ public sealed class EvidenceReceiptTreeContractTests
         using (var first = reports.OpenArtifactFile("a.txt", createNew: true)) first.Write("a"u8);
         HashSet<string> expected = ["reports/a.txt"];
 
-        EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(root, expected, maximumTreeEntries: 2);
+        EvidenceReceiptPayload.VerifyExactTree(root, expected, maximumTreeEntries: 2);
         _ = root.EnumerateArtifactEntries(8);
         using (var reports = CoverageRunOutputLease.AcquireArtifactDirectory(
             TestPathUtils.PathUnder(root.ArtifactDirectoryPath, "reports"), false, true)!)
@@ -56,11 +56,11 @@ public sealed class EvidenceReceiptTreeContractTests
         expected.Add("reports/b.txt");
 
         var refused = Assert.Throws<InvalidDataException>(() =>
-            EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(root, expected, maximumTreeEntries: 2));
+            EvidenceReceiptPayload.VerifyExactTree(root, expected, maximumTreeEntries: 2));
 
         Assert.Contains("tree exceeds its bound", refused.Message, StringComparison.Ordinal);
         _ = root.EnumerateArtifactEntries(8);
-        EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(root, expected, maximumTreeEntries: 3);
+        EvidenceReceiptPayload.VerifyExactTree(root, expected, maximumTreeEntries: 3);
         Assert.Equal("a", File.ReadAllText(TestPathUtils.PathUnder(root.ArtifactDirectoryPath, "reports/a.txt")));
         Assert.Equal("b", File.ReadAllText(TestPathUtils.PathUnder(root.ArtifactDirectoryPath, "reports/b.txt")));
     }
@@ -75,7 +75,7 @@ public sealed class EvidenceReceiptTreeContractTests
             TestPathUtils.PathUnder(temporary.Path, "artifacts"), true, true)!;
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            EvidenceReceiptStore.EvidenceReceiptKeyLease.VerifyExactTree(root, [], maximumTreeEntries: budget));
+            EvidenceReceiptPayload.VerifyExactTree(root, [], maximumTreeEntries: budget));
 
         _ = root.EnumerateArtifactEntries(8);
         Assert.Empty(Directory.GetFileSystemEntries(root.ArtifactDirectoryPath));

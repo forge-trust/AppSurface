@@ -262,7 +262,7 @@ public sealed class EvidenceProducerIdentityTests
         using var repo = await TestRepository.CreateAsync();
         await repo.WriteAsync("src/file", "data");
         await repo.CommitAsync("base");
-        var tooMany = Enumerable.Range(0, EvidenceProducerIdentityBuilder.MaximumMaterialKeys + 1)
+        var tooMany = Enumerable.Range(0, EvidenceKeyMaterialSnapshot.MaximumKeys + 1)
             .ToDictionary(static index => $"private-key-{index}", static index => $"private-value-{index}");
         var result = await BuildAsync(repo, materialValues: tooMany);
         Assert.Null(result.Identity);
@@ -281,17 +281,17 @@ public sealed class EvidenceProducerIdentityTests
         using var repo = await TestRepository.CreateAsync();
         await repo.WriteAsync("src/file", "data");
         await repo.CommitAsync("base");
-        var exactTotal = Enumerable.Range(0, EvidenceProducerIdentityBuilder.MaximumMaterialKeys)
+        var exactTotal = Enumerable.Range(0, EvidenceKeyMaterialSnapshot.MaximumKeys)
             .ToDictionary(static index => $"k{index:D2}", static _ => new string('v', 4093));
         // Three-byte keys plus each value make the aggregate exactly 256 KiB; each value remains within 4 KiB.
-        Assert.Equal(EvidenceProducerIdentityBuilder.MaximumMaterialTotalBytes,
+        Assert.Equal(EvidenceKeyMaterialSnapshot.MaximumTotalBytes,
             exactTotal.Sum(static pair => System.Text.Encoding.UTF8.GetByteCount(pair.Key) + System.Text.Encoding.UTF8.GetByteCount(pair.Value)));
 
         var accepted = await BuildAsync(repo, materialValues: exactTotal);
         Assert.NotNull(accepted.Identity);
 
         const string keyMarker = "private-key-marker";
-        var overlongKey = keyMarker + new string('k', EvidenceProducerIdentityBuilder.MaximumMaterialKeyLength + 1 - keyMarker.Length);
+        var overlongKey = keyMarker + new string('k', EvidenceKeyMaterialSnapshot.MaximumKeyLength + 1 - keyMarker.Length);
         var tooLongKey = await BuildAsync(repo, materialValues: new Dictionary<string, string> { [overlongKey] = "private-value-marker" });
         Assert.Null(tooLongKey.Identity);
         Assert.Equal("reuse.identity.material_invalid", tooLongKey.Reason);
@@ -313,7 +313,7 @@ public sealed class EvidenceProducerIdentityTests
         Assert.DoesNotContain("private-key-marker", valueDiagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain(overlongUtf8Value, valueDiagnostic, StringComparison.Ordinal);
 
-        var tooLargeTotal = await BuildAsync(repo, materialValues: Enumerable.Range(0, EvidenceProducerIdentityBuilder.MaximumMaterialKeys)
+        var tooLargeTotal = await BuildAsync(repo, materialValues: Enumerable.Range(0, EvidenceKeyMaterialSnapshot.MaximumKeys)
             .ToDictionary(static index => $"k{index:D2}", static index => new string('v', index == 63 ? 4094 : 4093)));
         Assert.Null(tooLargeTotal.Identity);
         Assert.Equal("reuse.identity.material_invalid", tooLargeTotal.Reason);

@@ -141,6 +141,8 @@ public sealed class EvidenceRunTestProducerTests
         Assert.Contains("  tests/A/A.csproj | filter: FullyQualifiedName~A | minimumTests: 7", output, StringComparison.Ordinal);
         Assert.Contains(TestEvidenceRunSupport.PreviewLine, output, StringComparison.Ordinal);
         using var summary = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Output, "evidence-summary.json")));
+        Assert.Equal(new[] { "kind", "profile", "scope", "matchedRules", "obligations", "testProducers", "next" },
+            summary.RootElement.EnumerateObject().Select(static property => property.Name));
         var producer = summary.RootElement.GetProperty("testProducers")[0];
         Assert.Equal(ProducerId, producer.GetProperty("id").GetString());
         Assert.True(producer.GetProperty("preview").GetBoolean());

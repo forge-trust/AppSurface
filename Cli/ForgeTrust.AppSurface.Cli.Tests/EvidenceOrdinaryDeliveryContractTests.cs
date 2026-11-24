@@ -24,6 +24,33 @@ public sealed class EvidenceOrdinaryDeliveryContractTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LiveReportChecksRequireThePatchTargetsDeclaredByTheGate(bool captureReceipt)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var gate = fixture.Execution.Gate! with
+        {
+            PatchTargetsJsonPath = TestPathUtils.PathUnder(fixture.Source, "coverage", "patch-targets.json"),
+        };
+        var execution = new CoverageEvidenceExecutionResult(fixture.Execution.Run, gate);
+
+        if (captureReceipt)
+        {
+            var failure = Assert.Throws<CoverageEvidenceInventoryException>(() =>
+                CoverageEvidenceInventory.Capture(fixture.Source, execution, fixture.Publications, CancellationToken.None));
+            Assert.Equal("inventory-required-file-missing", failure.Reason);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(() => fixture.DeliverAsync(execution));
+            Assert.False(Directory.Exists(fixture.Destination));
+        }
+
+        await fixture.AssertSourcesUnchangedAsync();
+    }
+
+    [Theory]
     [InlineData("negative-length")]
     [InlineData("short-digest")]
     [InlineData("uppercase-digest")]

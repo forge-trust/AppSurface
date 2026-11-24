@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -163,11 +164,7 @@ internal sealed class EvidenceCliWorkflow
         ArgumentNullException.ThrowIfNull(plan);
         Directory.CreateDirectory(outputDirectory);
         await WriteCanonicalAsync(Path.Join(outputDirectory, "evidence-plan.json"), plan, cancellationToken).ConfigureAwait(false);
-        await File.WriteAllTextAsync(
-            Path.Join(outputDirectory, "evidence-summary.json"),
-            JsonSerializer.Serialize(reuseDecisions is null ? CreateSummary(plan) : CreateSummary(plan, reuseDecisions), new JsonSerializerOptions { WriteIndented = true }),
-            new UTF8Encoding(false),
-            cancellationToken).ConfigureAwait(false);
+        await WriteSummaryAsync(outputDirectory, CreateSummary(plan, reuseDecisions), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -180,12 +177,7 @@ internal sealed class EvidenceCliWorkflow
         ArgumentNullException.ThrowIfNull(manifest);
         Directory.CreateDirectory(outputDirectory);
         await WriteCanonicalAsync(Path.Join(outputDirectory, "evidence-manifest.json"), manifest, cancellationToken).ConfigureAwait(false);
-        var summary = reuseDecisions is null ? CreateSummary(manifest) : CreateSummary(manifest, reuseDecisions);
-        await File.WriteAllTextAsync(
-            Path.Join(outputDirectory, "evidence-summary.json"),
-            JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }),
-            new UTF8Encoding(false),
-            cancellationToken).ConfigureAwait(false);
+        await WriteSummaryAsync(outputDirectory, CreateSummary(manifest, reuseDecisions), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -299,8 +291,9 @@ internal sealed class EvidenceCliWorkflow
         }
 
         if (!string.Equals(resolvedPlan.PlanDigest, plan.PlanDigest, StringComparison.Ordinal)
-            || !EvidenceManifestBuilder.Verify(plan, manifest)
-            || (requireGateAdmission && !EvidenceManifestBuilder.VerifyForGate(plan, manifest)))
+            || !(requireGateAdmission
+                ? EvidenceManifestBuilder.VerifyForGate(plan, manifest)
+                : EvidenceManifestBuilder.Verify(plan, manifest)))
         {
             throw new EvidenceCliException(
                 "ASEVD203",
@@ -509,6 +502,11 @@ internal sealed class EvidenceCliWorkflow
         await File.WriteAllBytesAsync(path, EvidenceCanonicalJson.Serialize(value), cancellationToken).ConfigureAwait(false);
     }
 
+    private static Task WriteSummaryAsync<TSummary>(string outputDirectory, TSummary summary, CancellationToken cancellationToken)
+        => File.WriteAllTextAsync(Path.Join(outputDirectory, "evidence-summary.json"),
+            JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }),
+            new UTF8Encoding(false), cancellationToken);
+
     private static async Task<TValue> ReadCanonicalAsync<TValue>(string path, CancellationToken cancellationToken)
     {
         if (!File.Exists(path))
@@ -528,53 +526,41 @@ internal sealed class EvidenceCliWorkflow
 
     private static bool ContainsGeneratedMarker(string path) => File.ReadAllText(path).Contains(GeneratedMarker, StringComparison.Ordinal);
 
-    private static object CreateSummary(EvidencePlan plan)
+    private static PlanSummary CreateSummary(EvidencePlan plan, IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions)
     {
-        const string next = "Run 'appsurface evidence run' only when the selected producer capabilities are ready.";
         var obligations = plan.Profile.Obligations.Select(static obligation => obligation.Id).ToArray();
-        var testProducers = TestEvidenceRunSupport.DescribePlan(plan);
+        var testProducers = reuseDecisions is null ? TestEvidenceRunSupport.DescribePlan(plan) : null;
 
-        // The testProducers property is added only when a test producer is selected, so other summaries keep their shape.
-        return testProducers.Length == 0
-            ? new { kind = "plan", profile = plan.Profile.Id, scope = plan.Profile.Scope.ToString(), matchedRules = plan.MatchedRuleIds, obligations, next }
-            : new { kind = "plan", profile = plan.Profile.Id, scope = plan.Profile.Scope.ToString(), matchedRules = plan.MatchedRuleIds, obligations, testProducers, next };
+        return new("plan", plan.Profile.Id, plan.Profile.Scope.ToString(), plan.MatchedRuleIds, obligations,
+            testProducers is { Length: > 0 } ? testProducers : null, reuseDecisions,
+            "Run 'appsurface evidence run' only when the selected producer capabilities are ready.");
     }
 
-    private static object CreateSummary(EvidencePlan plan, IReadOnlyList<EvidenceReuseSummaryDecision> decisions) => new
-    {
-        kind = "plan",
-        profile = plan.Profile.Id,
-        scope = plan.Profile.Scope.ToString(),
-        matchedRules = plan.MatchedRuleIds,
-        obligations = plan.Profile.Obligations.Select(static obligation => obligation.Id).ToArray(),
-        reuseDecisions = decisions,
-        next = "Run 'appsurface evidence run' only when the selected producer capabilities are ready.",
-    };
+    private static ManifestSummary CreateSummary(EvidenceManifest manifest, IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions)
+        => new("manifest", manifest.ClaimKind.ToString(), manifest.ExecutionVerdict.ToString(),
+            manifest.Eligibility.ToString(), manifest.EnvelopeStatus.ToString(), manifest.ClosedObligationIds,
+            manifest.UnmediatedObligationIds, reuseDecisions, GetManifestNextAction(manifest));
 
-    private static object CreateSummary(EvidenceManifest manifest) => new
-    {
-        kind = "manifest",
-        claim = manifest.ClaimKind.ToString(),
-        verdict = manifest.ExecutionVerdict.ToString(),
-        eligibility = manifest.Eligibility.ToString(),
-        envelopeStatus = manifest.EnvelopeStatus.ToString(),
-        closedObligations = manifest.ClosedObligationIds,
-        unmediatedObligations = manifest.UnmediatedObligationIds,
-        next = GetManifestNextAction(manifest),
-    };
+    private sealed record PlanSummary(
+        [property: JsonPropertyName("kind")] string Kind,
+        [property: JsonPropertyName("profile")] string Profile,
+        [property: JsonPropertyName("scope")] string Scope,
+        [property: JsonPropertyName("matchedRules")] IReadOnlyList<string> MatchedRules,
+        [property: JsonPropertyName("obligations")] IReadOnlyList<string> Obligations,
+        [property: JsonPropertyName("testProducers"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] object[]? TestProducers,
+        [property: JsonPropertyName("reuseDecisions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EvidenceReuseSummaryDecision>? ReuseDecisions,
+        [property: JsonPropertyName("next")] string Next);
 
-    private static object CreateSummary(EvidenceManifest manifest, IReadOnlyList<EvidenceReuseSummaryDecision> decisions) => new
-    {
-        kind = "manifest",
-        claim = manifest.ClaimKind.ToString(),
-        verdict = manifest.ExecutionVerdict.ToString(),
-        eligibility = manifest.Eligibility.ToString(),
-        envelopeStatus = manifest.EnvelopeStatus.ToString(),
-        closedObligations = manifest.ClosedObligationIds,
-        unmediatedObligations = manifest.UnmediatedObligationIds,
-        reuseDecisions = decisions,
-        next = GetManifestNextAction(manifest),
-    };
+    private sealed record ManifestSummary(
+        [property: JsonPropertyName("kind")] string Kind,
+        [property: JsonPropertyName("claim")] string Claim,
+        [property: JsonPropertyName("verdict")] string Verdict,
+        [property: JsonPropertyName("eligibility")] string Eligibility,
+        [property: JsonPropertyName("envelopeStatus")] string EnvelopeStatus,
+        [property: JsonPropertyName("closedObligations")] IReadOnlyList<string> ClosedObligations,
+        [property: JsonPropertyName("unmediatedObligations")] IReadOnlyList<string> UnmediatedObligations,
+        [property: JsonPropertyName("reuseDecisions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EvidenceReuseSummaryDecision>? ReuseDecisions,
+        [property: JsonPropertyName("next")] string Next);
 
     private static string GetManifestNextAction(EvidenceManifest manifest) => manifest.ClaimKind switch
     {

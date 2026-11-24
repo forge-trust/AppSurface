@@ -54,7 +54,10 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             return new EvidenceReuseRunResult(manifest, decisions);
         }
 
-        var repositoryRoot = FindRepositoryRoot(Directory.GetCurrentDirectory());
+        var invocationDirectory = Directory.GetCurrentDirectory();
+        var repositoryRoot = FindRepositoryRoot(invocationDirectory);
+        var fullSolutionPath = ResolveCoverageSolutionPath(plan, solutionPath, invocationDirectory);
+        var hasSolutionIdentity = IsSolutionIdentitySafe(repositoryRoot, fullSolutionPath);
         var registrations = new Dictionary<string, EvidenceReuseProducerRegistration>(StringComparer.Ordinal);
         var adapters = new Dictionary<string, CoverageProducerAdapter>(StringComparer.Ordinal);
         var producerRoots = new Dictionary<string, (string Execution, string Artifacts)>(StringComparer.Ordinal);
@@ -63,7 +66,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             var roots = GetProducerRoots(outputDirectory, producer.Id,
                 useInvocationArtifactRoot: plan.Profile.Producers.Count == 1);
             producerRoots.Add(producer.Id, roots);
-            var setup = await CreateProducerSetupAsync(producer, repositoryRoot, solutionPath,
+            var setup = await CreateProducerSetupAsync(producer, repositoryRoot, fullSolutionPath,
                 roots.Execution, roots.Artifacts,
                 diffSnapshot, output, error, cancellationToken).ConfigureAwait(false);
             adapters.Add(producer.Id, setup.Adapter);
@@ -130,7 +133,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             manifest = await session.CompleteAsync(manifest, cancellationToken).ConfigureAwait(false);
             var resolvedSdks = registrations.ToDictionary(static pair => pair.Key,
                 static pair => pair.Value.EffectiveToolIdentity.GetValueOrDefault("sdk", "not-applicable"), StringComparer.Ordinal);
-            return new EvidenceReuseRunResult(manifest, ToSummaryDecisions(plan, session.Decisions, solutionPath, resolvedSdks)
+            return new EvidenceReuseRunResult(manifest, ToSummaryDecisions(plan, session.Decisions, hasSolutionIdentity, resolvedSdks)
                 .Select(decision => producerRoots.TryGetValue(decision.ProducerId, out var roots)
                     ? decision with
                     {
@@ -160,16 +163,19 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         EvidencePlan plan, EvidenceDiffSnapshot? diffSnapshot, string? solutionPath, string? storeRoot,
         TimeSpan waitTimeout, CancellationToken cancellationToken)
     {
-        var repositoryRoot = FindRepositoryRoot(Directory.GetCurrentDirectory());
+        var invocationDirectory = Directory.GetCurrentDirectory();
+        var repositoryRoot = FindRepositoryRoot(invocationDirectory);
         if (plan.Profile.Resources.Count > 0)
             return plan.Profile.Producers.Select(producer => new EvidenceReuseSummaryDecision(producer.Id,
                 "Ineligible", "reuse.consumer_host_required",
                 "The CLI cannot prepare consumer-owned resources or registrations. Use EvidenceHostBootstrap.PrepareAsync in the consumer host.",
                 null, null, null, "not-published")).ToArray();
+        var fullSolutionPath = ResolveCoverageSolutionPath(plan, solutionPath, invocationDirectory);
+        var hasSolutionIdentity = IsSolutionIdentitySafe(repositoryRoot, fullSolutionPath);
         var registrations = new Dictionary<string, EvidenceReuseProducerRegistration>(StringComparer.Ordinal);
         foreach (var producer in plan.Profile.Producers)
         {
-            var setup = await CreateProducerSetupAsync(producer, repositoryRoot, solutionPath,
+            var setup = await CreateProducerSetupAsync(producer, repositoryRoot, fullSolutionPath,
                 string.Empty, null, diffSnapshot, TextWriter.Null, TextWriter.Null, cancellationToken).ConfigureAwait(false);
             registrations.Add(producer.Id, setup.Registration);
         }
@@ -181,37 +187,36 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             static _ => throw new InvalidOperationException("Read-only explain cannot allocate producer output."), cancellationToken).ConfigureAwait(false);
         var resolvedSdks = registrations.ToDictionary(static pair => pair.Key,
             static pair => pair.Value.EffectiveToolIdentity.GetValueOrDefault("sdk", "not-applicable"), StringComparer.Ordinal);
-        return ToSummaryDecisions(plan, session.Decisions, solutionPath, resolvedSdks);
+        return ToSummaryDecisions(plan, session.Decisions, hasSolutionIdentity, resolvedSdks);
     }
 
-    /// <summary>Projects coordinator decisions without replacing an ownership failure with identity ineligibility.</summary>
+    /// <summary>Projects coordinator decisions using the CLI prerequisites captured before preparation.</summary>
+    /// <remarks>Only preparation ineligibility is eligible for CLI-specific diagnostics. A keyed decision carries
+    /// a coordinator result from after identity construction and keeps its original reason.</remarks>
     /// <param name="plan">Resolved producer declarations.</param>
     /// <param name="decisions">Coordinator decisions for this invocation.</param>
-    /// <param name="solutionPath">Explicit built-in coverage solution identity.</param>
+    /// <param name="hasSolutionIdentity">Whether the explicit solution identified a file inside the worktree at setup.</param>
     /// <param name="sdkVersions">Resolved per-producer SDK identities.</param>
     internal static IReadOnlyList<EvidenceReuseSummaryDecision> ToSummaryDecisions(
-        EvidencePlan plan, IReadOnlyList<EvidenceProducerReuseDecision> decisions, string? solutionPath,
+        EvidencePlan plan, IReadOnlyList<EvidenceProducerReuseDecision> decisions, bool hasSolutionIdentity,
         IReadOnlyDictionary<string, string> sdkVersions) => decisions
         .Select(decision =>
         {
-            var producer = plan.Profile.Producers.Single(item => item.Id == decision.ProducerId);
-            var missingSolution = string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
-                && !IsSolutionIdentitySafe(FindRepositoryRoot(Directory.GetCurrentDirectory()), solutionPath);
-            var unsupportedRegistration = !string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
-                && decision.Status == EvidenceProducerReuseStatus.Ineligible;
-            var sdkUnavailable = string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
-                && decision.Status == EvidenceProducerReuseStatus.Ineligible
-                && string.Equals(sdkVersions.GetValueOrDefault(producer.Id), "unavailable", StringComparison.Ordinal);
-            var reason = missingSolution && decision.Status == EvidenceProducerReuseStatus.Ineligible
-                ? "reuse.solution_required"
-                : unsupportedRegistration ? "reuse.consumer_host_required"
-                : sdkUnavailable ? "reuse.sdk_unavailable" : decision.Reason;
-            var diagnostic = missingSolution && decision.Status == EvidenceProducerReuseStatus.Ineligible
-                ? "Coverage identity requires --solution resolving to a file inside this Git worktree. Register custom solution resolution through the consumer EvidenceHost."
-                : unsupportedRegistration
-                    ? "The CLI does not register custom producers. Use EvidenceHostBootstrap.PrepareAsync in the consumer host."
-                    : sdkUnavailable ? "The actual dotnet SDK version could not be resolved; execute fresh or repair the local SDK installation."
-                    : decision.Diagnostic;
+            var reason = decision.Reason;
+            var diagnostic = decision.Diagnostic;
+            if (decision is { Status: EvidenceProducerReuseStatus.Ineligible, ProducerKey: null })
+            {
+                var producer = plan.Profile.Producers.Single(item => item.Id == decision.ProducerId);
+                if (!IsCoverageProducer(producer))
+                    (reason, diagnostic) = ("reuse.consumer_host_required",
+                        "The CLI does not register custom producers. Use EvidenceHostBootstrap.PrepareAsync in the consumer host.");
+                else if (!hasSolutionIdentity)
+                    (reason, diagnostic) = ("reuse.solution_required",
+                        "Coverage identity requires --solution resolving to a file inside this Git worktree. Register custom solution resolution through the consumer EvidenceHost.");
+                else if (string.Equals(sdkVersions.GetValueOrDefault(producer.Id), "unavailable", StringComparison.Ordinal))
+                    (reason, diagnostic) = ("reuse.sdk_unavailable",
+                        "The actual dotnet SDK version could not be resolved; execute fresh or repair the local SDK installation.");
+            }
             var publication = decision.Publication switch
             {
                 EvidenceReceiptPublication.Published => "published",
@@ -219,8 +224,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 EvidenceReceiptPublication.Restored => "restored",
                 _ => "not-published",
             };
-            return new EvidenceReuseSummaryDecision(decision.ProducerId,
-                missingSolution && decision.Status == EvidenceProducerReuseStatus.Ineligible ? "Ineligible" : decision.Status.ToString(),
+            return new EvidenceReuseSummaryDecision(decision.ProducerId, decision.Status.ToString(),
                 reason, diagnostic, decision.ProducerKey, decision.OriginCompletedAt,
             decision.OriginElapsedMilliseconds, publication);
         }).ToArray();
@@ -228,7 +232,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
     internal static IReadOnlyDictionary<string, string> CreateToolIdentity(
         EvidenceProducerDeclaration producer, string repositoryRoot, string? solutionPath, string sdkVersion)
     {
-        if (!string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase))
+        if (!IsCoverageProducer(producer))
             return new Dictionary<string, string>(StringComparer.Ordinal);
         var settings = new CoverageEvidenceRunSettings(producer.CoverageExecution);
         var solutionIdentity = "missing";
@@ -236,9 +240,9 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         {
             var fullSolution = Path.GetFullPath(solutionPath);
             var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryRoot));
-            if (fullSolution.StartsWith(fullRoot + Path.DirectorySeparatorChar, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            if (IsInsideRepository(fullRoot, fullSolution))
                 solutionIdentity = Path.GetRelativePath(fullRoot, fullSolution).Replace(Path.DirectorySeparatorChar, '/');
-            else if (string.Equals(fullSolution, fullRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            else if (string.Equals(fullSolution, fullRoot, PathComparison))
                 solutionIdentity = Path.GetFileName(fullSolution);
             else
                 solutionIdentity = "outside-repository";
@@ -250,7 +254,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             ["appSurfaceVersion"] = GetCoordinatedVersion(typeof(CoverageEvidenceProducer).Assembly),
             ["coverageSupportVersion"] = GetCoordinatedVersion(typeof(StrictReportGeneratorRuntimeLocator).Assembly),
             ["reportGeneratorVersion"] = StrictReportGeneratorRuntimeLocator.Version,
-            ["reportGeneratorManifest"] = GetReportGeneratorManifestDigest(),
+            ["reportGeneratorManifest"] = StrictReportGeneratorRuntimeLocator.GetPinnedManifestDigest() ?? "unavailable",
             ["solution"] = solutionIdentity,
             ["configuration"] = settings.Configuration,
             ["parallelism"] = settings.Parallelism.ToString(CultureInfo.InvariantCulture),
@@ -284,21 +288,11 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         }
     }
 
-    private static string GetReportGeneratorManifestDigest()
-    {
-        const string resourceName = "ForgeTrust.AppSurface.Evidence.Coverage.reportgenerator-runtime-manifest.json";
-        var assembly = typeof(StrictReportGeneratorRuntimeLocator).Assembly;
-        using var stream = assembly.GetManifestResourceStream(resourceName)
-            ?? assembly.GetManifestResourceNames().Where(static name => name.EndsWith("reportgenerator-runtime-manifest.json", StringComparison.Ordinal))
-                .Select(assembly.GetManifestResourceStream).FirstOrDefault(static candidate => candidate is not null);
-        return stream is null ? "unavailable" : "sha256:" + Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
-    }
-
     private static bool RequiresCoverageIdentity(EvidenceProducerDeclaration producer, string? solutionPath) =>
-        string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
+        IsCoverageProducer(producer)
         && producer.Inputs is not null
         && producer.CoverageExecution is { CooperativeChildLifetime: true }
-        && !string.IsNullOrWhiteSpace(solutionPath);
+        && solutionPath is not null;
 
     private async Task<(CoverageProducerAdapter Adapter, EvidenceReuseProducerRegistration Registration)> CreateProducerSetupAsync(
         EvidenceProducerDeclaration producer, string repositoryRoot, string? solutionPath, string executionRoot,
@@ -311,7 +305,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         var adapter = new CoverageProducerAdapter(producer.Id, coverageProducer, solutionPath, executionRoot,
             finalReportRoot: artifactRoot, diffSnapshot: diffSnapshot, output: output, error: error,
             sdkVersion: sdkVersion, sdkExecutable: _sdkExecutable, repositoryRoot: repositoryRoot);
-        var implementationIdentity = string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
+        var implementationIdentity = IsCoverageProducer(producer)
             ? CoverageImplementationIdentity
             : "appsurface-cli-consumer-host-required-v1";
         var registration = new EvidenceReuseProducerRegistration(adapter, implementationIdentity,
@@ -319,15 +313,23 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         return (adapter, registration);
     }
 
-    private static bool IsSolutionIdentitySafe(string repositoryRoot, string? solutionPath)
-    {
-        if (string.IsNullOrWhiteSpace(solutionPath)) return false;
-        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryRoot));
-        var fullSolution = Path.GetFullPath(solutionPath);
-        if (!File.Exists(fullSolution)) return false;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return fullSolution.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
-    }
+    private static bool IsCoverageProducer(EvidenceProducerDeclaration producer)
+        => string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ResolveCoverageSolutionPath(EvidencePlan plan, string? solutionPath, string invocationDirectory)
+        => !string.IsNullOrWhiteSpace(solutionPath) && plan.Profile.Producers.Any(IsCoverageProducer)
+            ? Path.GetFullPath(solutionPath, invocationDirectory)
+            : null;
+
+    private static bool IsSolutionIdentitySafe(string repositoryRoot, string? fullSolutionPath)
+        => fullSolutionPath is not null && File.Exists(fullSolutionPath)
+            && IsInsideRepository(Path.TrimEndingDirectorySeparator(repositoryRoot), fullSolutionPath);
+
+    private static bool IsInsideRepository(string fullRoot, string fullSolution)
+        => fullSolution.StartsWith(fullRoot + Path.DirectorySeparatorChar, PathComparison);
+
+    private static StringComparison PathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     /// <summary>Separates fresh collector output from receipt custody while preserving the single-producer run-root report layout.</summary>
     /// <param name="outputDirectory">Exclusive invocation output root.</param>
@@ -413,10 +415,10 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
 
         public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
         {
-            if (!string.Equals(context.Producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase))
+            if (!IsCoverageProducer(context.Producer))
                 return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Unavailable, [],
                     "This producer requires an explicit consumer EvidenceHost registration; the CLI does not infer custom producer registrations.");
-            if (string.IsNullOrWhiteSpace(solutionPath))
+            if (solutionPath is null)
                 return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Unavailable, [], "reuse.solution_required: The coverage producer requires --solution so it can reuse AppSurface coverage discovery. Register custom solution resolution through the consumer host.");
             var elapsed = Stopwatch.StartNew();
             var execution = await producer.RunWithInventoryAsync(context.Producer, solutionPath, outputDirectory, diffSnapshot,
@@ -430,9 +432,9 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             EvidenceProducerKeyMaterialContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!string.Equals(context.Producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase))
+            if (!IsCoverageProducer(context.Producer))
                 throw new InvalidOperationException("reuse.consumer_host_required");
-            if (string.IsNullOrWhiteSpace(solutionPath))
+            if (solutionPath is null)
                 throw new InvalidOperationException("reuse.solution_required");
             if (!IsSolutionIdentitySafe(repositoryRoot, solutionPath))
                 throw new InvalidOperationException("reuse.solution_identity_unavailable");

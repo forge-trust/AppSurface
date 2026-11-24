@@ -10,26 +10,32 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// </remarks>
 internal sealed class EvidenceCoverageProcessRunner : ICoverageRunProcessRunner
 {
+    private const string ChildLifetimeProtocolIdentity = "child-lifetime:cooperative-v1";
+    private static readonly IReadOnlyDictionary<string, string> FixedEnvironment = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0",
+        ["MSBUILDDISABLENODEREUSE"] = "1",
+    };
+    private static readonly string[] MsBuildIsolation = ["-nodeReuse:false", "-p:UseSharedCompilation=false"];
+    private static readonly string[] BuildAndTestIsolation = ["--disable-build-servers", .. MsBuildIsolation];
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> FixedArguments =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
+        {
+            ["msbuild"] = MsBuildIsolation,
+            ["build"] = BuildAndTestIsolation,
+            ["test"] = BuildAndTestIsolation,
+        };
     private readonly ICoverageRunProcessRunner _inner;
     private readonly IReadOnlyDictionary<string, string> _environment;
     private readonly EvidenceChildLifetimeSession? _session;
 
     /// <summary>Gets stable protocol and effective isolation tokens for producer key material.</summary>
     /// <remarks>Contains no execution ID, endpoint, nonce, working directory or other invocation-specific path.</remarks>
-    internal static IReadOnlyList<string> EffectiveArgumentIdentity { get; } = Array.AsReadOnly(new[]
-    {
-        "child-lifetime:cooperative-v1",
-        "environment:DOTNET_CLI_USE_MSBUILD_SERVER=0",
-        "environment:MSBUILDDISABLENODEREUSE=1",
-        "msbuild:-nodeReuse:false",
-        "msbuild:-p:UseSharedCompilation=false",
-        "build:--disable-build-servers",
-        "build:-nodeReuse:false",
-        "build:-p:UseSharedCompilation=false",
-        "test:--disable-build-servers",
-        "test:-nodeReuse:false",
-        "test:-p:UseSharedCompilation=false",
-    }.Order(StringComparer.Ordinal).ToArray());
+    internal static IReadOnlyList<string> EffectiveArgumentIdentity { get; } = Array.AsReadOnly(
+        FixedEnvironment.Select(static variable => $"environment:{variable.Key}={variable.Value}")
+            .Concat(FixedArguments.SelectMany(static operation => operation.Value.Select(argument => $"{operation.Key}:{argument}")))
+            .Append(ChildLifetimeProtocolIdentity)
+            .Order(StringComparer.Ordinal).ToArray());
 
     /// <summary>Wraps the existing injected runner for a single coordinator-owned lifetime session.</summary>
     internal EvidenceCoverageProcessRunner(ICoverageRunProcessRunner inner, EvidenceChildLifetimeSession session)
@@ -60,18 +66,14 @@ internal sealed class EvidenceCoverageProcessRunner : ICoverageRunProcessRunner
             ? new Dictionary<string, string?>(original, EnvironmentComparer)
             : new Dictionary<string, string?>(EnvironmentComparer);
         foreach (var variable in _environment) environment[variable.Key] = variable.Value;
-        environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
-        environment["MSBUILDDISABLENODEREUSE"] = "1";
+        foreach (var variable in FixedEnvironment) environment[variable.Key] = variable.Value;
         var arguments = request.Arguments.ToList();
         var operation = arguments.FirstOrDefault();
-        if (operation is "msbuild" or "build" or "test")
+        if (operation is not null && FixedArguments.TryGetValue(operation, out var isolation))
         {
             // Insert before '--' so a test application's own arguments are never rewritten.
             var boundary = arguments.IndexOf("--");
             if (boundary < 0) boundary = arguments.Count;
-            var isolation = operation == "msbuild"
-                ? new[] { "-nodeReuse:false", "-p:UseSharedCompilation=false" }
-                : new[] { "--disable-build-servers", "-nodeReuse:false", "-p:UseSharedCompilation=false" };
             arguments.InsertRange(boundary, isolation);
         }
         return _inner.RunAsync(request with

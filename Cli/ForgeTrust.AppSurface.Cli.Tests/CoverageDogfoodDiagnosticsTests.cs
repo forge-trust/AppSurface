@@ -6,6 +6,23 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Checks safe user-facing option diagnostics from the Dogfood executable.</summary>
 public sealed class CoverageDogfoodDiagnosticsTests
 {
+    [Fact]
+    public void NativeFilterMatchesTheOrderedEmbeddedSelectorInventory()
+    {
+        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
+        var selectorPath = TestPathUtils.PathUnder(repositoryRoot,
+            ".github", "workflows", "native-coverage-test-selectors.txt");
+        var selectors = File.ReadAllLines(selectorPath)
+            .Select(line => line.Split('\t', 2))
+            .Select(entry =>
+            {
+                Assert.Equal(2, entry.Length);
+                return entry[1];
+            });
+
+        Assert.Equal(string.Join("|", selectors), NativeCoverageTestSelectorInventory.ReadNativeFilter());
+    }
+
     [Theory]
     [InlineData("2", "appsurface-visual-baseline-png-v1", "diff-policy-version",
         "Pass --contract-version 3 when using --diff-policy-id.")]

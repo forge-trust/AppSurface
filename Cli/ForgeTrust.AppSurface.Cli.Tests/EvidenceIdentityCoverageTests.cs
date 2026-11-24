@@ -301,6 +301,26 @@ public sealed class EvidenceIdentityCoverageTests
         Assert.DoesNotContain("private-", result.Diagnostic, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task IdentityHashesTheSameMaterialEnumerationItValidated()
+    {
+        using var repository = await TestRepository.CreateAsync();
+        await repository.WriteAsync("input.txt", "stable");
+        var producer = new EvidenceProducerDeclaration("producer", "check", "1", [], [], [], 10)
+        { Inputs = new EvidenceProducerInputs(["input.txt"], []) };
+        var entries = new MaterialEntries(new("zeta", "last"), new("alpha", "first"))
+        {
+            LaterEntries = [new("alpha", new string('x', EvidenceKeyMaterialSnapshot.MaximumValueBytes + 1))],
+        };
+
+        var result = await BuildIdentityAsync(repository, producer, [], new Dictionary<string, string>(), material: entries);
+
+        Assert.True(result.IsEligible, result.Diagnostic);
+        Assert.NotNull(result.Identity);
+        Assert.Equal(1, entries.EnumerationCount);
+        Assert.Equal(EvidenceDigest.Sha256("""{"alpha":"first","zeta":"last"}"""u8), result.Identity.ComponentHashes["material"]);
+    }
+
     [Theory]
     [InlineData("x\ud800y")]
     [InlineData("\udc00")]
@@ -361,6 +381,8 @@ public sealed class EvidenceIdentityCoverageTests
         }
 
         internal int? ReportedCount { get; init; }
+        internal KeyValuePair<string, string>[]? LaterEntries { get; init; }
+        internal int EnumerationCount { get; private set; }
         public int Count => ReportedCount ?? _entries.Length;
         public IEnumerable<string> Keys => _entries.Select(static entry => entry.Key);
         public IEnumerable<string> Values => _entries.Select(static entry => entry.Value);
@@ -372,8 +394,13 @@ public sealed class EvidenceIdentityCoverageTests
             value = found.Value;
             return _entries.Any(entry => EqualityComparer<string>.Default.Equals(entry.Key, key));
         }
-        public IEnumerator<KeyValuePair<string, string>> GetEnumerator() => ((IEnumerable<KeyValuePair<string, string>>)_entries).GetEnumerator();
-        IEnumerator IEnumerable.GetEnumerator() => _entries.GetEnumerator();
+        public IEnumerator<KeyValuePair<string, string>> GetEnumerator()
+        {
+            var entries = EnumerationCount++ == 0 ? _entries : LaterEntries ?? _entries;
+            return ((IEnumerable<KeyValuePair<string, string>>)entries).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     internal sealed class TestRepository : IDisposable

@@ -232,10 +232,9 @@ public static class EvidenceOwnedChild
         try
         {
             await pipe.ConnectAsync((int)ProtocolIoDeadline.TotalMilliseconds, protocolDeadline.Token).ConfigureAwait(false);
-            await WriteFrameAsync(pipe, $"BEGIN|{executionId}|{nonce}", protocolDeadline.Token).ConfigureAwait(false);
+            await WriteFrameAsync(pipe, FormatBegin(executionId, nonce), protocolDeadline.Token).ConfigureAwait(false);
             var response = await ReadFrameAsync(pipe, protocolDeadline.Token).ConfigureAwait(false);
-            if (response is null || !response.StartsWith("ACK|", StringComparison.Ordinal)
-                || !Guid.TryParseExact(response.AsSpan(4), "N", out var childId))
+            if (!TryParseAcknowledgement(response, out var childId))
                 throw new InvalidOperationException("Cooperative child enrollment was rejected or the invocation channel was unavailable.");
             return new Enrollment(pipe, childId);
         }
@@ -273,9 +272,9 @@ public static class EvidenceOwnedChild
             protocolDeadline.CancelAfter(ProtocolIoDeadline);
             try
             {
-                await WriteFrameAsync(pipe, $"COMPLETE|{childId:N}", protocolDeadline.Token).ConfigureAwait(false);
+                await WriteFrameAsync(pipe, FormatCompletion(childId), protocolDeadline.Token).ConfigureAwait(false);
                 var response = await ReadFrameAsync(pipe, protocolDeadline.Token).ConfigureAwait(false);
-                if (!string.Equals(response, $"DONE|{childId:N}", StringComparison.Ordinal))
+                if (!IsDoneAcknowledgement(response, childId))
                     throw new InvalidOperationException("The invocation did not acknowledge cooperative child completion.");
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

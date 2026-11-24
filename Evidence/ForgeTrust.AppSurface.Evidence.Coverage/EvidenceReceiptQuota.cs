@@ -21,16 +21,13 @@ internal static class EvidenceReceiptQuota
     internal const long MaximumBytes = 2L * 1024 * 1024 * 1024;
     internal const int MaximumEntries = 4096;
     internal const int EssentialReservationBytes = 64 * 1024;
-    internal const int MaximumStateBytes = 64 * 1024;
     internal const int IndexMaximumBytes = 16 * 1024 * 1024;
-    private const int MaximumPassedProducerRecordCharacters = 64 * 1024;
     private const int IndexSchemaVersion = 4;
     private const int MaximumPayloadTreeEntries = 1200;
     private const int MaximumRetiredPayloadsPerKey = 64;
     private const int MaximumEssentialReservationsPerKey = 64;
     private const int MaximumPayloadReservationsPerKey = 64;
     private static readonly TimeSpan MaximumIndexWait = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan MaximumOriginAge = TimeSpan.FromDays(7);
 
     /// <summary>Reserves essential authority capacity for an ordered batch of keys.</summary>
     /// <param name="rootPath">The private receipt store root.</param>
@@ -224,14 +221,6 @@ internal static class EvidenceReceiptQuota
         WriteIndex(root, rootPath, index);
     }
 
-    /// <summary>Reserves aggregate payload bytes without a recoverable stage binding for legacy callers.</summary>
-    /// <remarks>
-    /// Use the bound overload for new staging flows. This overload is retained for source compatibility; after a
-    /// process crash its aggregate reservation is intentionally treated as unknown and cannot be reconciled safely.
-    /// </remarks>
-    internal static bool TryReservePayload(string rootPath, string repositoryNamespace, string key, long bytes, DateTimeOffset now)
-        => TryReservePayloadCore(rootPath, repositoryNamespace, key, bytes, now, reservation: null);
-
     /// <summary>Persists a bounded payload reservation with its intended stage and final payload names.</summary>
     /// <param name="rootPath">The private receipt store root.</param>
     /// <param name="repositoryNamespace">The validated repository namespace.</param>
@@ -255,33 +244,24 @@ internal static class EvidenceReceiptQuota
         DateTimeOffset now, string reservationId, string stageDirectoryName, string payloadDirectoryName)
     {
         var reservation = CreatePayloadReservation(reservationId, stageDirectoryName, payloadDirectoryName, bytes);
-        return TryReservePayloadCore(rootPath, repositoryNamespace, key, bytes, now, reservation);
-    }
-
-    private static bool TryReservePayloadCore(string rootPath, string repositoryNamespace, string key, long bytes,
-        DateTimeOffset now, EvidenceReceiptPayloadReservation? reservation)
-    {
         if (bytes <= 0 || bytes > MaximumBytes) return false;
         using var root = OpenRoot(rootPath);
         using var indexLease = AcquireIndexLease(rootPath);
         var index = ReadIndex(root);
         var entry = FindForMutation(index, repositoryNamespace, key)
             ?? throw new InvalidOperationException("Essential receipt capacity was not reserved before payload staging.");
-        if (reservation is not null)
+        var reservations = entry.PayloadReservations ?? [];
+        var existing = reservations.SingleOrDefault(item => item.ReservationId == reservation.ReservationId);
+        if (existing is not null)
         {
-            var reservations = entry.PayloadReservations ?? [];
-            var existing = reservations.SingleOrDefault(item => item.ReservationId == reservation.ReservationId);
-            if (existing is not null)
-            {
-                if (existing != reservation)
-                    throw new InvalidDataException("A payload reservation identifier is already bound to another stage.");
-                // The prior publication may have thrown after rename but before its directory sync succeeded.
-                WriteIndex(root, rootPath, index);
-                return true;
-            }
-            if (reservations.Count >= MaximumPayloadReservationsPerKey)
-                throw new EvidenceReceiptQuotaUnavailableException("payload-reservation-capacity-unavailable");
+            if (existing != reservation)
+                throw new InvalidDataException("A payload reservation identifier is already bound to another stage.");
+            // The prior publication may have thrown after rename but before its directory sync succeeded.
+            WriteIndex(root, rootPath, index);
+            return true;
         }
+        if (reservations.Count >= MaximumPayloadReservationsPerKey)
+            throw new EvidenceReceiptQuotaUnavailableException("payload-reservation-capacity-unavailable");
         var maintenanceChanged = MaintainLocked(root, rootPath, index, requiredBytes: bytes, now);
         if (maintenanceChanged) WriteIndex(root, rootPath, index);
         entry = FindForMutation(index, repositoryNamespace, key)
@@ -294,38 +274,10 @@ internal static class EvidenceReceiptQuota
         Replace(index, entry, entry with
         {
             ReservedPayloadBytes = checked(entry.ReservedPayloadBytes + bytes),
-            PayloadReservations = reservation is null
-                ? entry.PayloadReservations
-                : (entry.PayloadReservations ?? []).Append(reservation).ToArray()
+            PayloadReservations = (entry.PayloadReservations ?? []).Append(reservation).ToArray()
         });
         WriteIndex(root, rootPath, index);
         return true;
-    }
-
-    /// <summary>Releases a legacy or uniquely matched reservation by bytes.</summary>
-    /// <remarks>Prefer the reservation-ID overload; equal-sized bound reservations are deliberately left untouched as ambiguous.</remarks>
-    internal static void ReleasePayloadReservation(string rootPath, string repositoryNamespace, string key, long bytes)
-    {
-        if (bytes <= 0) return;
-        using var root = OpenRoot(rootPath);
-        using var indexLease = AcquireIndexLease(rootPath);
-        var index = ReadIndex(root);
-        var entry = FindForMutation(index, repositoryNamespace, key);
-        if (entry is null) return;
-        var reservations = entry.PayloadReservations ?? [];
-        var knownBytes = reservations.Sum(static item => item.ReservedBytes);
-        var unboundBytes = Math.Max(0, entry.ReservedPayloadBytes - knownBytes);
-        var matching = reservations.Where(item => item.ReservedBytes == bytes).Take(2).ToArray();
-        var releaseBytes = unboundBytes >= bytes ? bytes : matching.Length == 1 ? matching[0].ReservedBytes : 0;
-        if (releaseBytes == 0) return;
-        if (unboundBytes < bytes && matching.Length == 1)
-            reservations = reservations.Where(item => item.ReservationId != matching[0].ReservationId).ToArray();
-        Replace(index, entry, entry with
-        {
-            ReservedPayloadBytes = Math.Max(0, entry.ReservedPayloadBytes - releaseBytes),
-            PayloadReservations = reservations
-        });
-        WriteIndex(root, rootPath, index);
     }
 
     /// <summary>Releases one exact reservation while its caller holds the corresponding exclusive key lease.</summary>
@@ -465,7 +417,8 @@ internal static class EvidenceReceiptQuota
                 .Where(entry => entry.RepositoryNamespace == repositoryNamespace && entry.ProducerId == producerId
                     && entry.PayloadDirectoryName is not null && entry.InputIdentityDigest is not null
                     && !entry.EssentialReserved && !entry.HasInFlight && !entry.HasAuditIntent && !entry.Quarantined
-                    && entry.OriginCompletedAt is { } completedAt && completedAt <= now && now - completedAt < MaximumOriginAge
+                    && entry.OriginCompletedAt is { } completedAt
+                    && EvidenceReceiptRetention.GetAgeMissReason(completedAt, now) is null
                     && entry.AuthorityState is { InFlightExecutionId: null, AuditIntentExecutionId: null, AuditMismatch: false } state
                     && state.PayloadDirectoryName == entry.PayloadDirectoryName && state.InputIdentityDigest == entry.InputIdentityDigest)
                 .OrderByDescending(static entry => entry.OriginCompletedAt)
@@ -498,9 +451,9 @@ internal static class EvidenceReceiptQuota
                 || commit.State.AuditMismatch || commit.State.PayloadDirectoryName != commit.PayloadDirectoryName
                 || commit.State.OriginCompletedAt != commit.CompletedAt)
                 throw new InvalidDataException("Receipt batch state does not describe the committed settled payload.");
-            if (commit.State.PassedProducerRecord is { Length: > MaximumPassedProducerRecordCharacters })
+            if (commit.State.PassedProducerRecord is { Length: > EvidenceReceiptState.MaximumPassedProducerBase64Characters })
                 throw new EvidenceReceiptQuotaUnavailableException("receipt-passed-producer-record-capacity-unavailable");
-            if (JsonSerializer.SerializeToUtf8Bytes(commit.State).Length > MaximumStateBytes)
+            if (JsonSerializer.SerializeToUtf8Bytes(commit.State).Length > EvidenceReceiptState.MaximumSerializedBytes)
                 throw new EvidenceReceiptQuotaUnavailableException("receipt-state-capacity-unavailable");
             var payloadReservation = (entry.PayloadReservations ?? [])
                 .SingleOrDefault(item => item.PayloadDirectoryName == commit.PayloadDirectoryName);
@@ -540,23 +493,6 @@ internal static class EvidenceReceiptQuota
                 InputIdentityDigest = committedState.InputIdentityDigest
             });
         }
-        WriteIndex(root, rootPath, index);
-    }
-
-    internal static void RecordSuccessfulUse(string rootPath, string repositoryNamespace, string key,
-        DateTimeOffset usedAt, long stateBytes, EvidenceReceiptState state)
-    {
-        using var root = OpenRoot(rootPath);
-        using var indexLease = AcquireIndexLease(rootPath);
-        var index = ReadIndex(root);
-        var entry = FindForMutation(index, repositoryNamespace, key)
-            ?? throw new EvidenceReceiptQuotaUnavailableException("receipt-index-entry-missing");
-        Replace(index, entry, entry with
-        {
-            LastSuccessfulUse = usedAt,
-            MetadataBytes = entry.EssentialReserved ? Math.Max(0, EssentialReservationBytes - stateBytes) : 0,
-            AuthorityState = state with { LastSuccessfulUse = usedAt }
-        });
         WriteIndex(root, rootPath, index);
     }
 
@@ -948,7 +884,7 @@ internal static class EvidenceReceiptQuota
     }
 
     private static bool IsExpired(DateTimeOffset? completedAt, DateTimeOffset now)
-        => completedAt is { } completed && (completed > now || now - completed >= MaximumOriginAge);
+        => completedAt is { } completed && EvidenceReceiptRetention.GetAgeMissReason(completed, now) is not null;
 
     /// <summary>Reclaims the payloads of a durably published eviction tombstone under its exclusive key lease.</summary>
     /// <remarks>A failed removal leaves the tombstone and its charges available for a later retry.</remarks>
@@ -971,10 +907,8 @@ internal static class EvidenceReceiptQuota
         string? expectedIdentity = null)
     {
         if (payloadName is null) return true;
-        if (!payloadName.StartsWith("payload-", StringComparison.Ordinal)) return false;
-        var recoveryName = payloadName.Length == "payload-".Length + 32
-            && payloadName["payload-".Length..].All(char.IsAsciiHexDigitLower)
-                ? "payload-stage-" + payloadName["payload-".Length..] : null;
+        if (!EvidenceReceiptPayloadNames.HasPayloadPrefix(payloadName)) return false;
+        var recoveryName = EvidenceReceiptPayloadNames.InferRecoveryStage(payloadName);
         try
         {
             var entries = keyRoot.EnumerateArtifactEntries(MaximumPayloadTreeEntries);
@@ -1092,7 +1026,7 @@ internal static class EvidenceReceiptQuota
         {
             if (entry is null || !IsHash(entry.RepositoryNamespace) || !IsHash(entry.Key)
                 || !identities.Add(entry.RepositoryNamespace + ":" + entry.Key)
-                || (entry.PayloadDirectoryName is { } activePayload && !IsFinalPayloadDirectoryName(activePayload))
+                || (entry.PayloadDirectoryName is { } activePayload && !EvidenceReceiptPayloadNames.IsFinalDirectoryName(activePayload))
                 || (entry.InputIdentityDigest is not null && !IsHash(entry.InputIdentityDigest))
                 || (entry.ProducerId is not null && (entry.ProducerId.Length is 0 or > 256 || entry.ProducerId.Any(char.IsControl)))
                 || entry.MetadataBytes < 0 || entry.PayloadBytes < 0 || entry.ReservedPayloadBytes < 0
@@ -1110,7 +1044,7 @@ internal static class EvidenceReceiptQuota
                         || payloadReservations.Any(item => string.Equals(item.PayloadDirectoryName,
                             entry.PayloadDirectoryName, StringComparison.OrdinalIgnoreCase))))
                 || entry.RetiredPayloads.Any(retired => retired is null || retired.Bytes < 0
-                    || !IsFinalPayloadDirectoryName(retired.DirectoryName)
+                    || !EvidenceReceiptPayloadNames.IsFinalDirectoryName(retired.DirectoryName)
                     || string.Equals(retired.DirectoryName, entry.PayloadDirectoryName, StringComparison.OrdinalIgnoreCase)
                     || (entry.PayloadReservations is { } retiredBindings && retiredBindings.Any(binding =>
                         string.Equals(retired.DirectoryName, binding.PayloadDirectoryName, StringComparison.OrdinalIgnoreCase))))
@@ -1122,9 +1056,8 @@ internal static class EvidenceReceiptQuota
                     || entry.EssentialReservationIds.Count != 0 || entry.PayloadReservations is { Count: > 0 }))
                 || (entry.AuthorityState is null && (entry.HasInFlight || entry.HasAuditIntent || entry.Quarantined))
                 || (entry.AuthorityState is { } state && (state.SchemaVersion != 1 || state.Key != entry.Key
-                    || (state.PayloadDirectoryName is { } authorityPayload && !IsFinalPayloadDirectoryName(authorityPayload))
-                    || (state.AuditExpectedAssertions is not null
-                        && System.Text.Encoding.UTF8.GetByteCount(state.AuditExpectedAssertions) > 4096))))
+                    || (state.PayloadDirectoryName is { } authorityPayload && !EvidenceReceiptPayloadNames.IsFinalDirectoryName(authorityPayload))
+                    || !EvidenceReceiptState.AreAuditAssertionsWithinLimit(state.AuditExpectedAssertions))))
                 throw new InvalidDataException("Receipt quota index contains unsupported or invalid authority.");
         }
     }
@@ -1245,27 +1178,9 @@ internal static class EvidenceReceiptQuota
 
     private static bool IsValidPayloadReservation(EvidenceReceiptPayloadReservation reservation)
         => reservation is not null
-            && reservation.ReservationId is { Length: 32 } id && id.All(Uri.IsHexDigit)
-            && reservation.StageDirectoryName == "payload-stage-" + id
-            && reservation.PayloadDirectoryName == "payload-" + id
             && reservation.ReservedBytes >= 0
-            && IsGeneratedDirectoryName(reservation.StageDirectoryName, "payload-stage-")
-            && IsGeneratedDirectoryName(reservation.PayloadDirectoryName, "payload-");
-
-    private static bool IsFinalPayloadDirectoryName(string name)
-        => IsGeneratedDirectoryName(name, "payload-")
-            && !name.StartsWith("payload-stage-", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsGeneratedDirectoryName(string name, string prefix)
-    {
-        try
-        {
-            CoverageRunOutputLease.ValidateArtifactComponent(name);
-            return name.StartsWith(prefix, StringComparison.Ordinal);
-        }
-        catch (ArgumentException) { return false; }
-        catch (InvalidDataException) { return false; }
-    }
+            && EvidenceReceiptPayloadNames.MatchesReservation(reservation.ReservationId,
+                reservation.StageDirectoryName, reservation.PayloadDirectoryName);
 
     private static void Replace(EvidenceReceiptQuotaIndex index, EvidenceReceiptQuotaEntry oldEntry, EvidenceReceiptQuotaEntry newEntry)
     {
@@ -1303,7 +1218,7 @@ internal sealed record EvidenceReceiptPayloadReservation(string ReservationId, s
     string PayloadDirectoryName, long ReservedBytes);
 
 internal sealed record EvidenceReceiptBatchCommit(string RepositoryNamespace, string Key, string ProducerId, string ExecutionId,
-    EvidenceReceiptState State, long StateBytes, string PayloadDirectoryName, DateTimeOffset CompletedAt,
+    EvidenceReceiptState State, string PayloadDirectoryName, DateTimeOffset CompletedAt,
     long PayloadBytes, long ReservationBytes, string EssentialReservationId);
 
 internal sealed record EvidenceReceiptComparableCandidate(string Key, string PayloadDirectoryName,

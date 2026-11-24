@@ -430,8 +430,8 @@ public sealed class EvidenceReuseSessionCoverageTests
             var usedBytes = entry.GetProperty("MetadataBytes").GetInt64()
                 + entry.GetProperty("PayloadBytes").GetInt64() + entry.GetProperty("ReservedPayloadBytes").GetInt64();
             // Reserve quota metadata only, leaving less space than the minimum publication charge.
-            Assert.True(EvidenceReceiptQuota.TryReservePayload(store, identity.RepositoryNamespace, key,
-                EvidenceReceiptQuota.MaximumBytes - usedBytes - 8 * 1024, DateTimeOffset.UtcNow));
+            await LegacyAggregateReservationFixture.SeedAsync(store, identity.RepositoryNamespace, key,
+                EvidenceReceiptQuota.MaximumBytes - usedBytes - 8 * 1024);
         }
         else
         {
@@ -445,7 +445,7 @@ public sealed class EvidenceReuseSessionCoverageTests
         var decision = Assert.Single(session.Decisions);
         Assert.Equal(expectedReason, decision.Reason);
         Assert.Equal(EvidenceReceiptPublication.Suppressed, decision.Publication);
-        var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], null,
+        var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], hasSolutionIdentity: false,
             new Dictionary<string, string>()));
         Assert.Equal(expectedReason, summary.Reason);
         Assert.Equal("suppressed", summary.Publication);

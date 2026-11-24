@@ -79,10 +79,16 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         Assert.Null(actual.EnvironmentOverrides["removed"]);
         Assert.Equal("0", actual.EnvironmentOverrides["DOTNET_CLI_USE_MSBUILD_SERVER"]);
         Assert.Equal("1", actual.EnvironmentOverrides["MSBUILDDISABLENODEREUSE"]);
-        Assert.Equal(disableServers, actual.Arguments.Contains("--disable-build-servers"));
-        Assert.Contains("-nodeReuse:false", actual.Arguments);
-        Assert.Contains("-p:UseSharedCompilation=false", actual.Arguments);
-        Assert.Equal(new[] { "--", "application-token" }, actual.Arguments.TakeLast(2));
+        var isolationArguments = disableServers
+            ? new[] { "--disable-build-servers", "-nodeReuse:false", "-p:UseSharedCompilation=false" }
+            : new[] { "-nodeReuse:false", "-p:UseSharedCompilation=false" };
+        Assert.Equal(new[] { operation, "project.csproj" }.Concat(isolationArguments).Concat(["--", "application-token"]), actual.Arguments);
+        Assert.Contains($"environment:DOTNET_CLI_USE_MSBUILD_SERVER={actual.EnvironmentOverrides["DOTNET_CLI_USE_MSBUILD_SERVER"]}",
+            EvidenceCoverageProcessRunner.EffectiveArgumentIdentity);
+        Assert.Contains($"environment:MSBUILDDISABLENODEREUSE={actual.EnvironmentOverrides["MSBUILDDISABLENODEREUSE"]}",
+            EvidenceCoverageProcessRunner.EffectiveArgumentIdentity);
+        foreach (var argument in isolationArguments)
+            Assert.Contains($"{operation}:{argument}", EvidenceCoverageProcessRunner.EffectiveArgumentIdentity);
         Assert.Same(request.Lease, actual.Lease);
         Assert.Equal(request.StandardOutputLimitBytes, actual.StandardOutputLimitBytes);
         Assert.Equal(request.StrictUtf8, actual.StrictUtf8);
@@ -139,9 +145,9 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         Assert.Null(original.EnvironmentOverrides);
         Assert.Equal(new[] { "test" }, original.Arguments);
         Assert.DoesNotContain(EvidenceCoverageProcessRunner.EffectiveArgumentIdentity, token => token.Contains(key, StringComparison.Ordinal));
-        Assert.Contains("child-lifetime:cooperative-v1", EvidenceCoverageProcessRunner.EffectiveArgumentIdentity);
-        Assert.Equal(11, EvidenceCoverageProcessRunner.EffectiveArgumentIdentity.Count);
-        Assert.Equal(EvidenceCoverageProcessRunner.EffectiveArgumentIdentity.Order(StringComparer.Ordinal), EvidenceCoverageProcessRunner.EffectiveArgumentIdentity);
+        Assert.DoesNotContain(EvidenceCoverageProcessRunner.EffectiveArgumentIdentity, token => token.Contains("first", StringComparison.Ordinal)
+            || token.Contains("second", StringComparison.Ordinal));
+        AssertStableIsolationIdentity();
     }
 
     [Theory]
@@ -304,6 +310,26 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
 
     private static CoverageRunProcessRequest Request(string executable, IReadOnlyList<string> arguments) =>
         new(executable, arguments, Directory.GetCurrentDirectory(), null, null, CoverageRunProcessLease.Detached());
+
+    private static void AssertStableIsolationIdentity()
+    {
+        string[] expected =
+        [
+            "build:--disable-build-servers",
+            "build:-nodeReuse:false",
+            "build:-p:UseSharedCompilation=false",
+            "child-lifetime:cooperative-v1",
+            "environment:DOTNET_CLI_USE_MSBUILD_SERVER=0",
+            "environment:MSBUILDDISABLENODEREUSE=1",
+            "msbuild:-nodeReuse:false",
+            "msbuild:-p:UseSharedCompilation=false",
+            "test:--disable-build-servers",
+            "test:-nodeReuse:false",
+            "test:-p:UseSharedCompilation=false",
+        ];
+
+        Assert.Equal(expected, EvidenceCoverageProcessRunner.EffectiveArgumentIdentity);
+    }
 
     private static EvidenceProducerDeclaration Declaration() => new("coverage", "coverage", "1.0.0", [], ["coverage/assertion@1"],
         [CoverageEvidenceInventory.CreateSlot()], 60, new EvidenceCoverageGateRequirements(95, 85, TolerancePercent: 0));

@@ -18,7 +18,7 @@ public sealed class EvidenceReuseCliCoverageTests
     [InlineData(true, false, "00:00:01")]
     [InlineData(true, true, "00:00:01")]
     public void ReuseOptionCombinationsAcceptOnlyValidOptIn(bool reuse, bool verify, string timeout)
-        => EvidenceRunCommand.ValidateReuseOptions(reuse, verify, timeout);
+        => Assert.Equal(TimeSpan.FromSeconds(1), EvidenceRunCommand.ParseReuseOptions(reuse, verify, timeout));
 
     [Theory]
     [InlineData("0")]
@@ -27,14 +27,14 @@ public sealed class EvidenceReuseCliCoverageTests
     [InlineData("not-a-duration")]
     public void InvalidReuseWaitIsRejectedWithStableDiagnostic(string timeout)
     {
-        var error = Assert.Throws<CommandException>(() => EvidenceRunCommand.ValidateReuseOptions(true, false, timeout));
+        var error = Assert.Throws<CommandException>(() => EvidenceRunCommand.ParseReuseOptions(true, false, timeout));
         Assert.Contains("reuse.invalid_wait_timeout", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public void VerifyReuseWithoutReuseIsRejectedBeforeExecution()
     {
-        var error = Assert.Throws<CommandException>(() => EvidenceRunCommand.ValidateReuseOptions(false, true, "00:00:01"));
+        var error = Assert.Throws<CommandException>(() => EvidenceRunCommand.ParseReuseOptions(false, true, "00:00:01"));
 
         Assert.Contains("reuse.verify_requires_reuse", error.Message, StringComparison.Ordinal);
         Assert.Contains("No store or output was created", error.Message, StringComparison.Ordinal);
@@ -195,14 +195,16 @@ public sealed class EvidenceReuseCliCoverageTests
         using (var plainPlanSummary = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(plainOutput, "evidence-summary.json"))))
         {
             Assert.Equal("plan", plainPlanSummary.RootElement.GetProperty("kind").GetString());
-            Assert.False(plainPlanSummary.RootElement.TryGetProperty("reuseDecisions", out _));
+            Assert.Equal(new[] { "kind", "profile", "scope", "matchedRules", "obligations", "next" },
+                plainPlanSummary.RootElement.EnumerateObject().Select(static property => property.Name));
             Assert.Contains("selected producer capabilities are ready", plainPlanSummary.RootElement.GetProperty("next").GetString(), StringComparison.Ordinal);
         }
         await workflow.WriteManifestAsync(manifest, plainOutput, CancellationToken.None);
         using (var plainManifestSummary = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(plainOutput, "evidence-summary.json"))))
         {
             Assert.Equal("manifest", plainManifestSummary.RootElement.GetProperty("kind").GetString());
-            Assert.False(plainManifestSummary.RootElement.TryGetProperty("reuseDecisions", out _));
+            Assert.Equal(new[] { "kind", "claim", "verdict", "eligibility", "envelopeStatus", "closedObligations", "unmediatedObligations", "next" },
+                plainManifestSummary.RootElement.EnumerateObject().Select(static property => property.Name));
             Assert.Equal("Evidence claim is ready for its declared eligible consumer.", plainManifestSummary.RootElement.GetProperty("next").GetString());
         }
 
@@ -212,6 +214,8 @@ public sealed class EvidenceReuseCliCoverageTests
         {
             Assert.Equal("plan", planSummary.RootElement.GetProperty("kind").GetString());
             Assert.Equal("targeted", planSummary.RootElement.GetProperty("profile").GetString());
+            Assert.Equal(new[] { "kind", "profile", "scope", "matchedRules", "obligations", "reuseDecisions", "next" },
+                planSummary.RootElement.EnumerateObject().Select(static property => property.Name));
             Assert.Equal("reuse.receipt_missing", planSummary.RootElement.GetProperty("reuseDecisions")[0].GetProperty("Reason").GetString());
         }
 
@@ -225,6 +229,8 @@ public sealed class EvidenceReuseCliCoverageTests
         Assert.Equal("manifest", manifestSummary.RootElement.GetProperty("kind").GetString());
         Assert.Equal(manifest.ExecutionVerdict.ToString(), manifestSummary.RootElement.GetProperty("verdict").GetString());
         Assert.Equal(manifest.Eligibility.ToString(), manifestSummary.RootElement.GetProperty("eligibility").GetString());
+        Assert.Equal(new[] { "kind", "claim", "verdict", "eligibility", "envelopeStatus", "closedObligations", "unmediatedObligations", "reuseDecisions", "next" },
+            manifestSummary.RootElement.EnumerateObject().Select(static property => property.Name));
         Assert.Equal("reuse.receipt_missing", manifestSummary.RootElement.GetProperty("reuseDecisions")[0].GetProperty("Reason").GetString());
     }
 
@@ -555,50 +561,94 @@ public sealed class EvidenceReuseCliCoverageTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MissingSolutionOnlyOverridesUnkeyedIneligibility(bool hasPreparedKey)
+    {
+        var producer = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["coverage/assertion@1"],
+            [CoverageEvidenceInventory.CreateSlot()], 30, new EvidenceCoverageGateRequirements(95, 85))
+        {
+            Inputs = new EvidenceProducerInputs(["global.json"], []),
+            CoverageExecution = new EvidenceCoverageExecutionOptions { CooperativeChildLifetime = true },
+        };
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [producer],
+            [new EvidenceObligation("coverage-check", "coverage", "coverage gate", [producer.Id], "coverage/assertion@1")]);
+        var plan = CreatePlan(profile);
+        var origin = new DateTimeOffset(2025, 2, 3, 4, 5, 6, TimeSpan.Zero);
+
+        foreach (var status in Enum.GetValues<EvidenceProducerReuseStatus>())
+        {
+            var decision = new EvidenceProducerReuseDecision("coverage", status, "reuse.original-decision",
+                "Original decision diagnostic.", hasPreparedKey ? "producer-key" : null, origin, 321);
+            if (status == EvidenceProducerReuseStatus.Hit)
+                decision = decision with { Publication = EvidenceReceiptPublication.Restored };
+            var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], hasSolutionIdentity: false,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["coverage"] = "10.0.402" }));
+
+            var isMissingSolutionRefusal = status == EvidenceProducerReuseStatus.Ineligible && !hasPreparedKey;
+            Assert.Equal(status.ToString(), summary.Status);
+            Assert.Equal(isMissingSolutionRefusal ? "reuse.solution_required" : decision.Reason, summary.Reason);
+            if (isMissingSolutionRefusal)
+                Assert.Contains("inside this Git worktree", summary.Diagnostic, StringComparison.Ordinal);
+            else
+                Assert.Equal(decision.Diagnostic, summary.Diagnostic);
+            Assert.Equal(decision.ProducerKey, summary.ProducerKey);
+            Assert.Equal(decision.OriginCompletedAt, summary.OriginCompletedAt);
+            Assert.Equal(decision.OriginElapsedMilliseconds, summary.OriginElapsedMilliseconds);
+            Assert.Equal(status switch
+            {
+                EvidenceProducerReuseStatus.Hit => "restored",
+                EvidenceProducerReuseStatus.Ineligible => "suppressed",
+                _ => "not-published",
+            }, summary.Publication);
+        }
+    }
+
     [Fact]
-    public async Task MissingSolutionOnlyOverridesOriginallyIneligibleSummaryDecisions()
+    public async Task ResolverReportsInputsChangedWhenSolutionDisappearsDuringFreshExecution()
     {
         using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        const string solutionName = "sample.slnx";
+        const string project = "tests/Sample.Tests/Sample.Tests.csproj";
+        await repository.WriteAsync("global.json", FindPinnedSdkConfiguration());
+        await repository.WriteAsync(solutionName, "synthetic solution fixture");
+        await repository.WriteAsync(project, "<Project />");
+        await repository.CommitAsync();
+
+        var producer = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["coverage/assertion@1"],
+            [CoverageEvidenceInventory.CreateSlot()], 60, new EvidenceCoverageGateRequirements(95, 85))
+        {
+            Inputs = new EvidenceProducerInputs(["global.json", solutionName, "tests/**"], []),
+            CoverageExecution = new EvidenceCoverageExecutionOptions(TestResults: EvidenceCoverageTestResultFormat.Junit)
+            { CooperativeChildLifetime = true },
+        };
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [producer],
+            [new EvidenceObligation("coverage-check", "coverage", "coverage gate", [producer.Id], "coverage/assertion@1")]);
+        var solution = TestPathUtils.PathUnder(repository.Root, solutionName);
+        var output = TestPathUtils.PathUnder(repository.Root, "run-output");
+        var store = TestPathUtils.PathUnder(repository.Root, "receipt-store");
+        var runner = new EvidenceCoverageInventoryEdgeTests.FixtureProcessRunner(project, () => File.Delete(solution));
+        var resolver = new EvidenceReuseExecutionResolver(new CoverageEvidenceProducer(
+            new CoverageEvidenceExecutionWorkflow(new CoverageRunWorkflow(runner,
+                new EvidenceCoverageInventoryEdgeTests.FixtureReportGenerator(), TimeProvider.System))));
         var context = SyntheticLocalContext.Capture();
         try
         {
             context.Enter(repository.Root);
-            var producer = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["coverage/assertion@1"],
-                [CoverageEvidenceInventory.CreateSlot()], 30, new EvidenceCoverageGateRequirements(95, 85))
-            {
-                Inputs = new EvidenceProducerInputs(["global.json"], []),
-                CoverageExecution = new EvidenceCoverageExecutionOptions { CooperativeChildLifetime = true },
-            };
-            var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [producer],
-                [new EvidenceObligation("coverage-check", "coverage", "coverage gate", [producer.Id], "coverage/assertion@1")]);
-            var plan = CreatePlan(profile);
-            var origin = new DateTimeOffset(2025, 2, 3, 4, 5, 6, TimeSpan.Zero);
+            var result = await resolver.RunAsync(CreatePlan(profile), null, solutionName, output,
+                verifyReuse: false, observationOnly: false, storeRoot: store, waitTimeout: TimeSpan.FromSeconds(5),
+                output: TextWriter.Null, error: TextWriter.Null, cancellationToken: CancellationToken.None);
 
-            foreach (var status in Enum.GetValues<EvidenceProducerReuseStatus>())
-            {
-                var decision = new EvidenceProducerReuseDecision("coverage", status, "reuse.original-decision",
-                    "Original decision diagnostic.", "producer-key", origin, 321);
-                if (status == EvidenceProducerReuseStatus.Hit)
-                    decision = decision with { Publication = EvidenceReceiptPublication.Restored };
-                var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], null,
-                    new Dictionary<string, string>(StringComparer.Ordinal) { ["coverage"] = "10.0.402" }));
-
-                Assert.Equal(status == EvidenceProducerReuseStatus.Ineligible ? "Ineligible" : status.ToString(), summary.Status);
-                Assert.Equal(status == EvidenceProducerReuseStatus.Ineligible ? "reuse.solution_required" : decision.Reason, summary.Reason);
-                if (status == EvidenceProducerReuseStatus.Ineligible)
-                    Assert.Contains("inside this Git worktree", summary.Diagnostic, StringComparison.Ordinal);
-                else
-                    Assert.Equal(decision.Diagnostic, summary.Diagnostic);
-                Assert.Equal(decision.ProducerKey, summary.ProducerKey);
-                Assert.Equal(decision.OriginCompletedAt, summary.OriginCompletedAt);
-                Assert.Equal(decision.OriginElapsedMilliseconds, summary.OriginElapsedMilliseconds);
-                Assert.Equal(status switch
-                {
-                    EvidenceProducerReuseStatus.Hit => "restored",
-                    EvidenceProducerReuseStatus.Ineligible => "suppressed",
-                    _ => "not-published",
-                }, summary.Publication);
-            }
+            Assert.Equal(1, runner.TestInvocationCount);
+            Assert.False(File.Exists(solution));
+            Assert.Equal(EvidenceExecutionVerdict.Passed, result.Manifest.ExecutionVerdict);
+            var decision = Assert.Single(result.Decisions);
+            Assert.NotNull(decision.ProducerKey);
+            Assert.Equal("Ineligible", decision.Status);
+            Assert.Equal("reuse.inputs_changed", decision.Reason);
+            Assert.Contains("changed during execution", decision.Diagnostic, StringComparison.Ordinal);
+            Assert.Equal("suppressed", decision.Publication);
         }
         finally
         {

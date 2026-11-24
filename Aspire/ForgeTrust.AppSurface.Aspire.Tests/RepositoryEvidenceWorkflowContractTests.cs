@@ -8,6 +8,46 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class RepositoryEvidenceWorkflowContractTests
 {
+    private static readonly string[] ExpectedSharedCliSelectors =
+    [
+        "FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence",
+        "FullyQualifiedName~EvidenceTestProducerPlannerTests",
+        "FullyQualifiedName~EvidenceArtifactFileValidationTests",
+        "FullyQualifiedName~EvidenceRunTestProducerTests",
+        "FullyQualifiedName~TestRunReconcilerTests",
+        "FullyQualifiedName~DotnetCliTestRunSourceTests",
+        "FullyQualifiedName~TestEvidenceProducerTests",
+        "FullyQualifiedName~TestEvidenceProducerProcessTests",
+        "FullyQualifiedName~VsTestRunnerProbeTests",
+    ];
+
+    private static readonly string[] ExpectedNativeCliOnlySelectors =
+    [
+        "FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests",
+        "FullyQualifiedName~CoverageArtifactMetadataDurabilityTests",
+        "FullyQualifiedName~CoverageArtifactEnumerationDecisionTests",
+    ];
+
+    private static readonly string[] ExpectedCoverageSecurityOnlySelectors =
+    [
+        "FullyQualifiedName~CoverageRunArtifactReaderTests",
+        "FullyQualifiedName~CoverageRunOutputGuardSecurityTests",
+        "FullyQualifiedName~CoverageGateTests",
+        "FullyQualifiedName~CoverageArtifact",
+        "FullyQualifiedName~CoverageStorageCommand",
+        "FullyQualifiedName~CoverageRunProcessContractTests",
+        "FullyQualifiedName~CoverageRunCollectorVersionPreflightTests",
+        "FullyQualifiedName~CoverageFanIn",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceHost",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePrepared",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceProducerKeyMaterialExecution",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceKeyMaterialFailure",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceReusePackageProofTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePackedReuseJourneyTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.NativeEvidenceProgramTests",
+    ];
+
     private readonly YamlMappingNode _workflow;
     private readonly YamlMappingNode _buildWorkflow;
     private readonly YamlMappingNode _packageWorkflow;
@@ -82,23 +122,26 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
-    public void NativeCollectorFilterMatchesTheAdapterDeclaration()
+    public void NativeCollectorFilterMatchesTheOrderedSelectorPolicy()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var adapter = File.ReadAllLines(Path.Join(repository, "tools",
-            "ForgeTrust.AppSurface.Coverage.Dogfood", "Program.cs"));
-        var declaration = Assert.Single(adapter, line =>
-            line.TrimStart().StartsWith("internal const string NativeFilter = ", StringComparison.Ordinal));
-        var declaredFilter = JsonSerializer.Deserialize<string>(declaration[(declaration.IndexOf('=') + 1)..]
-            .Trim().TrimEnd(';'));
         var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
         var securitySteps = job["steps"].AsSequence();
         var collectorStep = FindStep(securitySteps, "Run coverage security contracts");
         var collector = collectorStep["run"].AsScalar();
-        var filter = Assert.Single(Regex.Matches(collector, "\\$filter\\s*=\\s*\"([^\"]+)\"").Cast<Match>());
+        var inventory = ReadSelectorInventory(repository);
+        var selectors = inventory.Select(entry => entry.Selector).ToArray();
+        var expected = ExpectedCoverageSecurityOnlySelectors.Take(8)
+            .Concat(ExpectedSharedCliSelectors.Take(2))
+            .Concat(ExpectedCoverageSecurityOnlySelectors.Skip(8))
+            .Concat(ExpectedSharedCliSelectors.Skip(2))
+            .ToArray();
 
-        Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
-        Assert.Equal(declaredFilter, filter.Groups[1].Value);
+        Assert.Equal(expected, selectors);
+        Assert.Equal(1437, System.Text.Encoding.UTF8.GetByteCount(string.Join("|", selectors)));
+        Assert.Contains("$selectors = Get-Content -LiteralPath '.github/workflows/native-coverage-test-selectors.txt'", collector);
+        Assert.Contains("($_ -split \"`t\", 2)[1]", collector);
+        Assert.Contains("$filter = $selectors -join '|'", collector);
         Assert.Contains("'--test-argument', '--filter', '--test-argument', $filter", collector);
         Assert.Contains("'--test-project', 'Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj'", collector);
         Assert.Contains("'--test-project', 'Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj'", collector);
@@ -124,6 +167,28 @@ public sealed class RepositoryEvidenceWorkflowContractTests
             "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log",
             "${{ runner.temp }}/packed-reuse-diagnostics/**/consumer-proof.log"
         }, diagnosticPaths.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Fact]
+    public void NativeCliSelectorCompositionIncludesTheSharedAndLaneSpecificTests()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var inventory = ReadSelectorInventory(repository);
+        var sharedSelectors = inventory.Where(entry => entry.Scope == "shared-cli")
+            .Select(entry => entry.Selector).ToArray();
+        Assert.Equal(ExpectedSharedCliSelectors, sharedSelectors);
+        var lifecycle = FindStep(NativeJob["steps"].AsSequence(), "Test native lifecycle contracts for selected producers")["run"].AsScalar();
+        var exclusiveSelectors = ReadArraySelectors(lifecycle, "cliSelectors");
+        var composedSelectors = exclusiveSelectors.Concat(sharedSelectors).ToArray();
+
+        Assert.Equal(ExpectedNativeCliOnlySelectors, exclusiveSelectors);
+        Assert.Equal(ExpectedNativeCliOnlySelectors.Concat(ExpectedSharedCliSelectors), composedSelectors);
+        Assert.Contains("$sharedCliSelectors = Get-Content -LiteralPath '.github/workflows/native-coverage-test-selectors.txt'", lifecycle);
+        Assert.Contains("$entry[0] -eq 'shared-cli'", lifecycle);
+        Assert.Contains("$cliSelectors += $sharedCliSelectors", lifecycle);
+        Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", lifecycle);
+        Assert.Contains("--filter $cliFilter", lifecycle);
+        Assert.Contains("if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", lifecycle);
     }
 
     [Fact]
@@ -188,7 +253,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
         Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
         Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", testCommand);
-        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.Evidence|FullyQualifiedName~ForgeTrust.AppSurface.Cli.Tests.CoverageEvidence|FullyQualifiedName~CoverageArtifactMetadataDurabilityTests|FullyQualifiedName~CoverageArtifactEnumerationDecisionTests|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests'", testCommand);
+        Assert.Contains("--filter $cliFilter", testCommand);
         Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
         Assert.Contains("SolutionCoverageHandoffTests", testCommand);
 
@@ -569,6 +634,30 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var yaml = new YamlStream();
         yaml.Load(reader);
         return (YamlMappingNode)yaml.Documents.Single().RootNode;
+    }
+
+    private static (string Scope, string Selector)[] ReadSelectorInventory(string repository)
+    {
+        var path = Path.Join(repository, ".github", "workflows", "native-coverage-test-selectors.txt");
+        return File.ReadAllLines(path).Select(line =>
+        {
+            var entry = line.Split('\t', 2);
+            Assert.Equal(2, entry.Length);
+            Assert.Contains(entry[0], new[] { "native", "shared-cli" });
+            Assert.StartsWith("FullyQualifiedName~", entry[1], StringComparison.Ordinal);
+            return (entry[0], entry[1]);
+        }).ToArray();
+    }
+
+    private static string[] ReadArraySelectors(string script, string variable)
+    {
+        var pattern = $@"(?ms)\${Regex.Escape(variable)}\s*=\s*@\((?<selectors>.*?)\)";
+        var match = Regex.Match(script, pattern);
+        Assert.True(match.Success, $"Expected ${variable} to contain its lane-specific selectors.");
+        return Regex.Matches(match.Groups["selectors"].Value, "'([^']+)'")
+            .Cast<Match>()
+            .Select(selector => selector.Groups[1].Value)
+            .ToArray();
     }
 
     private YamlMappingNode NativeJob => _workflow["jobs"].AsMapping()["native-evidence"].AsMapping();

@@ -265,11 +265,9 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
             {
                 begin = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, beginCancellation.Token).ConfigureAwait(false);
             }
-            var parts = begin?.Split('|');
-            var valid = parts is { Length: 3 }
-                && string.Equals(parts[0], "BEGIN", StringComparison.Ordinal)
-                && string.Equals(parts[1], ExecutionId, StringComparison.Ordinal)
-                && ValidNonce(parts[2]);
+            var valid = EvidenceOwnedChildWire.TryParseBegin(begin, out var beginExecutionId, out var beginNonce)
+                && string.Equals(beginExecutionId, ExecutionId, StringComparison.Ordinal)
+                && ValidNonce(beginNonce);
 
             Guid childId;
             string? rejection = null;
@@ -292,14 +290,16 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
 
             if (rejection is not null)
             {
-                await EvidenceOwnedChildProtocol.TryWriteFrameAsync(pipe, "REJECT|" + rejection, CancellationToken.None).ConfigureAwait(false);
+                await EvidenceOwnedChildProtocol.TryWriteFrameAsync(pipe,
+                    EvidenceOwnedChildWire.FormatRejection(rejection), CancellationToken.None).ConfigureAwait(false);
                 return;
             }
 
             BeforeChildAcknowledgementForTests?.Invoke();
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe, $"ACK|{childId:N}", CancellationToken.None).ConfigureAwait(false);
+            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+                EvidenceOwnedChildWire.FormatAcknowledgement(childId), CancellationToken.None).ConfigureAwait(false);
             var complete = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, CancellationToken.None).ConfigureAwait(false);
-            if (!string.Equals(complete, $"COMPLETE|{childId:N}", StringComparison.Ordinal))
+            if (!EvidenceOwnedChildWire.IsCompletion(complete, childId))
                 throw new IOException("Admitted child did not send its completion frame.");
 
             lock (_gate)
@@ -309,7 +309,8 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
                 completed = true;
                 UpdateSettlementLocked();
             }
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe, $"DONE|{childId:N}", CancellationToken.None).ConfigureAwait(false);
+            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+                EvidenceOwnedChildWire.FormatDone(childId), CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!admitted) { }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException) { }

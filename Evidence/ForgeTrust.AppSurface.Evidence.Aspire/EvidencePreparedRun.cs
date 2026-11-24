@@ -39,6 +39,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     private readonly TimeProvider _clock;
     private readonly EvidenceHostPreparationRegistration _registration;
     private readonly IReadOnlyDictionary<string, PreparedProducerRegistration> _producers;
+    private readonly EvidenceResourceGraph _resourceGraph;
     private readonly EvidenceProducerReuseSession _session;
     private readonly EvidenceEnvelopeStatus _envelopeStatus;
     private readonly object _cleanupSync = new();
@@ -54,15 +55,14 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
 
     private EvidencePreparedRun(EvidencePlan plan, EvidenceHostOptions options, TimeProvider clock,
         EvidenceHostPreparationRegistration registration, IReadOnlyDictionary<string, PreparedProducerRegistration> producers,
-        EvidenceProducerReuseSession session, EvidenceEnvelopeStatus envelopeStatus, IReadOnlyDictionary<string, string> artifactDirectories)
+        EvidenceProducerReuseSession session, EvidenceEnvelopeStatus envelopeStatus, EvidenceResourceGraph resourceGraph,
+        IReadOnlyDictionary<string, string> artifactDirectories)
     {
-        (_plan, _options, _clock, _registration, _producers, _session, _envelopeStatus) =
-            (plan, options, clock, registration, producers, session, envelopeStatus);
+        (_plan, _options, _clock, _registration, _producers, _session, _envelopeStatus, _resourceGraph) =
+            (plan, options, clock, registration, producers, session, envelopeStatus, resourceGraph);
         ArtifactDirectories = artifactDirectories;
-        RequiredResourceIds = Array.AsReadOnly((plan.ContractVersion == "1.0"
-            ? plan.Profile.Resources.Select(static resource => resource.Id)
-            : ResourceClosure(plan, plan.Profile.Producers.Where(producer => !session.ReusedResults.ContainsKey(producer.Id))))
-            .Order(StringComparer.Ordinal).ToArray());
+        RequiredResourceIds = resourceGraph.GetRequiredResourceIds(plan,
+            plan.Profile.Producers.Where(producer => !session.ReusedResults.ContainsKey(producer.Id)));
     }
 
     /// <summary>Gets the immutable sorted resource IDs that this prepared run must start.</summary>
@@ -119,7 +119,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         {
             configure(registration);
             var producers = registration.Freeze();
-            ValidateRegistrations(frozen, registration, producers);
+            var resourceGraph = ValidateRegistrations(frozen, registration, producers);
             var envelopeStatus = EvidenceEnvelopeStatus.NotRequired;
             if (options.RequireTrustedEnvelope || frozen.Profile.Scope == EvidenceProfileScope.Release)
             {
@@ -147,7 +147,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                     WaitProgress = options.ReceiptWaitProgress is { } progress
                         ? (prefix, elapsed, remaining) => progress.Report(new(prefix, elapsed, remaining)) : null,
                 }, producer => artifactDirectories[producer.Id], cancellationToken).ConfigureAwait(false);
-            prepared = new EvidencePreparedRun(frozen, options, clock, registration, producers, session, envelopeStatus, artifactDirectories);
+            prepared = new EvidencePreparedRun(frozen, options, clock, registration, producers, session, envelopeStatus, resourceGraph, artifactDirectories);
             if (session.IsCancelled)
             {
                 prepared.ObserveCleanup();
@@ -231,7 +231,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                 // retain that scope for cleanup without admitting readiness or producer work when disposal won.
                 _factoryCancellation.Token.ThrowIfCancellationRequested();
                 _host = EvidenceHostBootstrap.CreatePreparedExecution(_plan, executionRegistration, _options, _clock,
-                    _session.ReusedResults, RequiredResourceIds.ToHashSet(StringComparer.Ordinal), _scope,
+                    _session.ReusedResults, RequiredResourceIds.ToHashSet(StringComparer.Ordinal), _scope, _resourceGraph,
                     _session.GetWriter, _session.BeforeCleanupAsync, _envelopeStatus, _session.ExecutionId,
                     id => _session.GetChildLifetime(id)?.Environment);
             }
@@ -352,7 +352,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         }
     }
 
-    private static void ValidateRegistrations(EvidencePlan plan, EvidenceHostPreparationRegistration registration,
+    private static EvidenceResourceGraph ValidateRegistrations(EvidencePlan plan, EvidenceHostPreparationRegistration registration,
         IReadOnlyDictionary<string, PreparedProducerRegistration> producers)
     {
         if (plan.Profile.Resources.Count > EvidenceProfileLimits.MaximumResources
@@ -363,27 +363,9 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             throw new EvidenceHostException("ASEVD303", "Every selected producer needs one explicit immutable registration.", "Register exactly the selected producers before preparation.");
         if (!plan.Profile.Resources.Select(static resource => resource.Id).Order(StringComparer.Ordinal).SequenceEqual(registration.ResourceIdentities.Keys.Order(StringComparer.Ordinal), StringComparer.Ordinal))
             throw new EvidenceHostException("ASEVD302", "Every selected resource needs one explicit fixture identity, including unused resources.", "Register exact resource identities before preparation; do not start readiness instances here.");
-        _ = ResourceClosure(plan, plan.Profile.Producers).ToArray();
-        // Validate unused graph branches too: an all-hit run must not bypass invalid descriptors.
-        _ = ResourceClosure(plan, [new EvidenceProducerDeclaration("validation", "validation", "1", plan.Profile.Resources.Select(static resource => resource.Id).ToArray(), [], [], 1)]).ToArray();
-    }
-
-    private static IReadOnlySet<string> ResourceClosure(EvidencePlan plan, IEnumerable<EvidenceProducerDeclaration> producers)
-    {
-        var resources = plan.Profile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var visiting = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var id in producers.SelectMany(static producer => producer.RequiredResources)) Visit(id);
-        return visited;
-        void Visit(string id)
-        {
-            if (visited.Contains(id)) return;
-            if (!resources.TryGetValue(id, out var resource) || !visiting.Add(id))
-                throw new EvidenceHostException("ASEVD304", "The resource graph is missing a dependency or contains a cycle.", "Declare an acyclic complete resource graph before preparation.");
-            foreach (var dependency in resource.Requires) Visit(dependency);
-            visiting.Remove(id);
-            visited.Add(id);
-        }
+        var resourceGraph = new EvidenceResourceGraph(plan.Profile.Resources);
+        resourceGraph.ValidatePreparation(plan.Profile.Producers);
+        return resourceGraph;
     }
 
     private static EvidencePlan FreezePlan(EvidencePlan plan)

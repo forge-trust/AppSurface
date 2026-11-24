@@ -40,6 +40,13 @@ public sealed class EvidenceReusePlannerTests
     [InlineData("src/file.cs\n")]
     [InlineData("   ")]
     public void Resolve_RejectsInvalidInputPatternWithoutFilesystemAccess(string pattern)
+        => AssertInputPatternRejected(pattern);
+
+    [Fact]
+    public void ResolveRejectsAnUnpairedSurrogateInInputPattern()
+        => AssertInputPatternRejected("src/in\uD800put.cs");
+
+    private static void AssertInputPatternRejected(string pattern)
     {
         var policy = CreatePolicy(CreateProducer() with { Inputs = new EvidenceProducerInputs([pattern], []) });
 
@@ -68,6 +75,8 @@ public sealed class EvidenceReusePlannerTests
     [InlineData("*.cs")]
     [InlineData("src/**/file*.cs")]
     [InlineData("missing-checkout/ literal filename .cs")]
+    [InlineData("src/\uD83D\uDE80*.cs")]
+    [InlineData("src/\uFFFD*.cs")]
     public void ResolveAcceptsExistingGlobGrammarAndDoesNotRequireFilesToExist(string pattern)
     {
         var producer = CreateProducer() with { Inputs = new EvidenceProducerInputs([pattern], []) };

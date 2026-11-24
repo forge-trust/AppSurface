@@ -70,63 +70,19 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
         if (hasManifest)
             using (var manifest = Open(root, manifestPath))
             {
-                if (manifest.Length > MaximumMetadataBytes) throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
-                var bytes = new byte[MaximumMetadataBytes + 1];
-                var count = 0;
-                while (count < bytes.Length)
-                {
-                    token.ThrowIfCancellationRequested();
-                    var read = manifest.Read(bytes, count, Math.Min(64 * 1024, bytes.Length - count));
-                    if (read == 0) break;
-                    count += read;
-                }
-                if (count > MaximumMetadataBytes) throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
-                using var snapshot = new MemoryStream(bytes, 0, count, writable: false);
+                var bytes = CoverageReportSet.ReadReceiptMetadata(manifest, token);
+                using var snapshot = new MemoryStream(bytes, writable: false);
                 var run = CoverageArtifactSession.ReadCurrent(snapshot);
                 if (run.ManifestBase.Outcome != "success" || !run.Inventory.SequenceEqual(publications))
                     throw new CoverageEvidenceInventoryException("inventory-run-manifest-mismatch");
                 afterSidecarParsed?.Invoke();
                 token.ThrowIfCancellationRequested();
-                paths.Add(new(manifestPath, count, Convert.ToHexStringLower(SHA256.HashData(bytes.AsSpan(0, count)))));
+                paths.Add(new(manifestPath, bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes))));
             }
         var inventory = new CoverageEvidenceInventory(CurrentVersion, paths.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray());
         inventory.Validate(root, token);
         var names = inventory.Files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal);
-        void Require(string relative)
-        {
-            ValidatePath(relative);
-            if (!names.Contains(relative)) throw new CoverageEvidenceInventoryException("inventory-required-file-missing");
-        }
-        foreach (var path in new[] { result.Run.CoveragePath, result.Gate.JsonReportPath, result.Gate.MarkdownReportPath,
-            result.Gate.PatchTargetsJsonPath, result.Gate.PatchTargetsMarkdownPath }.OfType<string>())
-        {
-            // These are trusted workflow destinations, not inventory input paths. Prove their exact mapping.
-            var relative = Path.GetRelativePath(root, Path.GetFullPath(path)).Replace(Path.DirectorySeparatorChar, '/');
-            Require(relative);
-        }
-        Require("coverage/coverage.cobertura.xml");
-        Require("coverage/coverage-gate.json");
-        Require("coverage/coverage-gate.md");
-        Require("coverage/timings.json");
-        Require("coverage/summary.txt");
-        using var timings = Open(root, "coverage/timings.json");
-        if (timings.Length > MaximumMetadataBytes) throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
-        using var document = JsonDocument.Parse(timings);
-        foreach (var project in document.RootElement.GetProperty("projects").EnumerateArray())
-        {
-            var slug = project.GetProperty("slug").GetString();
-            Require($"coverage/projects/{slug}/{CoverageProjectManifest.FileName}");
-            Require($"coverage/projects/{slug}/coverage.cobertura.xml");
-            using var projectManifest = Open(root, $"coverage/projects/{slug}/{CoverageProjectManifest.FileName}");
-            if (projectManifest.Length > MaximumMetadataBytes) throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
-            using var projectDocument = JsonDocument.Parse(projectManifest);
-            if (!projectDocument.RootElement.GetProperty("schemaVersion").TryGetInt32(out var schemaVersion)
-                || schemaVersion != 1
-                || projectDocument.RootElement.GetProperty("slug").GetString() != slug)
-                throw new CoverageEvidenceInventoryException("inventory-project-manifest-mismatch");
-            foreach (var report in project.GetProperty("testResults").EnumerateArray())
-                Require("coverage/" + report.GetProperty("path").GetString());
-        }
+        CoverageReportSet.ValidateReceiptCapture(root, names, result, token);
         return inventory;
     }
 
@@ -137,22 +93,15 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
         if (Version != CurrentVersion) throw new CoverageEvidenceInventoryException("inventory-version-unsupported");
         if (Files.Count is 0 or > MaximumFiles) throw new CoverageEvidenceInventoryException("inventory-file-limit");
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var components = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var prefixes = new EvidencePathPrefixes();
         long total = 0;
         string? previous = null;
         foreach (var file in Files)
         {
             token.ThrowIfCancellationRequested();
             ValidatePath(file.RelativePath);
-            if (!seen.Add(file.RelativePath)) throw new CoverageEvidenceInventoryException("inventory-path-collision");
-            var prefix = string.Empty;
-            foreach (var component in file.RelativePath.Split('/'))
-            {
-                prefix = prefix.Length == 0 ? component : prefix + "/" + component;
-                if (components.TryGetValue(prefix, out var existing) && existing != prefix)
-                    throw new CoverageEvidenceInventoryException("inventory-path-collision");
-                components[prefix] = prefix;
-            }
+            if (!seen.Add(file.RelativePath) || !prefixes.TryAdd(file.RelativePath))
+                throw new CoverageEvidenceInventoryException("inventory-path-collision");
             if (previous is not null && StringComparer.Ordinal.Compare(previous, file.RelativePath) >= 0)
                 throw new CoverageEvidenceInventoryException("inventory-order-invalid");
             previous = file.RelativePath;

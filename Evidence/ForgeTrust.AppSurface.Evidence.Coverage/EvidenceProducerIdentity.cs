@@ -45,10 +45,6 @@ internal static class EvidenceProducerIdentityBuilder
 {
     internal const int MaximumFiles = 100_000;
     internal const int MaximumMetadataBytes = 16 * 1024 * 1024;
-    internal const int MaximumMaterialKeys = 64;
-    internal const int MaximumMaterialKeyLength = 128;
-    internal const int MaximumMaterialValueBytes = 4 * 1024;
-    internal const int MaximumMaterialTotalBytes = 256 * 1024;
     internal static readonly TimeSpan PreparationBudget = TimeSpan.FromSeconds(60);
 
     private static readonly JsonSerializerOptions CanonicalJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -168,9 +164,9 @@ internal static class EvidenceProducerIdentityBuilder
             if (!paths.SequenceEqual(ExistingPaths(root, ParsePaths(finalListing)), StringComparer.Ordinal))
                 return Ineligible("reuse.identity.changed_during_read", "The repository input inventory changed during identity preparation.");
 
-            var materialError = ValidateMaterial(request.ExtraMaterial, deadline.Token);
+            ArgumentNullException.ThrowIfNull(request.ExtraMaterial);
+            var material = EvidenceKeyMaterialSnapshot.Capture(request.ExtraMaterial, deadline.Token);
             stage = "key";
-            if (materialError is not null) return Ineligible("reuse.identity.material_invalid", materialError);
             if (RequiresPatch(request.Producer) && (!ValidDigest(request.CapturedPatchSha256) || !ValidDigest(request.Plan.PatchSha256)))
                 return Ineligible("reuse.identity.patch_unavailable", "The producer requires the exact captured patch digest.");
             if ((RequiresPatch(request.Producer) || request.Plan.PatchSha256 is not null)
@@ -209,7 +205,7 @@ internal static class EvidenceProducerIdentityBuilder
                 ["implementation"] = Hash(Encoding.UTF8.GetBytes(request.ImplementationIdentity)),
                 ["resources"] = Hash(JsonSerializer.SerializeToUtf8Bytes(resources, CanonicalJson)),
                 ["tools"] = Hash(JsonSerializer.SerializeToUtf8Bytes(Sorted(request.EffectiveToolIdentity), CanonicalJson)),
-                ["material"] = Hash(JsonSerializer.SerializeToUtf8Bytes(Sorted(request.ExtraMaterial), CanonicalJson)),
+                ["material"] = Hash(JsonSerializer.SerializeToUtf8Bytes<IReadOnlyDictionary<string, string>>(material, CanonicalJson)),
                 ["platform"] = Hash(Encoding.UTF8.GetBytes($"{System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier}|{System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}|{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}")),
                 ["patch"] = Hash(Encoding.UTF8.GetBytes(RequiresPatch(request.Producer) ? request.CapturedPatchSha256!.ToLowerInvariant() : string.Empty)),
                 ["files"] = Hash(JsonSerializer.SerializeToUtf8Bytes(files, CanonicalJson))
@@ -221,6 +217,10 @@ internal static class EvidenceProducerIdentityBuilder
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             return TimeLimitResult();
+        }
+        catch (EvidenceKeyMaterialValidationException exception)
+        {
+            return Ineligible("reuse.identity.material_invalid", exception.Message);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException or Win32Exception)
         {
@@ -325,8 +325,8 @@ internal static class EvidenceProducerIdentityBuilder
 
         foreach (var pattern in request.Producer.Inputs.Include.Concat(request.Producer.Inputs.Exclude ?? []))
         {
-            token.ThrowIfCancellationRequested();
-            ValidatePattern(pattern, token);
+            if (!EvidenceProducerInputPattern.IsValid(pattern, token))
+                throw new ArgumentException("Invalid path pattern.");
         }
 
         foreach (var resource in request.Plan.Profile.Resources)
@@ -336,15 +336,6 @@ internal static class EvidenceProducerIdentityBuilder
                 || resource.Requires.Any(dependency => !IsWellFormedUtf16(dependency, token)))
                 throw new ArgumentException("Resource declaration contains malformed UTF-16.");
         }
-    }
-
-    private static void ValidatePattern(string pattern, CancellationToken token)
-    {
-        if (string.IsNullOrEmpty(pattern) || pattern.StartsWith('/') || pattern.Contains('\\') || Path.IsPathRooted(pattern)) throw new ArgumentException("Invalid path pattern.");
-        var segments = pattern.Split('/');
-        if (segments.Any(static segment => segment.Length == 0 || segment is "." or ".." || (segment.Contains("**", StringComparison.Ordinal) && segment != "**"))) throw new ArgumentException("Invalid path pattern.");
-        if (pattern.Any(static c => c is '\0' or '?' or '[' or ']')) throw new ArgumentException("Invalid path pattern.");
-        if (!IsWellFormedUtf16(pattern, token)) throw new ArgumentException("Invalid path pattern.");
     }
 
     private static bool Matches(string pattern, string path, CancellationToken token)
@@ -539,44 +530,11 @@ internal static class EvidenceProducerIdentityBuilder
     private static string Hash(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     private static bool ValidDigest(string? digest) => digest is { Length: 64 } && digest.All(Uri.IsHexDigit);
     private static bool RequiresPatch(EvidenceProducerDeclaration producer) => producer.CoverageGate is { MinPatchLinePercent: not null } or { MinPatchBranchPercent: not null };
-    private static string? ValidateMaterial(IReadOnlyDictionary<string, string> values, CancellationToken token = default)
-    {
-        ArgumentNullException.ThrowIfNull(values);
-        if (values.Count > MaximumMaterialKeys)
-            return $"Producer key material contains {FormatNumber(values.Count)} keys; limit is {FormatNumber(MaximumMaterialKeys)}. Remove keys and retry.";
-        var observedCount = 0;
-        var total = 0L;
-        foreach (var (key, value) in values)
-        {
-            token.ThrowIfCancellationRequested();
-            observedCount++;
-            if (observedCount > MaximumMaterialKeys)
-                return $"More than {FormatNumber(MaximumMaterialKeys)} producer key-material entries were observed ({FormatNumber(observedCount)} observed). Remove keys and retry.";
-            if (string.IsNullOrEmpty(key))
-                return "A producer key-material key name has length 0; minimum is 1. Provide a non-empty key name.";
-            if (key.Length > MaximumMaterialKeyLength)
-                return $"A producer key-material key name is {FormatNumber(key.Length)} UTF-16 code units; limit is {FormatNumber(MaximumMaterialKeyLength)}. Shorten key names and retry.";
-            if (!IsWellFormedUtf16(key, token))
-                return "A producer key-material key name contains malformed UTF-16. Use well-formed Unicode text.";
-            if (value is null)
-                return "A producer key-material entry has a null value. Return non-null values within the declared limits.";
-            if (!IsWellFormedUtf16(value, token))
-                return "A producer key-material value contains malformed UTF-16. Use well-formed Unicode text.";
-            var size = GetUtf8ByteCount(value, token);
-            if (size > MaximumMaterialValueBytes)
-                return $"A producer key-material value is {FormatNumber(size)} UTF-8 bytes; limit is {FormatNumber(MaximumMaterialValueBytes)}. Reduce the value and retry.";
-            total += GetUtf8ByteCount(key, token) + size;
-            if (total > MaximumMaterialTotalBytes)
-                return $"Producer key material totals {FormatNumber(total)} UTF-8 bytes; limit is {FormatNumber(MaximumMaterialTotalBytes)}. Reduce key and value sizes and retry.";
-        }
-        return null;
-    }
-
     /// <summary>Checks whether a string contains only Unicode scalar values encoded as well-formed UTF-16.</summary>
     /// <param name="value">String to inspect.</param>
     /// <param name="token">Optional cancellation token checked during long inputs.</param>
     /// <returns><see langword="true"/> when every surrogate belongs to a valid pair or is absent.</returns>
-    internal static bool IsWellFormedUtf16(string value, CancellationToken token = default)
+    private static bool IsWellFormedUtf16(string value, CancellationToken token)
     {
         for (var index = 0; index < value.Length; index++)
         {
@@ -589,26 +547,6 @@ internal static class EvidenceProducerIdentityBuilder
             else if (char.IsLowSurrogate(value[index])) return false;
         }
         return true;
-    }
-
-    private static long GetUtf8ByteCount(string value, CancellationToken token)
-    {
-        long bytes = 0;
-        for (var index = 0; index < value.Length; index++)
-        {
-            token.ThrowIfCancellationRequested();
-            var character = value[index];
-            if (character <= 0x7f) bytes++;
-            else if (character <= 0x7ff) bytes += 2;
-            else if (char.IsHighSurrogate(character) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1]))
-            {
-                bytes += 4;
-                index++;
-            }
-            else bytes += 3;
-        }
-
-        return bytes;
     }
 
     private static string FormatNumber(long value) => value.ToString(CultureInfo.InvariantCulture);

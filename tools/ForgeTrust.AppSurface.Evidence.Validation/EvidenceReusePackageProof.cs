@@ -25,11 +25,27 @@ internal static class EvidenceReusePackageProof
     private const string SupportId = Prefix + "Evidence.Coverage";
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    /// <summary>Gets the minimum candidate feed closure. Evidence.Cli is checked too when separately packed.</summary>
-    internal static IReadOnlyList<string> RequiredPackageIds { get; } = Array.AsReadOnly(new[]
+    /// <summary>Gets the minimum candidate feed closure in its stable admission order.</summary>
+    internal static IReadOnlyList<string> CandidateMinimumPackageIds { get; } = Array.AsReadOnly(new[]
     {
         ToolId, Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner", Prefix + "Evidence.Readiness",
         SupportId, Prefix + "Coverage", Prefix + "Evidence.Aspire"
+    });
+    /// <summary>Gets packages admitted only when a separate candidate archive is present.</summary>
+    private static IReadOnlyList<string> OptionalSeparatePackageIds { get; } = Array.AsReadOnly(new[]
+    {
+        Prefix + "Evidence.Cli"
+    });
+    /// <summary>Gets the bundled tool package identities attested by the reuse proof.</summary>
+    private static IReadOnlyList<string> BundledToolPackageIds { get; } = Array.AsReadOnly(new[]
+    {
+        ToolId, Prefix + "Evidence.Cli", Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner", SupportId, Prefix + "Coverage"
+    });
+    /// <summary>Gets the exact package identities restored by the independent prepared host.</summary>
+    private static IReadOnlyList<string> PreparedHostPackageIds { get; } = Array.AsReadOnly(new[]
+    {
+        Prefix + "Evidence.Aspire", Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner",
+        Prefix + "Evidence.Readiness", SupportId, Prefix + "Coverage"
     });
 
     /// <summary>Runs the bounded packed CLI/host journey, returning zero only after every recorded assertion passes.</summary>
@@ -143,8 +159,9 @@ internal static class EvidenceReusePackageProof
         Require(expectedSourceCommit.Length is 40 or 64 && expectedSourceCommit.All(char.IsAsciiHexDigit), "source-commit-pin");
         var result = new Dictionary<string, PackageProof>(StringComparer.Ordinal);
         var bundledAssemblyHashes = new Dictionary<string, string>(StringComparer.Ordinal);
-        var ids = RequiredPackageIds.ToList();
-        if (File.Exists(Path.Join(feed, $"{Prefix}Evidence.Cli.{version}.nupkg"))) ids.Add(Prefix + "Evidence.Cli");
+        var ids = CandidateMinimumPackageIds.ToList();
+        foreach (var optionalId in OptionalSeparatePackageIds)
+            if (File.Exists(Path.Join(feed, $"{optionalId}.{version}.nupkg"))) ids.Add(optionalId);
         foreach (var id in ids)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -208,20 +225,25 @@ internal static class EvidenceReusePackageProof
                 var toolLibrary = libraries.Single(library => library.Name.StartsWith(ToolId + "/", StringComparison.Ordinal));
                 var buildVersion = toolLibrary.Name[(ToolId.Length + 1)..];
                 Require(buildVersion.Length > 0, "tool-build-version");
+                var bundledLibraries = libraries.Where(library => BundledToolPackageIds.Contains(
+                    library.Name.Split('/')[0], StringComparer.Ordinal)).ToArray();
+                var bundledIds = bundledLibraries.Select(library => library.Name.Split('/')[0]).ToHashSet(StringComparer.Ordinal);
+                var candidateComponentIds = ids.Append(Prefix + "Evidence.Cli");
                 var componentLibraries = libraries.Where(library => library.Name.Split('/')[0] != ToolId
-                    && ids.Append(Prefix + "Evidence.Cli").Contains(library.Name.Split('/')[0], StringComparer.OrdinalIgnoreCase)).ToArray();
+                    && candidateComponentIds.Contains(library.Name.Split('/')[0], StringComparer.OrdinalIgnoreCase)).ToArray();
                 var componentVersions = componentLibraries.Select(library => library.Name[(library.Name.LastIndexOf('/') + 1)..])
                     .Distinct(StringComparer.Ordinal).ToArray();
                 Require(componentVersions.Length == 1 && (componentVersions[0] == version || componentVersions[0] == buildVersion),
                     "tool-bundled-graph-version");
                 foreach (var library in componentLibraries)
-                    Require(ids.Append(Prefix + "Evidence.Cli").Contains(library.Name.Split('/')[0], StringComparer.Ordinal)
+                    Require(candidateComponentIds.Contains(library.Name.Split('/')[0], StringComparer.Ordinal)
                         && library.Name.EndsWith("/" + componentVersions[0], StringComparison.Ordinal), "tool-bundled-graph-version");
-                foreach (var required in new[] { ToolId, SupportId, Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner", Prefix + "Evidence.Cli", Prefix + "Coverage" })
-                    Require(libraries.Any(library => library.Name == required + "/" + (required == ToolId ? buildVersion : componentVersions[0])), "tool-required-bundled-graph");
-                var bundledIds = new List<string> { SupportId, Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner", Prefix + "Coverage" };
-                if (ids.Contains(Prefix + "Evidence.Cli", StringComparer.Ordinal)) bundledIds.Add(Prefix + "Evidence.Cli");
-                foreach (var bundledId in bundledIds)
+                foreach (var required in BundledToolPackageIds)
+                    Require(libraries.Any(library => library.Name == required + "/" + (required == ToolId ? buildVersion : componentVersions[0])),
+                        "tool-required-bundled-graph");
+                Require(bundledLibraries.Length == BundledToolPackageIds.Count && bundledIds.SetEquals(BundledToolPackageIds),
+                    "tool-exact-bundled-graph");
+                foreach (var bundledId in BundledToolPackageIds.Where(id => id != ToolId))
                 {
                     var bundled = archive.Entries.Single(entry => entry.FullName.StartsWith("tools/", StringComparison.Ordinal)
                         && Path.GetFileName(entry.FullName) == bundledId + ".dll");
@@ -233,8 +255,9 @@ internal static class EvidenceReusePackageProof
         }
         foreach (var (id, hash) in bundledAssemblyHashes)
         {
-            Require(hash == result[id].AssemblySha256,
-                id == Prefix + "Evidence.Cli" ? "tool-bundled-cli-candidate-sha-before-output" : "tool-bundled-candidate-sha-before-output");
+            if (result.TryGetValue(id, out var package))
+                Require(hash == package.AssemblySha256,
+                    id == Prefix + "Evidence.Cli" ? "tool-bundled-cli-candidate-sha-before-output" : "tool-bundled-candidate-sha-before-output");
         }
         return result;
     }
@@ -347,7 +370,7 @@ internal static class EvidenceReusePackageProof
     {
         using var archive = ZipFile.OpenRead(packages[ToolId].Archive);
         var results = new List<AssemblyProof>();
-        foreach (var id in new[] { ToolId, Prefix + "Evidence.Cli", Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner", SupportId, Prefix + "Coverage" })
+        foreach (var id in BundledToolPackageIds)
         {
             var entry = archive.Entries.Single(item => item.FullName.StartsWith("tools/", StringComparison.Ordinal) && Path.GetFileName(item.FullName) == id + ".dll");
             var actual = Path.Join(root, id + ".dll");
@@ -404,20 +427,46 @@ internal static class EvidenceReusePackageProof
             && data.GetProperty("secondFactoryCount").GetInt32() == 0 && data.GetProperty("firstProducerRuns").GetInt32() == 1
             && data.GetProperty("secondProducerRuns").GetInt32() == 0 && data.GetProperty("cleanedApplications").GetInt32() == 1,
             "prepared-real-http-and-selective-startup");
-        foreach (var assembly in data.GetProperty("assemblies").EnumerateArray())
+        var assemblies = data.GetProperty("assemblies").EnumerateArray().ToArray();
+        var assemblyIds = assemblies.Select(assembly => assembly.GetProperty("name").GetString()!).ToArray();
+        Require(assemblies.Length == PreparedHostPackageIds.Count
+            && new HashSet<string>(assemblyIds, StringComparer.Ordinal).SetEquals(PreparedHostPackageIds), "complete-host-assembly-closure");
+        foreach (var assembly in assemblies)
         {
             var id = assembly.GetProperty("name").GetString()!;
             var path = assembly.GetProperty("path").GetString()!;
-            Require(packages.ContainsKey(id) && Within(assemblyRoot, path) && await HashAsync(path, token).ConfigureAwait(false) == packages[id].AssemblySha256,
+            Require(PreparedHostPackageIds.Contains(id, StringComparer.Ordinal) && packages.ContainsKey(id)
+                && Within(assemblyRoot, path) && await HashAsync(path, token).ConfigureAwait(false) == packages[id].AssemblySha256,
                 "independent-host-loaded-candidate-assembly");
             Require(assembly.GetProperty("sha256").GetString() == packages[id].AssemblySha256, "consumer-reported-loaded-sha");
         }
-        Require(data.GetProperty("assemblies").GetArrayLength() == 6, "complete-host-assembly-closure");
         using var deps = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(assemblyRoot, "PackedHost.deps.json"), token).ConfigureAwait(false));
-        foreach (var library in deps.RootElement.GetProperty("libraries").EnumerateObject().Where(item => item.Name.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase)))
-            Require(library.Value.GetProperty("type").GetString() == "package" && packages.TryGetValue(library.Name.Split('/')[0], out var package)
-                && library.Name == package.Id + "/" + package.Version, "published-host-package-only-deps");
+        _ = VerifyPackageClosure(deps.RootElement.GetProperty("libraries"), packages,
+            "published-host-exact-package-closure", "published-host-package-only-deps");
         return data.Clone();
+    }
+
+    private static IReadOnlyList<PackageProof> VerifyPackageClosure(JsonElement libraries,
+        IReadOnlyDictionary<string, PackageProof> packages, string closureDiagnostic, string packageDiagnostic)
+    {
+        var family = libraries.EnumerateObject()
+            .Where(library => library.Name.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase))
+            .Select(library => (Library: library, Id: library.Name.Split('/')[0]))
+            .ToArray();
+        Require(family.Length == PreparedHostPackageIds.Count
+            && new HashSet<string>(family.Select(library => library.Id), StringComparer.Ordinal).SetEquals(PreparedHostPackageIds),
+            closureDiagnostic);
+
+        var verifiedPackages = new List<PackageProof>(family.Length);
+        foreach (var library in family)
+        {
+            var type = library.Library.Value.GetProperty("type").GetString();
+            var package = packages.GetValueOrDefault(library.Id);
+            Require(type == "package" && package is not null && library.Id == package.Id
+                && library.Library.Name == package.Id + "/" + package.Version, packageDiagnostic);
+            verifiedPackages.Add(package!);
+        }
+        return verifiedPackages;
     }
 
     private static async Task VerifyAssetsAsync(string path, IReadOnlyDictionary<string, PackageProof> packages, string cache, CancellationToken token)
@@ -425,15 +474,13 @@ internal static class EvidenceReusePackageProof
         using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(path, token).ConfigureAwait(false));
         var folders = document.RootElement.GetProperty("packageFolders").EnumerateObject().Select(item => Path.TrimEndingDirectorySeparator(Path.GetFullPath(item.Name))).ToArray();
         Require(folders.Length == 1 && folders[0] == Path.TrimEndingDirectorySeparator(cache), "isolated-package-cache-no-fallback");
-        var family = document.RootElement.GetProperty("libraries").EnumerateObject().Where(item => item.Name.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase)).ToArray();
-        Require(family.Length == 6, "host-six-package-closure");
-        foreach (var library in family)
+        var verifiedPackages = VerifyPackageClosure(document.RootElement.GetProperty("libraries"), packages,
+            "host-six-package-closure", "exact-package-assets-no-project-fallback");
+        foreach (var package in verifiedPackages)
         {
-            Require(library.Value.GetProperty("type").GetString() == "package" && packages.TryGetValue(library.Name.Split('/')[0], out var package)
-                && library.Name == package.Id + "/" + package.Version, "exact-package-assets-no-project-fallback");
-            var id = library.Name.Split('/')[0];
-            var archive = Path.Join(cache, id.ToLowerInvariant(), packages[id].Version.ToLowerInvariant(), $"{id}.{packages[id].Version}.nupkg".ToLowerInvariant());
-            Require(await HashAsync(archive, token).ConfigureAwait(false) == packages[id].Sha256, "restored-candidate-archive-sha");
+            var archive = Path.Join(cache, package.Id.ToLowerInvariant(), package.Version.ToLowerInvariant(),
+                $"{package.Id}.{package.Version}.nupkg".ToLowerInvariant());
+            Require(await HashAsync(archive, token).ConfigureAwait(false) == package.Sha256, "restored-candidate-archive-sha");
         }
     }
 
@@ -756,7 +803,7 @@ internal static class EvidenceReusePackageProof
         }
     }
 
-    private const string HostProgram = """
+    private static string HostProgram => $$"""
         using System.Reflection;
         using System.Security.Cryptography;
         using System.Text;
@@ -772,8 +819,7 @@ internal static class EvidenceReusePackageProof
 
         var root = Path.GetFullPath(args.Single());
         Check(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") is null, "synthetic local child only");
-        var ids = new[] { "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Contracts",
-            "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Readiness", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Coverage" };
+        var ids = new[] { {{string.Join(", ", PreparedHostPackageIds.Select(id => JsonSerializer.Serialize(id)))}} };
         var assemblies = ids.Select(id => Assembly.Load(id)).Select(assembly => new
         {
             name = assembly.GetName().Name!, path = assembly.Location,

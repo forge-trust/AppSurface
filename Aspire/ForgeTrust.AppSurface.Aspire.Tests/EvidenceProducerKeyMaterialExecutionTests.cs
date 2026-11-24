@@ -145,7 +145,7 @@ public sealed class EvidenceProducerKeyMaterialExecutionTests
     [Fact]
     public async Task InvalidMaterialBounds_ShouldReportSafeNumericCountsWithoutRawKeysOrValues()
     {
-        var tooMany = Enumerable.Range(0, EvidenceProducerIdentityBuilder.MaximumMaterialKeys + 1)
+        var tooMany = Enumerable.Range(0, EvidenceKeyMaterialSnapshot.MaximumKeys + 1)
             .ToDictionary(static index => $"private-key-{index}", static index => $"private-value-{index}");
         var countResult = await PrepareMaterialAsync(tooMany);
         var countDiagnostic = Assert.IsType<string>(countResult.Diagnostic);
@@ -157,7 +157,7 @@ public sealed class EvidenceProducerKeyMaterialExecutionTests
         Assert.DoesNotContain("private-value-", countDiagnostic, StringComparison.Ordinal);
 
         const string keyMarker = "private-key-marker";
-        var overlongKey = keyMarker + new string('k', EvidenceProducerIdentityBuilder.MaximumMaterialKeyLength + 1 - keyMarker.Length);
+        var overlongKey = keyMarker + new string('k', EvidenceKeyMaterialSnapshot.MaximumKeyLength + 1 - keyMarker.Length);
         var keyLengthResult = await PrepareMaterialAsync(new Dictionary<string, string> { [overlongKey] = "private-value-marker" });
         var keyLengthDiagnostic = Assert.IsType<string>(keyLengthResult.Diagnostic);
         Assert.Equal("reuse.material_invalid", keyLengthResult.Reason);
@@ -177,7 +177,7 @@ public sealed class EvidenceProducerKeyMaterialExecutionTests
         Assert.DoesNotContain("private-key-marker", valueLengthDiagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain(overlongUtf8Value, valueLengthDiagnostic, StringComparison.Ordinal);
 
-        var overTotalBytes = Enumerable.Range(0, EvidenceProducerIdentityBuilder.MaximumMaterialKeys)
+        var overTotalBytes = Enumerable.Range(0, EvidenceKeyMaterialSnapshot.MaximumKeys)
             .ToDictionary(static index => $"k{index:D2}", static index => new string('v', index == 63 ? 4094 : 4093));
         var totalResult = await PrepareMaterialAsync(overTotalBytes);
         var totalDiagnostic = Assert.IsType<string>(totalResult.Diagnostic);

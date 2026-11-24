@@ -373,12 +373,7 @@ public sealed class EvidencePlanner
 
     private static void ValidateInputPattern(string producerId, string? pattern)
     {
-        var segments = pattern?.Split('/', StringSplitOptions.None);
-        if (string.IsNullOrWhiteSpace(pattern) || pattern.Contains('\\') || Path.IsPathRooted(pattern)
-            || pattern.IndexOfAny([':', '?', '[', ']', '{', '}']) >= 0 || pattern.Any(char.IsControl)
-            || segments is null || segments.Length == 0
-            || segments.Any(static segment => segment.Length == 0 || segment is "." or ".."
-                || segment.Contains("**", StringComparison.Ordinal) && segment != "**"))
+        if (!EvidenceProducerInputPattern.IsValid(pattern))
         {
             throw new EvidencePlanningException("ASEVD137", $"Producer '{producerId}' has invalid input pattern '{pattern}'.", "Use repository-relative forward-slash paths with * within a segment and ** as a complete segment.");
         }

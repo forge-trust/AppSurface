@@ -119,7 +119,7 @@ public sealed class EvidenceReuseCommandTests
     [Fact]
     public void VerifyReuseWithoutReuseFailsFast()
     {
-        var exception = Assert.Throws<CommandException>(() => EvidenceRunCommand.ValidateReuseOptions(false, true, "00:30:00"));
+        var exception = Assert.Throws<CommandException>(() => EvidenceRunCommand.ParseReuseOptions(false, true, "00:30:00"));
 
         Assert.Contains("reuse.verify_requires_reuse", exception.Message, StringComparison.Ordinal);
     }
@@ -155,7 +155,7 @@ public sealed class EvidenceReuseCommandTests
     [InlineData("not-a-duration")]
     public void InvalidReceiptWaitTimeoutFailsFast(string timeout)
     {
-        var exception = Assert.Throws<CommandException>(() => EvidenceRunCommand.ValidateReuseOptions(true, false, timeout));
+        var exception = Assert.Throws<CommandException>(() => EvidenceRunCommand.ParseReuseOptions(true, false, timeout));
 
         Assert.Contains("reuse.invalid_wait_timeout", exception.Message, StringComparison.Ordinal);
     }

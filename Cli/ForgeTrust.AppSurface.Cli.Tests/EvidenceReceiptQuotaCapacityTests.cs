@@ -106,8 +106,8 @@ public sealed class EvidenceReceiptQuotaCapacityTests
             var stageName = "payload-stage-" + reservationId;
             var payloadName = "payload-" + reservationId;
 
-            using (var legacy = Assert.Single(await store.AcquireAsync([legacyKey], CancellationToken.None)))
-                Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repositoryNamespace, legacyKey, 900_000_000, now));
+            using (Assert.Single(await store.AcquireAsync([legacyKey], CancellationToken.None)))
+                await LegacyAggregateReservationFixture.SeedAsync(root, repositoryNamespace, legacyKey, 900_000_000);
 
             using (var foreign = Assert.Single(await store.AcquireAsync([foreignKey], CancellationToken.None)))
             {
@@ -246,7 +246,9 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 if (victims.Contains(row!["Key"]!.GetValue<string>())) row["PayloadBytes"] = 700_000_000;
             await File.WriteAllTextAsync(indexPath, indexDocument.ToJsonString());
 
-            Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, requester.Key, 100_000_000, now));
+            var reservationId = Guid.NewGuid().ToString("N");
+            Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repository, requester.Key, 100_000_000, now,
+                reservationId, "payload-stage-" + reservationId, "payload-" + reservationId));
 
             Assert.False(Directory.Exists(Path.Combine(root, repository, victims[0], "payload-pressure-0")));
             Assert.True(Directory.Exists(Path.Combine(root, repository, victims[1], "payload-pressure-1")));
@@ -398,7 +400,7 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 PayloadDirectoryName = firstPayload
             };
             var commit = new EvidenceReceiptBatchCommit(repositoryNamespace, key, "quota-commit-producer-id",
-                "quota-commit-execution", committedState, JsonSerializer.SerializeToUtf8Bytes(committedState).Length,
+                "quota-commit-execution", committedState,
                 firstPayload, now, 150, 100, lease.EssentialReservationId);
 
             Assert.Throws<EvidenceReceiptQuotaUnavailableException>(
@@ -440,7 +442,7 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 PassedProducerRecord = new string('A', encodedRecordCharacters)
             };
             var commit = new EvidenceReceiptBatchCommit(repositoryNamespace, key, "quota-state-bound-producer-id",
-                executionId, committedState, JsonSerializer.SerializeToUtf8Bytes(committedState).Length,
+                executionId, committedState,
                 payloadName, now, 0, 128, lease.EssentialReservationId);
 
             var failure = Assert.Throws<EvidenceReceiptQuotaUnavailableException>(

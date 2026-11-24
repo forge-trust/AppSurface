@@ -5,12 +5,86 @@ namespace ForgeTrust.AppSurface.Evidence.Contracts;
 /// <summary>Defines the shared cooperative child channel configuration and bounded UTF-8 frames.</summary>
 internal static class EvidenceOwnedChildWire
 {
+    private const string BeginVerb = "BEGIN";
+    private const string AcknowledgementPrefix = "ACK|";
+    private const string CompletionPrefix = "COMPLETE|";
+    private const string DonePrefix = "DONE|";
+    private const string RejectionPrefix = "REJECT|";
+
     /// <summary>Identifies the current-user-only invocation pipe.</summary>
     internal const string PipeEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_PIPE";
     /// <summary>Identifies the current Evidence execution.</summary>
     internal const string ExecutionEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID";
     /// <summary>Authenticates enrollment in the current execution.</summary>
     internal const string NonceEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_NONCE";
+
+    /// <summary>Formats the child enrollment request using the existing wire representation.</summary>
+    /// <param name="executionId">The execution identifier supplied by the invocation.</param>
+    /// <param name="nonce">The enrollment nonce supplied by the invocation.</param>
+    /// <returns>The BEGIN frame payload without its newline terminator.</returns>
+    internal static string FormatBegin(string executionId, string nonce) => $"{BeginVerb}|{executionId}|{nonce}";
+
+    /// <summary>Parses a BEGIN payload with exactly its existing three fields.</summary>
+    /// <param name="value">The decoded frame payload.</param>
+    /// <param name="executionId">The execution identifier, or an empty string when parsing fails.</param>
+    /// <param name="nonce">The nonce, or an empty string when parsing fails.</param>
+    /// <returns>True when the payload has the BEGIN keyword and exactly two data fields.</returns>
+    internal static bool TryParseBegin(string? value, out string executionId, out string nonce)
+    {
+        executionId = string.Empty;
+        nonce = string.Empty;
+        var parts = value?.Split('|');
+        if (parts is not { Length: 3 } || !string.Equals(parts[0], BeginVerb, StringComparison.Ordinal)) return false;
+        executionId = parts[1];
+        nonce = parts[2];
+        return true;
+    }
+
+    /// <summary>Formats the enrollment acknowledgement using a canonical N-format child identifier.</summary>
+    /// <param name="childId">The admitted child identifier.</param>
+    /// <returns>The ACK frame payload without its newline terminator.</returns>
+    internal static string FormatAcknowledgement(Guid childId) => AcknowledgementPrefix + childId.ToString("N");
+
+    /// <summary>Parses an ACK payload containing an N-format child identifier.</summary>
+    /// <param name="value">The decoded frame payload.</param>
+    /// <param name="childId">The parsed child identifier, or <see cref="Guid.Empty"/> when parsing fails.</param>
+    /// <returns>True when the payload contains ACK followed by a valid N-format GUID.</returns>
+    internal static bool TryParseAcknowledgement(string? value, out Guid childId)
+    {
+        childId = Guid.Empty;
+        return value is not null
+            && value.StartsWith(AcknowledgementPrefix, StringComparison.Ordinal)
+            && Guid.TryParseExact(value.AsSpan(AcknowledgementPrefix.Length), "N", out childId);
+    }
+
+    /// <summary>Formats the child completion request using a canonical N-format identifier.</summary>
+    /// <param name="childId">The enrolled child identifier.</param>
+    /// <returns>The COMPLETE frame payload without its newline terminator.</returns>
+    internal static string FormatCompletion(Guid childId) => CompletionPrefix + childId.ToString("N");
+
+    /// <summary>Checks for an exact COMPLETE payload matching the admitted child.</summary>
+    /// <param name="value">The decoded frame payload.</param>
+    /// <param name="childId">The admitted child identifier.</param>
+    /// <returns>True only for the exact canonical completion payload.</returns>
+    internal static bool IsCompletion(string? value, Guid childId)
+        => string.Equals(value, FormatCompletion(childId), StringComparison.Ordinal);
+
+    /// <summary>Formats the completion acknowledgement using a canonical N-format identifier.</summary>
+    /// <param name="childId">The completed child identifier.</param>
+    /// <returns>The DONE frame payload without its newline terminator.</returns>
+    internal static string FormatDone(Guid childId) => DonePrefix + childId.ToString("N");
+
+    /// <summary>Checks for an exact DONE payload matching the enrolled child.</summary>
+    /// <param name="value">The decoded frame payload.</param>
+    /// <param name="childId">The enrolled child identifier.</param>
+    /// <returns>True only for the exact canonical completion acknowledgement.</returns>
+    internal static bool IsDoneAcknowledgement(string? value, Guid childId)
+        => string.Equals(value, FormatDone(childId), StringComparison.Ordinal);
+
+    /// <summary>Formats a rejection payload using the existing reason text.</summary>
+    /// <param name="reason">The protocol rejection reason.</param>
+    /// <returns>The REJECT frame payload without its newline terminator.</returns>
+    internal static string FormatRejection(string reason) => RejectionPrefix + reason;
 
     /// <summary>Writes and flushes a frame after checking its byte count, including the trailing newline.</summary>
     /// <param name="stream">The invocation channel stream.</param>

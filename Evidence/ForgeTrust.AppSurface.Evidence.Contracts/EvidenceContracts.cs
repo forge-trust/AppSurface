@@ -911,31 +911,8 @@ public sealed class EvidenceArtifactWriter
                     BufferSize = 64 * 1024,
                     Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
                 });
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
-                long lengthBytes = 0;
-                try
-                {
-                    while (true)
-                    {
-                        var read = await input.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-                        if (read == 0)
-                        {
-                            break;
-                        }
-
-                        lengthBytes += read;
-                        if (lengthBytes > artifact.LengthBytes) return false;
-                        hash.AppendData(buffer, 0, read);
-                    }
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(buffer);
-                }
-
-                if (lengthBytes != artifact.LengthBytes
-                    || !string.Equals(Convert.ToHexString(hash.GetHashAndReset()), artifact.Sha256, StringComparison.OrdinalIgnoreCase))
+                if (await EvidenceArtifactFileValidation.CheckStreamAsync(input, artifact, cancellationToken).ConfigureAwait(false)
+                    != EvidenceArtifactFileStatus.Valid)
                 {
                     return false;
                 }
@@ -1175,34 +1152,9 @@ public static class EvidenceArtifactFileValidation
         EvidenceArtifactResult artifact,
         CancellationToken cancellationToken)
     {
-        if (stream.Length != artifact.LengthBytes)
-        {
-            return EvidenceArtifactFileStatus.LengthMismatch;
-        }
-
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = new byte[64 * 1024];
-        var remaining = artifact.LengthBytes;
-        while (remaining > 0)
-        {
-            var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                // The file shrank after its length was read.
-                return EvidenceArtifactFileStatus.LengthMismatch;
-            }
-
-            hash.AppendData(buffer, 0, read);
-            remaining -= read;
-        }
-
-        if (await stream.ReadAsync(buffer.AsMemory(0, 1), cancellationToken).ConfigureAwait(false) > 0)
-        {
-            // The file grew after its length was read. The extra bytes are not hashed.
-            return EvidenceArtifactFileStatus.LengthMismatch;
-        }
-
-        return string.Equals(Convert.ToHexString(hash.GetHashAndReset()), artifact.Sha256, StringComparison.OrdinalIgnoreCase)
+        var (status, digest) = await EvidenceArtifactStream.HashAsync(stream, artifact.LengthBytes, cancellationToken).ConfigureAwait(false);
+        if (status != EvidenceArtifactLengthStatus.Exact) return EvidenceArtifactFileStatus.LengthMismatch;
+        return string.Equals(digest, artifact.Sha256, StringComparison.OrdinalIgnoreCase)
             ? EvidenceArtifactFileStatus.Valid
             : EvidenceArtifactFileStatus.DigestMismatch;
     }

@@ -58,6 +58,16 @@ public sealed class EvidenceReusePackageProofTests
         Assert.Contains("ForgeTrust.AppSurface.Evidence.Coverage", packages.Keys);
     }
 
+    [Fact]
+    public async Task ToolBundleValidationIgnoresUnrelatedForgeTrustLibraries()
+    {
+        using var fixture = new FeedFixture("unrelated-tool-family");
+
+        var packages = await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit);
+
+        Assert.Equal(7, packages.Count);
+    }
+
     [Theory]
     [InlineData("different-build-version")]
     [InlineData("root-build-version")]
@@ -618,7 +628,7 @@ public sealed class EvidenceReusePackageProofTests
         internal string Root { get; } = Directory.CreateTempSubdirectory("evidence-packed-admission-").FullName;
         internal FeedFixture(string? failure = null)
         {
-            foreach (var id in EvidenceReusePackageProof.RequiredPackageIds)
+            foreach (var id in EvidenceReusePackageProof.CandidateMinimumPackageIds)
             {
                 if (failure == "missing-contracts" && id.EndsWith("Evidence.Contracts", StringComparison.Ordinal)) continue;
                 var target = id switch
@@ -659,6 +669,8 @@ public sealed class EvidenceReusePackageProofTests
                         libraries[name + "/" + (failure == "tool-graph-skew" && name.EndsWith("Evidence.Coverage", StringComparison.Ordinal) ? "0.0.0"
                             : failure == "different-build-version" || failure == "root-build-version" && name == id ? "0.1.0" : Version)] = new { type = "project" };
                     }
+                    if (failure == "unrelated-tool-family")
+                        libraries["ForgeTrust.AppSurface.UnrelatedProduct/1.2.3"] = new { type = "project" };
                     using var writer = new StreamWriter(archive.CreateEntry(dllPath + id + ".deps.json").Open());
                     writer.Write(JsonSerializer.Serialize(new { libraries }));
                 }

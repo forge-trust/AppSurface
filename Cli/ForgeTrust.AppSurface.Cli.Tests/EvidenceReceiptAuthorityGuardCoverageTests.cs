@@ -107,7 +107,7 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         var state = fixture.Lease.ReadState();
         var original = fixture.IndexBytes();
         var (plan, manifest, sourceRoot) = CreatePublication(fixture.DirectoryPath,
-            defect == "record-oversized" ? new string('x', EvidenceReceiptQuota.MaximumStateBytes + 1) : null);
+            defect == "record-oversized" ? new string('x', EvidenceReceiptState.MaximumPassedProducerBase64Characters + 1) : null);
         manifest = defect switch
         {
             "digest-null" => manifest with { ManifestDigest = null! },
@@ -141,7 +141,7 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         Assert.Throws<InvalidDataException>(() =>
             EvidenceReceiptQuota.CommitInvocation(fixture.Root,
                 [new(fixture.Repository, state.Key, "producer", "execution", settled,
-                    JsonSerializer.SerializeToUtf8Bytes(settled).Length, "../outside", completedAt, 0, 0,
+                    "../outside", completedAt, 0, 0,
                     fixture.Lease.EssentialReservationId)]));
 
         Assert.Equal(state, fixture.Lease.ReadState());
@@ -274,11 +274,13 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         using var fixture = await Fixture.CreateAsync();
         var repository = fixture.Repository;
         var key = fixture.Lease.Key;
-        var payloadName = "payload-authority-guard-retired";
+        var reservationId = Guid.NewGuid().ToString("N");
+        var payloadName = "payload-" + reservationId;
         var completedAt = fixture.Clock.GetUtcNow();
         var sentinelPath = TestPathUtils.PathUnder(fixture.DirectoryPath, "operator-sentinel.txt");
         await File.WriteAllTextAsync(sentinelPath, "preserve outside receipt custody");
-        Assert.True(EvidenceReceiptQuota.TryReservePayload(fixture.Root, repository, key, 3, completedAt));
+        Assert.True(EvidenceReceiptQuota.TryReservePayload(fixture.Root, repository, key, 3, completedAt,
+            reservationId, "payload-stage-" + reservationId, payloadName));
         using (var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(fixture.Lease.DirectoryPath,
             createMissing: false, requirePrivate: true)!)
         using (var payload = keyRoot.CreateArtifactDirectory(payloadName))
@@ -291,7 +293,7 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
             payloadName, null, completedAt, false, null);
         fixture.Lease.EstablishAuthority("retirement-fixture");
         EvidenceReceiptQuota.CommitInvocation(fixture.Root,
-            [new(repository, key, "producer", "retirement-fixture", settled, JsonSerializer.SerializeToUtf8Bytes(settled).Length,
+            [new(repository, key, "producer", "retirement-fixture", settled,
                 payloadName, completedAt, 3, 3, fixture.Lease.EssentialReservationId)]);
         var invalidated = new EvidenceReceiptState(1, key, null, null, null, null, null);
         EvidenceReceiptQuota.InvalidatePayload(fixture.Lease, settled, invalidated);

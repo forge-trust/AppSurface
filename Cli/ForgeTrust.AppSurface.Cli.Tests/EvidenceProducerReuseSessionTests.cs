@@ -29,6 +29,7 @@ public sealed class EvidenceProducerReuseSessionTests
         Assert.Equal("10.0.402", first["sdk"]);
         Assert.Equal("5.5.10", first["reportGeneratorVersion"]);
         Assert.StartsWith("sha256:", first["reportGeneratorManifest"], StringComparison.Ordinal);
+        Assert.Equal(StrictReportGeneratorRuntimeLocator.GetPinnedManifestDigest(), first["reportGeneratorManifest"]);
         Assert.DoesNotContain("/work", string.Join("\n", first.Values), StringComparison.Ordinal);
         Assert.DoesNotContain("commit", string.Join("\n", first.Keys), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("endpoint", string.Join("\n", first.Keys), StringComparison.OrdinalIgnoreCase);
@@ -55,11 +56,14 @@ public sealed class EvidenceProducerReuseSessionTests
         }
 
         await using var second = await fixture.PrepareAsync();
+        var receiptDecision = Assert.Single(second.Decisions);
         var restored = Assert.Single(second.ReusedResults);
         Assert.Equal(fixture.ProducerDeclaration.Id, restored.Key);
         Assert.Equal(EvidenceProducerOutcome.Reused, restored.Value.Outcome);
         Assert.Equal(1, fixture.Producer.ExecutionCount);
         Assert.True(File.Exists(Path.Combine(fixture.LastArtifactRoot, "reports", "report.txt")));
+        Assert.True(await second.BeginExecutionAsync(CancellationToken.None));
+        Assert.Equal(receiptDecision, Assert.Single(second.Decisions));
     }
 
     [Theory]
@@ -634,6 +638,7 @@ public sealed class EvidenceProducerReuseSessionTests
         await using (var recovery = await fixture.PrepareAsync(verifyReuse: true))
         {
             Assert.Empty(recovery.ReusedResults);
+            Assert.False(recovery.HasMatchedVerifiedAudit(fixture.ProducerDeclaration.Id));
             Assert.True(await recovery.BeginExecutionAsync(CancellationToken.None));
             var passed = await fixture.Producer.ProduceAsync(
                 new EvidenceProducerContext(fixture.Plan, fixture.ProducerDeclaration, TimeProvider.System, recovery.GetWriter(fixture.ProducerDeclaration)),
@@ -641,6 +646,7 @@ public sealed class EvidenceProducerReuseSessionTests
             Assert.True(await recovery.BeforeCleanupAsync(true, CancellationToken.None));
             var result = await recovery.CompleteAsync(EvidenceManifestBuilder.Build(fixture.Plan, [passed], metrics: new EvidenceExecutionMetrics { CleanupCompleted = true }), CancellationToken.None);
             Assert.Equal(EvidenceExecutionVerdict.Passed, result.ExecutionVerdict);
+            Assert.False(recovery.HasMatchedVerifiedAudit(fixture.ProducerDeclaration.Id));
         }
 
         await using var recovered = await fixture.PrepareAsync();

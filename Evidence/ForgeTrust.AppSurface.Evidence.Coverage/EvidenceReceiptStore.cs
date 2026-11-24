@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -40,7 +39,7 @@ internal sealed record EvidenceReceiptStoreOptions
 internal sealed class EvidenceReceiptStore
 {
     private const int SchemaVersion = 1;
-    private const int MaximumStateBytes = 64 * 1024;
+
     private readonly string _root;
     private readonly string _namespace;
     private readonly bool _readOnly;
@@ -284,26 +283,17 @@ internal sealed class EvidenceReceiptStore
         var normalizedKey = key.ToLowerInvariant();
         try
         {
-            var state = EvidenceReceiptQuota.ReadAuthority(_root, _namespace, normalizedKey, readOnly: _readOnly);
-            if (state is null) return EvidenceReceiptReadResult.Miss("missing");
-            if (state.InFlightExecutionId is not null) return EvidenceReceiptReadResult.Unavailable("unresolved-execution", state);
-            if (state.AuditIntentExecutionId is not null || state.AuditMismatch)
-                return EvidenceReceiptReadResult.Miss("audit-quarantined", state);
-            if (state.OriginCompletedAt is { } completedAt)
-            {
-                var age = _clock.GetUtcNow() - completedAt;
-                if (age < TimeSpan.Zero) return EvidenceReceiptReadResult.Miss("origin-time-in-future", state);
-                if (age >= TimeSpan.FromDays(7)) return EvidenceReceiptReadResult.Miss("origin-expired", state);
-            }
-            if (state.PayloadDirectoryName is null || state.PassedProducerRecord is null || state.OriginManifestDigest is null)
-                return EvidenceReceiptReadResult.Miss("no-passed-receipt", state);
+            var authority = EvidenceReceiptQuota.ReadAuthority(_root, _namespace, normalizedKey, readOnly: _readOnly);
+            var proposed = ClassifyAuthority(authority, _clock);
+            if (!proposed.IsCandidate) return proposed with { State = authority };
+            var state = proposed.State!;
             using var payload = CoverageRunOutputLease.AcquireArtifactDirectory(
-                Path.Combine(_root, _namespace, normalizedKey, state.PayloadDirectoryName), false, true);
+                Path.Combine(_root, _namespace, normalizedKey, state.PayloadDirectoryName!), false, true);
             if (payload is null) return EvidenceReceiptReadResult.Miss("payload-missing", state);
             try
             {
-                var origin = ReadOriginMetadata(payload, state);
-                return EvidenceReceiptReadResult.Candidate(state) with
+                var origin = EvidenceReceiptPayload.ReadOriginMetadata(payload, state);
+                return proposed with
                 {
                     Result = origin.Result,
                     OriginPlan = origin.Plan,
@@ -313,7 +303,7 @@ internal sealed class EvidenceReceiptStore
                     OriginElapsedMilliseconds = origin.Result.ElapsedMilliseconds
                 };
             }
-            catch (ReceiptMetadataException exception)
+            catch (EvidenceReceiptPayload.ReceiptMetadataException exception)
             {
                 var reason = exception.Reason switch
                 {
@@ -331,6 +321,22 @@ internal sealed class EvidenceReceiptStore
         { return EvidenceReceiptReadResult.Unavailable("foreign-or-unsupported-state-preserved"); }
     }
 
+    /// <summary>Classifies an authority snapshot before any receipt payload is opened.</summary>
+    /// <remarks>Ownership and quarantine take precedence over age and payload eligibility.
+    /// The clock is read only when age is relevant. An age refusal retains the snapshot.</remarks>
+    private static EvidenceReceiptReadResult ClassifyAuthority(EvidenceReceiptState? state, TimeProvider clock)
+    {
+        if (state is null) return EvidenceReceiptReadResult.Miss("missing");
+        if (state.InFlightExecutionId is not null) return EvidenceReceiptReadResult.Unavailable("unresolved-execution");
+        if (state.AuditIntentExecutionId is not null || state.AuditMismatch) return EvidenceReceiptReadResult.Miss("audit-quarantined");
+        if (state.OriginCompletedAt is { } completedAt
+            && EvidenceReceiptRetention.GetAgeMissReason(completedAt, clock.GetUtcNow()) is { } ageMissReason)
+            return EvidenceReceiptReadResult.Miss(ageMissReason, state);
+        if (state.PayloadDirectoryName is null || state.PassedProducerRecord is null || state.OriginManifestDigest is null)
+            return EvidenceReceiptReadResult.Miss("no-passed-receipt");
+        return EvidenceReceiptReadResult.Candidate(state);
+    }
+
     /// <summary>Finds the latest verified same-producer origin for a bounded read-only difference explanation.</summary>
     /// <param name="producerId">The stable producer ID from the current plan.</param>
     /// <param name="currentIdentity">The current hash-only identity computed before execution.</param>
@@ -344,7 +350,7 @@ internal sealed class EvidenceReceiptStore
             return EvidenceReceiptComparableResult.Unavailable("repository-namespace-mismatch");
         try
         {
-            var current = EvidenceReceiptInputIdentity.Create(currentIdentity);
+            var (current, _) = EvidenceReceiptInputIdentity.Create(currentIdentity);
             var candidates = EvidenceReceiptQuota.ReadComparable(_root, _namespace, producerId, _clock.GetUtcNow(),
                 readOnly: _readOnly);
             foreach (var candidate in candidates)
@@ -373,74 +379,6 @@ internal sealed class EvidenceReceiptStore
         { return EvidenceReceiptComparableResult.Unavailable("receipt-index-unavailable"); }
     }
 
-    /// <summary>Reads and binds the canonical origin metadata without changing receipt state or touching artifacts.</summary>
-    private static ReceiptOriginMetadata ReadOriginMetadata(CoverageRunOutputLease payload, EvidenceReceiptState state)
-    {
-        var resultBytes = ReadBoundedFile(payload, "passed-producer.json", 64 * 1024);
-        if (!DecodePassedProducerRecord(state.PassedProducerRecord).AsSpan().SequenceEqual(resultBytes))
-            throw new ReceiptMetadataException("passed-producer-record-invalid");
-
-        var manifestBytes = ReadBoundedFile(payload, "origin.manifest.json", 4 * 1024 * 1024);
-        var result = EvidenceCanonicalJson.Deserialize<EvidenceProducerResult>(resultBytes);
-        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(manifestBytes);
-        var planBytes = ReadBoundedFile(payload, "origin.plan.json", 4 * 1024 * 1024);
-        var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(planBytes);
-
-        EvidenceReceiptInputIdentity? inputIdentity = null;
-        if (state.InputIdentityDigest is not null)
-        {
-            var identityBytes = ReadBoundedFile(payload, "identity.json", EvidenceProducerIdentityBuilder.MaximumMetadataBytes);
-            if (!StringComparer.Ordinal.Equals(EvidenceDigest.Sha256(identityBytes), state.InputIdentityDigest))
-                throw new ReceiptMetadataException("input-identity-digest-invalid");
-            inputIdentity = EvidenceCanonicalJson.Deserialize<EvidenceReceiptInputIdentity>(identityBytes);
-            inputIdentity.Validate();
-            if (!identityBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(inputIdentity)))
-                throw new ReceiptMetadataException("input-identity-noncanonical");
-        }
-
-        if (!resultBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(result))
-            || !manifestBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(manifest))
-            || !planBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(plan))
-            || !EvidenceManifestBuilder.Verify(plan, manifest)
-            || !StringComparer.Ordinal.Equals(manifest.ManifestDigest, state.OriginManifestDigest))
-            throw new ReceiptMetadataException("origin-binding-invalid");
-
-        if (result.Outcome != EvidenceProducerOutcome.Passed
-            || !manifest.ProducerResults.Any(item => item.ProducerId == result.ProducerId
-                && resultBytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(item))))
-            throw new ReceiptMetadataException("passed-producer-invalid");
-
-        return new ReceiptOriginMetadata(plan, manifest, result, inputIdentity);
-    }
-
-    /// <summary>The verified origin data shared by inspection and restoration.</summary>
-    private sealed record ReceiptOriginMetadata(EvidencePlan Plan, EvidenceManifest Manifest,
-        EvidenceProducerResult Result, EvidenceReceiptInputIdentity? InputIdentity);
-
-    /// <summary>A metadata refusal that inspection and leased restoration handle according to their ownership rules.</summary>
-    private sealed class ReceiptMetadataException(string reason) : Exception
-    {
-        internal string Reason { get; } = reason;
-    }
-
-    private static byte[] ReadBoundedFile(CoverageRunOutputLease root, string name, int maximumBytes)
-    {
-        using var stream = root.OpenArtifactFile(name, false);
-        if (stream.Length < 0 || stream.Length > maximumBytes) throw new InvalidDataException("Receipt document exceeds its bound.");
-        using var memory = new MemoryStream((int)stream.Length);
-        stream.CopyTo(memory);
-        return memory.ToArray();
-    }
-
-    private static byte[] DecodePassedProducerRecord(string? encoded)
-    {
-        if (encoded is null || encoded.Length > MaximumStateBytes)
-            throw new InvalidDataException("Passed producer authority record is missing or over its encoded bound.");
-        var bytes = Convert.FromBase64String(encoded);
-        if (bytes.Length > 64 * 1024) throw new InvalidDataException("Passed producer authority record exceeds its byte bound.");
-        return bytes;
-    }
-
     private static void ValidateHash(string value, string parameter)
     {
         if (value is null || value.Length != 64 || value.Any(c => !Uri.IsHexDigit(c)))
@@ -450,8 +388,6 @@ internal sealed class EvidenceReceiptStore
     /// <summary>Owns one key directory and its native operation lease.</summary>
     internal sealed class EvidenceReceiptKeyLease : IDisposable
     {
-        private const int MaximumPayloadFiles = 256;
-        private const int MaximumPayloadBytes = (int)EvidenceArtifactWriter.MaximumTotalArtifactBytes;
         private readonly string directory;
         private readonly string storeRoot;
         private readonly string repositoryNamespace;
@@ -497,7 +433,7 @@ internal sealed class EvidenceReceiptStore
             var state = ReadState() ?? new EvidenceReceiptState(SchemaVersion, Key, null, null, null, null, null);
             if (state.InFlightExecutionId is not null)
                 throw new InvalidOperationException("An unresolved execution authority already blocks this key.");
-            if (expectedAssertions is not null && Encoding.UTF8.GetByteCount(expectedAssertions) > 4096)
+            if (!EvidenceReceiptState.AreAuditAssertionsWithinLimit(expectedAssertions))
                 throw new InvalidDataException("Expected audit assertions exceed their bound.");
             var quarantined = state.AuditIntentExecutionId is not null || state.AuditMismatch;
             if (quarantined && !auditIntent && !allowQuarantinedFresh)
@@ -527,7 +463,7 @@ internal sealed class EvidenceReceiptStore
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
             ArgumentNullException.ThrowIfNull(expectedAssertions);
-            if (Encoding.UTF8.GetByteCount(expectedAssertions) > 4096)
+            if (!EvidenceReceiptState.AreAuditAssertionsWithinLimit(expectedAssertions))
                 throw new InvalidDataException("Expected audit assertions exceed their bound.");
             var state = ReadState() ?? throw new InvalidOperationException("Audit intent must be established before recording a mismatch.");
             if (!StringComparer.Ordinal.Equals(state.AuditIntentExecutionId, executionId))
@@ -537,22 +473,7 @@ internal sealed class EvidenceReceiptStore
 
         /// <summary>Returns the currently admissible receipt candidate without changing LRU metadata.</summary>
         /// <remarks>Pending intent, mismatch quarantine, or unresolved execution authority always denies reuse.</remarks>
-        internal EvidenceReceiptReadResult ProposeReadReceipt()
-        {
-            var state = ReadState();
-            if (state is null) return EvidenceReceiptReadResult.Miss("missing");
-            if (state.InFlightExecutionId is not null) return EvidenceReceiptReadResult.Unavailable("unresolved-execution");
-            if (state.AuditIntentExecutionId is not null || state.AuditMismatch) return EvidenceReceiptReadResult.Miss("audit-quarantined");
-            if (state.OriginCompletedAt is { } completedAt)
-            {
-                var age = clock.GetUtcNow() - completedAt;
-                if (age < TimeSpan.Zero) return EvidenceReceiptReadResult.Miss("origin-time-in-future", state);
-                if (age >= TimeSpan.FromDays(7)) return EvidenceReceiptReadResult.Miss("origin-expired", state);
-            }
-            if (state.PayloadDirectoryName is null || state.PassedProducerRecord is null || state.OriginManifestDigest is null)
-                return EvidenceReceiptReadResult.Miss("no-passed-receipt");
-            return EvidenceReceiptReadResult.Candidate(state);
-        }
+        internal EvidenceReceiptReadResult ProposeReadReceipt() => ClassifyAuthority(ReadState(), clock);
 
         /// <summary>Verifies a complete origin receipt and restores its artifacts through the bounded writer.</summary>
         /// <param name="producer">Current declaration that must exactly match the origin plan.</param>
@@ -576,49 +497,16 @@ internal sealed class EvidenceReceiptStore
             var state = proposed.State!;
             try
             {
-                var payload = OpenPayload(state.PayloadDirectoryName!);
-                using (payload.Root)
+                using (var payload = EvidenceReceiptPayload.Open(directory, state.PayloadDirectoryName!))
                 {
-                    var rootEntries = payload.Root.EnumerateArtifactEntries(8);
-                    var names = rootEntries.Select(static entry => entry.Name).ToHashSet(StringComparer.Ordinal);
-                    var requiredNames = new HashSet<string>(["origin.plan.json", "origin.manifest.json", "passed-producer.json", "artifacts"], StringComparer.Ordinal);
-                    if (state.InputIdentityDigest is not null) requiredNames.Add("identity.json");
-                    if (!names.SetEquals(requiredNames)
-                        || rootEntries.Single(static entry => entry.Name == "artifacts").IsDirectory is false
-                        || rootEntries.Where(static entry => entry.Name != "artifacts").Any(static entry => entry.IsDirectory))
-                        throw new InvalidOwnedReceiptException("payload-container-invalid");
-                    var origin = ReadOriginMetadata(payload.Root, state);
-                    if (state.OriginCompletedAt is null)
-                        throw new InvalidOwnedReceiptException("origin-binding-invalid");
-
-                    var declaration = origin.Plan.Profile.Producers.SingleOrDefault(item => item.Id == producer.Id);
-                    var originResult = origin.Manifest.ProducerResults.SingleOrDefault(item => item.ProducerId == producer.Id);
-                    if (declaration is null || originResult is null || origin.Result.ProducerId != producer.Id
-                        || !StringComparer.Ordinal.Equals(
-                            EvidenceProducerIdentityBuilder.CanonicalDeclarationHash(declaration),
-                            EvidenceProducerIdentityBuilder.CanonicalDeclarationHash(producer))
-                        || !EvidenceArtifactValidation.AreValid(producer, originResult.Artifacts))
-                        throw new InvalidOwnedReceiptException("passed-producer-invalid");
-
-                    var artifacts = originResult.Artifacts ?? [];
-                    VerifyArtifacts(payload.Root, artifacts, cancellationToken);
-                    if (producer.Kind.Equals("coverage", StringComparison.OrdinalIgnoreCase))
-                        ValidateCoverageReceiptInventory(producer, artifacts,
-                            Path.Combine(storeRoot, repositoryNamespace, Key, state.PayloadDirectoryName!, "artifacts"), cancellationToken);
+                    var (origin, completedAt) = await EvidenceReceiptPayload.VerifyForRestoreAsync(payload, state, producer,
+                        cancellationToken).ConfigureAwait(false);
+                    var originResult = origin.Result;
                     try
                     {
-                        using var artifactRoot = OpenSubdirectory(payload.Root, "artifacts");
-                        foreach (var artifact in artifacts.OrderBy(static item => item.LogicalName, StringComparer.Ordinal)
-                                     .ThenBy(static item => item.RelativePath, StringComparer.Ordinal))
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            using var opened = OpenRelativeFile(artifactRoot, artifact.RelativePath, requirePrivate: true);
-                            var restored = await writer.WriteAsync(artifact.LogicalName, artifact.RelativePath,
-                                opened.Stream, cancellationToken).ConfigureAwait(false);
-                            if (!ArtifactMetadataEquals(restored, artifact))
-                                throw new InvalidOwnedReceiptException("restore-artifact-changed-during-copy");
-                        }
-                        if (!await writer.VerifyWrittenArtifactsAsync(cancellationToken).ConfigureAwait(false))
+                        using var artifactRoot = EvidenceReceiptPayload.OpenArtifacts(payload);
+                        if (!await EvidenceReceiptPayload.RestoreArtifactsAsync(artifactRoot, originResult.Artifacts ?? [],
+                                writer, cancellationToken).ConfigureAwait(false))
                             return EvidenceReceiptReadResult.Miss("restore-artifact-verification-failed", state);
 
                         RecordSuccessfulUse(clock.GetUtcNow());
@@ -636,20 +524,20 @@ internal sealed class EvidenceReceiptStore
                         ElapsedMilliseconds = 0,
                         ProducerKey = Key,
                         OriginManifestDigest = origin.Manifest.ManifestDigest,
-                        OriginCompletedAt = state.OriginCompletedAt,
+                        OriginCompletedAt = completedAt,
                         Diagnostic = producer.Kind.Equals("coverage", StringComparison.OrdinalIgnoreCase)
                             ? "Coverage report: coverage/coverage-gate.md (relative to the producer artifact root)."
                             : originResult.Diagnostic
                     };
                     return EvidenceReceiptReadResult.Restored(reused, origin.Plan, origin.Manifest,
-                        state.OriginCompletedAt.Value, origin.InputIdentity, originResult.ElapsedMilliseconds);
+                        completedAt, origin.InputIdentity, originResult.ElapsedMilliseconds);
                 }
             }
-            catch (ReceiptMetadataException exception)
+            catch (EvidenceReceiptPayload.ReceiptMetadataException exception)
             {
                 return InvalidateOwned(state, exception.Reason);
             }
-            catch (InvalidOwnedReceiptException exception)
+            catch (EvidenceReceiptPayload.InvalidOwnedReceiptException exception)
             {
                 // All validation/restore handles have unwound before native payload deletion.
                 return InvalidateOwned(state, exception.Reason);
@@ -737,7 +625,7 @@ internal sealed class EvidenceReceiptStore
             try
             {
                 var commits = staged.Select(stage => new EvidenceReceiptBatchCommit(repositoryNamespace, stage.Lease.Key,
-                    stage.ProducerId, executionId, stage.NextState, stage.StateBytes, stage.PayloadName, stage.CompletedAt,
+                    stage.ProducerId, executionId, stage.NextState, stage.PayloadName, stage.CompletedAt,
                     stage.PayloadBytes, stage.ReservationBytes, stage.Lease.EssentialReservationId)).ToArray();
                 beforeAuthorityCommitForTests?.Invoke();
                 EvidenceReceiptQuota.CommitInvocation(storeRoot, commits);
@@ -815,19 +703,18 @@ internal sealed class EvidenceReceiptStore
                 if (EvidenceReceiptStore.IsWithin(sourceRoot, storeRoot) || EvidenceReceiptStore.IsWithin(storeRoot, sourceRoot))
                     return StagePublicationOutcome.Refused("source-root-overlaps-receipt-store");
                 var artifacts = result.Artifacts ?? [];
-                await VerifySourceArtifactsAsync(sourceRoot, artifacts, cancellationToken).ConfigureAwait(false);
-                if (producer.Kind.Equals("coverage", StringComparison.OrdinalIgnoreCase))
-                    ValidateCoverageReceiptInventory(producer, artifacts, sourceRoot, cancellationToken);
+                await EvidenceReceiptPayload.VerifySourceArtifactsAsync(sourceRoot, producer, artifacts,
+                    cancellationToken).ConfigureAwait(false);
                 var planBytes = EvidenceCanonicalJson.Serialize(originPlan);
                 var manifestBytes = EvidenceCanonicalJson.Serialize(originManifest);
                 var producerBytes = EvidenceCanonicalJson.Serialize(result);
-                // The authority reader bounds the Base64 producer record to MaximumStateBytes characters.
+                // The authority reader bounds the Base64 producer record by its encoded-character limit.
                 // Bound the raw bytes before reserving payload capacity or creating a staging directory.
-                if (producerBytes.Length > MaximumStateBytes / 4 * 3)
+                if (producerBytes.Length > EvidenceReceiptState.MaximumPassedProducerBase64Characters / 4 * 3)
                     return StagePublicationOutcome.Refused("producer-result-too-large");
-                var identity = request.Identity is null
-                    ? EvidenceReceiptInputIdentity.Create(request.ComponentHashes, request.Files)
-                    : EvidenceReceiptInputIdentity.Create(request.Identity);
+                var identityBytes = request.Identity is null
+                    ? Array.Empty<byte>()
+                    : EvidenceReceiptInputIdentity.Create(request.Identity).CanonicalBytes;
                 if (request.Identity is not null)
                 {
                     if (request.Identity.Key != Key || request.Identity.RepositoryNamespace != repositoryNamespace)
@@ -835,14 +722,12 @@ internal sealed class EvidenceReceiptStore
                 }
                 if (request.CompletedAt > clock.GetUtcNow())
                     throw new InvalidDataException("Receipt origin completion time is in the future.");
-                var identityBytes = identity is null ? [] : EvidenceCanonicalJson.Serialize(identity);
-                if (identityBytes.Length > EvidenceProducerIdentityBuilder.MaximumMetadataBytes)
-                    throw new InvalidDataException("Receipt input identity exceeds its encoded-byte bound.");
+                var documents = new EvidenceReceiptPayload.ReceiptDocumentBytes(planBytes, manifestBytes, producerBytes, identityBytes);
                 var reservation = EvidenceReceiptQuota.EstimatePayloadReservation(artifacts.Sum(static artifact => artifact.LengthBytes),
                     planBytes.Length, manifestBytes.Length, producerBytes.Length, identityBytes.Length, artifacts.Count);
                 var reservationId = Guid.NewGuid().ToString("N");
-                var stageName = "payload-stage-" + reservationId;
-                var payloadName = "payload-" + reservationId;
+                var stageName = EvidenceReceiptPayloadNames.Stage(reservationId);
+                var payloadName = EvidenceReceiptPayloadNames.Final(reservationId);
                 if (!EvidenceReceiptQuota.TryReservePayload(storeRoot, repositoryNamespace, Key, reservation, clock.GetUtcNow(),
                         reservationId, stageName, payloadName))
                     return StagePublicationOutcome.Refused("payload-quota-full");
@@ -854,19 +739,9 @@ internal sealed class EvidenceReceiptStore
                     using (var stage = keyRoot.CreateArtifactDirectory(stageName))
                     {
                         stageIdentity = stage.ArtifactDirectoryIdentity;
-                        WriteImmediate(stage, "origin.plan.json", planBytes, 4 * 1024 * 1024);
-                        WriteImmediate(stage, "origin.manifest.json", manifestBytes, 4 * 1024 * 1024);
-                        WriteImmediate(stage, "passed-producer.json", producerBytes, 64 * 1024);
-                        if (identityBytes.Length != 0) WriteImmediate(stage, "identity.json", identityBytes, EvidenceProducerIdentityBuilder.MaximumMetadataBytes);
-                        using var artifactsRoot = stage.CreateArtifactDirectory("artifacts");
-                        foreach (var artifact in artifacts.OrderBy(static item => item.RelativePath, StringComparer.Ordinal))
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            beforeArtifactCopyForTests?.Invoke(request, artifact);
-                            await CopySourceArtifactToStageAsync(sourceRoot, artifactsRoot, artifact, cancellationToken).ConfigureAwait(false);
-                        }
-                        VerifyArtifacts(stage, artifacts, cancellationToken);
-                        VerifyStagedPayload(stage, artifacts);
+                        await EvidenceReceiptPayload.WriteStageAsync(stage, sourceRoot, documents, artifacts,
+                            beforeArtifactCopyForTests is null ? null : artifact => beforeArtifactCopyForTests(request, artifact),
+                            cancellationToken).ConfigureAwait(false);
                     }
                     cancellationToken.ThrowIfCancellationRequested();
                     using var destination = CoverageRunOutputLease.AcquireArtifactDirectory(directory, false, true)
@@ -886,13 +761,12 @@ internal sealed class EvidenceReceiptStore
                         LastSuccessfulUse = null,
                         AuditMismatch = false,
                         AuditExpectedAssertions = null,
-                        InputIdentityDigest = identityBytes.Length == 0 ? null : Hash(identityBytes)
+                        InputIdentityDigest = identityBytes.Length == 0 ? null : EvidenceDigest.Sha256(identityBytes)
                     };
-                    var encodedStateBytes = JsonSerializer.SerializeToUtf8Bytes(next).Length;
-                    if (encodedStateBytes > MaximumStateBytes)
+                    if (JsonSerializer.SerializeToUtf8Bytes(next).Length > EvidenceReceiptState.MaximumSerializedBytes)
                         throw new IOException("Serialized receipt authority exceeds its encoded-byte bound.");
                     return StagePublicationOutcome.Ready(new(this, request.ProducerId, payloadName, request.CompletedAt,
-                        reservationId, reservation, payloadBytes, encodedStateBytes, next, state, state.PayloadDirectoryName));
+                        reservationId, reservation, payloadBytes, next, state));
                 }
                 catch
                 {
@@ -935,11 +809,12 @@ internal sealed class EvidenceReceiptStore
                 using var root = CoverageRunOutputLease.AcquireArtifactDirectory(keyDirectory, false, true);
                 if (root is null) return false;
                 if (recoverCommittedStage) return EvidenceReceiptQuota.DeleteOwnedPayloadIfPresent(root, name, identity);
-                var item = root.EnumerateArtifactEntries(MaximumPayloadFiles * 4 + 8).SingleOrDefault(entry => entry.Name == name);
+                var item = root.EnumerateArtifactEntries(EvidenceReceiptPayload.MaximumScannedEntries)
+                    .SingleOrDefault(entry => entry.Name == name);
                 if (item is null) return true;
                 if (item is not { IsDirectory: true }) return false;
-                root.DeleteArtifactEntry(name, MaximumPayloadFiles * 4 + 8, identity ?? item.Identity);
-                return root.EnumerateArtifactEntries(MaximumPayloadFiles * 4 + 8).All(entry => entry.Name != name);
+                root.DeleteArtifactEntry(name, EvidenceReceiptPayload.MaximumScannedEntries, identity ?? item.Identity);
+                return root.EnumerateArtifactEntries(EvidenceReceiptPayload.MaximumScannedEntries).All(entry => entry.Name != name);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or NotSupportedException)
             { return false; }
@@ -979,19 +854,13 @@ internal sealed class EvidenceReceiptStore
         }
 
         private sealed record StagedReceiptPublication(EvidenceReceiptKeyLease Lease, string ProducerId,
-            string PayloadName, DateTimeOffset CompletedAt, string ReservationId, long ReservationBytes, long PayloadBytes, int StateBytes,
-            EvidenceReceiptState NextState, EvidenceReceiptState PreviousState, string? PreviousPayloadName);
+            string PayloadName, DateTimeOffset CompletedAt, string ReservationId, long ReservationBytes, long PayloadBytes,
+            EvidenceReceiptState NextState, EvidenceReceiptState PreviousState);
 
         private sealed record StagePublicationOutcome(StagedReceiptPublication? Stage, EvidenceReceiptPublicationResult? Result)
         {
             internal static StagePublicationOutcome Ready(StagedReceiptPublication stage) => new(stage, null);
             internal static StagePublicationOutcome Refused(string reason) => new(null, EvidenceReceiptPublicationResult.Refused(reason));
-        }
-
-        /// <summary>Carries a typed validation miss outside open payload handles before invalidation.</summary>
-        private sealed class InvalidOwnedReceiptException(string reason) : Exception
-        {
-            internal string Reason { get; } = reason;
         }
 
         private EvidenceReceiptReadResult InvalidateOwned(EvidenceReceiptState state, string reason)
@@ -1019,387 +888,21 @@ internal sealed class EvidenceReceiptStore
             return EvidenceReceiptReadResult.Miss(reason);
         }
 
-        private (CoverageRunOutputLease Root, string Path) OpenPayload(string payloadName)
-        {
-            CoverageRunOutputLease.ValidateArtifactComponent(payloadName);
-            if (!payloadName.StartsWith("payload-", StringComparison.Ordinal)) throw new InvalidDataException("Receipt payload name is not owned.");
-            var path = Path.Combine(directory, payloadName);
-            return (CoverageRunOutputLease.AcquireArtifactDirectory(path, false, true)
-                ?? throw new DirectoryNotFoundException("Receipt payload is missing."), path);
-        }
-
-        private static void WriteImmediate(CoverageRunOutputLease root, string name, byte[] bytes, int maximumBytes)
-        {
-            if (bytes.Length > maximumBytes) throw new InvalidDataException("Receipt document exceeds its bound.");
-            using var output = root.OpenArtifactFile(name, true);
-            output.Write(bytes);
-            output.Flush(flushToDisk: true);
-        }
-
-        private static void VerifyArtifacts(CoverageRunOutputLease payload,
-            IReadOnlyList<EvidenceArtifactResult> artifacts, CancellationToken cancellationToken)
-        {
-            ValidateInventoryBounds(artifacts);
-            using var artifactsRoot = OpenSubdirectory(payload, "artifacts");
-            long total = 0;
-            foreach (var artifact in artifacts)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var (length, digest) = HashRelative(artifactsRoot, artifact.RelativePath, artifact.LengthBytes,
-                    requirePrivate: true, cancellationToken);
-                total = checked(total + length);
-                if (total > MaximumPayloadBytes || !StringComparer.OrdinalIgnoreCase.Equals(digest, artifact.Sha256))
-                    throw new InvalidDataException("Receipt artifact inventory digest or size differs.");
-            }
-            VerifyExactTree(artifactsRoot, artifacts.Select(static item => item.RelativePath).ToHashSet(StringComparer.Ordinal));
-        }
-
-        /// <summary>Verifies every declared artifact before optional receipt custody is staged.</summary>
-        /// <param name="sourceRoot">Execution report root; it need not exist when the complete inventory is empty.</param>
-        /// <param name="artifacts">Complete result inventory, already checked against the producer's slot declarations.</param>
-        /// <param name="cancellationToken">Cancels validation before filesystem access and between streaming reads.</param>
-        /// <remarks>Empty generic inventories require no source files or directory. The caller independently checks
-        /// source/store separation, passing origin claims, coverage-specific completeness, and exact retained custody.</remarks>
-        private static async Task VerifySourceArtifactsAsync(string sourceRoot,
-            IReadOnlyList<EvidenceArtifactResult> artifacts, CancellationToken cancellationToken)
-        {
-            ValidateInventoryBounds(artifacts);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (artifacts.Count == 0) return;
-            using var root = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetFullPath(sourceRoot), false, false)
-                ?? throw new DirectoryNotFoundException("Producer artifact root is unavailable.");
-            long total = 0;
-            foreach (var artifact in artifacts)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var (length, digest) = await HashRelativeAsync(root, artifact.RelativePath, artifact.LengthBytes,
-                    requirePrivate: false, cancellationToken).ConfigureAwait(false);
-                total = checked(total + length);
-                if (total > MaximumPayloadBytes || !StringComparer.OrdinalIgnoreCase.Equals(digest, artifact.Sha256))
-                    throw new InvalidDataException("Source artifact inventory digest or size differs.");
-            }
-            // Source roots may also contain invocation plans and original execution output. Only the
-            // declared writer inventory is copied; the staged/retained receipt tree must be exact.
-        }
-
-        private static (long Length, string Digest) HashRelative(CoverageRunOutputLease root, string relativePath,
-            long expectedLength, bool requirePrivate, CancellationToken cancellationToken)
-        {
-            using var opened = OpenRelativeFile(root, relativePath, requirePrivate);
-            return HashStream(opened.Stream, expectedLength, cancellationToken);
-        }
-
-        private static async Task<(long Length, string Digest)> HashRelativeAsync(CoverageRunOutputLease root,
-            string relativePath, long expectedLength, bool requirePrivate, CancellationToken cancellationToken)
-        {
-            using var opened = OpenRelativeFile(root, relativePath, requirePrivate);
-            if (expectedLength < 0 || expectedLength > MaximumPayloadBytes || opened.Stream.Length != expectedLength)
-                throw new InvalidDataException("Artifact length differs from its manifest.");
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer = new byte[64 * 1024];
-            long length = 0;
-            while (true)
-            {
-                var count = await opened.Stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                if (count == 0) break;
-                length = checked(length + count);
-                if (length > expectedLength) throw new InvalidDataException("Artifact grew during read.");
-                hash.AppendData(buffer, 0, count);
-            }
-            if (length != expectedLength) throw new InvalidDataException("Artifact changed during read.");
-            return (length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
-        }
-
-        /// <summary>Hashes an exact-length receipt stream using bounded reads without taking stream ownership.</summary>
-        /// <param name="input">Caller-owned readable stream exposing its length, at the beginning of its declared artifact bytes.</param>
-        /// <param name="expectedLength">Manifest length, from zero through the 256-MiB payload bound.</param>
-        /// <param name="cancellationToken">Checked before each read, including the final end-of-stream observation.</param>
-        /// <returns>The observed length and lower-case SHA-256 after exact-length end-of-stream verification.</returns>
-        /// <remarks>
-        /// This internal validation boundary is intentionally exposed for contract tests without reflection.
-        /// It checks the initial length and refuses either growth or truncation while streaming in at most 64-KiB reads.
-        /// The caller retains the stream, its position, and responsibility for disposal on success and failure.
-        /// </remarks>
-        /// <exception cref="InvalidDataException">The manifest length is outside its bound or the stream differs from it.</exception>
-        /// <exception cref="OperationCanceledException">The caller cancelled a read boundary.</exception>
-        internal static (long Length, string Digest) HashStream(Stream input, long expectedLength,
-            CancellationToken cancellationToken)
-        {
-            if (expectedLength < 0 || expectedLength > MaximumPayloadBytes || input.Length != expectedLength)
-                throw new InvalidDataException("Artifact length differs from its manifest.");
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer = new byte[64 * 1024];
-            long length = 0;
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var count = input.Read(buffer, 0, buffer.Length);
-                if (count == 0) break;
-                length = checked(length + count);
-                if (length > expectedLength) throw new InvalidDataException("Artifact grew during read.");
-                hash.AppendData(buffer, 0, count);
-            }
-            if (length != expectedLength) throw new InvalidDataException("Artifact changed during read.");
-            return (length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
-        }
-
-        private static async Task CopySourceArtifactToStageAsync(string sourceRoot, CoverageRunOutputLease stageRoot,
-            EvidenceArtifactResult expected, CancellationToken cancellationToken)
-        {
-            using var source = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetFullPath(sourceRoot), false, false)
-                ?? throw new DirectoryNotFoundException("Producer artifact root is unavailable.");
-            using var opened = OpenRelativeFile(source, expected.RelativePath, requirePrivate: false);
-            using var destination = OpenRelativeOutput(stageRoot, expected.RelativePath);
-            if (opened.Stream.Length != expected.LengthBytes)
-                throw new InvalidDataException("Source artifact length changed before staging.");
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer = new byte[64 * 1024];
-            long length = 0;
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var count = await opened.Stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                if (count == 0) break;
-                length = checked(length + count);
-                if (length > expected.LengthBytes) throw new InvalidDataException("Source artifact grew during staging.");
-                hash.AppendData(buffer, 0, count);
-                await destination.Stream.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
-            }
-            if (length != expected.LengthBytes
-                || !StringComparer.OrdinalIgnoreCase.Equals(Convert.ToHexString(hash.GetHashAndReset()), expected.Sha256))
-                throw new InvalidDataException("Source artifact changed during staging.");
-            await destination.Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            destination.Stream.Flush(flushToDisk: true);
-        }
-
-        private static bool ArtifactMetadataEquals(EvidenceArtifactResult actual, EvidenceArtifactResult expected)
-            => actual.LogicalName == expected.LogicalName && actual.RelativePath == expected.RelativePath
-                && actual.MediaType == expected.MediaType && actual.LengthBytes == expected.LengthBytes
-                && StringComparer.OrdinalIgnoreCase.Equals(actual.Sha256, expected.Sha256);
-
-        private static void ValidateInventoryBounds(IReadOnlyList<EvidenceArtifactResult> artifacts)
-        {
-            if (artifacts.Count > MaximumPayloadFiles || !artifacts.Select(static item => item.RelativePath)
-                    .Distinct(StringComparer.OrdinalIgnoreCase).Count().Equals(artifacts.Count))
-                throw new InvalidDataException("Receipt artifact inventory exceeds its bound or contains duplicate paths.");
-            var components = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var artifact in artifacts)
-            {
-                try { _ = EvidenceArtifactValidation.NormalizePortableRelativePath(artifact.RelativePath); }
-                catch (ArgumentException exception) { throw new InvalidDataException("Receipt artifact path is not portable.", exception); }
-                var parts = artifact.RelativePath.Split('/');
-                // The payload's artifacts container adds one directory to the exact-tree depth.
-                if (parts.Length > 32) throw new InvalidDataException("Receipt artifact path exceeds its depth bound.");
-                var prefix = string.Empty;
-                foreach (var part in parts)
-                {
-                    prefix = prefix.Length == 0 ? part : prefix + "/" + part;
-                    if (components.TryGetValue(prefix, out var spelling) && spelling != prefix)
-                        throw new InvalidDataException("Receipt artifact paths have colliding component spellings.");
-                    components[prefix] = prefix;
-                }
-            }
-            // Four metadata files and the artifacts container also consume exact-tree entries.
-            if (components.Count + 5 > MaximumPayloadFiles * 4)
-                throw new InvalidDataException("Receipt artifact tree exceeds its bounded entry count.");
-        }
-
-        private static void ValidateCoverageReceiptInventory(EvidenceProducerDeclaration producer,
-            IReadOnlyList<EvidenceArtifactResult> artifacts, string artifactRoot, CancellationToken cancellationToken)
-        {
-            var slot = producer.ArtifactSlots.SingleOrDefault(item => item.LogicalName == CoverageEvidenceInventory.LogicalName);
-            if (slot is null || slot.RelativeRoot != "coverage" || slot.MaximumFiles is null
-                || slot.MaximumFiles > CoverageEvidenceInventory.MaximumFiles)
-                throw new CoverageEvidenceInventoryException("inventory-slot-ineligible");
-
-            var files = artifacts.Where(item => item.LogicalName == CoverageEvidenceInventory.LogicalName)
-                .Select(item => new CoverageEvidenceInventoryFile(item.RelativePath, item.LengthBytes, item.Sha256))
-                .OrderBy(item => item.RelativePath, StringComparer.Ordinal).ToArray();
-            if (files.Length == 0 || files.Length > slot.MaximumFiles || files.Length > CoverageEvidenceInventory.MaximumFiles
-                || files.Sum(file => file.LengthBytes) > slot.MaximumBytes)
-                throw new CoverageEvidenceInventoryException("inventory-required-file-missing");
-
-            var inventory = new CoverageEvidenceInventory(CoverageEvidenceInventory.CurrentVersion, files);
-            inventory.Validate(artifactRoot, cancellationToken);
-            var names = files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal);
-            foreach (var required in new[]
-                { "coverage/coverage.cobertura.xml", "coverage/coverage-gate.json", "coverage/coverage-gate.md", "coverage/timings.json", "coverage/summary.txt" })
-                if (!names.Contains(required)) throw new CoverageEvidenceInventoryException("inventory-required-file-missing");
-
-            using var timings = CoverageRunArtifactReader.OpenRegularFile(Path.GetFullPath(artifactRoot),
-                Path.Combine(Path.GetFullPath(artifactRoot), "coverage"),
-                Path.Combine(Path.GetFullPath(artifactRoot), "coverage", "timings.json"));
-            if (timings.Length > CoverageEvidenceInventory.MaximumMetadataBytes)
-                throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
-            using var document = JsonDocument.Parse(timings);
-            foreach (var project in document.RootElement.GetProperty("projects").EnumerateArray())
-            {
-                var slug = project.GetProperty("slug").GetString();
-                if (string.IsNullOrWhiteSpace(slug)) throw new CoverageEvidenceInventoryException("inventory-project-manifest-mismatch");
-                foreach (var required in new[]
-                    { $"coverage/projects/{slug}/{CoverageProjectManifest.FileName}", $"coverage/projects/{slug}/coverage.cobertura.xml" })
-                    if (!names.Contains(required)) throw new CoverageEvidenceInventoryException("inventory-required-file-missing");
-                foreach (var report in project.GetProperty("testResults").EnumerateArray())
-                {
-                    var path = report.GetProperty("path").GetString();
-                    if (path is null || !names.Contains("coverage/" + path))
-                        throw new CoverageEvidenceInventoryException("inventory-required-file-missing");
-                }
-            }
-        }
-
-        private static OpenedArtifactFile OpenRelativeFile(CoverageRunOutputLease root, string relativePath, bool requirePrivate)
-        {
-            var normalized = EvidenceArtifactValidation.NormalizePortableRelativePath(relativePath);
-            if (!StringComparer.Ordinal.Equals(normalized, relativePath)) throw new InvalidDataException("Artifact path is not canonical.");
-            var components = normalized.Split('/');
-            var current = root;
-            var owned = new List<CoverageRunOutputLease>();
-            try
-            {
-                for (var index = 0; index < components.Length - 1; index++)
-                {
-                    current = OpenSubdirectory(current, components[index], requirePrivate);
-                    owned.Add(current);
-                }
-                return new OpenedArtifactFile(current.OpenArtifactFile(components[^1], false, requirePrivate), owned);
-            }
-            catch
-            {
-                foreach (var item in owned.AsEnumerable().Reverse()) item.Dispose();
-                throw;
-            }
-        }
-
-        private static OpenedArtifactOutput OpenRelativeOutput(CoverageRunOutputLease root, string relativePath)
-        {
-            var components = EvidenceArtifactValidation.NormalizePortableRelativePath(relativePath).Split('/');
-            var current = root;
-            var owned = new List<CoverageRunOutputLease>();
-            try
-            {
-                for (var index = 0; index < components.Length - 1; index++)
-                {
-                    var child = GetOrCreateSubdirectory(current, components[index]);
-                    owned.Add(child);
-                    current = child;
-                }
-                return new OpenedArtifactOutput(current.OpenArtifactFile(components[^1], true), owned);
-            }
-            catch { foreach (var item in owned.AsEnumerable().Reverse()) item.Dispose(); throw; }
-        }
-
-        private static void VerifyStagedPayload(CoverageRunOutputLease stage, IReadOnlyList<EvidenceArtifactResult> artifacts)
-        {
-            var expected = artifacts.Select(static item => item.RelativePath).ToHashSet(StringComparer.Ordinal);
-            using var artifactRoot = OpenSubdirectory(stage, "artifacts");
-            VerifyExactTree(artifactRoot, expected);
-        }
-
-        /// <summary>Verifies an exact, bounded artifact-path inventory without taking ownership of the root.</summary>
-        /// <param name="root">Caller-owned native directory lease, held exclusively through verification.</param>
-        /// <param name="expectedFiles">Immutable canonical portable root-relative file paths expected in the tree.</param>
-        /// <param name="requirePrivate">Whether every opened child must retain current-user-only access.</param>
-        /// <param name="maximumTreeEntries">A stricter entry budget from one through 1,024; defaults to the production limit of 1,024.</param>
-        /// <remarks>Callers separately verify artifact hashes and lengths. Verification owns and disposes only its child leases.
-        /// A smaller per-call budget supports bounded native traversal tests without changing process file-descriptor limits.</remarks>
-        internal static void VerifyExactTree(CoverageRunOutputLease root, HashSet<string> expectedFiles, bool requirePrivate = true,
-            int maximumTreeEntries = MaximumPayloadFiles * 4)
-        {
-            ArgumentNullException.ThrowIfNull(root);
-            ArgumentNullException.ThrowIfNull(expectedFiles);
-            if (maximumTreeEntries is < 1 or > MaximumPayloadFiles * 4)
-                throw new ArgumentOutOfRangeException(nameof(maximumTreeEntries));
-            var actualFiles = new HashSet<string>(StringComparer.Ordinal);
-            var pending = new Stack<(CoverageRunOutputLease Root, string Prefix, bool Owned)>();
-            pending.Push((root, string.Empty, false));
-            var owned = new List<CoverageRunOutputLease>();
-            try
-            {
-                var entryCount = 0;
-                while (pending.TryPop(out var item))
-                {
-                    if (item.Prefix.Count(static character => character == '/') >= 32)
-                        throw new InvalidDataException("Receipt payload nesting exceeds its bound.");
-                    foreach (var entry in item.Root.EnumerateArtifactEntries(MaximumPayloadFiles * 4 + 8))
-                    {
-                        if (++entryCount > maximumTreeEntries) throw new InvalidDataException("Receipt payload tree exceeds its bound.");
-                        var path = item.Prefix.Length == 0 ? entry.Name : item.Prefix + "/" + entry.Name;
-                        if (entry.IsDirectory)
-                        {
-                            if (!expectedFiles.Any(file => file.StartsWith(path + "/", StringComparison.Ordinal)))
-                                throw new InvalidDataException("Receipt payload contains an undeclared directory.");
-                            var child = OpenSubdirectory(item.Root, entry.Name, requirePrivate);
-                            owned.Add(child);
-                            pending.Push((child, path, true));
-                        }
-                        else if (!actualFiles.Add(path)) throw new InvalidDataException("Receipt payload contains duplicate paths.");
-                    }
-                }
-                if (!actualFiles.SetEquals(expectedFiles)) throw new InvalidDataException("Receipt payload inventory differs from its manifest.");
-            }
-            finally { foreach (var item in owned.AsEnumerable().Reverse()) item.Dispose(); }
-        }
-
-        private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-
-        private static CoverageRunOutputLease OpenSubdirectory(CoverageRunOutputLease parent, string name, bool requirePrivate = true)
-        {
-            CoverageRunOutputLease.ValidateArtifactComponent(name);
-            return CoverageRunOutputLease.AcquireArtifactDirectory(Path.Combine(parent.ArtifactDirectoryPath, name), false, requirePrivate)
-                ?? throw new DirectoryNotFoundException("Receipt payload directory is missing.");
-        }
-
-        private static CoverageRunOutputLease GetOrCreateSubdirectory(CoverageRunOutputLease parent, string name)
-        {
-            try { return OpenSubdirectory(parent, name); }
-            catch (DirectoryNotFoundException) { return parent.CreateArtifactDirectory(name); }
-        }
-
-        private sealed class OpenedArtifactFile(FileStream stream, IReadOnlyList<CoverageRunOutputLease> roots) : IDisposable
-        {
-            internal FileStream Stream { get; } = stream;
-            public void Dispose()
-            {
-                Stream.Dispose();
-                foreach (var root in roots.Reverse()) root.Dispose();
-            }
-        }
-
-        private sealed class OpenedArtifactOutput(FileStream stream, IReadOnlyList<CoverageRunOutputLease> roots) : IDisposable
-        {
-            internal FileStream Stream { get; } = stream;
-            public void Dispose()
-            {
-                Stream.Dispose();
-                foreach (var root in roots.Reverse()) root.Dispose();
-            }
-        }
-
         /// <summary>Records successful use for LRU ordering after a caller has fully verified and restored the payload.</summary>
         internal void RecordSuccessfulUse(DateTimeOffset usedAt)
         {
             var state = ReadState() ?? throw new InvalidOperationException("No receipt exists to record as used.");
             if (state.AuditIntentExecutionId is not null || state.InFlightExecutionId is not null || state.PayloadDirectoryName is null)
                 throw new InvalidOperationException("Only an eligible, settled receipt can update LRU metadata.");
-            var updated = state with { LastSuccessfulUse = usedAt };
-            WriteState(updated);
-            try
-            {
-                EvidenceReceiptQuota.RecordSuccessfulUse(storeRoot, repositoryNamespace, Key, usedAt,
-                    JsonSerializer.SerializeToUtf8Bytes(updated).Length, updated);
-            }
-            catch (EvidenceReceiptQuotaUnavailableException)
-            {
-                // LRU is advisory; a receipt that was fully verified and restored remains valid if indexing is temporarily unavailable.
-            }
+            WriteState(state with { LastSuccessfulUse = usedAt });
         }
 
         private void WriteState(EvidenceReceiptState state)
         {
             Verify();
             var bytes = JsonSerializer.SerializeToUtf8Bytes(state);
-            if (bytes.Length > MaximumStateBytes) throw new IOException("Essential receipt authority capacity is unavailable.");
+            if (bytes.Length > EvidenceReceiptState.MaximumSerializedBytes)
+                throw new IOException("Essential receipt authority capacity is unavailable.");
             Verify();
             EvidenceReceiptQuota.RecordState(storeRoot, repositoryNamespace, Key, bytes.Length, state);
         }
@@ -1478,6 +981,19 @@ internal sealed record EvidenceReceiptState(int SchemaVersion, string Key, strin
     string? PayloadDirectoryName, string? PassedProducerRecord = null, DateTimeOffset? LastSuccessfulUse = null,
     bool AuditMismatch = false, string? AuditExpectedAssertions = null)
 {
+    /// <summary>Maximum UTF-8 length of the serialized authority state.</summary>
+    internal const int MaximumSerializedBytes = 64 * 1024;
+
+    /// <summary>Maximum character count of the Base64 passed-producer record inside authority state.</summary>
+    internal const int MaximumPassedProducerBase64Characters = 64 * 1024;
+
+    /// <summary>Maximum UTF-8 byte count of the persisted audit assertion identity.</summary>
+    internal const int MaximumAuditAssertionBytes = 4096;
+
+    /// <summary>Checks the audit assertion identity size, allowing an absent optional value.</summary>
+    internal static bool AreAuditAssertionsWithinLimit(string? assertions)
+        => assertions is null || Encoding.UTF8.GetByteCount(assertions) <= MaximumAuditAssertionBytes;
+
     public string? InputIdentityDigest { get; init; }
 }
 
@@ -1485,30 +1001,15 @@ internal sealed record EvidenceReceiptState(int SchemaVersion, string Key, strin
 internal sealed record EvidenceReceiptInputIdentity(IReadOnlyDictionary<string, string> ComponentHashes,
     IReadOnlyList<EvidenceReceiptInputFile> Files)
 {
+    private const int MaximumComponentHashes = 64;
     private static readonly HashSet<string> AllowedComponentNames = new(
         ["declaration", "implementation", "resources", "tools", "material", "platform", "patch", "files"], StringComparer.Ordinal);
 
-    internal static EvidenceReceiptInputIdentity? Create(IReadOnlyDictionary<string, string>? componentHashes,
-        IReadOnlyList<EvidenceReceiptInputFile>? files)
-    {
-        if (componentHashes is null && files is null) return null;
-        var components = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        if (componentHashes is not null)
-            foreach (var (name, hash) in componentHashes)
-            {
-                if (string.IsNullOrWhiteSpace(name) || name.Length > 128 || !IsHash(hash))
-                    throw new InvalidDataException("Receipt identity components must be named SHA-256 hashes only.");
-                components.Add(name, hash.ToLowerInvariant());
-            }
-        var inventory = (files ?? []).OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
-        var identity = new EvidenceReceiptInputIdentity(components, inventory);
-        identity.Validate();
-        if (EvidenceCanonicalJson.Serialize(identity).Length > EvidenceProducerIdentityBuilder.MaximumMetadataBytes)
-            throw new InvalidDataException("Receipt input identity exceeds its encoded-byte bound.");
-        return identity;
-    }
-
-    internal static EvidenceReceiptInputIdentity Create(EvidenceProducerIdentity identity)
+    /// <summary>Projects a prepared producer identity to the persisted hash-only inventory.</summary>
+    /// <param name="identity">The prepared identity whose components and files will be retained.</param>
+    /// <returns>The validated receipt identity and the same canonical bytes used for its size check.</returns>
+    /// <exception cref="InvalidDataException">The resulting inventory is invalid or exceeds its bounds.</exception>
+    internal static (EvidenceReceiptInputIdentity Identity, byte[] CanonicalBytes) Create(EvidenceProducerIdentity identity)
     {
         ArgumentNullException.ThrowIfNull(identity);
         var components = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -1516,15 +1017,16 @@ internal sealed record EvidenceReceiptInputIdentity(IReadOnlyDictionary<string, 
         var receipt = new EvidenceReceiptInputIdentity(components,
             identity.Files.Select(static file => new EvidenceReceiptInputFile(file.RelativePath, file.Sha256,
                 file.Mode, file.LengthBytes)).OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray());
-        receipt.Validate();
-        if (EvidenceCanonicalJson.Serialize(receipt).Length > EvidenceProducerIdentityBuilder.MaximumMetadataBytes)
-            throw new InvalidDataException("Receipt input identity exceeds its encoded-byte bound.");
-        return receipt;
+        return (receipt, receipt.ValidateAndEncode());
     }
 
-    internal void Validate()
+    /// <summary>Validates the inventory and returns its bounded canonical UTF-8 representation.</summary>
+    /// <remarks>Readers still compare these bytes with the bounded payload to reject noncanonical encodings.</remarks>
+    /// <returns>The bytes to compare, reserve, hash, or write.</returns>
+    /// <exception cref="InvalidDataException">An inventory field is invalid or a limit is exceeded.</exception>
+    internal byte[] ValidateAndEncode()
     {
-        if (ComponentHashes.Count > EvidenceProducerIdentityBuilder.MaximumMaterialKeys
+        if (ComponentHashes.Count > MaximumComponentHashes
             || Files.Count > EvidenceProducerIdentityBuilder.MaximumFiles
             || ComponentHashes.Any(pair => !AllowedComponentNames.Contains(pair.Key) || pair.Key.Length > 128 || !IsHash(pair.Value))
             || Files.Any(file => !IsHash(file.Sha256) || !IsValidMode(file.Mode)
@@ -1532,8 +1034,10 @@ internal sealed record EvidenceReceiptInputIdentity(IReadOnlyDictionary<string, 
                 || !EvidenceProducerIdentityBuilder.IsValidInputRelativePath(file.RelativePath))
             || Files.Select(static file => file.RelativePath).Distinct(StringComparer.Ordinal).Count() != Files.Count)
             throw new InvalidDataException("Receipt input identity is invalid or exceeds its bound.");
-        if (EvidenceCanonicalJson.Serialize(this).Length > EvidenceProducerIdentityBuilder.MaximumMetadataBytes)
+        var bytes = EvidenceCanonicalJson.Serialize(this);
+        if (bytes.Length > EvidenceProducerIdentityBuilder.MaximumMetadataBytes)
             throw new InvalidDataException("Receipt input identity exceeds its encoded-byte bound.");
+        return bytes;
     }
 
     /// <summary>
@@ -1562,13 +1066,10 @@ internal sealed record EvidenceReceiptInputFile(string RelativePath, string Sha2
 /// <param name="ProducerId">The producer whose passed result is being persisted.</param>
 /// <param name="SourceArtifactRoot">The producer's current run artifact root, read without following links.</param>
 /// <param name="CompletedAt">The origin completion time used for age eligibility.</param>
-/// <param name="ComponentHashes">Optional allowlisted component names and SHA-256 digests; raw component values are never stored.</param>
-/// <param name="Files">Optional hash-only input identity; exact relative paths are retained for explain output, while file contents and raw tool or environment values are never stored.</param>
 internal sealed record EvidenceReceiptPublicationRequest(EvidenceReceiptStore.EvidenceReceiptKeyLease Lease,
-    string ProducerId, string SourceArtifactRoot, DateTimeOffset CompletedAt,
-    IReadOnlyDictionary<string, string>? ComponentHashes = null, IReadOnlyList<EvidenceReceiptInputFile>? Files = null)
+    string ProducerId, string SourceArtifactRoot, DateTimeOffset CompletedAt)
 {
-    /// <summary>Gets an optional complete hash-only identity; preferred over the legacy hash and file arguments.</summary>
+    /// <summary>Gets the optional prepared identity whose key and namespace are bound to this receipt.</summary>
     internal EvidenceProducerIdentity? Identity { get; init; }
 }
 

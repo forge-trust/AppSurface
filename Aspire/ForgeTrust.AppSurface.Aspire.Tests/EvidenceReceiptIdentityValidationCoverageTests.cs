@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
@@ -7,18 +8,18 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
     private static readonly string Hash = new('a', 64);
 
     [Fact]
-    public void LegacyOptionalIdentityRemainsAbsentWhileSuppliedIdentityIsCanonicalized()
+    public void TypedIdentityIsCanonicalizedBeforePersistence()
     {
-        Assert.Null(EvidenceReceiptInputIdentity.Create(null, null));
         var files = new[] { new EvidenceReceiptInputFile("src/z.cs", Hash), new EvidenceReceiptInputFile("src/a.cs", Hash) };
-        var identity = EvidenceReceiptInputIdentity.Create(
-            new Dictionary<string, string> { ["tools"] = Hash.ToUpperInvariant(), ["files"] = Hash }, files)!;
+        var sourceIdentity = new EvidenceProducerIdentity(Hash, Hash,
+            files.Select(static file => new EvidenceProducerInputFile(file.RelativePath, file.Mode, file.LengthBytes, file.Sha256)).ToArray(),
+            new Dictionary<string, string> { ["tools"] = Hash, ["files"] = Hash });
+        var (identity, canonicalBytes) = EvidenceReceiptInputIdentity.Create(sourceIdentity);
 
         Assert.Equal(["files", "tools"], identity.ComponentHashes.Keys);
         Assert.Equal(Hash, identity.ComponentHashes["tools"]);
         Assert.Equal(["src/a.cs", "src/z.cs"], identity.Files.Select(file => file.RelativePath));
-        Assert.Empty(EvidenceReceiptInputIdentity.Create(null, files)!.ComponentHashes);
-        Assert.Empty(EvidenceReceiptInputIdentity.Create(new Dictionary<string, string> { ["tools"] = Hash }, null)!.Files);
+        Assert.Equal(EvidenceCanonicalJson.Serialize(identity), canonicalBytes);
     }
 
     [Theory]
@@ -27,13 +28,13 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
     [InlineData("unknown-name")]
     [InlineData("short-hash")]
     [InlineData("non-hex-hash")]
-    public void OptionalIdentityRejectsInvalidComponentMetadata(string defect)
+    public void PersistedIdentityRejectsInvalidComponentMetadata(string defect)
     {
         var name = defect switch { "empty-name" => "", "long-name" => new string('x', 129), "unknown-name" => "raw-environment-value", _ => "tools" };
         var hash = defect switch { "short-hash" => "abcd", "non-hex-hash" => new string('g', 64), _ => Hash };
 
-        Assert.Throws<InvalidDataException>(() => EvidenceReceiptInputIdentity.Create(
-            new Dictionary<string, string> { [name] = hash }, []));
+        Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(
+            new Dictionary<string, string> { [name] = hash }, []).ValidateAndEncode());
     }
 
     [Theory]
@@ -53,7 +54,7 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
         };
 
         Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(
-            new Dictionary<string, string> { ["tools"] = Hash }, files).Validate());
+            new Dictionary<string, string> { ["tools"] = Hash }, files).ValidateAndEncode());
     }
 
     [Theory]
@@ -62,13 +63,13 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
     public void PersistedInventoryCountBoundsAreCheckedBeforeAcceptingMetadata(string dimension)
     {
         var components = dimension == "components"
-            ? Enumerable.Range(0, EvidenceProducerIdentityBuilder.MaximumMaterialKeys + 1).ToDictionary(index => "component-" + index, _ => Hash)
+            ? Enumerable.Range(0, 65).ToDictionary(index => "component-" + index, _ => Hash)
             : new Dictionary<string, string>();
         var files = dimension == "files"
             ? Enumerable.Repeat(new EvidenceReceiptInputFile("src/input.cs", Hash), EvidenceProducerIdentityBuilder.MaximumFiles + 1).ToArray()
             : [];
 
-        Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(components, files).Validate());
+        Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(components, files).ValidateAndEncode());
     }
 
     [Fact]
@@ -79,7 +80,7 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
             "src/" + index + "/" + suffix, Hash, 0x81a4, 1)).ToArray();
 
         var failure = Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(
-            new Dictionary<string, string> { ["tools"] = Hash }, files).Validate());
+            new Dictionary<string, string> { ["tools"] = Hash }, files).ValidateAndEncode());
 
         Assert.Contains("encoded-byte bound", failure.Message, StringComparison.Ordinal);
     }

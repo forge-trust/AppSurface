@@ -1,16 +1,14 @@
-using System.Collections.ObjectModel;
-using System.Globalization;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
 /// <summary>Describes a bounded key-material wait without confusing a wait deadline with actual callback settlement.</summary>
-/// <param name="Material">Local raw material only when the callback completed successfully before its deadline.</param>
+/// <param name="Material">The validated snapshot when the callback and capture both completed before the deadline.</param>
 /// <param name="Settled">Whether the actual callback task has terminated.</param>
 /// <param name="CallerCancelled">Whether invocation cancellation requested this stop.</param>
 /// <param name="Reason">Stable preparation reason.</param>
 internal sealed record EvidenceProducerKeyMaterialPreparation(
-    IReadOnlyDictionary<string, string>? Material,
+    EvidenceKeyMaterialSnapshot? Material,
     bool Settled,
     bool CallerCancelled,
     string Reason)
@@ -29,7 +27,7 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
 {
     private readonly CancellationTokenSource _deadline;
     private readonly CancellationTokenSource _cancellation;
-    private readonly Task<IReadOnlyDictionary<string, string>> _actualTask;
+    private readonly Task<EvidenceKeyMaterialSnapshot> _actualTask;
     private readonly TimeSpan _cleanupTimeout;
     private readonly TimeProvider _clock;
     private readonly CancellationToken _callerCancellation;
@@ -56,7 +54,8 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
         _actualTask = Task.Run(async () =>
         {
             callbackToken.ThrowIfCancellationRequested();
-            return CaptureMaterial(await callback.GetKeyMaterialAsync(context, callbackToken).ConfigureAwait(false));
+            var material = await callback.GetKeyMaterialAsync(context, callbackToken).ConfigureAwait(false);
+            return EvidenceKeyMaterialSnapshot.Capture(material, callbackToken);
         }, callbackToken);
         _ = _actualTask.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -95,7 +94,6 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
             if (_cancellation.IsCancellationRequested)
                 return new EvidenceProducerKeyMaterialPreparation(null, true, _callerCancellation.IsCancellationRequested,
                     _callerCancellation.IsCancellationRequested ? "reuse.material_cancelled" : "reuse.material_timed_out");
-            // CaptureMaterial rejects null and returns an owned, non-null snapshot before the task completes.
             return new EvidenceProducerKeyMaterialPreparation(material, true, false, "reuse.material_ready");
         }
         catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
@@ -118,12 +116,12 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
             return new EvidenceProducerKeyMaterialPreparation(null, true, _callerCancellation.IsCancellationRequested,
                 _callerCancellation.IsCancellationRequested ? "reuse.material_cancelled" : "reuse.material_timed_out");
         }
-        catch (KeyMaterialValidationException exception)
+        catch (EvidenceKeyMaterialValidationException exception)
         {
             return new EvidenceProducerKeyMaterialPreparation(null, true, _callerCancellation.IsCancellationRequested,
                 "reuse.material_invalid")
             {
-                Diagnostic = exception.Diagnostic,
+                Diagnostic = exception.Message,
             };
         }
         catch (InvalidDataException)
@@ -167,75 +165,4 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
 
     private static bool IsNonFatal(Exception exception) => exception is not OutOfMemoryException
         and not StackOverflowException and not AccessViolationException and not AppDomainUnloadedException;
-
-    private static IReadOnlyDictionary<string, string> CaptureMaterial(IReadOnlyDictionary<string, string> material)
-    {
-        if (material is null)
-            throw new KeyMaterialValidationException("The key-material callback returned no material map. Return a non-null map within the declared limits.");
-        var reportedCount = material.Count;
-        if (reportedCount > EvidenceProducerIdentityBuilder.MaximumMaterialKeys)
-            throw new KeyMaterialValidationException(
-                $"Key material contains {FormatNumber(reportedCount)} keys; limit is {FormatNumber(EvidenceProducerIdentityBuilder.MaximumMaterialKeys)}. Remove keys and retry.");
-
-        var snapshot = new Dictionary<string, string>(StringComparer.Ordinal);
-        var totalBytes = 0L;
-        var observedCount = 0;
-        foreach (var pair in material)
-        {
-            observedCount++;
-            if (observedCount > EvidenceProducerIdentityBuilder.MaximumMaterialKeys)
-                throw new KeyMaterialValidationException(
-                    $"More than {FormatNumber(EvidenceProducerIdentityBuilder.MaximumMaterialKeys)} key-material entries were observed ({FormatNumber(observedCount)} observed). Remove keys and retry.");
-            if (string.IsNullOrEmpty(pair.Key))
-                throw new KeyMaterialValidationException("A key-material key name has length 0; minimum is 1. Provide a non-empty key name.");
-            if (pair.Key.Length > EvidenceProducerIdentityBuilder.MaximumMaterialKeyLength)
-                throw new KeyMaterialValidationException(
-                    $"A key-material key name is {FormatNumber(pair.Key.Length)} UTF-16 code units; limit is {FormatNumber(EvidenceProducerIdentityBuilder.MaximumMaterialKeyLength)}. Shorten key names and retry.");
-            if (!EvidenceProducerIdentityBuilder.IsWellFormedUtf16(pair.Key))
-                throw new KeyMaterialValidationException("A key-material key name contains malformed UTF-16. Use well-formed Unicode text.");
-            if (pair.Value is null)
-                throw new KeyMaterialValidationException("A key-material entry has a null value. Return non-null values within the declared limits.");
-            if (!EvidenceProducerIdentityBuilder.IsWellFormedUtf16(pair.Value))
-                throw new KeyMaterialValidationException("A key-material value contains malformed UTF-16. Use well-formed Unicode text.");
-            if (snapshot.ContainsKey(pair.Key))
-                throw new KeyMaterialValidationException("Key-material key names must be unique. Return a map with unique key names.");
-
-            var valueBytes = GetUtf8ByteCount(pair.Value);
-            if (valueBytes > EvidenceProducerIdentityBuilder.MaximumMaterialValueBytes)
-                throw new KeyMaterialValidationException(
-                    $"A key-material value is {FormatNumber(valueBytes)} UTF-8 bytes; limit is {FormatNumber(EvidenceProducerIdentityBuilder.MaximumMaterialValueBytes)}. Reduce the value and retry.");
-            totalBytes += GetUtf8ByteCount(pair.Key) + valueBytes;
-            if (totalBytes > EvidenceProducerIdentityBuilder.MaximumMaterialTotalBytes)
-                throw new KeyMaterialValidationException(
-                    $"Key material totals {FormatNumber(totalBytes)} UTF-8 bytes; limit is {FormatNumber(EvidenceProducerIdentityBuilder.MaximumMaterialTotalBytes)}. Reduce key and value sizes and retry.");
-            snapshot.Add(pair.Key, pair.Value);
-        }
-        return new ReadOnlyDictionary<string, string>(snapshot);
-    }
-
-    private static long GetUtf8ByteCount(string value)
-    {
-        long bytes = 0;
-        for (var index = 0; index < value.Length; index++)
-        {
-            var character = value[index];
-            if (character <= 0x7f) bytes++;
-            else if (character <= 0x7ff) bytes += 2;
-            else if (char.IsHighSurrogate(character))
-            {
-                bytes += 4;
-                index++;
-            }
-            else bytes += 3;
-        }
-
-        return bytes;
-    }
-
-    private static string FormatNumber(long value) => value.ToString(CultureInfo.InvariantCulture);
-
-    private sealed class KeyMaterialValidationException(string diagnostic) : Exception
-    {
-        internal string Diagnostic { get; } = diagnostic;
-    }
 }
