@@ -29,6 +29,27 @@ Every [CI workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/
 
 Run the sample or package-specific command you changed, and include that command in your pull request notes. For broad changes, also run the full test suite and coverage command listed in [Local verification](#local-verification).
 
+### Repository tasks
+
+Install [Task v3](https://taskfile.dev/docs/installation) to run common contributor commands by name.
+Run `task` from the checkout to list them, or `task --dry build` to see the underlying command.
+The [root Taskfile](https://github.com/forge-trust/AppSurface/blob/main/Taskfile.yml) runs commands from
+the repository root, even when invoked from a subdirectory. Use root-relative project paths.
+
+| Command | When to use it |
+| --- | --- |
+| `task restore` | Check that the solution restores with the committed NuGet lock files. |
+| `task build` | Build the solution. |
+| `task test` | Build and run the solution's tests. After a matching build, use `task test -- --no-build`. |
+| `task format:check` | Check whether .NET formatting would change files. Use `task format` to apply the edits. |
+| `task evidence:plan` | Preview the checks selected for changes against `origin/main`. |
+| `task evidence` | Run the selected checks and verify their results. See [local verification](#local-verification) for scope and prerequisites. |
+| `task coverage` | Run the [compatibility coverage script](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) for the entire solution. It requires Bash and defaults to a non-sandboxed host. Configure it through the script's environment variables. |
+
+Pass arguments to the underlying command after `--`. For example, run one test project with
+`task test -- ForgeTrust.AppSurface.Core.Tests`, or compare against another revision with
+`task evidence:plan -- --base HEAD~1`. Run the underlying `dotnet` commands directly if you prefer.
+
 ## Working on docs
 
 Documentation changes should explain both how to use an API and why a reader would choose it. When a docs change touches public behavior, update the package-level README, repository-level entry point, or release note surface that helps someone discover the change.
