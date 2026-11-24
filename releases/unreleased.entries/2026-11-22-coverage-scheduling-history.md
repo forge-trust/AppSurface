@@ -1,2 +1,0 @@
-<!-- appsurface:unreleased-entry section="included" -->
-- Maintainers can restore [coverage scheduling history](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#coverage-scheduling-history) with a C# file app and the repository's pinned .NET SDK. It uses `gh api` to fetch prior project durations and lets coverage proceed when history is unavailable.
