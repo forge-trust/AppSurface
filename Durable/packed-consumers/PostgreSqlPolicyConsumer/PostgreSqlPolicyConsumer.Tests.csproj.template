@@ -14,10 +14,5 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
-  <ItemGroup>
-    <Compile Include="$(RepositoryRoot)/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlIntegrationTestDatabase.cs"
-             Link="PackedSupport/PostgreSqlIntegrationTestDatabase.cs" />
-    <Compile Include="$(RepositoryRoot)/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlTestContainerImage.cs"
-             Link="PackedSupport/PostgreSqlTestContainerImage.cs" />
-  </ItemGroup>
+  <Import Project="$(RepositoryRoot)/Durable/packed-consumers/PostgreSqlFixtureSupport.props" />
 </Project>

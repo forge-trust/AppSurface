@@ -1,0 +1,11 @@
+<Project>
+  <!-- The packed consumers exercise runtime packages with the same source-only test fixture as the example. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlIntegrationTestDatabase.cs"
+             Link="PackedSupport/PostgreSqlIntegrationTestDatabase.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlTestContainerImage.cs"
+             Link="PackedSupport/PostgreSqlTestContainerImage.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../../PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/*.cs"
+             Link="PackedSupport/PostgreSqlTesting/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
