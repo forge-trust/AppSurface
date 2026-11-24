@@ -109,6 +109,20 @@ public sealed class EvidenceArtifactFileValidationTests
         Assert.Equal(EvidenceArtifactFileStatus.LengthMismatch, await EvidenceArtifactFileValidation.CheckAsync(directory.Path, ProducerId, artifact));
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1)]
+    public async Task CheckStreamAsync_ShouldReportAFileWhoseLengthChangesAfterItIsOpened(int delta)
+    {
+        // The stream reports the recorded length, as a file does when it is opened, then yields fewer or more bytes.
+        var actual = delta < 0 ? Content[..^1] : [.. Content, 0x20];
+        var artifact = new EvidenceArtifactResult("test-receipt", "test/test-receipt.json", "application/json", Content.Length, Convert.ToHexString(SHA256.HashData(actual)));
+        await using var stream = new MisreportedLengthStream(actual, Content.Length);
+
+        Assert.Equal(EvidenceArtifactFileStatus.LengthMismatch, await EvidenceArtifactFileValidation.CheckStreamAsync(stream, artifact, CancellationToken.None));
+        Assert.True(stream.Position <= Content.Length + 1);
+    }
+
     [Fact]
     public async Task CheckAsync_ShouldReportReplacedBytesOfTheSameLength()
     {
@@ -355,4 +369,9 @@ public sealed class EvidenceArtifactFileValidationTests
     }
 
     private sealed record WrittenEvidence(EvidenceCliWorkflow Workflow, string Output, string PlanPath, string ManifestPath, string ReceiptPath);
+
+    private sealed class MisreportedLengthStream(byte[] content, long reportedLength) : MemoryStream(content)
+    {
+        public override long Length => reportedLength;
+    }
 }

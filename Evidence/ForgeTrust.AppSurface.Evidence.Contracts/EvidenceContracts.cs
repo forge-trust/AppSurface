@@ -922,7 +922,8 @@ public static class EvidenceArtifactFileValidation
     /// <param name="cancellationToken">Cancellation token observed while hashing.</param>
     /// <returns>
     /// <see cref="EvidenceArtifactFileStatus.Valid"/> only for an unlinked regular file whose length and digest match.
-    /// Length is compared before hashing, and the file is opened without write sharing while it is hashed.
+    /// Length is compared before hashing, at most the recorded length plus one byte is read, and a file whose length
+    /// changes while it is read is reported as <see cref="EvidenceArtifactFileStatus.LengthMismatch"/>.
     /// </returns>
     public static async Task<EvidenceArtifactFileStatus> CheckAsync(
         string artifactRoot,
@@ -971,29 +972,65 @@ public static class EvidenceArtifactFileValidation
             }
 
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            if (stream.Length != artifact.LengthBytes)
-            {
-                return EvidenceArtifactFileStatus.LengthMismatch;
-            }
-
-            // The length matched above and the file is open without write sharing, so hashing the stream reads the
-            // recorded number of bytes. A file changed underneath the read simply fails the digest comparison.
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer = new byte[64 * 1024];
-            int read;
-            while ((read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                hash.AppendData(buffer, 0, read);
-            }
-
-            return string.Equals(Convert.ToHexString(hash.GetHashAndReset()), artifact.Sha256, StringComparison.OrdinalIgnoreCase)
-                ? EvidenceArtifactFileStatus.Valid
-                : EvidenceArtifactFileStatus.DigestMismatch;
+            return await CheckStreamAsync(stream, artifact, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return EvidenceArtifactFileStatus.Missing;
         }
+    }
+
+    /// <summary>
+    /// Compares an open artifact stream with its recorded length and SHA-256, reading at most the recorded length
+    /// plus one byte.
+    /// </summary>
+    /// <param name="stream">Readable, seekable stream positioned at the start of the artifact.</param>
+    /// <param name="artifact">Recorded artifact metadata; its length must not be negative.</param>
+    /// <param name="cancellationToken">Cancellation token observed while hashing.</param>
+    /// <returns>
+    /// <see cref="EvidenceArtifactFileStatus.LengthMismatch"/> when the reported length differs, when the stream ends
+    /// before the recorded length, or when a byte follows it; otherwise the digest comparison.
+    /// </returns>
+    /// <remarks>
+    /// <see cref="CheckAsync"/> owns path and link checks and calls this with the file it opened. The method is a
+    /// separate internal seam because read sharing does not stop every writer on every platform, so a file can change
+    /// length after it is opened, and a test can only show that with a stream it controls.
+    /// </remarks>
+    internal static async Task<EvidenceArtifactFileStatus> CheckStreamAsync(
+        Stream stream,
+        EvidenceArtifactResult artifact,
+        CancellationToken cancellationToken)
+    {
+        if (stream.Length != artifact.LengthBytes)
+        {
+            return EvidenceArtifactFileStatus.LengthMismatch;
+        }
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[64 * 1024];
+        var remaining = artifact.LengthBytes;
+        while (remaining > 0)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                // The file shrank after its length was read.
+                return EvidenceArtifactFileStatus.LengthMismatch;
+            }
+
+            hash.AppendData(buffer, 0, read);
+            remaining -= read;
+        }
+
+        if (await stream.ReadAsync(buffer.AsMemory(0, 1), cancellationToken).ConfigureAwait(false) > 0)
+        {
+            // The file grew after its length was read. The extra bytes are not hashed.
+            return EvidenceArtifactFileStatus.LengthMismatch;
+        }
+
+        return string.Equals(Convert.ToHexString(hash.GetHashAndReset()), artifact.Sha256, StringComparison.OrdinalIgnoreCase)
+            ? EvidenceArtifactFileStatus.Valid
+            : EvidenceArtifactFileStatus.DigestMismatch;
     }
 
     private static bool IsLink(string path) => File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);

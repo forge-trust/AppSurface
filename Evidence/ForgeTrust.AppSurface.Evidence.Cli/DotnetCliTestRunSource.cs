@@ -275,7 +275,19 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
     /// large, malformed, uses a DTD, or its <c>total</c> counter differs from the parsed count. Subdirectories, which
     /// test frameworks create for result attachments, are neither counted nor opened.
     /// </returns>
-    internal static bool TryReadResults(string resultsDirectory, out IReadOnlyList<TestCaseResult> results)
+    internal static bool TryReadResults(string resultsDirectory, out IReadOnlyList<TestCaseResult> results) =>
+        TryReadResults(resultsDirectory, MaximumResultsBytes, out results);
+
+    /// <summary>Reads the single TRX file of a run, refusing a file longer than <paramref name="maximumBytes"/>.</summary>
+    /// <param name="resultsDirectory">The results directory of one project.</param>
+    /// <param name="maximumBytes">
+    /// Largest file length opened. Production callers pass <see cref="MaximumResultsBytes"/> through the overload
+    /// without this parameter; tests pass a small value so a well-formed file can prove the length check alone
+    /// rejects it.
+    /// </param>
+    /// <param name="results">Top-level results; empty on failure.</param>
+    /// <returns>False under the conditions the overload without <paramref name="maximumBytes"/> documents.</returns>
+    internal static bool TryReadResults(string resultsDirectory, long maximumBytes, out IReadOnlyList<TestCaseResult> results)
     {
         results = [];
         try
@@ -288,7 +300,7 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
             }
 
             using var stream = File.OpenRead(path);
-            if (stream.Length > MaximumResultsBytes)
+            if (stream.Length > maximumBytes)
             {
                 return false;
             }

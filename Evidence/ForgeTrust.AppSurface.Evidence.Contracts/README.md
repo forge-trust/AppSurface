@@ -58,8 +58,8 @@ An unavailable capability, timeout, skipped producer, incomplete test profile, o
 | `InvalidPath` | The producer id is not one path segment, the relative path is absolute, empty or traversing, or the recorded length is negative. |
 | `Linked` | The artifact root, a directory on the way, or the file is a symbolic link or other reparse point. |
 | `Missing` | The file or a directory on the way does not exist or cannot be opened. |
-| `LengthMismatch` | The file length differs from the recorded length. Checked before hashing. |
-| `DigestMismatch` | Same length, different SHA-256. At most the recorded length is hashed. |
+| `LengthMismatch` | The file length differs from the recorded length. Checked before hashing, and again while reading: a file that shrinks or grows after it is opened gets this status. |
+| `DigestMismatch` | Same length, different SHA-256. At most the recorded length is hashed, and at most one byte past it is read. |
 
 **Why it exists.** `EvidenceArtifactValidation.AreValid(...)` checks artifact metadata against a declaration, and `EvidenceManifestBuilder.Verify(...)` checks digests of the plan and manifest. Neither opens the artifact, so without this check a manifest can verify after its artifact is deleted or replaced. [`appsurface evidence verify`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#verifying-evidence) and the repository validation tool both call this one method, so there is a single link-rejection rule.
 

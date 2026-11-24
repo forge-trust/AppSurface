@@ -128,6 +128,20 @@ public sealed class DotnetCliTestRunSourceTests
     }
 
     [Fact]
+    public void TryReadResults_ShouldRejectAWellFormedResultsFileOverTheSizeBound()
+    {
+        // The file parses, so only the length check can reject it.
+        using var directory = TestDirectory.Create();
+        var path = TestPathUtils.PathUnder(directory.Path, DotnetCliTestRunSource.ResultsFileName);
+        File.WriteAllText(path, Trx(0, string.Empty));
+        var length = new FileInfo(path).Length;
+
+        Assert.True(DotnetCliTestRunSource.TryReadResults(directory.Path, length, out _));
+        Assert.False(DotnetCliTestRunSource.TryReadResults(directory.Path, length - 1, out var results));
+        Assert.Empty(results);
+    }
+
+    [Fact]
     public void TryReadResults_ShouldRejectADirectoryNamedLikeTheResultsFile()
     {
         using var directory = TestDirectory.Create();
