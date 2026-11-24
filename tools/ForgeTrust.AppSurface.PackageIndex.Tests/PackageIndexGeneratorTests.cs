@@ -879,7 +879,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         if (prereleaseInstall)
         {
             const string manifestPath = "packages/package-index.yml";
-            var manifest = await File.ReadAllTextAsync(Path.Combine(_repositoryRoot, manifestPath));
+            var manifest = await File.ReadAllTextAsync(TestPathUtils.PathUnder(_repositoryRoot, manifestPath));
             var targetOrder = configureTool ? "    order: 50" : "    order: 20";
             await WriteFileAsync(manifestPath, manifest.Replace(targetOrder, $"    prerelease_install: true\n{targetOrder}", StringComparison.Ordinal));
         }
