@@ -122,7 +122,7 @@ internal static class CoverageHistoryData
             throw;
         }
         catch (Exception exception) when (exception is SharpCompressException or IOException or
-            NotSupportedException or IndexOutOfRangeException)
+            NotSupportedException or IndexOutOfRangeException or ArgumentException)
         {
             throw new InvalidDataException("Invalid ZIP archive or timings entry.", exception);
         }

@@ -30,9 +30,9 @@ internal static class CoverageScheduleHistoryContracts
     private sealed record ZipEntry(string Name, byte[] Bytes, CompressionLevel Compression = CompressionLevel.Optimal);
     private sealed record Case(string Name, Func<Task> Run);
 
-    private sealed class FaultingZipStream(byte[] bytes) : MemoryStream(bytes, writable: false)
+    private sealed class FaultingZipStream(byte[] bytes, Exception failure) : MemoryStream(bytes, writable: false)
     {
-        public override long Seek(long offset, SeekOrigin origin) => throw new IndexOutOfRangeException();
+        public override long Seek(long offset, SeekOrigin origin) => throw failure;
     }
 
     private sealed class TemporaryDirectory : IDisposable
@@ -80,7 +80,7 @@ internal static class CoverageScheduleHistoryContracts
             new("test_required_configuration_and_absolute_output_are_fatal", BadInvocationAsync),
             new("zip_codec_acceptance_and_decodable_method_9_rejection", CodecAcceptanceAsync),
             new("restore_skips_candidates_with_inconsistent_zip_metadata", InconsistentZipMetadataFallbackAsync),
-            new("zip_reader_index_error_marks_candidate_invalid", ZipReaderIndexErrorAsync),
+            new("zip_reader_errors_mark_candidate_invalid", ZipReaderErrorsAsync),
             new("timing_json_and_archive_boundaries", InputBoundariesAsync),
             new("exclusive_output_ownership_and_partial_write_cleanup", OutputOwnershipAsync),
             new("gh_process_runner", GhProcessContracts.RunAsync)
@@ -393,6 +393,7 @@ internal static class CoverageScheduleHistoryContracts
         using var temporary = NewTemporaryDirectory();
         var fixture = ReadCanonicalFixture();
         var invalidNewer = MakeZip(new("timings.json", Encoding.UTF8.GetBytes("{\"projects\":[]}")));
+        var lzma = ReadCodecFixture("lzma");
         var validOlder = MakeZip(new("timings.json", fixture));
         var result = await InvokeAsync(
             Path.Combine(temporary.Path, "fallback", "timings.json"),
@@ -401,7 +402,8 @@ internal static class CoverageScheduleHistoryContracts
                 [RunsEndpoint] = Runs(
                     RunRecord(20, createdAt: "2026-11-10T12:00:00Z"),
                     RunRecord(19, createdAt: "2026-11-09T12:00:00Z")),
-                [ArtifactsEndpoint(20)] = Artifacts(Artifact(120)),
+                [ArtifactsEndpoint(20)] = Artifacts(Artifact(121), Artifact(120)),
+                [DownloadEndpoint(121)] = lzma[..(lzma.Length / 2)],
                 [DownloadEndpoint(120)] = invalidNewer,
                 [ArtifactsEndpoint(19)] = Artifacts(Artifact(119)),
                 [DownloadEndpoint(119)] = validOlder
@@ -411,7 +413,7 @@ internal static class CoverageScheduleHistoryContracts
         Equal(string.Empty, result.StandardError, "stderr");
         BytesEqual(fixture, File.ReadAllBytes(Path.Combine(temporary.Path, "fallback", "timings.json")), "fallback bytes");
         SequenceEqual(
-            [RunsEndpoint, ArtifactsEndpoint(20), DownloadEndpoint(120), ArtifactsEndpoint(19), DownloadEndpoint(119)],
+            [RunsEndpoint, ArtifactsEndpoint(20), DownloadEndpoint(121), DownloadEndpoint(120), ArtifactsEndpoint(19), DownloadEndpoint(119)],
             Endpoints(result),
             "newer-invalid then older-valid request trace");
     }
@@ -420,7 +422,7 @@ internal static class CoverageScheduleHistoryContracts
     {
         using var temporary = NewTemporaryDirectory();
         var fixture = ReadCanonicalFixture();
-        var output = Path.Combine(temporary.Path, "size-fallback", "timings.json");
+        var output = Path.Join(temporary.Path, "size-fallback", "timings.json");
         var result = await InvokeAsync(
             output,
             new Dictionary<string, byte[]>
@@ -472,7 +474,7 @@ internal static class CoverageScheduleHistoryContracts
         foreach (var (name, archive) in invalidArchives)
         {
             using var temporary = NewTemporaryDirectory();
-            var output = Path.Combine(temporary.Path, $"invalid-zip-{name}", "timings.json");
+            var output = Path.Join(temporary.Path, "invalid-zip", "timings.json");
             var result = await InvokeAsync(output, SingleCandidateResponses(archive));
 
             Equal(0, result.ExitCode, name + " exit code");
@@ -937,19 +939,25 @@ internal static class CoverageScheduleHistoryContracts
         }
     }
 
-    private static Task ZipReaderIndexErrorAsync()
+    private static Task ZipReaderErrorsAsync()
     {
-        using var archive = new FaultingZipStream(MakeZip(new("timings.json", ReadCanonicalFixture())));
-        try
+        var fixture = ReadCodecFixture("lzma");
+        foreach (var failure in new Exception[] { new IndexOutOfRangeException(), new ArgumentException() })
         {
-            CoverageHistoryData.ReadArchive(archive);
-        }
-        catch (InvalidDataException error) when (error.InnerException is IndexOutOfRangeException)
-        {
-            return Task.CompletedTask;
+            using var archive = new FaultingZipStream(fixture, failure);
+            try
+            {
+                CoverageHistoryData.ReadArchive(archive);
+            }
+            catch (InvalidDataException error) when (ReferenceEquals(error.InnerException, failure))
+            {
+                continue;
+            }
+
+            throw new InvalidDataException($"Expected {failure.GetType().Name} to invalidate the ZIP candidate.");
         }
 
-        throw new InvalidDataException("Expected a ZIP reader index error to invalidate the candidate.");
+        return Task.CompletedTask;
     }
 
     private static async Task InconsistentZipMetadataFallbackAsync()
