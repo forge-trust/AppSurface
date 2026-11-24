@@ -26,6 +26,13 @@ Run `scripts/verify-cloudtasks-activation.sh` for the broader proof, including r
 
 ## Install and configure
 
+Once the package is available on NuGet, set `APPSURFACE_VERSION` to the published coordinated preview version used by
+the rest of your AppSurface packages and add the adapter to your Google Cloud caller project.
+
+```bash
+dotnet add package ForgeTrust.AppSurface.Durable.CloudTasks --version "$APPSURFACE_VERSION"
+```
+
 The supported public namespace is `ForgeTrust.AppSurface.Durable.CloudTasks`. Register one singleton token source before the activation client. For Cloud Run, explicitly select the metadata source:
 
 ```csharp
@@ -97,8 +104,7 @@ For API shapes, all diagnostic codes, ownership boundaries, unsupported uses, an
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-This package has an explicitly experimental or publication-held contract. Do not
-treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and
-[release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and
-migration guidance.
+AppSurface ships as a coordinated package family. Before installing this package
+from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md)
+for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->

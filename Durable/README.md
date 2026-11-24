@@ -25,11 +25,11 @@ AppSurface Durable is a public-preview package family for portable durable contr
   It does not simulate persistence or replace real-provider conformance tests.
 - [`ForgeTrust.AppSurface.Durable.Templates`](ForgeTrust.AppSurface.Durable.Templates/README.md) provides a native `dotnet new` starter for a standalone external-activation host. The template package is not a runtime dependency; generated projects use coordinated Durable preview package references.
 
-The core Durable, Provider, PostgreSQL, and Testing packages participate in the coordinated prerelease publish plan;
-the template package is a separately installed generation tool whose emitted projects use that coordinated package
-graph. The optional Cloud Tasks transport is tracked separately behind its package readiness gate. These surfaces remain
-public previews: adopt them only with the reviewed schema, role, recovery, and operational evidence described below, and
-do not treat the preview as production support.
+The core Durable, Provider, PostgreSQL, Testing, and optional Cloud Tasks packages participate in the
+[coordinated prerelease publish plan](../releases/README.md). The template package is a separately installed generation
+tool whose emitted projects use that coordinated package graph. These surfaces are public previews. Check the applicable
+schema, role, recovery, and operational guidance before adopting them. For Cloud Tasks, add the package only to the
+Google Cloud caller and verify the target deployment's [identity and delivery boundary](cloudtasks-activation.md).
 
 For #765 retry timing choices, start with the [execution-policy v1 reference](execution-policies-v1.md). It compares
 legacy completion-relative backoff, deadline-only execution, and fixed acceptance-relative attempt plans, then links the
