@@ -57,10 +57,10 @@ Relative path returned to production code:
 var relativePath = TestPathUtils.RelativePath("docs", "README.md");
 ```
 
-Intentional platform-path behavior tests may still use `Path.Join` or `Path.Combine` directly when the point of the test is the platform API behavior or the arguments are literal expected-path segments.
+Apply the same rule to literal expectations as to fixture setup. For example, use `TestPathUtils.PathUnder(tempRoot, "docs", "README.md")` on the expected side of an assertion. Use direct `Path` operations for primitives such as `Path.GetDirectoryName` above or when a test specifically exercises platform path semantics. See the [filesystem path policy](../../CONTRIBUTING.md#filesystem-paths).
 
 ## Policy failures
 
-The policy test reports the violation kind, file, line and column, risky argument, reason, replacement guidance, and allowlist path. If a direct `Path.Join` or `Path.Combine` call is intentional, add a reasoned entry to `tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml`.
+The policy test detects dynamic `Path.Join` and `Path.Combine` calls with path-like argument names. It reports the source location and the argument that triggered the check. When migrating a call, keep the root and every child segment. For an intentional platform-semantics exception, document why the helper cannot express it and add the reported key and reason to the [allowlist](./path-policy-allowlist.yml).
 
 Repository scans ignore generated build output, Git metadata, gstack artifacts, and local dependency cache copies such as `.pnpm-store` so restored tooling snapshots do not create unrelated policy failures.

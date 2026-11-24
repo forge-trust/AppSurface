@@ -414,38 +414,6 @@ def transform_project(project_path, source_project, is_tests):
             if dependency.lower() not in package_names:
                 add_package_reference(package_group, dependency)
 
-        compile_items = [
-            child
-            for group in root.iter()
-            if local_name(group.tag) == "ItemGroup"
-            for child in list(group)
-            if local_name(child.tag) == "Compile"
-        ]
-        support_files = (
-            repo_root / "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlIntegrationTestDatabase.cs",
-            repo_root / "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlTestContainerImage.cs",
-        )
-        parent_by_child = {
-            child: parent
-            for parent in root.iter()
-            for child in list(parent)
-        }
-        for support_file in support_files:
-            existing = [
-                item
-                for item in compile_items
-                if pathlib.Path(item.get("Include", "").replace("\\", "/")).name == support_file.name
-            ]
-            if existing:
-                compile_item = existing[0]
-                for duplicate in existing[1:]:
-                    parent_by_child[duplicate].remove(duplicate)
-            else:
-                compile_item = ET.SubElement(package_group, "Compile")
-            compile_item.set("Include", str(support_file))
-            compile_item.set("Link", f"PackedSupport/{support_file.name}")
-            compile_item.attrib.pop("Update", None)
-
     for project_reference in (
         child
         for group in root.iter()
@@ -494,6 +462,7 @@ PY
   dotnet restore "$consumer_tests_project" \
     --configfile "$CONFIG_FILE" \
     -m:1 \
+    -p:RepositoryRoot="$ROOT_DIR" \
     -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
     -p:RestoreLockedMode=false \
     -p:UseSharedCompilation=false
@@ -508,6 +477,7 @@ PY
     --configuration Release \
     --no-restore \
     -m:1 \
+    -p:RepositoryRoot="$ROOT_DIR" \
     -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
     -p:RestoreLockedMode=false \
     -p:UseSharedCompilation=false \

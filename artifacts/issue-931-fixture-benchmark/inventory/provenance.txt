@@ -1,0 +1,14 @@
+Autoplan #931 bounded verification inventory
+Revision: 3f3126a5febff2cb94847bf8a1092b5d61657a18
+SDK: dotnet 10.0.402
+Configuration: Release
+Project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj
+Restore: succeeded with shared caches from ~/.config/developer-caches/env.sh
+Build: succeeded, 0 warnings, 0 errors
+Discovery only: --list-tests, no test execution
+Work filter: FullyQualifiedName~ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkDefinitionTests
+Flow filter: FullyQualifiedName~ForgeTrust.AppSurface.Durable.PostgreSql.Tests.DurableSlice4ReferenceWorkloadTests
+Discovery counts: Work 4, Flow 30
+Source comparison: Each discovery list exactly matches the pinned class. Four Work and 29 Flow cases initialize a ready store. FlowClient_StartRejectsANonAuthoritativeContextCodec uses an empty database and rejects the codec before schema access. Empty describes the database state.
+Redaction: discovery output replaces the machine-specific worktree path with <WORKTREE>.
+Sorted manifest SHA-256: a0744765a334e4787c33893e0df9728bd3f0542803ae9cfcf10eac624aac9634

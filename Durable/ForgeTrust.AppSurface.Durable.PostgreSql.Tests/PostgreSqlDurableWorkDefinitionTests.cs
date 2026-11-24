@@ -6,18 +6,26 @@ using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
-public sealed class PostgreSqlDurableWorkDefinitionTests
+public sealed class PostgreSqlDurableWorkDefinitionTests : IClassFixture<PostgreSqlCohortFixture<PostgreSqlDurableWorkDefinitionTests>>
 {
     private const string WorkName = "tests.postgresql.typed-definition";
     private const string WorkVersion = "v1";
     private const string InputContract = "tests.postgresql.typed-definition.input";
     private const string ResultContract = "tests.postgresql.typed-definition.result";
+    private readonly PostgreSqlCohortFixture<PostgreSqlDurableWorkDefinitionTests> _fixture;
+
+    public PostgreSqlDurableWorkDefinitionTests(
+        PostgreSqlCohortFixture<PostgreSqlDurableWorkDefinitionTests> fixture)
+    {
+        _fixture = fixture;
+    }
 
     [Fact]
     public async Task DefinitionRequest_AndDirectRequestShareAcceptanceIdentityAndPersistedFacts()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = await InitializeAsync(database);
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("typed-definition-tests", "issue-800");
+        var database = fixtureDatabase.Database;
+        var schema = new PostgreSqlDurableRuntimeSchemaStatus(fixtureDatabase.RuntimeEpoch, fixtureDatabase.Status.StoreId);
         var definition = CreateDefinition(CreatePolicy(maximumAttempts: 7));
         var scope = new DurableScopeId("typed-definition-factory-scope");
         var command = new DurableCommandId("typed-definition-factory-command");
@@ -64,8 +72,9 @@ public sealed class PostgreSqlDurableWorkDefinitionTests
     [Fact]
     public async Task ChangedDefinitionDefaultWithoutOverride_Conflicts_WhileExplicitOriginalOverrideRestoresDuplicate()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = await InitializeAsync(database);
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("typed-definition-tests", "issue-800");
+        var database = fixtureDatabase.Database;
+        var schema = new PostgreSqlDurableRuntimeSchemaStatus(fixtureDatabase.RuntimeEpoch, fixtureDatabase.Status.StoreId);
         var originalPolicy = CreatePolicy(maximumAttempts: 5);
         var changedPolicy = CreatePolicy(maximumAttempts: 6);
         var definition = CreateDefinition(originalPolicy);
@@ -122,8 +131,9 @@ public sealed class PostgreSqlDurableWorkDefinitionTests
     [Fact]
     public async Task TransactionWriter_RollbackRemovesWorkAndCallerDomainRows()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = await InitializeAsync(database);
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("typed-definition-tests", "issue-800");
+        var database = fixtureDatabase.Database;
+        var schema = new PostgreSqlDurableRuntimeSchemaStatus(fixtureDatabase.RuntimeEpoch, fixtureDatabase.Status.StoreId);
         var definition = CreateDefinition(CreatePolicy());
         await using var provider = CreateProvider(database, schema, definition);
         var writer = provider.GetRequiredService<IDurableWorkTransactionWriter>();
@@ -159,8 +169,9 @@ public sealed class PostgreSqlDurableWorkDefinitionTests
     [Fact]
     public async Task DefinitionBinding_UsesBoundedRuntimePumpAndReturnsExactTypedResult()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = await InitializeAsync(database);
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("typed-definition-tests", "issue-800");
+        var database = fixtureDatabase.Database;
+        var schema = new PostgreSqlDurableRuntimeSchemaStatus(fixtureDatabase.RuntimeEpoch, fixtureDatabase.Status.StoreId);
         var definition = CreateDefinition(CreatePolicy(maximumAttempts: 3));
         var services = new ServiceCollection();
         services.AddDurableWork(definition.ExecutedBy<ProofExecutor>());
@@ -233,17 +244,6 @@ public sealed class PostgreSqlDurableWorkDefinitionTests
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options => options.SendWakeNotifications = false);
         return services.BuildServiceProvider();
-    }
-
-    private static async ValueTask<PostgreSqlDurableRuntimeSchemaStatus> InitializeAsync(
-        PostgreSqlIntegrationTestDatabase database)
-    {
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "typed-definition-tests", "issue-800");
-        var status = await schema.GetStatusAsync();
-        return new PostgreSqlDurableRuntimeSchemaStatus(epoch, status.StoreId);
     }
 
     private static async ValueTask EnqueueAndCommitAsync(

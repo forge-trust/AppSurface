@@ -2,3 +2,5 @@
 # AcquisitionBoundaryTests rejects this embedded-userinfo authority before transport.
 https://user:password@repo.example.test
 password@repo.example.test
+# The PostgreSQL fixture benchmark redaction test passes this sentinel only to redact().
+postgres://sentinel:url@pg.internal
