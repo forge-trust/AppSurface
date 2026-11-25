@@ -223,13 +223,15 @@ jobs:
             'FullyQualifiedName~CoverageArtifactMetadataDurabilityTests'
             'FullyQualifiedName~CoverageArtifactEnumerationDecisionTests'
           )
-          $sharedCliSelectors = Get-Content -LiteralPath '.github/workflows/native-coverage-test-selectors.txt' |
-            ForEach-Object {
-              $entry = $_ -split "`t", 2
-              if ($entry.Length -eq 2 -and $entry[0] -eq 'shared-cli') { $entry[1] }
-            }
-          $cliSelectors += $sharedCliSelectors
-          $cliFilter = $cliSelectors -join '|'
+          $dogfoodProject = 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj'
+          dotnet restore $dogfoodProject --locked-mode
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build $dogfoodProject --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dogfood = 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/Release/net10.0/ForgeTrust.AppSurface.Coverage.Dogfood.dll'
+          $sharedCliFilter = & dotnet $dogfood --print-test-filter shared-cli
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $cliFilter = ($cliSelectors -join '|') + '|' + $sharedCliFilter
           dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter $cliFilter
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve evidence inputs, plan, proof, and artifacts

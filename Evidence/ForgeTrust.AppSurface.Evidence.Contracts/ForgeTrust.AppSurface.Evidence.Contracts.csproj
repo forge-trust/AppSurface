@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Aspire" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Coverage" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Planner" />

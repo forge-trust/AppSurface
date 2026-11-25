@@ -540,6 +540,30 @@ public sealed class EvidencePreparedHostCoverageTests
     }
 
     [Fact]
+    public async Task ProducerIdentifierChangedDuringFactory_ShouldRejectHandoffAndDisposeTransferredScope()
+    {
+        using var fixture = new Fixture();
+        var producer = new MutableIdProducer("check");
+        var readiness = new Readiness("database");
+        var owner = new Owner();
+        await using var prepared = await fixture.PrepareAsync(producer);
+
+        var failure = await Assert.ThrowsAsync<EvidenceHostException>(() => prepared.RunAsync((_, _) =>
+        {
+            producer.Id = "changed";
+            return ValueTask.FromResult(new EvidenceHostResourceScope([readiness], owner));
+        }));
+        await prepared.DisposeAsync();
+
+        Assert.Equal("reuse.registration_changed", failure.Code);
+        Assert.Equal(0, readiness.ReadinessCalls);
+        Assert.Equal(0, producer.Runs);
+        Assert.Equal(1, producer.Disposals);
+        Assert.Equal(1, readiness.Disposals);
+        Assert.Equal(1, owner.Disposals);
+    }
+
+    [Fact]
     public async Task NonfatalProducerDisposalFailure_ShouldInvalidateCompletionAndRemainObservable()
     {
         using var fixture = new Fixture();

@@ -15,7 +15,7 @@ public sealed class EvidenceCoverageInventoryEdgeTests
         var missingRoot = TestPathUtils.PathUnder(directory.Path, "not-created");
         var prefix = "coverage/" + string.Join("/", Enumerable.Repeat(new string('\u0800', 110), 30));
         var files = Enumerable.Range(0, CoverageEvidenceInventory.MaximumFiles)
-            .Select(index => new CoverageEvidenceInventoryFile($"{prefix}/{index:D3}", 0, new string('a', 64))).ToArray();
+            .Select(index => new CoverageReportFile($"{prefix}/{index:D3}", 0, new string('a', 64))).ToArray();
         var inventory = new CoverageEvidenceInventory(CoverageEvidenceInventory.CurrentVersion, files);
 
         var failure = Assert.Throws<CoverageEvidenceInventoryException>(() => inventory.Validate(missingRoot));
@@ -38,7 +38,7 @@ public sealed class EvidenceCoverageInventoryEdgeTests
             _ => new string('x', pathLength)
         };
 
-        var error = Assert.Throws<CoverageEvidenceInventoryException>(() => CoverageEvidenceInventory.ValidatePath(path));
+        var error = Assert.Throws<CoverageEvidenceInventoryException>(() => CoverageReportFile.ValidatePath(path));
 
         Assert.Equal("inventory-path-invalid", error.Reason);
     }
@@ -47,14 +47,14 @@ public sealed class EvidenceCoverageInventoryEdgeTests
     [InlineData("coverage/file.xml")]
     [InlineData("coverage/nested/report.json")]
     public void ReceiptPathValidationAcceptsCanonicalRelativePaths(string path)
-        => CoverageEvidenceInventory.ValidatePath(path);
+        => CoverageReportFile.ValidatePath(path);
 
     [Fact]
     public void ReceiptPathValidationRejectsMoreThanThirtyTwoComponents()
     {
         var path = "coverage/" + string.Join("/", Enumerable.Repeat("segment", 32));
 
-        var error = Assert.Throws<CoverageEvidenceInventoryException>(() => CoverageEvidenceInventory.ValidatePath(path));
+        var error = Assert.Throws<CoverageEvidenceInventoryException>(() => CoverageReportFile.ValidatePath(path));
 
         Assert.Equal("inventory-path-invalid", error.Reason);
     }
@@ -67,7 +67,7 @@ public sealed class EvidenceCoverageInventoryEdgeTests
         Directory.CreateDirectory(Path.GetDirectoryName(report)!);
         var bytes = "<coverage />"u8.ToArray();
         await File.WriteAllBytesAsync(report, bytes);
-        var file = new CoverageEvidenceInventoryFile("coverage/report.xml", bytes.Length,
+        var file = new CoverageReportFile("coverage/report.xml", bytes.Length,
             Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
         var inventory = new CoverageEvidenceInventory(CoverageEvidenceInventory.CurrentVersion, [file]);
 
@@ -278,7 +278,7 @@ public sealed class EvidenceCoverageInventoryEdgeTests
     public void ClosedInventoryRejectsUnsupportedVersionBeforeReadingFiles(int version, string reason)
     {
         var inventory = new CoverageEvidenceInventory(version,
-            [new CoverageEvidenceInventoryFile("coverage/missing.xml", 0, new string('0', 64))]);
+            [new CoverageReportFile("coverage/missing.xml", 0, new string('0', 64))]);
 
         var error = Assert.Throws<CoverageEvidenceInventoryException>(() => inventory.Validate(Path.GetTempPath()));
 

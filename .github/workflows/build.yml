@@ -256,13 +256,21 @@ jobs:
       - name: Restore coverage security tests (locked)
         shell: pwsh
         run: |
-          dotnet restore Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --locked-mode
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')
+          if ($projects.Count -eq 0) { throw 'Native coverage project inventory is empty.' }
+          foreach ($project in $projects) {
+            dotnet restore $project --locked-mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
-      - name: Restore dogfood adapter (locked)
-        run: dotnet restore tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --locked-mode
+      - name: Restore and build dogfood adapter (locked)
+        shell: pwsh
+        run: |
+          $project = 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj'
+          dotnet restore $project --locked-mode
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build $project --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Download same-source CLI candidate package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -322,13 +330,16 @@ jobs:
           APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS: ${{ runner.temp }}/packed-reuse-diagnostics
         run: |
           New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS | Out-Null
-          $selectors = Get-Content -LiteralPath '.github/workflows/native-coverage-test-selectors.txt' |
-            ForEach-Object { ($_ -split "`t", 2)[1] }
-          $filter = $selectors -join '|'
-          $arguments = @('coverage', 'run',
-            '--test-project', 'Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj',
-            '--test-project', 'Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj',
-            '--configuration', 'Release', '--no-restore',
+          $dogfood = 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/Release/net10.0/ForgeTrust.AppSurface.Coverage.Dogfood.dll'
+          $filter = & dotnet $dogfood --print-test-filter native
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')
+          if ($projects.Count -eq 0) { throw 'Native coverage project inventory is empty.' }
+          $arguments = @('coverage', 'run')
+          foreach ($project in $projects) {
+            $arguments += @('--test-project', $project)
+          }
+          $arguments += @('--configuration', 'Release', '--no-restore',
             '--output', "${{ runner.temp }}/coverage-native-results", '--test-results', 'junit', '--artifact-retention', 'full',
             '--logger', 'console;verbosity=detailed', '--test-argument', '/p:TailwindEnabled=false',
             '--test-argument', '--filter', '--test-argument', $filter,
@@ -347,13 +358,18 @@ jobs:
           $collection = "${{ runner.temp }}/coverage-native-results"
           $timingsPath = Join-Path $collection 'timings.json'
           $timings = Get-Content -Raw -LiteralPath $timingsPath | ConvertFrom-Json
+          $projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')
           $reports = @{}
           foreach ($entry in $timings.projects) {
-            if (!$entry.coverageFile -or $reports.ContainsKey($entry.project)) { throw "Native coverage report index is invalid" }
+            if (!$entry.coverageFile -or $entry.project -cnotin $projects -or $reports.ContainsKey($entry.project)) {
+              throw 'Native coverage report index is invalid.'
+            }
             # coverage run stages an exact copy of the original collector bytes at coverageFile.
             $reports[$entry.project] = Join-Path $collection $entry.coverageFile
           }
-          if ($reports.Count -ne 2) { throw "Expected both native test project reports" }
+          if ($projects.Count -eq 0 -or $reports.Count -ne $projects.Count) {
+            throw 'Expected exactly the declared native test project reports.'
+          }
           $indexPath = Join-Path $env:RUNNER_TEMP 'coverage-native-report-index.json'
           $reports | ConvertTo-Json | Set-Content -LiteralPath $indexPath
           $platform = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "Darwin" } else { "Linux" }

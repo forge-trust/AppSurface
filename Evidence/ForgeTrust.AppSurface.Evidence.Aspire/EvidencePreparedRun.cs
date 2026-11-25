@@ -35,9 +35,8 @@ public sealed partial class EvidenceHostBootstrap
 public sealed class EvidencePreparedRun : IAsyncDisposable
 {
     private readonly EvidencePlan _plan;
-    private readonly EvidenceHostOptions _options;
+    private readonly EvidenceHostOptions _executionOptions;
     private readonly TimeProvider _clock;
-    private readonly EvidenceHostPreparationRegistration _registration;
     private readonly IReadOnlyDictionary<string, PreparedProducerRegistration> _producers;
     private readonly EvidenceResourceGraph _resourceGraph;
     private readonly EvidenceProducerReuseSession _session;
@@ -53,13 +52,13 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     private bool _used;
     private bool _disposed;
 
-    private EvidencePreparedRun(EvidencePlan plan, EvidenceHostOptions options, TimeProvider clock,
-        EvidenceHostPreparationRegistration registration, IReadOnlyDictionary<string, PreparedProducerRegistration> producers,
+    private EvidencePreparedRun(EvidencePlan plan, EvidenceHostOptions executionOptions, TimeProvider clock,
+        IReadOnlyDictionary<string, PreparedProducerRegistration> producers,
         EvidenceProducerReuseSession session, EvidenceEnvelopeStatus envelopeStatus, EvidenceResourceGraph resourceGraph,
         IReadOnlyDictionary<string, string> artifactDirectories)
     {
-        (_plan, _options, _clock, _registration, _producers, _session, _envelopeStatus, _resourceGraph) =
-            (plan, options, clock, registration, producers, session, envelopeStatus, resourceGraph);
+        (_plan, _executionOptions, _clock, _producers, _session, _envelopeStatus, _resourceGraph) =
+            (plan, executionOptions, clock, producers, session, envelopeStatus, resourceGraph);
         ArtifactDirectories = artifactDirectories;
         RequiredResourceIds = resourceGraph.GetRequiredResourceIds(plan,
             plan.Profile.Producers.Where(producer => !session.ReusedResults.ContainsKey(producer.Id)));
@@ -77,7 +76,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     public EvidencePlan Plan => _plan;
 
     /// <summary>Gets the resolved current invocation output root.</summary>
-    public string ArtifactDirectory => _options.ArtifactDirectory!;
+    public string ArtifactDirectory => _executionOptions.ArtifactDirectory!;
 
     /// <summary>Gets each producer's controlled artifact root, indexed by its unchanged declaration identifier.</summary>
     /// <remarks>Producer identifiers are opaque; consumers must use this map rather than treating an identifier as a filesystem path.</remarks>
@@ -102,13 +101,12 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         cancellationToken.ThrowIfCancellationRequested();
         if (options.VerifyReuse && !options.Reuse)
             throw new EvidenceHostException("reuse.verify_requires_reuse", "A reuse audit requires opt-in reuse.", "Enable Reuse or remove VerifyReuse.");
-        if (options.CapturedPatch is { Length: > 20 * 1024 * 1024 })
-            throw new ArgumentOutOfRangeException(nameof(options), "The captured patch exceeds the existing twenty-MiB bound.");
-        if (options.ProducerCleanupTimeout <= TimeSpan.Zero || options.ProducerCleanupTimeout > TimeSpan.FromMinutes(1)
-            || options.ReceiptWaitTimeout <= TimeSpan.Zero || options.ReceiptWaitTimeout == Timeout.InfiniteTimeSpan)
+        EvidenceProducerReuseOptions.ValidateCapturedPatch(options.CapturedPatch, nameof(options));
+        if (!EvidenceExecutionTimeouts.IsValidProducerCleanup(options.ProducerCleanupTimeout)
+            || !EvidenceExecutionTimeouts.IsValidReceiptWait(options.ReceiptWaitTimeout))
             throw new ArgumentOutOfRangeException(nameof(options), "Cleanup must be positive and at most one minute; receipt waiting must be finite and positive.");
-        if (options.Reuse && (options.RequireTrustedEnvelope || plan.Profile.Scope == EvidenceProfileScope.Release
-            || string.Equals(options.EnvironmentReader("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase)))
+        if (options.Reuse && (options.RequireTrustedEnvelope
+            || EvidenceReuseContext.IsProtected(plan.Profile.Scope, options.EnvironmentReader)))
             throw new EvidenceHostException("reuse.local_only", "Reuse cannot supply protected CI or release evidence.", "Run the eager or prepared host fresh without reuse.");
 
         var frozen = FreezePlan(plan);
@@ -132,8 +130,10 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             }
             var output = options.Reuse ? EvidenceReuseOutput.CreateFreshRoot(options.ArtifactDirectory, Path.Join("TestResults", "evidence"))
                 : Path.GetFullPath(options.ArtifactDirectory ?? Path.Join("TestResults", "evidence", "artifacts"));
-            // Preserve absence explicitly; null can otherwise convert through byte[] to non-null empty memory.
-            options = options with { ArtifactDirectory = output, CapturedPatch = options.CapturedPatch is { } captured ? new ReadOnlyMemory<byte>(captured.ToArray()) : (ReadOnlyMemory<byte>?)null };
+            var executionOptions = new EvidenceHostOptions(options.RequireTrustedEnvelope, output)
+            {
+                ProducerCleanupTimeout = options.ProducerCleanupTimeout,
+            };
             var bindings = producers.ToDictionary(static pair => pair.Key, static pair =>
                 new EvidenceReuseProducerRegistration(pair.Value.Producer, pair.Value.ImplementationIdentity, pair.Value.ToolIdentity), StringComparer.Ordinal);
             var artifactDirectories = new ReadOnlyDictionary<string, string>(frozen.Profile.Producers.ToDictionary(static producer => producer.Id,
@@ -147,7 +147,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                     WaitProgress = options.ReceiptWaitProgress is { } progress
                         ? (prefix, elapsed, remaining) => progress.Report(new(prefix, elapsed, remaining)) : null,
                 }, producer => artifactDirectories[producer.Id], cancellationToken).ConfigureAwait(false);
-            prepared = new EvidencePreparedRun(frozen, options, clock, registration, producers, session, envelopeStatus, resourceGraph, artifactDirectories);
+            prepared = new EvidencePreparedRun(frozen, executionOptions, clock, producers, session, envelopeStatus, resourceGraph, artifactDirectories);
             if (session.IsCancelled)
             {
                 prepared.ObserveCleanup();
@@ -205,8 +205,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_used) throw new InvalidOperationException("Prepared Evidence runs execute exactly once.");
             _used = true;
-            if (_producers.Any(pair => pair.Value.Producer.Id != pair.Key))
-                throw new EvidenceHostException("reuse.registration_changed", "A producer identifier changed after preparation.", "Keep registered identifiers immutable and prepare a new run.");
+            EvidenceHostRegistration.ValidatePreparedProducerIds(_producers);
             if (!await _session.BeginExecutionAsync(cancellationToken).ConfigureAwait(false))
                 return FailureManifest(_session.IsCancelled ? EvidenceProducerOutcome.Cancelled : EvidenceProducerOutcome.Unavailable,
                     "reuse.preparation_unavailable: Preparation could not safely authorize execution; inspect Decisions before retrying.", observationOnly);
@@ -217,23 +216,26 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                 // Own synchronous factory work before its ValueTask is returned as well as asynchronous startup.
                 _factoryTask = Task.Run(async () => await createResources(RequiredResourceIds, _factoryCancellation.Token).ConfigureAwait(false));
                 _scope = await _factoryTask.WaitAsync(cancellationToken).ConfigureAwait(false);
-                if (_scope is null || !_scope.Resources.Keys.Order(StringComparer.Ordinal).SequenceEqual(RequiredResourceIds, StringComparer.Ordinal)
-                    || _scope.Resources.Any(pair => pair.Value.Id != pair.Key))
-                    throw new EvidenceHostException("reuse.resource_scope_invalid", "The factory transferred missing, unrequested, or changed readiness bindings.", "Transfer exactly the requested resource identifiers and its application owner.");
             }
-            var executionRegistration = new EvidenceHostRegistration();
-            foreach (var producer in _producers.Values) executionRegistration.AddProducer(producer.Producer);
-            if (_scope is not null)
-                foreach (var resource in _scope.Resources.Values) executionRegistration.AddResource(resource);
+
+            var executionRegistration = EvidenceHostRegistration.CreateForPreparedExecution(
+                _producers, _scope?.Resources, RequiredResourceIds);
             lock (_cleanupSync)
             {
                 // Disposal and host admission share this handoff. A factory may return a scope after cancellation;
                 // retain that scope for cleanup without admitting readiness or producer work when disposal won.
                 _factoryCancellation.Token.ThrowIfCancellationRequested();
-                _host = EvidenceHostBootstrap.CreatePreparedExecution(_plan, executionRegistration, _options, _clock,
-                    _session.ReusedResults, RequiredResourceIds.ToHashSet(StringComparer.Ordinal), _scope, _resourceGraph,
-                    _session.GetWriter, _session.BeforeCleanupAsync, _envelopeStatus, _session.ExecutionId,
-                    id => _session.GetChildLifetime(id)?.Environment);
+                _host = EvidenceHostBootstrap.CreatePreparedExecution(_plan, executionRegistration, _executionOptions, _clock,
+                    new EvidencePreparedExecution(
+                        _session.ReusedResults,
+                        RequiredResourceIds.ToHashSet(StringComparer.Ordinal),
+                        _scope,
+                        _resourceGraph,
+                        _session.GetWriter,
+                        _session.BeforeCleanupAsync,
+                        _envelopeStatus,
+                        _session.ExecutionId,
+                        id => _session.GetChildLifetime(id)?.Environment));
             }
             var manifest = await _host.RunAsync(observationOnly, cancellationToken).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested)
@@ -262,8 +264,8 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     private EvidenceManifest FailureManifest(EvidenceProducerOutcome outcome, string diagnostic, bool observationOnly,
         IReadOnlyList<EvidenceResourceResult>? actualResources = null, EvidenceExecutionMetrics? actualMetrics = null)
     {
-        var results = _plan.Profile.Producers.Select(producer => _session.ReusedResults.GetValueOrDefault(producer.Id)
-            ?? new EvidenceProducerResult(producer.Id, outcome, [], diagnostic)).ToArray();
+        var results = EvidenceHostBootstrap.BuildProducerFailureResults(
+            _plan.Profile, _session.ReusedResults, outcome, diagnostic);
         var resources = _plan.Profile.Resources.Select(resource => new EvidenceResourceResult(resource.Id,
             RequiredResourceIds.Contains(resource.Id, StringComparer.Ordinal) ? EvidenceResourceOutcome.Unavailable : EvidenceResourceOutcome.NotRequiredForExecution,
             0, RequiredResourceIds.Contains(resource.Id, StringComparer.Ordinal) ? diagnostic : null)).ToArray();
@@ -312,7 +314,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             }
         }
         catch (Exception exception) { primary ??= exception; settled = false; }
-        try { await _session.CompleteUnsuccessfulSettlementAsync(settled).ConfigureAwait(false); }
+        try { _session.CompleteUnsuccessfulSettlement(settled); }
         finally { await _session.DisposeAsync().ConfigureAwait(false); }
         if (primary is not null && !EvidenceHostBootstrap.IsNonFatalException(primary)) ExceptionDispatchInfo.Capture(primary).Throw();
         return settled;
@@ -355,8 +357,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     private static EvidenceResourceGraph ValidateRegistrations(EvidencePlan plan, EvidenceHostPreparationRegistration registration,
         IReadOnlyDictionary<string, PreparedProducerRegistration> producers)
     {
-        if (plan.Profile.Resources.Count > EvidenceProfileLimits.MaximumResources
-            || plan.Profile.Producers.Count > EvidenceProfileLimits.MaximumProducers || plan.Profile.Obligations.Count > EvidenceProfileLimits.MaximumObligations)
+        if (EvidenceProfileLimits.ExceedsLimits(plan.Profile))
             throw new EvidenceHostException("ASEVD301", "The plan exceeds Evidence profile limits.", "Split it into bounded profiles.");
         if (!plan.Profile.Producers.Select(static producer => producer.Id).Order(StringComparer.Ordinal).SequenceEqual(producers.Keys.Order(StringComparer.Ordinal), StringComparer.Ordinal)
             || producers.Any(pair => pair.Value.Producer.Id != pair.Key))
@@ -373,12 +374,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         var frozen = EvidenceCanonicalJson.Deserialize<EvidencePlan>(EvidenceCanonicalJson.Serialize(plan));
         if (!EvidenceManifestBuilder.Verify(frozen, EvidenceManifestBuilder.Build(frozen, [])))
             throw new EvidenceHostException("reuse.plan_invalid", "The supplied plan or policy digest is invalid.", "Resolve a current policy into a digest-bound plan before preparation.");
-        var resolved = new EvidencePlanner().Resolve(frozen.PolicySnapshot!, frozen.ChangedPaths);
-        if (frozen.PatchSha256 is not null)
-        {
-            resolved = resolved with { PatchSha256 = frozen.PatchSha256, PlanDigest = string.Empty };
-            resolved = resolved with { PlanDigest = EvidenceDigest.CanonicalSha256(resolved) };
-        }
+        var resolved = new EvidencePlanner().ResolveRecordedPlan(frozen.PolicySnapshot!, frozen.ChangedPaths, frozen.PatchSha256);
         if (!string.Equals(resolved.PlanDigest, frozen.PlanDigest, StringComparison.Ordinal))
             throw new EvidenceHostException("reuse.plan_invalid", "The plan is inconsistent with its current policy resolution.", "Resolve the complete policy before preparation; do not manufacture selected profile or claim fields.");
         static IReadOnlyList<T> Copy<T>(IEnumerable<T> values) => new ReadOnlyCollection<T>(values.ToArray());

@@ -132,12 +132,12 @@ public sealed class EvidenceReuseCommandTests
     {
         var plan = new EvidencePlan("1.0", "policy", "", "", new("profile", scope, [], [], []), [], [], "");
 
-        var failure = Assert.Throws<CommandException>(() => EvidenceRunCommand.ValidateReuseContext(true, plan,
+        var failure = Assert.Throws<CommandException>(() => EvidenceReuseCommandOptions.ValidateContext(true, plan,
             name => name == "GITHUB_ACTIONS" ? githubActions : null));
 
         Assert.Contains("reuse.gate_context_forbidden", failure.Message, StringComparison.Ordinal);
         Assert.Contains("No producer or resource was started", failure.Message, StringComparison.Ordinal);
-        EvidenceRunCommand.ValidateReuseContext(false, plan, _ => "true");
+        EvidenceReuseCommandOptions.ValidateContext(false, plan, _ => "true");
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public sealed class EvidenceReuseCommandTests
     {
         var plan = new EvidencePlan("1.0", "policy", "", "", new("profile", EvidenceProfileScope.Targeted, [], [], []), [], [], "");
 
-        EvidenceRunCommand.ValidateReuseContext(true, plan, _ => null);
+        EvidenceReuseCommandOptions.ValidateContext(true, plan, _ => null);
     }
 
     [Theory]

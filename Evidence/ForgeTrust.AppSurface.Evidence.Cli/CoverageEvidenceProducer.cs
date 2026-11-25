@@ -53,10 +53,6 @@ internal sealed class CoverageEvidenceProducer
     /// The caller cancellation token. Caller cancellation is propagated; only expiration of the producer's linked
     /// deadline yields <see cref="EvidenceProducerOutcome.TimedOut"/>.
     /// </param>
-    /// <param name="artifactWriter">Optional fresh bounded writer in separate custody staging; requires an explicit
-    /// coverage-reports multi-file slot. Omission leaves ordinary execution unchanged.</param>
-    /// <param name="childLifetime">Optional coordinator-owned cooperative session. Used only when the workload explicitly
-    /// opts into CooperativeChildLifetime; the coordinator closes enrollment and joins actual child work.</param>
     /// <returns>
     /// A passed result only when collection and the declared gate both pass; a failed result for collection, gate, or
     /// nonfatal core failures (including independently thrown cancellation exceptions); or an unavailable or invalid
@@ -69,6 +65,7 @@ internal sealed class CoverageEvidenceProducer
     /// fail-mode no-progress handling, clean output, and the established AppSurface test exclusion.
     /// Its monotonic producer budget limits the automatic no-dump VSTest timer without replacing deadline cancellation;
     /// it does not expose a general-purpose coverage configuration surface to Evidence consumers.
+    /// Use <see cref="RunWithInventoryAsync"/> when the caller manages receipt custody and needs the eligibility result.
     /// </remarks>
     public async Task<EvidenceProducerResult> RunAsync(
         EvidenceProducerDeclaration producer,
@@ -76,11 +73,9 @@ internal sealed class CoverageEvidenceProducer
         string outputDirectory,
         EvidenceDiffSnapshot? diffSnapshot,
         CoverageTextWriters writers,
-        CancellationToken cancellationToken,
-        EvidenceArtifactWriter? artifactWriter = null,
-        EvidenceChildLifetimeSession? childLifetime = null) =>
+        CancellationToken cancellationToken) =>
         (await RunWithInventoryAsync(producer, solutionPath, outputDirectory, diffSnapshot, writers,
-            cancellationToken, artifactWriter, childLifetime).ConfigureAwait(false)).Result;
+            cancellationToken).ConfigureAwait(false)).Result;
 
     /// <summary>Runs coverage with optional complete custody and returns coordinator-owned eligibility data.</summary>
     /// <remarks>
@@ -142,8 +137,7 @@ internal sealed class CoverageEvidenceProducer
             return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Invalid, [], "ASCOV208 coverageArtifactRetention must be managed or full before execution starts."));
         }
 
-        if ((producer.CoverageGate.MinPatchLinePercent.HasValue || producer.CoverageGate.MinPatchBranchPercent.HasValue)
-            && diffSnapshot is null)
+        if (producer.CoverageGate.RequiresPatch && diffSnapshot is null)
         {
             return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Unavailable, [], "The declared patch coverage gate requires --diff-file so the plan and coverage gate use the same explicit CI diff."));
         }
@@ -212,7 +206,7 @@ internal sealed class CoverageEvidenceProducer
                     timingsPath);
                 hint = " See coverage/timings.json for bounded diagnostics.";
             }
-            catch (Exception ex) when (IsNonFatal(ex))
+            catch (Exception ex) when (EvidenceExceptionPolicy.IsNonFatalException(ex))
             {
                 // The timeout outcome is authoritative; a missing or unsafe hint artifact is ignored.
             }
@@ -222,11 +216,11 @@ internal sealed class CoverageEvidenceProducer
         {
             return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], "The existing AppSurface coverage workflow failed with OperationCanceledException."));
         }
-        catch (CoverageExecutionException exception) when (IsNonFatal(exception))
+        catch (CoverageExecutionException exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
         {
             return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"The existing AppSurface coverage workflow failed with {exception.Code ?? exception.GetType().Name}."));
         }
-        catch (Exception exception) when (IsNonFatal(exception))
+        catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
         {
             return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"The existing AppSurface coverage workflow failed with {exception.GetType().Name}."));
         }
@@ -300,9 +294,7 @@ internal sealed class CoverageEvidenceProducer
                 {
                     // Required reports already exist here. Atomic, non-overwriting delivery adds only missing
                     // optional metadata; rejected custody can never overwrite or poison an ordinary report.
-                    await PreserveOrdinaryReportsAsync(outputDirectory, finalReportRoot, execution,
-                        inventory.Files.Select(file => new CoverageArtifactInventoryEntry(
-                            file.RelativePath["coverage/".Length..], file.LengthBytes, file.Sha256)).ToArray(),
+                    await PromoteReportsAsync(outputDirectory, finalReportRoot, execution, inventory.Files,
                         custodyCancellation.Token).ConfigureAwait(false);
                     artifacts = inventory.AdoptDelivered(receiptWriter, slot, finalReportRoot, custodyCancellation.Token);
                 }
@@ -316,7 +308,7 @@ internal sealed class CoverageEvidenceProducer
                 inventoryReason = "inventory-deadline";
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception exception) when (IsNonFatal(exception))
+            catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
             {
                 inventory = null;
                 inventoryReason = exception is CoverageEvidenceInventoryException failure
@@ -382,7 +374,8 @@ internal sealed class CoverageEvidenceProducer
             ? null
             : new CoveragePatchRequest(
                 GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory()),
-                PatchDiffSource.ForSnapshot(diffSnapshot.Bytes.ToArray(), diffSnapshot.Label, 20L * 1024 * 1024, diffSnapshot.Sha256),
+                PatchDiffSource.ForSnapshot(diffSnapshot.Bytes.ToArray(), diffSnapshot.Label,
+                    EvidencePlan.MaximumCapturedPatchBytes, diffSnapshot.Sha256),
                 requirements.MinPatchLinePercent,
                 requirements.MinPatchBranchPercent,
                 string.Equals(requirements.PatchLineMode, "codecov", StringComparison.OrdinalIgnoreCase)
@@ -407,7 +400,7 @@ internal sealed class CoverageEvidenceProducer
             return (true, null);
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception exception) when (IsNonFatal(exception))
+        catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
         {
             return (false, "ordinary-report-promotion-unavailable");
         }
@@ -434,11 +427,23 @@ internal sealed class CoverageEvidenceProducer
     /// <exception cref="InvalidDataException">The execution or closed publication metadata is incomplete or invalid.</exception>
     /// <exception cref="IOException">A source changed or a destination cannot safely accept its exact bytes.</exception>
     /// <exception cref="OperationCanceledException">The caller cancelled validation or delivery.</exception>
-    internal static async Task PreserveOrdinaryReportsAsync(
+    internal static Task PreserveOrdinaryReportsAsync(
         string sourceRoot,
         string finalRoot,
         CoverageEvidenceExecutionResult execution,
         IReadOnlyList<CoverageArtifactInventoryEntry> publications,
+        CancellationToken cancellationToken,
+        Action? beforeReportPromotion = null)
+        => PromoteReportsAsync(sourceRoot, finalRoot, execution,
+            publications.Select(static publication => CoverageReportFile.FromPublication(publication, normalizeSeparators: true)),
+            cancellationToken, beforeReportPromotion);
+
+    /// <summary>Validates and delivers a complete set of run-relative reports for either ordinary delivery or custody.</summary>
+    private static async Task PromoteReportsAsync(
+        string sourceRoot,
+        string finalRoot,
+        CoverageEvidenceExecutionResult execution,
+        IEnumerable<CoverageReportFile> reports,
         CancellationToken cancellationToken,
         Action? beforeReportPromotion = null)
     {
@@ -446,23 +451,19 @@ internal sealed class CoverageEvidenceProducer
             throw new InvalidDataException("Ordinary reports require successful collection and a completed gate decision.");
         var normalizedFinalRoot = Path.GetFullPath(finalRoot);
         var normalizedSourceRoot = Path.GetFullPath(sourceRoot);
-        var files = publications.Select(publication => new OrdinaryCoverageReport(
-                "coverage/" + publication.Path.Replace('\\', '/'), publication.Length, publication.Sha256))
-            .OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
+        var files = reports.OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
         ValidateOrdinaryReportSet(normalizedSourceRoot, execution, files, cancellationToken);
 
         using var finalRootLease = CoverageRunOutputLease.AcquireArtifactDirectory(
             normalizedFinalRoot, createMissing: true, requirePrivate: false)
             ?? throw new IOException("The final coverage report root is unavailable.");
-        var sourceCoverageRoot = Path.Join(normalizedSourceRoot, "coverage");
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var components = file.RelativePath.Split('/');
             using var destinationParent = OpenOrCreateArtifactDirectory(finalRootLease, components[..^1]);
             var destinationName = components[^1];
-            using var input = CoverageRunArtifactReader.OpenRegularFile(normalizedSourceRoot, sourceCoverageRoot,
-                Path.Join(normalizedSourceRoot, file.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+            using var input = CoverageReportFile.OpenRead(normalizedSourceRoot, file.RelativePath);
             if (input.Length != file.LengthBytes)
                 throw new IOException("A managed coverage report changed before promotion.");
 
@@ -509,15 +510,15 @@ internal sealed class CoverageEvidenceProducer
     }
 
     private static void ValidateOrdinaryReportSet(string sourceRoot, CoverageEvidenceExecutionResult execution,
-        IReadOnlyList<OrdinaryCoverageReport> files, CancellationToken cancellationToken)
+        IReadOnlyList<CoverageReportFile> files, CancellationToken cancellationToken)
     {
         var paths = new HashSet<string>(StringComparer.Ordinal);
         var prefixes = new EvidencePathPrefixes();
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            CoverageEvidenceInventory.ValidatePath(file.RelativePath);
-            if (file.LengthBytes < 0 || file.Sha256.Length != 64 || file.Sha256.Any(static value => !char.IsAsciiHexDigitLower(value)))
+            CoverageReportFile.ValidatePath(file.RelativePath);
+            if (file.LengthBytes < 0 || !file.HasCanonicalDigest)
                 throw new InvalidDataException("The managed coverage publication metadata is invalid.");
             if (!paths.Add(file.RelativePath)) throw new InvalidDataException("The managed coverage publication paths are duplicated.");
             if (!prefixes.TryAdd(file.RelativePath))
@@ -560,14 +561,6 @@ internal sealed class CoverageEvidenceProducer
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         return diagnostic.Replace(Path.GetFullPath(executionRoot), Path.GetFullPath(finalRoot), comparison);
     }
-
-    private static bool IsNonFatal(Exception exception) =>
-        exception is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException;
-
-    private sealed record OrdinaryCoverageReport(string RelativePath, long LengthBytes, string Sha256);
 }
 
 /// <summary>Internal coordinator result: ordinary coverage outcome plus complete optional receipt eligibility.</summary>

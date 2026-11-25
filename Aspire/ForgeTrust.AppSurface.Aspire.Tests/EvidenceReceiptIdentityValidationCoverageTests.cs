@@ -1,3 +1,4 @@
+using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
@@ -8,18 +9,25 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
     private static readonly string Hash = new('a', 64);
 
     [Fact]
-    public void TypedIdentityIsCanonicalizedBeforePersistence()
+    public void TypedIdentityRoundTripsExistingCanonicalBytes()
     {
-        var files = new[] { new EvidenceReceiptInputFile("src/z.cs", Hash), new EvidenceReceiptInputFile("src/a.cs", Hash) };
+        var files = new[] { new EvidenceProducerInputFile("src/z.cs", 0x81a4, 1, Hash), new EvidenceProducerInputFile("src/a.cs", 0, 0, Hash) };
         var sourceIdentity = new EvidenceProducerIdentity(Hash, Hash,
-            files.Select(static file => new EvidenceProducerInputFile(file.RelativePath, file.Mode, file.LengthBytes, file.Sha256)).ToArray(),
+            files,
             new Dictionary<string, string> { ["tools"] = Hash, ["files"] = Hash });
         var (identity, canonicalBytes) = EvidenceReceiptInputIdentity.Create(sourceIdentity);
 
         Assert.Equal(["files", "tools"], identity.ComponentHashes.Keys);
         Assert.Equal(Hash, identity.ComponentHashes["tools"]);
         Assert.Equal(["src/a.cs", "src/z.cs"], identity.Files.Select(file => file.RelativePath));
-        Assert.Equal(EvidenceCanonicalJson.Serialize(identity), canonicalBytes);
+        var existingBytes = Encoding.UTF8.GetBytes(
+            $$"""{"ComponentHashes":{"files":"{{Hash}}","tools":"{{Hash}}"},"Files":["""
+            + $$"""{"LengthBytes":0,"Mode":0,"RelativePath":"src/a.cs","Sha256":"{{Hash}}"},"""
+            + $$"""{"LengthBytes":1,"Mode":33188,"RelativePath":"src/z.cs","Sha256":"{{Hash}}"}]}""");
+        Assert.Equal(existingBytes, canonicalBytes);
+        var existing = EvidenceCanonicalJson.Deserialize<EvidenceReceiptInputIdentity>(existingBytes);
+        Assert.Equal(identity.Files, existing.Files);
+        Assert.Equal(existingBytes, existing.ValidateAndEncode());
     }
 
     [Theory]
@@ -44,7 +52,7 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
     [InlineData("duplicate-path")]
     public void PersistedIdentityRejectsInvalidOrAmbiguousFileInventory(string defect)
     {
-        var file = new EvidenceReceiptInputFile("src/input.cs", Hash, 0x81a4, 1);
+        var file = new EvidenceProducerInputFile("src/input.cs", 0x81a4, 1, Hash);
         var files = defect switch
         {
             "negative-length" => new[] { file with { LengthBytes = -1 } },
@@ -66,7 +74,7 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
             ? Enumerable.Range(0, 65).ToDictionary(index => "component-" + index, _ => Hash)
             : new Dictionary<string, string>();
         var files = dimension == "files"
-            ? Enumerable.Repeat(new EvidenceReceiptInputFile("src/input.cs", Hash), EvidenceProducerIdentityBuilder.MaximumFiles + 1).ToArray()
+            ? Enumerable.Repeat(new EvidenceProducerInputFile("src/input.cs", 0, 0, Hash), EvidenceProducerIdentityBuilder.MaximumFiles + 1).ToArray()
             : [];
 
         Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(components, files).ValidateAndEncode());
@@ -76,8 +84,8 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
     public void EncodedMetadataLimitAppliesEvenWhenEveryIndividualFileRecordIsValid()
     {
         var suffix = new string('a', 4000) + ".cs";
-        var files = Enumerable.Range(0, 5000).Select(index => new EvidenceReceiptInputFile(
-            "src/" + index + "/" + suffix, Hash, 0x81a4, 1)).ToArray();
+        var files = Enumerable.Range(0, 5000).Select(index => new EvidenceProducerInputFile(
+            "src/" + index + "/" + suffix, 0x81a4, 1, Hash)).ToArray();
 
         var failure = Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(
             new Dictionary<string, string> { ["tools"] = Hash }, files).ValidateAndEncode());

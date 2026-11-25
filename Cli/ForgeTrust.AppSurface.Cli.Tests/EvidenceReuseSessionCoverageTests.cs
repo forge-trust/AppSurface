@@ -316,7 +316,7 @@ public sealed class EvidenceReuseSessionCoverageTests
             new Dictionary<string, string>(), retryOptions, _ => artifacts, CancellationToken.None);
         Assert.True(await retry.BeginExecutionAsync(CancellationToken.None));
         Assert.All(retry.Decisions, decision => Assert.Equal(EvidenceProducerReuseStatus.Miss, decision.Status));
-        await retry.CompleteUnsuccessfulSettlementAsync(actualCleanupCompleted: true);
+        retry.CompleteUnsuccessfulSettlement(actualCleanupCompleted: true);
         var finalIdentity = await BuildIdentityAsync(repository.Root, plan, declarations[0]);
         foreach (var decision in retry.Decisions)
             Assert.Null(EvidenceReceiptQuota.ReadAuthority(store, finalIdentity.RepositoryNamespace,
@@ -353,7 +353,7 @@ public sealed class EvidenceReuseSessionCoverageTests
         var identity = await BuildIdentityAsync(repository.Root, plan, declaration);
         var prior = Assert.IsType<EvidenceReceiptState>(EvidenceReceiptQuota.ReadAuthority(store, identity.RepositoryNamespace, key));
         var malformed = prior with { AuditIntentExecutionId = "orphaned-audit-owner", AuditExpectedAssertions = malformedAssertions };
-        EvidenceReceiptQuota.RecordState(store, identity.RepositoryNamespace, key, JsonSerializer.SerializeToUtf8Bytes(malformed).Length, malformed);
+        EvidenceReceiptQuota.RecordState(store, identity.RepositoryNamespace, key, malformed);
         var verify = ReuseOptions(repository.Root, store) with { VerifyReuse = true };
 
         await using var audit = await EvidenceProducerReuseSession.PrepareAsync(plan, registrations,
@@ -445,8 +445,8 @@ public sealed class EvidenceReuseSessionCoverageTests
         var decision = Assert.Single(session.Decisions);
         Assert.Equal(expectedReason, decision.Reason);
         Assert.Equal(EvidenceReceiptPublication.Suppressed, decision.Publication);
-        var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], hasSolutionIdentity: false,
-            new Dictionary<string, string>()));
+        var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions([decision],
+            new Dictionary<string, (string Reason, string Diagnostic)>()));
         Assert.Equal(expectedReason, summary.Reason);
         Assert.Equal("suppressed", summary.Publication);
         Assert.Equal(key, decision.ProducerKey);
@@ -1252,7 +1252,9 @@ public sealed class EvidenceReuseSessionCoverageTests
         await using (var restored = await EvidenceProducerReuseSession.PrepareAsync(plan, registrations,
             new Dictionary<string, string>(), options, _ => restoredArtifacts, CancellationToken.None))
         {
-            Assert.Equal(EvidenceProducerReuseStatus.Hit, Assert.Single(restored.Decisions).Status);
+            var decision = Assert.Single(restored.Decisions);
+            Assert.Equal(EvidenceProducerReuseStatus.Hit, decision.Status);
+            Assert.Equal(EvidenceReceiptPublication.Restored, decision.Publication);
             var reused = Assert.Single(restored.ReusedResults);
             Assert.Equal(EvidenceProducerOutcome.Reused, reused.Value.Outcome);
             Assert.Equal("receipt content", await File.ReadAllTextAsync(TestPathUtils.PathUnder(restoredArtifacts, "reports", "report.txt")));
@@ -1264,6 +1266,9 @@ public sealed class EvidenceReuseSessionCoverageTests
         await using (var audit = await EvidenceProducerReuseSession.PrepareAsync(plan, registrations,
             new Dictionary<string, string>(), options with { VerifyReuse = true }, _ => auditArtifacts, CancellationToken.None))
         {
+            var decision = Assert.Single(audit.Decisions);
+            Assert.Equal("reuse.audit_requested", decision.Reason);
+            Assert.Equal(EvidenceReceiptPublication.NotPublished, decision.Publication);
             Assert.Empty(audit.ReusedResults);
             Assert.True(await audit.BeginExecutionAsync(CancellationToken.None));
             var freshResult = await producer.ProduceAsync(new EvidenceProducerContext(plan, declaration,
@@ -1936,8 +1941,7 @@ public sealed class EvidenceReuseSessionCoverageTests
         var admittedState = Assert.IsType<EvidenceReceiptState>(EvidenceReceiptQuota.ReadAuthority(store,
             identity.RepositoryNamespace, key));
         var foreignIntent = admittedState with { AuditIntentExecutionId = "foreign-audit-owner" };
-        var foreignBytes = JsonSerializer.SerializeToUtf8Bytes(foreignIntent);
-        EvidenceReceiptQuota.RecordState(store, identity.RepositoryNamespace, key, foreignBytes.Length, foreignIntent);
+        EvidenceReceiptQuota.RecordState(store, identity.RepositoryNamespace, key, foreignIntent);
 
         var completed = await audit.CompleteAsync(EvidenceManifestBuilder.Build(plan,
             [auditResult with { SatisfiedAssertionIds = ["different-assertion"] }],

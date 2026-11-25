@@ -7,20 +7,43 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageDogfoodDiagnosticsTests
 {
     [Fact]
-    public void NativeFilterMatchesTheOrderedEmbeddedSelectorInventory()
+    public void NativeProjectsMatchTheOrderedEmbeddedProjectInventory()
+    {
+        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
+        var projectPath = TestPathUtils.PathUnder(repositoryRoot,
+            ".github", "workflows", "native-coverage-test-projects.txt");
+        string[] expected =
+        [
+            "Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj",
+            "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj",
+        ];
+
+        Assert.Equal(expected, File.ReadAllLines(projectPath));
+        Assert.Equal(expected, NativeCoverageTestInventory.ReadNativeProjects());
+    }
+
+    [Theory]
+    [InlineData("native")]
+    [InlineData("shared-cli")]
+    public async Task PrintTestFilterWritesTheOrderedSelectionToStandardOutput(string lane)
     {
         var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
         var selectorPath = TestPathUtils.PathUnder(repositoryRoot,
             ".github", "workflows", "native-coverage-test-selectors.txt");
         var selectors = File.ReadAllLines(selectorPath)
             .Select(line => line.Split('\t', 2))
-            .Select(entry =>
-            {
-                Assert.Equal(2, entry.Length);
-                return entry[1];
-            });
+            .Where(entry => lane == "native" || entry[0] == lane)
+            .Select(entry => entry[1]);
 
-        Assert.Equal(string.Join("|", selectors), NativeCoverageTestSelectorInventory.ReadNativeFilter());
+        var (assembly, _) = FindDogfoodAssembly(repositoryRoot);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var request = new CoverageRunProcessRequest("dotnet", [assembly, "--print-test-filter", lane],
+            repositoryRoot, null, null, CoverageRunProcessLease.Detached());
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, deadline.Token);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.StandardError);
+        Assert.Equal(string.Join("|", selectors), result.StandardOutput?.TrimEnd('\r', '\n'));
     }
 
     [Theory]
@@ -35,11 +58,7 @@ public sealed class CoverageDogfoodDiagnosticsTests
     {
         using var temp = TestDirectory.Create();
         var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
-        var testOutputDirectory = new DirectoryInfo(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory));
-        var configuration = testOutputDirectory.Parent?.Name ?? throw new DirectoryNotFoundException("Could not determine the test configuration.");
-        var dogfoodAssembly = TestPathUtils.PathUnder(repositoryRoot,
-            $"tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/{configuration}/{testOutputDirectory.Name}/ForgeTrust.AppSurface.Coverage.Dogfood.dll");
-        Assert.True(File.Exists(dogfoodAssembly), $"The Dogfood executable was not built: {dogfoodAssembly}");
+        var (dogfoodAssembly, configuration) = FindDogfoodAssembly(repositoryRoot);
 
         var arguments = new List<string>
         {
@@ -58,5 +77,15 @@ public sealed class CoverageDogfoodDiagnosticsTests
         Assert.Contains($"ASCOV311 Dogfood failed at options ({expectedReason}).", error);
         Assert.Contains(expectedRecovery, error);
         Assert.DoesNotContain("private-", error, StringComparison.Ordinal);
+    }
+
+    private static (string Assembly, string Configuration) FindDogfoodAssembly(string repositoryRoot)
+    {
+        var testOutputDirectory = new DirectoryInfo(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory));
+        var configuration = testOutputDirectory.Parent?.Name ?? throw new DirectoryNotFoundException("Could not determine the test configuration.");
+        var dogfoodAssembly = TestPathUtils.PathUnder(repositoryRoot,
+            $"tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/{configuration}/{testOutputDirectory.Name}/ForgeTrust.AppSurface.Coverage.Dogfood.dll");
+        Assert.True(File.Exists(dogfoodAssembly), $"The Dogfood executable was not built: {dogfoodAssembly}");
+        return (dogfoodAssembly, configuration);
     }
 }

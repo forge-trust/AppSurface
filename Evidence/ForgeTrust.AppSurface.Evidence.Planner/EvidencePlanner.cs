@@ -27,7 +27,7 @@ public sealed class EvidencePlanner
     public EvidencePlan ResolvePatch(EvidencePolicy policy, ReadOnlyMemory<byte> patch,
         IReadOnlyList<NormalizedDiffPath>? additionalPaths = null)
     {
-        if (patch.IsEmpty || patch.Length > 20 * 1024 * 1024)
+        if (patch.IsEmpty || patch.Length > EvidencePlan.MaximumCapturedPatchBytes)
             throw new EvidencePlanningException("ASEVD101", "Evidence planning requires a bounded, nonempty patch.",
                 "Provide a unified patch no larger than 20 MiB, or plan from explicit paths only.");
         var snapshot = patch.ToArray();
@@ -48,6 +48,15 @@ public sealed class EvidencePlanner
         return ResolveCore(policy, (additionalPaths ?? []).Concat(patchPaths).ToArray(),
             Convert.ToHexStringLower(SHA256.HashData(snapshot)));
     }
+
+    /// <summary>Recomputes the selection and plan digest for a recorded plan.</summary>
+    /// <param name="policy">The recorded canonical policy snapshot.</param>
+    /// <param name="changedPaths">The recorded normalized changed paths.</param>
+    /// <param name="patchSha256">The recorded patch digest, or null for a path-only plan.</param>
+    /// <returns>The expected plan for comparison with the recorded plan.</returns>
+    /// <remarks>Callers validate the recorded binding separately. Replaying selection does not read the original patch.</remarks>
+    internal EvidencePlan ResolveRecordedPlan(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths,
+        string? patchSha256) => ResolveCore(policy, changedPaths, patchSha256);
 
     private static EvidencePlan ResolveCore(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths,
         string? patchSha256)
@@ -101,10 +110,9 @@ public sealed class EvidencePlanner
             matchedRuleIds = matchedRuleIds.Append($"conservative:{policy.ConservativeProfileId}");
         }
 
-        var hasReuseContract = policy.Profiles.Any(static candidate =>
-            candidate.Producers.Any(static producer => producer.RequiresContractVersion11()));
+        var declarationsRequireV11 = EvidenceContractVersions.RequiresVersion11(policy, profile);
         var draft = new EvidencePlan(
-            ContractVersion: hasReuseContract ? "1.1" : "1.0",
+            ContractVersion: declarationsRequireV11 ? EvidenceContractVersions.V11 : EvidenceContractVersions.V10,
             PolicyId: policy.Id,
             PolicyDigest: policyDigest,
             DiffDigest: diffDigest,
@@ -207,9 +215,7 @@ public sealed class EvidencePlanner
 
     private static void ValidateProfile(EvidenceProfile profile)
     {
-        if (profile.Resources.Count > EvidenceProfileLimits.MaximumResources
-            || profile.Producers.Count > EvidenceProfileLimits.MaximumProducers
-            || profile.Obligations.Count > EvidenceProfileLimits.MaximumObligations)
+        if (EvidenceProfileLimits.ExceedsLimits(profile))
         {
             throw new EvidencePlanningException("ASEVD122", $"Profile '{profile.Id}' exceeds v1 EvidenceHost declaration limits.", "Split the profile into bounded evidence obligations.");
         }
@@ -295,10 +301,10 @@ public sealed class EvidencePlanner
             foreach (var slot in producer.ArtifactSlots)
             {
                 RequireIdentifier(slot.LogicalName, "artifact logical name");
-                if (slot.MaximumBytes < 0 || string.IsNullOrWhiteSpace(slot.MediaType)
-                    || slot.MaximumFiles is <= 0 or > 128)
+                if (!slot.HasValidLimits || string.IsNullOrWhiteSpace(slot.MediaType))
                 {
-                    throw new EvidencePlanningException("ASEVD126", $"Producer '{producer.Id}' has an invalid artifact slot '{slot.LogicalName}'.", "Use a media type, a non-negative aggregate maximum byte count, and omit maximumFiles or set it from 1 through 128.");
+                    throw new EvidencePlanningException("ASEVD126", $"Producer '{producer.Id}' has an invalid artifact slot '{slot.LogicalName}'.",
+                        $"Use a media type, a non-negative aggregate maximum byte count, and omit maximumFiles or set it from 1 through {EvidenceArtifactSlot.MaximumAllowedFiles}.");
                 }
 
                 try

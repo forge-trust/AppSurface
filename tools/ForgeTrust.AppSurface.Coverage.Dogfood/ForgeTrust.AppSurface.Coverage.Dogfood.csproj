@@ -8,6 +8,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj" />
+    <EmbeddedResource Include="../../.github/workflows/native-coverage-test-projects.txt">
+      <LogicalName>ForgeTrust.AppSurface.Coverage.Dogfood.native-coverage-test-projects.txt</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="../../.github/workflows/native-coverage-test-selectors.txt">
       <LogicalName>ForgeTrust.AppSurface.Coverage.Dogfood.native-coverage-test-selectors.txt</LogicalName>
     </EmbeddedResource>

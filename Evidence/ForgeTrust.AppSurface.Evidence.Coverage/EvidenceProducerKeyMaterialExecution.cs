@@ -77,7 +77,7 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(context);
         if (context.Producer.TimeoutSeconds <= 0)
             throw new ArgumentOutOfRangeException(nameof(context));
-        if (cleanupTimeout <= TimeSpan.Zero || cleanupTimeout > TimeSpan.FromMinutes(1))
+        if (!EvidenceExecutionTimeouts.IsValidProducerCleanup(cleanupTimeout))
             throw new ArgumentOutOfRangeException(nameof(cleanupTimeout));
         cancellationToken.ThrowIfCancellationRequested();
         return new EvidenceProducerKeyMaterialExecution(callback, context,
@@ -92,8 +92,7 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
         {
             var material = await _actualTask.WaitAsync(_cancellation.Token).ConfigureAwait(false);
             if (_cancellation.IsCancellationRequested)
-                return new EvidenceProducerKeyMaterialPreparation(null, true, _callerCancellation.IsCancellationRequested,
-                    _callerCancellation.IsCancellationRequested ? "reuse.material_cancelled" : "reuse.material_timed_out");
+                return CreateStoppedPreparation(settled: true);
             return new EvidenceProducerKeyMaterialPreparation(material, true, false, "reuse.material_ready");
         }
         catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
@@ -105,16 +104,14 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
             }
             catch (TimeoutException) when (!_actualTask.IsCompleted)
             {
-                return new EvidenceProducerKeyMaterialPreparation(null, false, _callerCancellation.IsCancellationRequested,
-                    _callerCancellation.IsCancellationRequested ? "reuse.material_cancelled_active" : "reuse.material_unsettled");
+                return CreateStoppedPreparation(settled: false);
             }
-            catch (Exception exception) when (IsNonFatal(exception))
+            catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
             {
                 // A completed nonfatal cancellation/fault establishes settlement, never a usable late key.
             }
 
-            return new EvidenceProducerKeyMaterialPreparation(null, true, _callerCancellation.IsCancellationRequested,
-                _callerCancellation.IsCancellationRequested ? "reuse.material_cancelled" : "reuse.material_timed_out");
+            return CreateStoppedPreparation(settled: true);
         }
         catch (EvidenceKeyMaterialValidationException exception)
         {
@@ -132,11 +129,24 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
                 Diagnostic = "The key-material callback returned invalid data. Return a non-null map with unique, non-empty keys within the declared limits.",
             };
         }
-        catch (Exception exception) when (IsNonFatal(exception))
+        catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
         {
             return new EvidenceProducerKeyMaterialPreparation(null, true, _callerCancellation.IsCancellationRequested,
                 "reuse.material_failed");
         }
+    }
+
+    private EvidenceProducerKeyMaterialPreparation CreateStoppedPreparation(bool settled)
+    {
+        var callerCancelled = _callerCancellation.IsCancellationRequested;
+        var reason = (settled, callerCancelled) switch
+        {
+            (true, true) => "reuse.material_cancelled",
+            (true, false) => "reuse.material_timed_out",
+            (false, true) => "reuse.material_cancelled_active",
+            (false, false) => "reuse.material_unsettled",
+        };
+        return new(null, settled, callerCancelled, reason);
     }
 
     /// <summary>Joins the actual callback and releases its cancellation sources only after termination.</summary>
@@ -152,7 +162,7 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
         {
             await _actualTask.ConfigureAwait(false);
         }
-        catch (Exception exception) when (IsNonFatal(exception))
+        catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
         {
             // The preparation outcome already represents an invalid, cancelled or failed key callback.
         }
@@ -163,6 +173,4 @@ internal sealed class EvidenceProducerKeyMaterialExecution : IAsyncDisposable
         }
     }
 
-    private static bool IsNonFatal(Exception exception) => exception is not OutOfMemoryException
-        and not StackOverflowException and not AccessViolationException and not AppDomainUnloadedException;
 }

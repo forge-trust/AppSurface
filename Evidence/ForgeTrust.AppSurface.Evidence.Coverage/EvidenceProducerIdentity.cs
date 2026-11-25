@@ -24,7 +24,32 @@ internal sealed record EvidenceProducerIdentity(
     string Key,
     string RepositoryNamespace,
     IReadOnlyList<EvidenceProducerInputFile> Files,
-    IReadOnlyDictionary<string, string> ComponentHashes);
+    IReadOnlyDictionary<string, string> ComponentHashes)
+{
+    /// <summary>Checks whether another identity addresses the same receipt.</summary>
+    /// <param name="other">The identity obtained by revalidating the producer's inputs.</param>
+    /// <returns>True when both the content key and repository namespace match exactly.</returns>
+    internal bool HasSameReceiptKey(EvidenceProducerIdentity? other) =>
+        other is not null && Key == other.Key && RepositoryNamespace == other.RepositoryNamespace;
+}
+
+/// <summary>Stable version 1 names shared by the producer key and the persisted receipt inventory.</summary>
+/// <remarks>Changing a wire name changes existing keys and can make stored inventories unreadable.</remarks>
+internal static class EvidenceProducerIdentityComponents
+{
+    internal const string Declaration = "declaration";
+    internal const string Implementation = "implementation";
+    internal const string Resources = "resources";
+    internal const string Tools = "tools";
+    internal const string Material = "material";
+    internal const string Platform = "platform";
+    internal const string Patch = "patch";
+    internal const string Files = "files";
+
+    /// <summary>Recognizes an exact version 1 name. Persisted inventories may contain a subset of these names.</summary>
+    internal static bool IsVersionOneName(string name) =>
+        name is Declaration or Implementation or Resources or Tools or Material or Platform or Patch or Files;
+}
 
 /// <summary>One regular input file, represented by its repository path, platform-available mode, length and content digest.</summary>
 /// <remarks>
@@ -111,8 +136,7 @@ internal static class EvidenceProducerIdentityBuilder
                 ?? throw new InvalidOperationException("Git common directory is unavailable.");
             var namespaceId = Hash(Encoding.UTF8.GetBytes(commonDirectory.ArtifactDirectoryIdentity));
             stage = "inventory";
-            var listed = await GitAsync(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], deadline.Token, raw: true).ConfigureAwait(false);
-            var paths = ExistingPaths(root, ParsePaths(listed));
+            var paths = await ReadExistingInventoryAsync(root, deadline.Token).ConfigureAwait(false);
             var includes = request.Producer.Inputs!.Include;
             var excludes = request.Producer.Inputs.Exclude ?? [];
             var indexedPaths = await GitAsync(root, ["ls-files", "--stage", "-z"], deadline.Token, raw: true).ConfigureAwait(false);
@@ -120,8 +144,8 @@ internal static class EvidenceProducerIdentityBuilder
                 return Ineligible("reuse.identity.nested_repository", "A declared include pattern may select files inside a nested Git repository or submodule.");
             if (HasSelectedLinkedDirectory(root, paths, includes, deadline.Token))
                 return Ineligible("reuse.identity.linked_input", "A declared include pattern may select files through a linked directory.");
-            var selected = paths.Where(path => includes.Any(pattern => Matches(pattern, path, deadline.Token))
-                && !excludes.Any(pattern => Matches(pattern, path, deadline.Token))).Order(StringComparer.Ordinal).ToArray();
+            var selected = paths.Where(path => includes.Any(pattern => EvidenceProducerInputPattern.MatchesPath(pattern, path, deadline.Token))
+                && !excludes.Any(pattern => EvidenceProducerInputPattern.MatchesPath(pattern, path, deadline.Token))).ToArray();
             if (CheckFileCountLimit(selected.Length) is { } fileCountLimit) return fileCountLimit;
             if (selected.Length == 0) return Ineligible("reuse.identity.empty", "The declared input patterns select no files.");
             long metadataBytes = 0;
@@ -160,16 +184,17 @@ internal static class EvidenceProducerIdentityBuilder
             }
 
             // Re-enumeration catches additions, deletions, renames and changed selection while hashing.
-            var finalListing = await GitAsync(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], deadline.Token, raw: true).ConfigureAwait(false);
-            if (!paths.SequenceEqual(ExistingPaths(root, ParsePaths(finalListing)), StringComparer.Ordinal))
+            var finalPaths = await ReadExistingInventoryAsync(root, deadline.Token).ConfigureAwait(false);
+            if (!paths.SequenceEqual(finalPaths, StringComparer.Ordinal))
                 return Ineligible("reuse.identity.changed_during_read", "The repository input inventory changed during identity preparation.");
 
             ArgumentNullException.ThrowIfNull(request.ExtraMaterial);
             var material = EvidenceKeyMaterialSnapshot.Capture(request.ExtraMaterial, deadline.Token);
             stage = "key";
-            if (RequiresPatch(request.Producer) && (!ValidDigest(request.CapturedPatchSha256) || !ValidDigest(request.Plan.PatchSha256)))
+            var requiresPatch = request.Producer.CoverageGate?.RequiresPatch == true;
+            if (requiresPatch && (!ValidDigest(request.CapturedPatchSha256) || !ValidDigest(request.Plan.PatchSha256)))
                 return Ineligible("reuse.identity.patch_unavailable", "The producer requires the exact captured patch digest.");
-            if ((RequiresPatch(request.Producer) || request.Plan.PatchSha256 is not null)
+            if ((requiresPatch || request.Plan.PatchSha256 is not null)
                 && !string.Equals(request.Plan.PatchSha256, request.CapturedPatchSha256, StringComparison.OrdinalIgnoreCase))
                 return Ineligible("reuse.identity.patch_mismatch", "The captured patch digest does not match the planned patch.");
 
@@ -179,20 +204,15 @@ internal static class EvidenceProducerIdentityBuilder
                 deadline.Token.ThrowIfCancellationRequested();
                 resourceDeclarations.Add(resource.Id, resource);
             }
-            var requiredIds = new HashSet<string>(StringComparer.Ordinal);
-            var pending = new Stack<string>(request.Producer.RequiredResources);
-            while (pending.TryPop(out var id))
+            var requiredResources = new List<EvidenceResourceDeclaration>();
+            foreach (var (_, declaration) in EvidenceResourceReachability.Enumerate(
+                resourceDeclarations, request.Producer.RequiredResources, deadline.Token))
             {
-                if (!requiredIds.Add(id)) continue;
-                if (!resourceDeclarations.TryGetValue(id, out var declaration)) return Ineligible("reuse.identity.resource_unavailable", "A required resource declaration is unavailable.");
-                foreach (var dependency in declaration.Requires)
-                {
-                    deadline.Token.ThrowIfCancellationRequested();
-                    pending.Push(dependency);
-                }
+                if (declaration is null)
+                    return Ineligible("reuse.identity.resource_unavailable", "A required resource declaration is unavailable.");
+                requiredResources.Add(declaration);
             }
-            var resources = request.Plan.Profile.Resources
-                .Where(resource => requiredIds.Contains(resource.Id))
+            var resources = requiredResources
                 .OrderBy(static resource => resource.Id, StringComparer.Ordinal)
                 .Select(resource => new { declaration = resource with { Requires = resource.Requires.Order(StringComparer.Ordinal).ToArray() }, identity = request.ResourceIdentities.GetValueOrDefault(resource.Id) }).ToArray();
             deadline.Token.ThrowIfCancellationRequested();
@@ -201,14 +221,14 @@ internal static class EvidenceProducerIdentityBuilder
 
             var components = new SortedDictionary<string, string>(StringComparer.Ordinal)
             {
-                ["declaration"] = CanonicalDeclarationHash(request.Producer),
-                ["implementation"] = Hash(Encoding.UTF8.GetBytes(request.ImplementationIdentity)),
-                ["resources"] = Hash(JsonSerializer.SerializeToUtf8Bytes(resources, CanonicalJson)),
-                ["tools"] = Hash(JsonSerializer.SerializeToUtf8Bytes(Sorted(request.EffectiveToolIdentity), CanonicalJson)),
-                ["material"] = Hash(JsonSerializer.SerializeToUtf8Bytes<IReadOnlyDictionary<string, string>>(material, CanonicalJson)),
-                ["platform"] = Hash(Encoding.UTF8.GetBytes($"{System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier}|{System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}|{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}")),
-                ["patch"] = Hash(Encoding.UTF8.GetBytes(RequiresPatch(request.Producer) ? request.CapturedPatchSha256!.ToLowerInvariant() : string.Empty)),
-                ["files"] = Hash(JsonSerializer.SerializeToUtf8Bytes(files, CanonicalJson))
+                [EvidenceProducerIdentityComponents.Declaration] = CanonicalDeclarationHash(request.Producer),
+                [EvidenceProducerIdentityComponents.Implementation] = Hash(Encoding.UTF8.GetBytes(request.ImplementationIdentity)),
+                [EvidenceProducerIdentityComponents.Resources] = Hash(JsonSerializer.SerializeToUtf8Bytes(resources, CanonicalJson)),
+                [EvidenceProducerIdentityComponents.Tools] = Hash(JsonSerializer.SerializeToUtf8Bytes(Sorted(request.EffectiveToolIdentity), CanonicalJson)),
+                [EvidenceProducerIdentityComponents.Material] = Hash(JsonSerializer.SerializeToUtf8Bytes<IReadOnlyDictionary<string, string>>(material, CanonicalJson)),
+                [EvidenceProducerIdentityComponents.Platform] = Hash(Encoding.UTF8.GetBytes($"{System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier}|{System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}|{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}")),
+                [EvidenceProducerIdentityComponents.Patch] = Hash(Encoding.UTF8.GetBytes(requiresPatch ? request.CapturedPatchSha256!.ToLowerInvariant() : string.Empty)),
+                [EvidenceProducerIdentityComponents.Files] = Hash(JsonSerializer.SerializeToUtf8Bytes(files, CanonicalJson))
             };
             var key = Hash(JsonSerializer.SerializeToUtf8Bytes(new { version = 1, components }, CanonicalJson));
             deadline.Token.ThrowIfCancellationRequested();
@@ -338,50 +358,6 @@ internal static class EvidenceProducerIdentityBuilder
         }
     }
 
-    private static bool Matches(string pattern, string path, CancellationToken token)
-    {
-        var segments = path.Split('/');
-        var reachable = new bool[segments.Length + 1];
-        reachable[0] = true;
-        foreach (var part in pattern.Split('/'))
-        {
-            token.ThrowIfCancellationRequested();
-            var next = new bool[reachable.Length];
-            if (part == "**")
-            {
-                var reachablePrefix = false;
-                for (var index = 0; index < reachable.Length; index++)
-                {
-                    token.ThrowIfCancellationRequested();
-                    reachablePrefix |= reachable[index];
-                    next[index] = reachablePrefix;
-                }
-            }
-            else
-                for (var index = 0; index < segments.Length; index++)
-                {
-                    token.ThrowIfCancellationRequested();
-                    next[index + 1] = reachable[index] && SegmentMatches(part, segments[index], token);
-                }
-            reachable = next;
-        }
-        return reachable[^1];
-    }
-    private static bool SegmentMatches(string pattern, string value, CancellationToken token)
-    {
-        var p = 0; var v = 0; var star = -1; var retry = 0;
-        while (v < value.Length)
-        {
-            token.ThrowIfCancellationRequested();
-            if (p < pattern.Length && (pattern[p] == value[v] || pattern[p] == '*'))
-            { if (pattern[p] == '*') { star = p++; retry = v; } else { p++; v++; } }
-            else if (star >= 0) { p = star + 1; v = ++retry; }
-            else return false;
-        }
-        while (p < pattern.Length && pattern[p] == '*') p++;
-        return p == pattern.Length;
-    }
-
     private static string ResolveContainedPath(string root, string relative)
     {
         var current = root;
@@ -481,35 +457,7 @@ internal static class EvidenceProducerIdentityBuilder
     /// <param name="token">Cancellation token for bounded pattern matching.</param>
     /// <returns><see langword="true"/> when a pattern selects the path or a possible descendant.</returns>
     internal static bool IncludeMaySelectPathOrDescendant(string path, IReadOnlyList<string> includePatterns, CancellationToken token)
-        => includePatterns.Any(pattern => Matches(pattern, path, token) || CouldSelectDescendant(pattern, path, token));
-
-    private static bool CouldSelectDescendant(string pattern, string directory, CancellationToken token)
-    {
-        var patternSegments = pattern.Split('/');
-        var directorySegments = directory.Split('/');
-        var reachable = new bool[patternSegments.Length + 1, directorySegments.Length + 1];
-        reachable[0, 0] = true;
-        for (var patternIndex = 0; patternIndex < patternSegments.Length; patternIndex++)
-        {
-            for (var directoryIndex = 0; directoryIndex <= directorySegments.Length; directoryIndex++)
-            {
-                token.ThrowIfCancellationRequested();
-                if (!reachable[patternIndex, directoryIndex]) continue;
-                if (patternSegments[patternIndex] == "**")
-                {
-                    reachable[patternIndex + 1, directoryIndex] = true;
-                    if (directoryIndex < directorySegments.Length)
-                        reachable[patternIndex, directoryIndex + 1] = true;
-                }
-                else if (directoryIndex < directorySegments.Length
-                    && SegmentMatches(patternSegments[patternIndex], directorySegments[directoryIndex], token))
-                {
-                    reachable[patternIndex + 1, directoryIndex + 1] = true;
-                }
-            }
-        }
-        return Enumerable.Range(0, patternSegments.Length).Any(index => reachable[index, directorySegments.Length]);
-    }
+        => includePatterns.Any(pattern => EvidenceProducerInputPattern.MayMatchPathOrDescendant(pattern, path, token));
 
     private static int GetMode(string path)
     {
@@ -519,17 +467,28 @@ internal static class EvidenceProducerIdentityBuilder
         return 0x8000 | (int)File.GetUnixFileMode(path);
     }
 
-    private static List<string> ParsePaths(string nulList) => nulList.Split('\0', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-    private static List<string> ExistingPaths(string root, IEnumerable<string> paths) => paths.Where(path =>
+    private static async Task<string[]> ReadExistingInventoryAsync(string root, CancellationToken token)
     {
-        try { _ = File.GetAttributes(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar))); return true; }
-        catch (FileNotFoundException) { return false; }
-        catch (DirectoryNotFoundException) { return false; }
-    }).ToList();
+        var listed = await GitAsync(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], token, raw: true).ConfigureAwait(false);
+        return listed.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Where(path =>
+            {
+                try
+                {
+                    _ = File.GetAttributes(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)));
+                    return true;
+                }
+                catch (FileNotFoundException) { return false; }
+                catch (DirectoryNotFoundException) { return false; }
+            })
+            .ToArray();
+    }
+
     private static Dictionary<string, string> Sorted(IReadOnlyDictionary<string, string> values) => values.OrderBy(static pair => pair.Key, StringComparer.Ordinal).ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
     private static string Hash(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     private static bool ValidDigest(string? digest) => digest is { Length: 64 } && digest.All(Uri.IsHexDigit);
-    private static bool RequiresPatch(EvidenceProducerDeclaration producer) => producer.CoverageGate is { MinPatchLinePercent: not null } or { MinPatchBranchPercent: not null };
     /// <summary>Checks whether a string contains only Unicode scalar values encoded as well-formed UTF-16.</summary>
     /// <param name="value">String to inspect.</param>
     /// <param name="token">Optional cancellation token checked during long inputs.</param>

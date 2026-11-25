@@ -21,7 +21,7 @@ public sealed class EvidenceReusePackageProofTests
     public async Task AdmissionRecordsActualArchiveAndAssemblyHashes()
     {
         using var fixture = new FeedFixture();
-        var result = await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit);
+        var result = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
         Assert.Equal(7, result.Count);
         foreach (var package in result.Values)
         {
@@ -52,7 +52,7 @@ public sealed class EvidenceReusePackageProofTests
     {
         using var fixture = new FeedFixture(shape);
 
-        var packages = await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit);
+        var packages = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
 
         Assert.Equal(7, packages.Count);
         Assert.Contains("ForgeTrust.AppSurface.Evidence.Coverage", packages.Keys);
@@ -63,7 +63,7 @@ public sealed class EvidenceReusePackageProofTests
     {
         using var fixture = new FeedFixture("unrelated-tool-family");
 
-        var packages = await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit);
+        var packages = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
 
         Assert.Equal(7, packages.Count);
     }
@@ -74,7 +74,7 @@ public sealed class EvidenceReusePackageProofTests
     public async Task CoherentBundledBuildVersionMayDifferFromPackageVersionWhenCandidateDllHashesAgree(string versionShape)
     {
         using var fixture = new FeedFixture(versionShape);
-        var packages = await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit);
+        var packages = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
         Assert.Equal(7, packages.Count);
     }
 
@@ -93,7 +93,7 @@ public sealed class EvidenceReusePackageProofTests
     public async Task BadCandidateIsRejectedBeforeCreatingOutput(string failure)
     {
         using var fixture = new FeedFixture(failure);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit));
         var output = Path.Join(fixture.Root, "must-not-exist");
         var result = await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
             Path.Join(fixture.Root, "not-used-dotnet"), Commit, CancellationToken.None);
@@ -160,8 +160,11 @@ public sealed class EvidenceReusePackageProofTests
 
             var globalJsonPath = TestPathUtils.PathUnder(output, "global.json");
             Assert.True(File.Exists(globalJsonPath), "The pinned SDK configuration must exist while the SDK query process is active.");
-            using var globalJson = JsonDocument.Parse(await File.ReadAllBytesAsync(globalJsonPath, deadline.Token));
-            Assert.Equal("10.0.402", globalJson.RootElement.GetProperty("sdk").GetProperty("version").GetString());
+            var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+            var repositoryGlobalJson = await File.ReadAllTextAsync(Path.Join(repository, "global.json"), deadline.Token);
+            var proofGlobalJson = await File.ReadAllTextAsync(globalJsonPath, deadline.Token);
+            Assert.Equal(repositoryGlobalJson, proofGlobalJson);
+            using var globalJson = JsonDocument.Parse(proofGlobalJson);
             Assert.Equal("disable", globalJson.RootElement.GetProperty("sdk").GetProperty("rollForward").GetString());
             Assert.False(globalJson.RootElement.GetProperty("sdk").GetProperty("allowPrerelease").GetBoolean());
 
@@ -233,7 +236,7 @@ public sealed class EvidenceReusePackageProofTests
     {
         using var fixture = new FeedFixture();
         var output = TestPathUtils.PathUnder(fixture.Root, "output");
-        await Assert.ThrowsAsync<InvalidOperationException>(() => EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, version, Commit));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, version, Commit));
         Assert.Equal(1, await EvidenceReusePackageProof.RunAsync(fixture.Root, version, output,
             TestPathUtils.PathUnder(fixture.Root, "dotnet"), Commit, CancellationToken.None));
         Assert.False(Directory.Exists(output));
@@ -247,7 +250,7 @@ public sealed class EvidenceReusePackageProofTests
     {
         using var fixture = new FeedFixture();
         var output = TestPathUtils.PathUnder(fixture.Root, "output");
-        await Assert.ThrowsAsync<InvalidOperationException>(() => EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, commit));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, commit));
         Assert.Equal(1, await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
             TestPathUtils.PathUnder(fixture.Root, "dotnet"), commit, CancellationToken.None));
         Assert.False(Directory.Exists(output));
@@ -455,7 +458,7 @@ public sealed class EvidenceReusePackageProofTests
                 RewriteEntry(archive, name, contents);
             }
         }
-        Assert.NotNull(await Record.ExceptionAsync(() => EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit)));
+        Assert.NotNull(await Record.ExceptionAsync(() => EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit)));
         var output = TestPathUtils.PathUnder(fixture.Root, "output");
         Assert.Equal(1, await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
             TestPathUtils.PathUnder(fixture.Root, "unused-sdk"), Commit, CancellationToken.None));
@@ -473,7 +476,7 @@ public sealed class EvidenceReusePackageProofTests
             archive.GetEntry($"lib/net10.0/{id}.dll")!.Delete();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit));
+            EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit));
         var output = TestPathUtils.PathUnder(fixture.Root, "missing-library-assembly-output");
         Assert.Equal(1, await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
             TestPathUtils.PathUnder(fixture.Root, "unused-sdk"), Commit, CancellationToken.None));
@@ -507,7 +510,7 @@ public sealed class EvidenceReusePackageProofTests
         {
             // These archives have an admitted graph and hashes, but deliberately lack tool-install metadata.
             // An actual SDK failure must become retained failed evidence, never a complete proof.
-            var admitted = await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit);
+            var admitted = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
             Assert.Equal(7, admitted.Count);
             using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 
@@ -541,7 +544,7 @@ public sealed class EvidenceReusePackageProofTests
         {
             await File.WriteAllBytesAsync(sdk, sdkBytes);
             Assert.True(File.Exists(sdk));
-            Assert.Equal(7, (await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit)).Count);
+            Assert.Equal(7, (await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit)).Count);
 
             var result = await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
                 sdk, Commit, CancellationToken.None);
@@ -570,7 +573,7 @@ public sealed class EvidenceReusePackageProofTests
         using var probe = new SdkCancellationProbeFixture(fixture.Root, "nonzero", secret);
         try
         {
-            Assert.Equal(7, (await EvidenceReusePackageProof.InspectFeedAsync(fixture.Root, Version, Commit)).Count);
+            Assert.Equal(7, (await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit)).Count);
 
             var result = await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
                 probe.ExecutablePath, Commit, CancellationToken.None);
@@ -628,7 +631,7 @@ public sealed class EvidenceReusePackageProofTests
         internal string Root { get; } = Directory.CreateTempSubdirectory("evidence-packed-admission-").FullName;
         internal FeedFixture(string? failure = null)
         {
-            foreach (var id in EvidenceReusePackageProof.CandidateMinimumPackageIds)
+            foreach (var id in EvidenceReusePackageAdmission.CandidateMinimumPackageIds)
             {
                 if (failure == "missing-contracts" && id.EndsWith("Evidence.Contracts", StringComparison.Ordinal)) continue;
                 var target = id switch

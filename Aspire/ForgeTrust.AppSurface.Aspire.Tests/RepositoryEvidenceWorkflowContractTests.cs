@@ -139,12 +139,15 @@ public sealed class RepositoryEvidenceWorkflowContractTests
 
         Assert.Equal(expected, selectors);
         Assert.Equal(1437, System.Text.Encoding.UTF8.GetByteCount(string.Join("|", selectors)));
-        Assert.Contains("$selectors = Get-Content -LiteralPath '.github/workflows/native-coverage-test-selectors.txt'", collector);
-        Assert.Contains("($_ -split \"`t\", 2)[1]", collector);
-        Assert.Contains("$filter = $selectors -join '|'", collector);
+        var lockedRestore = FindStep(securitySteps, "Restore coverage security tests (locked)")["run"].AsScalar();
+        const string loadProjects = "$projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')";
+        Assert.Contains(loadProjects, lockedRestore);
+        Assert.Contains("foreach ($project in $projects)", lockedRestore);
+        Assert.Contains("dotnet restore $project --locked-mode", lockedRestore);
+        Assert.Contains("$filter = & dotnet $dogfood --print-test-filter native", collector);
         Assert.Contains("'--test-argument', '--filter', '--test-argument', $filter", collector);
-        Assert.Contains("'--test-project', 'Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj'", collector);
-        Assert.Contains("'--test-project', 'Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj'", collector);
+        Assert.Contains(loadProjects, collector);
+        Assert.Contains("$arguments += @('--test-project', $project)", collector);
         Assert.Contains("'--artifact-retention', 'full'", collector);
         Assert.Contains("'--test-argument', '--blame-hang-timeout', '--test-argument', '2m'", collector);
         Assert.Equal("${{ runner.temp }}/packed-reuse-diagnostics",
@@ -152,7 +155,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS", collector);
         var capture = FindStep(job["steps"].AsSequence(), "Attest successful native coverage evidence")["run"].AsScalar();
         Assert.Contains("'--raw-index', $indexPath, '--timings', $timingsPath", capture);
-        Assert.Contains("$reports.Count -ne 2", capture);
+        Assert.Contains(loadProjects, capture);
+        Assert.Contains("$entry.project -cnotin $projects", capture);
+        Assert.Contains("$reports.ContainsKey($entry.project)", capture);
+        Assert.Contains("$reports.Count -ne $projects.Count", capture);
         Assert.Contains("$contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }", capture);
         Assert.Contains("'--contract-version', $contractVersion", capture);
 
@@ -183,9 +189,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
 
         Assert.Equal(ExpectedNativeCliOnlySelectors, exclusiveSelectors);
         Assert.Equal(ExpectedNativeCliOnlySelectors.Concat(ExpectedSharedCliSelectors), composedSelectors);
-        Assert.Contains("$sharedCliSelectors = Get-Content -LiteralPath '.github/workflows/native-coverage-test-selectors.txt'", lifecycle);
-        Assert.Contains("$entry[0] -eq 'shared-cli'", lifecycle);
-        Assert.Contains("$cliSelectors += $sharedCliSelectors", lifecycle);
+        Assert.Contains("dotnet restore $dogfoodProject --locked-mode", lifecycle);
+        Assert.Contains("dotnet build $dogfoodProject --configuration Release --no-restore", lifecycle);
+        Assert.Contains("$sharedCliFilter = & dotnet $dogfood --print-test-filter shared-cli", lifecycle);
+        Assert.Contains("$cliFilter = ($cliSelectors -join '|') + '|' + $sharedCliFilter", lifecycle);
         Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", lifecycle);
         Assert.Contains("--filter $cliFilter", lifecycle);
         Assert.Contains("if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", lifecycle);

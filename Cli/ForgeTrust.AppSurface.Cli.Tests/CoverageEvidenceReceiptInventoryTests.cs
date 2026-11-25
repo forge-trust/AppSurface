@@ -55,7 +55,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
     [InlineData("coverage\\file")]
     [InlineData("Coverage/file")]
     public void UnsafePathsAreRejectedWithoutNormalization(string path) =>
-        Assert.Throws<CoverageEvidenceInventoryException>(() => CoverageEvidenceInventory.ValidatePath(path));
+        Assert.Throws<CoverageEvidenceInventoryException>(() => CoverageReportFile.ValidatePath(path));
 
     [Theory]
     [InlineData("duplicate", "inventory-path-collision")]
@@ -76,7 +76,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         Directory.CreateDirectory(Path.Join(source, "coverage"));
         var first = Put(source, "coverage/a.txt", "first"u8.ToArray());
         var second = Put(source, "coverage/b.txt", "second"u8.ToArray());
-        CoverageEvidenceInventoryFile[] files = [first, second];
+        CoverageReportFile[] files = [first, second];
         var version = CoverageEvidenceInventory.CurrentVersion;
         switch (failure)
         {
@@ -369,7 +369,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         var source = Path.Join(directory.Path, "source");
         var first = Put(source, "coverage/a", [1]);
         var second = Put(source, "coverage/b", [2]);
-        CoverageEvidenceInventoryFile[] files = [first, second];
+        CoverageReportFile[] files = [first, second];
         var slot = CoverageEvidenceInventory.CreateSlot();
         if (limit == "count") files = Enumerable.Range(0, 129).Select(index => first with { RelativePath = $"coverage/{index:D3}" }).ToArray();
         if (limit == "bytes") files = [first with { LengthBytes = CoverageEvidenceInventory.MaximumBytes }, second];
@@ -566,7 +566,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         Assert.True(await writer.VerifyWrittenArtifactsAsync());
     }
 
-    private static CoverageEvidenceInventoryFile Put(string root, string path, byte[] bytes)
+    private static CoverageReportFile Put(string root, string path, byte[] bytes)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(TestPathUtils.PathUnder(root, path))!);
         File.WriteAllBytes(TestPathUtils.PathUnder(root, path), bytes);

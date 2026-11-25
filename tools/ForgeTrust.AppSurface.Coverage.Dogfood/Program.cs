@@ -17,7 +17,6 @@ return args.Length > 0 && args[0] == "--package-proof"
 
 internal static class CoverageDogfood
 {
-    internal static string NativeFilter { get; } = NativeCoverageTestSelectorInventory.ReadNativeFilter();
     private const string ReportProfileId = "coverlet-collector-cobertura-v1";
     private const string CollectorPackageVersion = "10.0.1";
     private const string ShadowProofFileName = "shadow-proof.json";
@@ -32,12 +31,19 @@ internal static class CoverageDogfood
     {
         if (args.Length == 1 && args[0] == "--help")
         {
+            Console.WriteLine("Print the ordered test filter with --print-test-filter native|shared-cli.");
             Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--contract-version 2|3 (default 2)] [--diff-policy-id appsurface-visual-baseline-png-v1 (v3 only)] [--native-platform Linux|Windows|Darwin --raw-index <project-to-original-json> --timings <json>] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
             return 0;
         }
         var stage = "options";
         try
         {
+            if (args is ["--print-test-filter", var lane])
+            {
+                if (lane is not ("native" or "shared-cli")) throw new ArgumentException();
+                Console.WriteLine(NativeCoverageTestInventory.ReadFilter(sharedCliOnly: lane == "shared-cli"));
+                return 0;
+            }
             if (args.Length % 2 != 0) throw new ArgumentException();
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
             var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "contract-version", "diff-policy-id", "native-platform", "raw-index", "primary", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
@@ -70,11 +76,8 @@ internal static class CoverageDogfood
             var projects = solution.Descendants("Project").Select(x => x.Attribute("Path")?.Value)
                 .Where(x => x is not null && (x.EndsWith(".Tests.csproj", StringComparison.Ordinal) || x.EndsWith(".IntegrationTests.csproj", StringComparison.Ordinal)))
                 .Select(x => x!.Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
-            var nativeProjects = new[]
-            {
-                "Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj",
-                "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj"
-            };
+            var nativeProjects = NativeCoverageTestInventory.ReadNativeProjects();
+            var nativeFilter = NativeCoverageTestInventory.ReadFilter();
             var measurements = new InvocationMeasurements();
             string gitVersion = "not-checked-v2";
             string commit;
@@ -104,7 +107,7 @@ internal static class CoverageDogfood
             stage = "collector-policy";
             var policy = new CoverageFanInPolicy(new(commit, tree, sdk.Trim(), configuration),
                 new("github-actions", Required("run-scope"), Required("run-id"), int.Parse(Required("attempt"), System.Globalization.CultureInfo.InvariantCulture)),
-                projects, new[] { "Linux", "Windows", "Darwin" }.Select(x => new CoverageSupplement(x.ToLowerInvariant(), x, NativeFilter, nativeProjects)).ToArray(),
+                projects, new[] { "Linux", "Windows", "Darwin" }.Select(x => new CoverageSupplement(x.ToLowerInvariant(), x, nativeFilter, nativeProjects)).ToArray(),
                 diffBase is not null
                     ? new(CoverageGateMode.AggregateAndPatch, DiffBase: diffBase) : new(CoverageGateMode.AggregateOnly),
                 Limits: new CoverageOperationLimits(TotalRecords: 4_000_000))

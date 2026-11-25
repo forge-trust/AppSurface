@@ -164,6 +164,22 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
             Assert.True(proof.GetProperty("passed").GetBoolean());
             Assert.Equal(commit, proof.GetProperty("expectedSourceCommit").GetString());
             Assert.Equal(8, proof.GetProperty("packages").GetArrayLength());
+            var negatives = proof.GetProperty("negatives").EnumerateArray().ToArray();
+            Assert.Equal(["tool-graph-version", "host-private-edge"],
+                negatives.Select(item => item.GetProperty("kind").GetString()));
+            Assert.Equal(
+                ["Native validation contract failed: packed-reuse/tool-bundled-graph-version",
+                    "Native validation contract failed: packed-reuse/exact-private-edge-in-every-framework-group"],
+                negatives.Select(item => item.GetProperty("contract").GetString()));
+            Assert.All(negatives, item =>
+            {
+                Assert.Equal(1, item.GetProperty("exitCode").GetInt32());
+                Assert.False(item.GetProperty("outputCreated").GetBoolean());
+                var rejectedOutput = Path.Join(proofRoot, "negative-" + item.GetProperty("kind").GetString(), "must-not-exist");
+                Assert.False(Directory.Exists(rejectedOutput));
+                Assert.False(File.Exists(rejectedOutput));
+                Assert.False(File.Exists(rejectedOutput + ".packed-reuse.claim"));
+            });
             foreach (var mode in new[] { "built", "publish" })
             {
                 var host = proof.GetProperty("host").GetProperty(mode);

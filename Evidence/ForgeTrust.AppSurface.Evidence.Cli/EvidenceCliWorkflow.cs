@@ -154,6 +154,21 @@ internal sealed class EvidenceCliWorkflow
         return new EvidencePlanningResolution(plan, inputs.Snapshot);
     }
 
+    /// <summary>Builds the CLI refusal for a profile whose resources require a consumer-owned host.</summary>
+    /// <param name="plan">The selected resource-backed plan.</param>
+    /// <param name="observationOnly">Whether the command requested observation-only execution.</param>
+    /// <returns>The manifest with every resource and producer marked unavailable.</returns>
+    internal static EvidenceManifest BuildResourceBackedRefusal(EvidencePlan plan, bool observationOnly)
+    {
+        var resources = plan.Profile.Resources.Select(resource => new EvidenceResourceResult(resource.Id,
+            EvidenceResourceOutcome.Unavailable, 0,
+            "Resource-backed evidence requires an explicitly registered consumer EvidenceHost; the CLI does not provision or infer consumer resources.")).ToArray();
+        var producers = plan.Profile.Producers.Select(producer => new EvidenceProducerResult(producer.Id,
+            EvidenceProducerOutcome.Unavailable, [],
+            "The selected profile requires consumer-owned resources. Run it through ForgeTrust.AppSurface.Evidence.Aspire with explicit registrations.")).ToArray();
+        return EvidenceManifestBuilder.Build(plan, producers, observationOnly, resourceResults: resources);
+    }
+
     /// <summary>
     /// Writes the canonical plan and its human-readable summary to <paramref name="outputDirectory"/>.
     /// </summary>
@@ -276,14 +291,7 @@ internal sealed class EvidenceCliWorkflow
         EvidencePlan resolvedPlan;
         try
         {
-            resolvedPlan = _planner.Resolve(plan.PolicySnapshot, plan.ChangedPaths);
-            if (plan.PatchSha256 is not null)
-            {
-                // The original raw patch is not part of the plan artifact. Check its recorded
-                // digest in the canonical binding, then recompute selection from normalized paths.
-                var bound = resolvedPlan with { PatchSha256 = plan.PatchSha256, PlanDigest = string.Empty };
-                resolvedPlan = bound with { PlanDigest = EvidenceDigest.CanonicalSha256(bound) };
-            }
+            resolvedPlan = _planner.ResolveRecordedPlan(plan.PolicySnapshot, plan.ChangedPaths, plan.PatchSha256);
         }
         catch (EvidencePlanningException exception)
         {
@@ -344,22 +352,14 @@ internal sealed class EvidenceCliWorkflow
     public static string FormatSummary(EvidenceManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
-        var action = manifest.ClaimKind switch
-        {
-            EvidenceClaimKind.ReleaseComplete => "Release evidence is complete.",
-            EvidenceClaimKind.TargetedComplete => "Targeted evidence is complete.",
-            EvidenceClaimKind.NoEvidenceRequired => "No evidence is required by the matched policy rule.",
-            EvidenceClaimKind.ObservationOnly => "Observation recorded; it is not gate eligible.",
-            EvidenceClaimKind.LocalReusedComplete => LocalReusedNextAction,
-            _ => "Evidence is incomplete. Review unmediated obligations and producer diagnostics.",
-        };
+        var guidance = GetManifestGuidance(manifest.ClaimKind);
         return string.Join(
             Environment.NewLine,
             $"Evidence result: {manifest.ClaimKind}",
             $"Execution: {manifest.ExecutionVerdict}",
             $"Closed obligations: {FormatIds(manifest.ClosedObligationIds)}",
             $"Unmediated obligations: {FormatIds(manifest.UnmediatedObligationIds)}",
-            $"Next: {action}");
+            $"Next: {guidance.Console}");
     }
 
     internal static string FormatSummary(EvidenceManifest manifest, IReadOnlyList<EvidenceReuseSummaryDecision> decisions)
@@ -426,11 +426,10 @@ internal sealed class EvidenceCliWorkflow
 
     private async Task<EvidenceDiffSnapshot> ReadDiffSnapshotAsync(string path, CancellationToken cancellationToken)
     {
-        const long maximumDiffBytes = 20L * 1024 * 1024;
         try
         {
             await using var stream = _diffFileAccess.OpenRead(path);
-            var bytes = await ReadBoundedBytesAsync(stream, maximumDiffBytes, path, cancellationToken).ConfigureAwait(false);
+            var bytes = await ReadBoundedBytesAsync(stream, EvidencePlan.MaximumCapturedPatchBytes, path, cancellationToken).ConfigureAwait(false);
 
             return new EvidenceDiffSnapshot(bytes, Path.GetFileName(path), Convert.ToHexString(SHA256.HashData(bytes)));
         }
@@ -539,7 +538,7 @@ internal sealed class EvidenceCliWorkflow
     private static ManifestSummary CreateSummary(EvidenceManifest manifest, IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions)
         => new("manifest", manifest.ClaimKind.ToString(), manifest.ExecutionVerdict.ToString(),
             manifest.Eligibility.ToString(), manifest.EnvelopeStatus.ToString(), manifest.ClosedObligationIds,
-            manifest.UnmediatedObligationIds, reuseDecisions, GetManifestNextAction(manifest));
+            manifest.UnmediatedObligationIds, reuseDecisions, GetManifestGuidance(manifest.ClaimKind).Json);
 
     private sealed record PlanSummary(
         [property: JsonPropertyName("kind")] string Kind,
@@ -562,12 +561,21 @@ internal sealed class EvidenceCliWorkflow
         [property: JsonPropertyName("reuseDecisions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EvidenceReuseSummaryDecision>? ReuseDecisions,
         [property: JsonPropertyName("next")] string Next);
 
-    private static string GetManifestNextAction(EvidenceManifest manifest) => manifest.ClaimKind switch
+    private static (string Console, string Json) GetManifestGuidance(EvidenceClaimKind claim)
     {
-        EvidenceClaimKind.None => "Resolve the listed producer or obligation failure before gating.",
-        EvidenceClaimKind.LocalReusedComplete => LocalReusedNextAction,
-        _ => "Evidence claim is ready for its declared eligible consumer.",
-    };
+        const string gateReady = "Evidence claim is ready for its declared eligible consumer.";
+        return claim switch
+        {
+            EvidenceClaimKind.ReleaseComplete => ("Release evidence is complete.", gateReady),
+            EvidenceClaimKind.TargetedComplete => ("Targeted evidence is complete.", gateReady),
+            EvidenceClaimKind.NoEvidenceRequired => ("No evidence is required by the matched policy rule.", gateReady),
+            EvidenceClaimKind.ObservationOnly => ("Observation recorded; it is not gate eligible.",
+                "Observation recorded as informational evidence. Run fresh evidence without --observation-only for gate admission."),
+            EvidenceClaimKind.LocalReusedComplete => (LocalReusedNextAction, LocalReusedNextAction),
+            _ => ("Evidence is incomplete. Review unmediated obligations and producer diagnostics.",
+                "Resolve the listed producer or obligation failure before gating."),
+        };
+    }
 
     private static string FormatIds(IEnumerable<string> ids)
     {

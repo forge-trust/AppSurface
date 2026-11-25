@@ -59,9 +59,9 @@ public sealed class EvidenceChildProtocolCoverageTests
             timer.StartBlockedCallback();
             await timer.CallbackStarted.Task.WaitAsync(deadline.Token);
 
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+            await EvidenceOwnedChildWire.WriteFrameAsync(pipe,
                 $"BEGIN|{session.ExecutionId}|{session.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}", deadline.Token);
-            var acknowledgementTask = EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, deadline.Token);
+            var acknowledgementTask = EvidenceOwnedChildWire.ReadFrameAsync(pipe, deadline.Token);
             await timer.DisposeStarted.Task.WaitAsync(deadline.Token);
 
             Assert.False(acknowledgementTask.IsCompleted);
@@ -71,8 +71,8 @@ public sealed class EvidenceChildProtocolCoverageTests
             var acknowledgement = await acknowledgementTask;
             Assert.StartsWith("ACK|", acknowledgement ?? string.Empty, StringComparison.Ordinal);
             var childId = acknowledgement!["ACK|".Length..];
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe, $"COMPLETE|{childId}", deadline.Token);
-            Assert.Equal($"DONE|{childId}", await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, deadline.Token));
+            await EvidenceOwnedChildWire.WriteFrameAsync(pipe, $"COMPLETE|{childId}", deadline.Token);
+            Assert.Equal($"DONE|{childId}", await EvidenceOwnedChildWire.ReadFrameAsync(pipe, deadline.Token));
 
             Assert.Equal(1, timer.DisposeAsyncCalls);
             Assert.True(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(5), deadline.Token));
@@ -320,11 +320,11 @@ public sealed class EvidenceChildProtocolCoverageTests
             await using (server)
             {
                 await server.WaitForConnectionAsync(deadline.Token);
-                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildWire.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
                 Assert.Equal("COMPLETE|" + childId,
-                    await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "DONE|" + childId, deadline.Token);
+                    await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildWire.WriteFrameAsync(server, "DONE|" + childId, deadline.Token);
             }
         }, deadline.Token);
         Task<int>? processTask = null;
@@ -404,10 +404,10 @@ public sealed class EvidenceChildProtocolCoverageTests
             await using (server)
             {
                 await server.WaitForConnectionAsync(deadline.Token);
-                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildWire.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
                 Assert.Equal("COMPLETE|" + childId,
-                    await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                    await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
                 if (truncatedReply) await server.WriteAsync("DONE|unfinished"u8.ToArray(), deadline.Token);
                 // Empty EOF refuses acknowledgement; a partial frame also proves transport-loss reporting.
             }
@@ -494,9 +494,9 @@ public sealed class EvidenceChildProtocolCoverageTests
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
         {
             await pipe.ConnectAsync(3000, deadline.Token);
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+            await EvidenceOwnedChildWire.WriteFrameAsync(pipe,
                 $"BEGIN|{session.ExecutionId}|{session.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}", deadline.Token);
-            var acknowledgement = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, deadline.Token);
+            var acknowledgement = await EvidenceOwnedChildWire.ReadFrameAsync(pipe, deadline.Token);
             Assert.StartsWith("ACK|", acknowledgement ?? string.Empty, StringComparison.Ordinal);
         }
 
@@ -516,15 +516,15 @@ public sealed class EvidenceChildProtocolCoverageTests
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await pipe.ConnectAsync(3000, timeout.Token);
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+            await EvidenceOwnedChildWire.WriteFrameAsync(pipe,
                 $"BEGIN|{session.ExecutionId}|{session.Environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}", timeout.Token);
-            var acknowledgement = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, timeout.Token);
+            var acknowledgement = await EvidenceOwnedChildWire.ReadFrameAsync(pipe, timeout.Token);
             Assert.StartsWith("ACK|", acknowledgement ?? string.Empty, StringComparison.Ordinal);
             var childId = acknowledgement!["ACK|".Length..];
             Assert.Matches("^[0-9a-f]{32}$", childId);
             var mismatchedChildId = (childId[0] == '0' ? '1' : '0') + childId[1..];
 
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe, $"COMPLETE|{mismatchedChildId}", timeout.Token);
+            await EvidenceOwnedChildWire.WriteFrameAsync(pipe, $"COMPLETE|{mismatchedChildId}", timeout.Token);
         }
 
         Assert.False(await session.WaitForSettlementAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
@@ -705,12 +705,12 @@ public sealed class EvidenceChildProtocolCoverageTests
 
         if (frameKind == "empty-eof")
         {
-            Assert.Null(await EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
+            Assert.Null(await EvidenceOwnedChildWire.ReadFrameAsync(stream, CancellationToken.None));
             return;
         }
 
         var failure = await Assert.ThrowsAsync<IOException>(() =>
-            EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
+            EvidenceOwnedChildWire.ReadFrameAsync(stream, CancellationToken.None));
         Assert.Contains("Truncated", failure.Message, StringComparison.Ordinal);
     }
 
@@ -719,7 +719,7 @@ public sealed class EvidenceChildProtocolCoverageTests
     {
         using var stream = new MemoryStream();
 
-        var failure = await Assert.ThrowsAsync<IOException>(() => EvidenceOwnedChildProtocol.WriteFrameAsync(
+        var failure = await Assert.ThrowsAsync<IOException>(() => EvidenceOwnedChildWire.WriteFrameAsync(
             stream, new string('x', EvidenceOwnedChild.MaximumFrameBytes), CancellationToken.None));
 
         Assert.Contains("exceeds its limit", failure.Message, StringComparison.Ordinal);
@@ -732,16 +732,16 @@ public sealed class EvidenceChildProtocolCoverageTests
         using var stream = new MemoryStream();
         var payload = new string('é', (EvidenceOwnedChild.MaximumFrameBytes - 1) / 2) + "x";
 
-        await EvidenceOwnedChildProtocol.WriteFrameAsync(stream, payload, CancellationToken.None);
+        await EvidenceOwnedChildWire.WriteFrameAsync(stream, payload, CancellationToken.None);
         Assert.Equal(EvidenceOwnedChild.MaximumFrameBytes, stream.Length);
         await Assert.ThrowsAsync<IOException>(() =>
-            EvidenceOwnedChildProtocol.WriteFrameAsync(stream, payload + "x", CancellationToken.None));
-        await EvidenceOwnedChildProtocol.WriteFrameAsync(stream, "DONE", CancellationToken.None);
+            EvidenceOwnedChildWire.WriteFrameAsync(stream, payload + "x", CancellationToken.None));
+        await EvidenceOwnedChildWire.WriteFrameAsync(stream, "DONE", CancellationToken.None);
         stream.Position = 0;
 
-        Assert.Equal(payload, await EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
-        Assert.Equal("DONE", await EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
-        Assert.Null(await EvidenceOwnedChildProtocol.ReadFrameAsync(stream, CancellationToken.None));
+        Assert.Equal(payload, await EvidenceOwnedChildWire.ReadFrameAsync(stream, CancellationToken.None));
+        Assert.Equal("DONE", await EvidenceOwnedChildWire.ReadFrameAsync(stream, CancellationToken.None));
+        Assert.Null(await EvidenceOwnedChildWire.ReadFrameAsync(stream, CancellationToken.None));
     }
 
     [Theory]
@@ -763,12 +763,12 @@ public sealed class EvidenceChildProtocolCoverageTests
         if (propagates)
         {
             var actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                EvidenceOwnedChildProtocol.TryWriteFrameAsync(stream, "REJECT|invalid", CancellationToken.None));
+                EvidenceChildLifetimeSession.TryWriteRejectionAsync(stream, "invalid"));
             Assert.Same(expected, actual);
         }
         else
         {
-            await EvidenceOwnedChildProtocol.TryWriteFrameAsync(stream, "REJECT|invalid", CancellationToken.None);
+            await EvidenceChildLifetimeSession.TryWriteRejectionAsync(stream, "invalid");
         }
     }
 

@@ -46,12 +46,12 @@ public sealed class EvidenceReuseCliCoverageTests
         var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [], []);
         var plan = CreatePlan(profile);
 
-        EvidenceRunCommand.ValidateReuseContext(false, plan, _ => "true");
-        var error = Assert.Throws<CommandException>(() => EvidenceRunCommand.ValidateReuseContext(true, plan,
+        EvidenceReuseCommandOptions.ValidateContext(false, plan, _ => "true");
+        var error = Assert.Throws<CommandException>(() => EvidenceReuseCommandOptions.ValidateContext(true, plan,
             name => name == "GITHUB_ACTIONS" ? "TRUE" : null));
 
         Assert.Contains("reuse.gate_context_forbidden", error.Message, StringComparison.Ordinal);
-        EvidenceRunCommand.ValidateReuseContext(true, plan, _ => null);
+        EvidenceReuseCommandOptions.ValidateContext(true, plan, _ => null);
     }
 
     [Fact]
@@ -187,6 +187,8 @@ public sealed class EvidenceReuseCliCoverageTests
         var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [], []);
         var plan = CreatePlan(profile);
         var manifest = EvidenceManifestBuilder.Build(plan, [], observationOnly: true);
+        const string observationGuidance = "Observation recorded as informational evidence. Run fresh evidence without --observation-only for gate admission.";
+        Assert.Contains("Observation recorded; it is not gate eligible.", EvidenceCliWorkflow.FormatSummary(manifest), StringComparison.Ordinal);
         var decision = new EvidenceReuseSummaryDecision("coverage", "Miss", "reuse.receipt_missing",
             "No matching receipt exists.", null, null, null, "not-published");
 
@@ -205,7 +207,9 @@ public sealed class EvidenceReuseCliCoverageTests
             Assert.Equal("manifest", plainManifestSummary.RootElement.GetProperty("kind").GetString());
             Assert.Equal(new[] { "kind", "claim", "verdict", "eligibility", "envelopeStatus", "closedObligations", "unmediatedObligations", "next" },
                 plainManifestSummary.RootElement.EnumerateObject().Select(static property => property.Name));
-            Assert.Equal("Evidence claim is ready for its declared eligible consumer.", plainManifestSummary.RootElement.GetProperty("next").GetString());
+            Assert.Equal("ObservationOnly", plainManifestSummary.RootElement.GetProperty("claim").GetString());
+            Assert.Equal("Informational", plainManifestSummary.RootElement.GetProperty("eligibility").GetString());
+            Assert.Equal(observationGuidance, plainManifestSummary.RootElement.GetProperty("next").GetString());
         }
 
         await workflow.WritePlanAsync(plan, TestPathUtils.PathUnder(directory.Path, "out"), CancellationToken.None, [decision]);
@@ -232,6 +236,7 @@ public sealed class EvidenceReuseCliCoverageTests
         Assert.Equal(new[] { "kind", "claim", "verdict", "eligibility", "envelopeStatus", "closedObligations", "unmediatedObligations", "reuseDecisions", "next" },
             manifestSummary.RootElement.EnumerateObject().Select(static property => property.Name));
         Assert.Equal("reuse.receipt_missing", manifestSummary.RootElement.GetProperty("reuseDecisions")[0].GetProperty("Reason").GetString());
+        Assert.Equal(observationGuidance, manifestSummary.RootElement.GetProperty("next").GetString());
     }
 
     [Fact]
@@ -566,15 +571,10 @@ public sealed class EvidenceReuseCliCoverageTests
     [InlineData(true)]
     public void MissingSolutionOnlyOverridesUnkeyedIneligibility(bool hasPreparedKey)
     {
-        var producer = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["coverage/assertion@1"],
-            [CoverageEvidenceInventory.CreateSlot()], 30, new EvidenceCoverageGateRequirements(95, 85))
+        var preparationDiagnostics = new Dictionary<string, (string Reason, string Diagnostic)>(StringComparer.Ordinal)
         {
-            Inputs = new EvidenceProducerInputs(["global.json"], []),
-            CoverageExecution = new EvidenceCoverageExecutionOptions { CooperativeChildLifetime = true },
+            ["coverage"] = ("reuse.solution_required", "Coverage identity requires a solution inside this Git worktree."),
         };
-        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [producer],
-            [new EvidenceObligation("coverage-check", "coverage", "coverage gate", [producer.Id], "coverage/assertion@1")]);
-        var plan = CreatePlan(profile);
         var origin = new DateTimeOffset(2025, 2, 3, 4, 5, 6, TimeSpan.Zero);
 
         foreach (var status in Enum.GetValues<EvidenceProducerReuseStatus>())
@@ -583,8 +583,7 @@ public sealed class EvidenceReuseCliCoverageTests
                 "Original decision diagnostic.", hasPreparedKey ? "producer-key" : null, origin, 321);
             if (status == EvidenceProducerReuseStatus.Hit)
                 decision = decision with { Publication = EvidenceReceiptPublication.Restored };
-            var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions(plan, [decision], hasSolutionIdentity: false,
-                new Dictionary<string, string>(StringComparer.Ordinal) { ["coverage"] = "10.0.402" }));
+            var summary = Assert.Single(EvidenceReuseExecutionResolver.ToSummaryDecisions([decision], preparationDiagnostics));
 
             var isMissingSolutionRefusal = status == EvidenceProducerReuseStatus.Ineligible && !hasPreparedKey;
             Assert.Equal(status.ToString(), summary.Status);
@@ -690,7 +689,7 @@ public sealed class EvidenceReuseCliCoverageTests
         try
         {
             syntheticLocalContext.Enter(repository.Root);
-            EvidenceRunCommand.ValidateReuseContext(true, plan);
+            EvidenceReuseCommandOptions.ValidateContext(true, plan);
 
             var missExplanation = Assert.Single(await resolver.ExplainAsync(plan, null, solution, store,
                 TimeSpan.FromSeconds(5), CancellationToken.None));
@@ -830,6 +829,20 @@ public sealed class EvidenceReuseCliCoverageTests
                 (await SnapshotTreeAsync(store)).Where(static item => item.Key != "F:quota-index.json").ToArray());
             Assert.Equal(payloadBytesBeforeContendedAdmission.ToArray(),
                 (await SnapshotTreeAsync(Path.Join(keyDirectory, authorityBeforeContendedAdmission!.PayloadDirectoryName!))).ToArray());
+
+            inFlightLease.SettleExecution(inFlightExecutionId);
+            const string auditIntent = "explain-pending-audit";
+            inFlightLease.EstablishAuthority(auditIntent, auditIntent: true);
+            inFlightLease.SettleExecution(auditIntent);
+            var beforeQuarantineExplain = await SnapshotTreeAsync(store);
+            var quarantineExplanation = Assert.Single(await resolver.ExplainAsync(plan, null, solution, store,
+                TimeSpan.FromSeconds(5), CancellationToken.None));
+            Assert.Equal("Miss", quarantineExplanation.Status);
+            Assert.Equal("reuse.audit-quarantined", quarantineExplanation.Reason);
+            Assert.Contains("--verify-reuse", quarantineExplanation.Diagnostic, StringComparison.Ordinal);
+            Assert.Equal("not-published", quarantineExplanation.Publication);
+            Assert.Equal(beforeQuarantineExplain.ToArray(), (await SnapshotTreeAsync(store)).ToArray());
+            Assert.Equal(runnerBeforeContendedAdmission, runner.InvocationCount);
 
             var collisionStore = TestPathUtils.PathUnder(repository.Root, "store-collision");
             await File.WriteAllTextAsync(collisionStore, "occupied by a file");
@@ -1170,8 +1183,8 @@ public sealed class EvidenceReuseCliCoverageTests
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
             {
                 await child.ConnectAsync(3000, deadline.Token);
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(child, $"BEGIN|{executionId}|{nonce}", deadline.Token);
-                var acknowledgement = await EvidenceOwnedChildProtocol.ReadFrameAsync(child, deadline.Token);
+                await EvidenceOwnedChildWire.WriteFrameAsync(child, $"BEGIN|{executionId}|{nonce}", deadline.Token);
+                var acknowledgement = await EvidenceOwnedChildWire.ReadFrameAsync(child, deadline.Token);
                 ChildAcknowledged = acknowledgement is not null && acknowledgement.StartsWith("ACK|", StringComparison.Ordinal);
                 if (!ChildAcknowledged)
                     throw new InvalidOperationException("The resolver did not admit the fixture child connection.");

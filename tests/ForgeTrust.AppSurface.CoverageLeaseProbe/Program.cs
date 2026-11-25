@@ -10,6 +10,8 @@ if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "do
 {
     var mode = Environment.GetEnvironmentVariable("APPSURFACE_IDENTITY_SDK_PROBE_MODE");
     await File.WriteAllTextAsync(Path.Join(sdkProbeRoot, "sdk-probe.observed"), mode);
+    if (mode == "count")
+        await File.AppendAllTextAsync(Path.Join(sdkProbeRoot, "sdk-probe.invocations"), "query\n");
     if (mode == "pipe-holder")
     {
         var pid = Path.Join(sdkProbeRoot, "sdk-probe.child-pid");

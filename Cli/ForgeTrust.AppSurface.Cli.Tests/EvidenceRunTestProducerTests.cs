@@ -194,10 +194,10 @@ public sealed class EvidenceRunTestProducerTests
         var plan = Fixture.Plan(Fixture.Policy());
 
         var exception = Assert.Throws<CommandException>(() =>
-            EvidenceRunCommand.ValidateReuseContext(true, plan, _ => null));
+            EvidenceReuseCommandOptions.ValidateContext(true, plan, _ => null));
 
         Assert.Contains("reuse.test_preview_requires_fresh", exception.Message, StringComparison.Ordinal);
-        EvidenceRunCommand.ValidateReuseContext(false, plan, _ => null);
+        EvidenceReuseCommandOptions.ValidateContext(false, plan, _ => null);
     }
 
     [Fact]

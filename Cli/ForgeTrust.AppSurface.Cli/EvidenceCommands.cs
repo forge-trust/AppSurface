@@ -125,8 +125,8 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
     public string? ReceiptStore { get; set; }
 
     /// <summary>Gets or sets the finite positive receipt wait budget used by the later run.</summary>
-    [CommandOption("receipt-wait-timeout", Description = "Maximum finite positive wait for another local reuse owner. Defaults to 00:30:00.")]
-    public string ReceiptWaitTimeout { get; set; } = "00:30:00";
+    [CommandOption("receipt-wait-timeout", Description = EvidenceReuseCommandOptions.ReceiptWaitTimeoutDescription)]
+    public string ReceiptWaitTimeout { get; set; } = EvidenceReuseCommandOptions.DefaultReceiptWaitTimeout;
 
     /// <summary>Gets or sets the solution supplied to the built-in coverage identity resolver.</summary>
     [CommandOption("solution", Description = "Solution used to identify built-in coverage settings; no build or tests are run by explain.")]
@@ -141,14 +141,14 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
             TimeSpan receiptWait = default;
             if (Reuse)
             {
-                receiptWait = EvidenceRunCommand.ParseReuseOptions(true, false, ReceiptWaitTimeout);
+                receiptWait = EvidenceReuseCommandOptions.ParseReceiptWaitTimeout(ReceiptWaitTimeout);
                 ValidateReadOnlyOutput(OutputDirectory, ReceiptStore);
             }
             var resolution = Reuse
                 ? await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken)
                 : null;
             var plan = resolution?.Plan ?? await Workflow.ExplainAsync(CreatePlanningRequest(), cancellationToken);
-            EvidenceRunCommand.ValidateReuseContext(Reuse, plan);
+            EvidenceReuseCommandOptions.ValidateContext(Reuse, plan);
             var decisions = Reuse
                 ? await (_reuseResolver ?? throw new CommandException("ASEVD216: Read-only reuse explanation requires the built-in coverage adapter. Fix: run the installed appsurface tool with its Evidence services registered. Code: reuse.explain_unavailable."))
                     .ExplainAsync(plan, resolution?.DiffSnapshot, SolutionPath, ReceiptStore,
@@ -180,16 +180,11 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
     {
         try
         {
-            var store = Path.TrimEndingDirectorySeparator(Path.GetFullPath(EvidenceReceiptStore.ResolveRoot(
-                receiptStore, Environment.GetEnvironmentVariable("APPSURFACE_EVIDENCE_RECEIPT_STORE"),
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))));
+            var store = EvidenceReceiptStore.ResolveRoot(receiptStore);
             var output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDirectory));
             using var outputLease = CoverageRunOutputLease.AcquireArtifactDirectory(output, false, false);
             using var storeLease = CoverageRunOutputLease.AcquireArtifactDirectory(store, false, false);
-            static bool Within(string parent, string candidate) => candidate.Equals(parent, StringComparison.OrdinalIgnoreCase)
-                || candidate.StartsWith(Path.EndsInDirectorySeparator(parent) ? parent : parent + Path.DirectorySeparatorChar,
-                    StringComparison.OrdinalIgnoreCase);
-            if (Within(store, output) || Within(output, store))
+            if (EvidenceReceiptStore.PathsOverlap(store, output))
                 throw new CommandException("ASEVD217: Read-only reuse explain requires output outside the receipt store. Choose a separate --output directory. Code: reuse.explain_output_overlaps_store. No plan artifacts or receipt state were written.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or NotSupportedException
@@ -235,8 +230,8 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     public string? ReceiptStore { get; set; }
 
     /// <summary>Gets or sets the finite native receipt-lease wait budget.</summary>
-    [CommandOption("receipt-wait-timeout", Description = "Maximum finite positive wait for another local reuse owner. Defaults to 00:30:00.")]
-    public string ReceiptWaitTimeout { get; set; } = "00:30:00";
+    [CommandOption("receipt-wait-timeout", Description = EvidenceReuseCommandOptions.ReceiptWaitTimeoutDescription)]
+    public string ReceiptWaitTimeout { get; set; } = EvidenceReuseCommandOptions.DefaultReceiptWaitTimeout;
 
     /// <summary>Gets or sets the factory for the built-in <c>test</c> producer; tests replace it to supply a fake test-run source.</summary>
     internal Func<string, TestEvidenceProducerOptions, TestEvidenceProducer> TestProducerFactory { get; set; } =
@@ -267,7 +262,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             var cancellationToken = console.RegisterCancellationHandler();
             var resolution = await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken);
             var plan = resolution.Plan;
-            ValidateReuseContext(Reuse, plan);
+            EvidenceReuseCommandOptions.ValidateContext(Reuse, plan);
             TestEvidenceRunSupport.ValidateSelection(plan);
 
             var hasTestProducer = plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer);
@@ -306,42 +301,28 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
                 manifest = reuseResult.Manifest;
                 reuseDecisions = reuseResult.Decisions;
             }
+            else if (plan.Profile.Resources.Count > 0)
+            {
+                manifest = EvidenceCliWorkflow.BuildResourceBackedRefusal(plan, ObservationOnly);
+            }
             else
             {
                 var results = new List<EvidenceProducerResult>();
-                var resourceResults = plan.Profile.Resources
-                    .Select(resource => new EvidenceResourceResult(
-                        resource.Id,
-                        EvidenceResourceOutcome.Unavailable,
-                        0,
-                        "Resource-backed evidence requires an explicitly registered consumer EvidenceHost; the CLI does not provision or infer consumer resources."))
-                    .ToArray();
-                if (resourceResults.Length > 0)
+                var artifactRoot = Path.Join(outputDirectory, "artifacts");
+                foreach (var producer in plan.Profile.Producers)
                 {
-                    results.AddRange(plan.Profile.Producers.Select(producer => new EvidenceProducerResult(
-                        producer.Id,
-                        EvidenceProducerOutcome.Unavailable,
-                        [],
-                        "The selected profile requires consumer-owned resources. Run it through ForgeTrust.AppSurface.Evidence.Aspire with explicit registrations.")));
-                }
-                else
-                {
-                    var artifactRoot = Path.Join(outputDirectory, "artifacts");
-                    foreach (var producer in plan.Profile.Producers)
+                    var produced = TestEvidenceRunSupport.IsTestProducer(producer)
+                        ? await RunTestProducerAsync(plan, producer, artifactRoot, console, testReports, cancellationToken)
+                        : await RunProducerAsync(producer, resolution.DiffSnapshot, outputDirectory, console, cancellationToken);
+                    var checkedResult = await TestEvidenceRunSupport.EnforceArtifactsAsync(artifactRoot, produced, cancellationToken);
+                    if (!ReferenceEquals(checkedResult, produced))
                     {
-                        var produced = TestEvidenceRunSupport.IsTestProducer(producer)
-                            ? await RunTestProducerAsync(plan, producer, artifactRoot, console, testReports, cancellationToken)
-                            : await RunProducerAsync(producer, resolution.DiffSnapshot, outputDirectory, console, cancellationToken);
-                        var checkedResult = await TestEvidenceRunSupport.EnforceArtifactsAsync(artifactRoot, produced, cancellationToken);
-                        if (!ReferenceEquals(checkedResult, produced))
-                        {
-                            await console.Error.WriteLineAsync(checkedResult.Diagnostic);
-                        }
-
-                        results.Add(checkedResult);
+                        await console.Error.WriteLineAsync(checkedResult.Diagnostic);
                     }
+
+                    results.Add(checkedResult);
                 }
-                manifest = EvidenceManifestBuilder.Build(plan, results, ObservationOnly, resourceResults: resourceResults);
+                manifest = EvidenceManifestBuilder.Build(plan, results, ObservationOnly);
             }
 
             await Workflow.WriteManifestAsync(manifest, outputDirectory, cancellationToken, reuseDecisions);
@@ -381,23 +362,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     {
         if (verifyReuse && !reuse)
             throw new CommandException("ASEVD213: --verify-reuse requires --reuse. Fix: pass both options or remove --verify-reuse. Code: reuse.verify_requires_reuse. No store or output was created.");
-        if (!TimeSpan.TryParse(receiptWaitTimeout, CultureInfo.InvariantCulture, out var receiptWait)
-            || receiptWait <= TimeSpan.Zero)
-            throw new CommandException("ASEVD214: --receipt-wait-timeout must be a finite positive duration. Fix: pass a value such as 00:30:00. Code: reuse.invalid_wait_timeout. No store or output was created.");
-        return receiptWait;
-    }
-
-    /// <summary>Rejects local reuse in release or protected CI contexts and in profiles that select the preview test producer.</summary>
-    /// <param name="reuse">Whether reuse is enabled; fresh invocations retain their existing behavior.</param>
-    /// <param name="plan">The selected policy-bound plan.</param>
-    /// <param name="environmentReader">Optional per-call environment seam, without process-wide test mutation.</param>
-    internal static void ValidateReuseContext(bool reuse, EvidencePlan plan, Func<string, string?>? environmentReader = null)
-    {
-        if (reuse && (plan.Profile.Scope == EvidenceProfileScope.Release
-            || string.Equals((environmentReader ?? Environment.GetEnvironmentVariable)("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase)))
-            throw new CommandException("ASEVD215: local producer reuse is unavailable for release profiles and protected CI. Fix: run without --reuse in the trusted release workflow. Code: reuse.gate_context_forbidden. No producer or resource was started.");
-        if (reuse && plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer))
-            throw new CommandException("ASEVD219: The preview test producer requires a fresh CLI run. Run the selected profile without --reuse. Code: reuse.test_preview_requires_fresh. No producer or resource was started.");
+        return EvidenceReuseCommandOptions.ParseReceiptWaitTimeout(receiptWaitTimeout);
     }
 
     private async Task<EvidenceProducerResult> RunProducerAsync(
@@ -472,6 +437,41 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         }
 
         await File.AppendAllTextAsync(summaryPath, markdown.ToString(), new UTF8Encoding(false), cancellationToken);
+    }
+}
+
+/// <summary>Defines the reuse options and admission checks shared by run and read-only explain.</summary>
+internal static class EvidenceReuseCommandOptions
+{
+    /// <summary>The invariant default receipt wait duration used by both commands.</summary>
+    internal const string DefaultReceiptWaitTimeout = "00:30:00";
+
+    /// <summary>The shared help text for the receipt wait option.</summary>
+    internal const string ReceiptWaitTimeoutDescription =
+        $"Maximum finite positive wait for another local reuse owner. Defaults to {DefaultReceiptWaitTimeout}.";
+
+    /// <summary>Parses the receipt wait duration before either command touches local state.</summary>
+    /// <param name="receiptWaitTimeout">An invariant finite positive duration.</param>
+    /// <returns>The validated receipt wait duration.</returns>
+    /// <exception cref="CommandException">The duration is invalid or nonpositive.</exception>
+    internal static TimeSpan ParseReceiptWaitTimeout(string receiptWaitTimeout)
+    {
+        if (!TimeSpan.TryParse(receiptWaitTimeout, CultureInfo.InvariantCulture, out var receiptWait)
+            || receiptWait <= TimeSpan.Zero)
+            throw new CommandException("ASEVD214: --receipt-wait-timeout must be a finite positive duration. Fix: pass a value such as 00:30:00. Code: reuse.invalid_wait_timeout. No store or output was created.");
+        return receiptWait;
+    }
+
+    /// <summary>Rejects local reuse in release or protected CI contexts and in profiles that select the preview test producer.</summary>
+    /// <param name="reuse">Whether reuse is enabled; fresh invocations retain their existing behavior.</param>
+    /// <param name="plan">The selected policy-bound plan.</param>
+    /// <param name="environmentReader">Optional per-call environment seam, without process-wide test mutation.</param>
+    internal static void ValidateContext(bool reuse, EvidencePlan plan, Func<string, string?>? environmentReader = null)
+    {
+        if (reuse && EvidenceReuseContext.IsProtected(plan.Profile.Scope, environmentReader ?? Environment.GetEnvironmentVariable))
+            throw new CommandException("ASEVD215: local producer reuse is unavailable for release profiles and protected CI. Fix: run without --reuse in the trusted release workflow. Code: reuse.gate_context_forbidden. No producer or resource was started.");
+        if (reuse && plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer))
+            throw new CommandException("ASEVD219: The preview test producer requires a fresh CLI run. Run the selected profile without --reuse. Code: reuse.test_preview_requires_fresh. No producer or resource was started.");
     }
 }
 

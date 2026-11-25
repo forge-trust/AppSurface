@@ -6,6 +6,27 @@ using System.Text.Json.Serialization;
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
 
+/// <summary>Defines the supported wire versions for evidence plans and manifests.</summary>
+internal static class EvidenceContractVersions
+{
+    /// <summary>The original contract, before producer reuse was supported.</summary>
+    internal const string V10 = "1.0";
+
+    /// <summary>The contract that introduced producer reuse.</summary>
+    internal const string V11 = "1.1";
+
+    /// <summary>Checks whether a wire version is recognized. Missing versions are unsupported.</summary>
+    internal static bool IsSupported(string? version) => version is V10 or V11;
+
+    /// <summary>Checks the policy snapshot and resolved profile for declarations that require version 1.1.</summary>
+    /// <param name="policy">The policy snapshot, including unselected profiles, when present.</param>
+    /// <param name="resolvedProfile">The resolved plan profile, which can combine multiple policy profiles.</param>
+    /// <returns>Whether any producer declaration requires version 1.1.</returns>
+    internal static bool RequiresVersion11(EvidencePolicy? policy, EvidenceProfile resolvedProfile) =>
+        (policy?.Profiles ?? []).Append(resolvedProfile).Any(static profile =>
+            profile.Producers.Any(static producer => producer.RequiresContractVersion11()));
+}
+
 /// <summary>
 /// Defines the scope selected by a versioned evidence policy.
 /// </summary>
@@ -172,6 +193,15 @@ public sealed record EvidenceArtifactSlot(string LogicalName, string RelativeRoo
     /// <remarks>Valid values are 1 through 128. MaximumBytes bounds the aggregate slot bytes; the producer-wide 256 MiB limit also applies. Explicit values require contract 1.1.</remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaximumFiles { get; init; }
+
+    /// <summary>Largest file count a producer may declare for a single artifact slot.</summary>
+    internal const int MaximumAllowedFiles = 128;
+
+    /// <summary>Gets the declared file count or the legacy one-file limit when it is omitted.</summary>
+    internal int EffectiveMaximumFiles => MaximumFiles ?? 1;
+
+    /// <summary>Gets whether the slot declares a nonnegative byte budget and a supported file count.</summary>
+    internal bool HasValidLimits => MaximumBytes >= 0 && EffectiveMaximumFiles is >= 1 and <= MaximumAllowedFiles;
 }
 
 /// <summary>Declares the repository-relative files that completely influence a reusable producer result.</summary>
@@ -211,7 +241,11 @@ public sealed record EvidenceCoverageGateRequirements(
     decimal? MinPatchLinePercent = null,
     decimal? MinPatchBranchPercent = null,
     string PatchLineMode = "measurable",
-    decimal TolerancePercent = 0.5m);
+    decimal TolerancePercent = 0.5m)
+{
+    /// <summary>Gets whether either declared patch threshold requires an exact captured diff.</summary>
+    internal bool RequiresPatch => MinPatchLinePercent.HasValue || MinPatchBranchPercent.HasValue;
+}
 
 /// <summary>
 /// Declares a producer selected by an evidence profile.
@@ -433,6 +467,14 @@ public static class EvidenceProfileLimits
 
     /// <summary>Maximum obligations a v1 profile may declare.</summary>
     public const int MaximumObligations = 128;
+
+    /// <summary>Checks the declaration counts against the shared limits before planning or execution.</summary>
+    /// <param name="profile">The profile whose resources, producers, and obligations are counted.</param>
+    /// <returns>Whether any count exceeds its inclusive maximum.</returns>
+    internal static bool ExceedsLimits(EvidenceProfile profile)
+        => profile.Resources.Count > MaximumResources
+            || profile.Producers.Count > MaximumProducers
+            || profile.Obligations.Count > MaximumObligations;
 }
 
 /// <summary>
@@ -488,6 +530,9 @@ public sealed record EvidencePlan(
     string PlanDigest,
     EvidencePolicy? PolicySnapshot = null)
 {
+    /// <summary>Maximum size of a captured patch shared by planning, coverage, and receipt preparation.</summary>
+    internal const int MaximumCapturedPatchBytes = 20 * 1024 * 1024;
+
     /// <summary>Lowercase SHA-256 of the exact unified patch bytes captured at planning, when available.</summary>
     /// <remarks><see cref="DiffDigest"/> still identifies the normalized path list; a path-only plan cannot bind patch acceptance.</remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -522,6 +567,10 @@ public sealed record EvidenceProducerResult(
     /// <summary>Gets the nondefault original completion time of the reused result; absent for fresh execution.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? OriginCompletedAt { get; init; }
+
+    /// <summary>Checks whether any reuse provenance field is present, including partial provenance.</summary>
+    internal bool HasAnyReuseProvenance() =>
+        ProducerKey is not null || OriginManifestDigest is not null || OriginCompletedAt is not null;
 }
 
 /// <summary>
@@ -554,6 +603,10 @@ public sealed record EvidenceExecutionMetrics(
     /// <summary>Gets time spent restoring artifacts in this invocation, in milliseconds; zero is omitted from JSON.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long ArtifactRestoreMilliseconds { get; init; }
+
+    /// <summary>Checks whether any reuse timing has a nonzero value.</summary>
+    internal bool HasNonzeroReuseTimings() =>
+        PreparationMilliseconds != 0 || ReceiptWaitMilliseconds != 0 || ArtifactRestoreMilliseconds != 0;
 }
 
 /// <summary>
@@ -740,7 +793,7 @@ public sealed class EvidenceArtifactWriter
         if (normalized != artifact.RelativePath || artifact.MediaType != slot.MediaType || artifact.LengthBytes < 0
             || artifact.Sha256.Length != 64 || artifact.Sha256.Any(static value => !char.IsAsciiHexDigitLower(value)))
             throw new ArgumentException("The verified artifact metadata is invalid.", nameof(artifact));
-        ReserveArtifact(artifact.LogicalName, normalized, artifact.LengthBytes, slot.MaximumBytes);
+        ReserveArtifact(slot, normalized, artifact.LengthBytes);
         lock (_sync) _artifacts[normalized] = artifact;
     }
 
@@ -758,16 +811,8 @@ public sealed class EvidenceArtifactWriter
         ReadOnlyMemory<byte> contents,
         CancellationToken cancellationToken = default)
     {
-        if (_producer.ArtifactSlots.FirstOrDefault(slot => string.Equals(slot.LogicalName, logicalName, StringComparison.Ordinal)) is not { } slot)
-        {
-            throw new InvalidOperationException($"Artifact '{logicalName}' is not declared by producer '{_producer.Id}'.");
-        }
-
-        var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
-        EvidenceArtifactValidation.ValidatePathForSlot(slot, relativePath);
-        var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath,
-            _requireUnlinkedPaths || slot.MaximumFiles is not null);
-        ReserveArtifact(logicalName, normalizedPath, contents.Length, slot.MaximumBytes);
+        var (slot, normalizedPath, destination) = ResolveWriteDestination(logicalName, relativePath);
+        ReserveArtifact(slot, normalizedPath, contents.Length);
         var created = false;
         try
         {
@@ -821,16 +866,8 @@ public sealed class EvidenceArtifactWriter
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(contents);
-        if (_producer.ArtifactSlots.FirstOrDefault(slot => string.Equals(slot.LogicalName, logicalName, StringComparison.Ordinal)) is not { } slot)
-        {
-            throw new InvalidOperationException($"Artifact '{logicalName}' is not declared by producer '{_producer.Id}'.");
-        }
-
-        var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
-        EvidenceArtifactValidation.ValidatePathForSlot(slot, relativePath);
-        var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath,
-            _requireUnlinkedPaths || slot.MaximumFiles is not null);
-        ReserveArtifact(logicalName, normalizedPath, 0, slot.MaximumBytes);
+        var (slot, normalizedPath, destination) = ResolveWriteDestination(logicalName, relativePath);
+        ReserveArtifact(slot, normalizedPath, 0);
 
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         long lengthBytes = 0;
@@ -856,7 +893,7 @@ public sealed class EvidenceArtifactWriter
                     break;
                 }
 
-                AddArtifactBytes(logicalName, read, slot.MaximumBytes);
+                AddArtifactBytes(slot, read);
                 lengthBytes += read;
                 hash.AppendData(buffer, 0, read);
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
@@ -897,12 +934,10 @@ public sealed class EvidenceArtifactWriter
     {
         foreach (var artifact in WrittenArtifacts)
         {
-            string path;
             try
             {
                 var slot = _producer.ArtifactSlots.First(slot => slot.LogicalName == artifact.LogicalName);
-                path = EvidenceArtifactValidation.GetContainedPath(_rootPath, artifact.RelativePath,
-                    _requireUnlinkedPaths || slot.MaximumFiles is not null);
+                var path = ResolveContainedDestination(slot, artifact.RelativePath);
                 await using var input = new FileStream(path, new FileStreamOptions
                 {
                     Mode = FileMode.Open,
@@ -926,48 +961,57 @@ public sealed class EvidenceArtifactWriter
         return true;
     }
 
-    private void ReserveArtifact(string logicalName, string normalizedPath, long lengthBytes, long maximumBytes)
+    private (EvidenceArtifactSlot Slot, string NormalizedPath, string Destination) ResolveWriteDestination(
+        string logicalName, string relativePath)
     {
+        var slot = _producer.ArtifactSlots.SingleOrDefault(slot => string.Equals(slot.LogicalName, logicalName, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"Artifact '{logicalName}' is not declared by producer '{_producer.Id}'.");
+        var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
+        EvidenceArtifactValidation.ValidatePathForSlot(slot, relativePath);
+        return (slot, normalizedPath, ResolveContainedDestination(slot, normalizedPath));
+    }
+
+    private string ResolveContainedDestination(EvidenceArtifactSlot slot, string normalizedPath)
+        => EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath,
+            _requireUnlinkedPaths || slot.MaximumFiles is not null);
+
+    private void ReserveArtifact(EvidenceArtifactSlot slot, string normalizedPath, long lengthBytes)
+    {
+        var logicalName = slot.LogicalName;
         lock (_sync)
         {
-            if (!_destinations.Add(normalizedPath))
+            if (_destinations.Contains(normalizedPath))
             {
                 throw new InvalidOperationException($"Artifact destination '{normalizedPath}' was already written by producer '{_producer.Id}'.");
             }
 
-            var slot = _producer.ArtifactSlots.Single(candidate => string.Equals(candidate.LogicalName, logicalName, StringComparison.Ordinal));
-            var maximumFiles = slot.MaximumFiles ?? 1;
             var slotCount = _slotCounts.GetValueOrDefault(logicalName);
             var slotBytes = _slotBytes.GetValueOrDefault(logicalName);
-            if (maximumFiles is < 1 or > 128 || slot.MaximumBytes < 0
-                || slotCount >= maximumFiles || lengthBytes > slot.MaximumBytes - slotBytes)
+            if (!slot.HasValidLimits || slotCount >= slot.EffectiveMaximumFiles || lengthBytes > slot.MaximumBytes - slotBytes)
             {
-                _destinations.Remove(normalizedPath);
                 throw new InvalidOperationException($"Artifact slot '{logicalName}' exceeds its declared file or byte limit.");
             }
 
-            _artifacts.Add(normalizedPath, null);
-
-            if (lengthBytes > maximumBytes
-                || lengthBytes > MaximumTotalArtifactBytes - _totalBytes)
+            if (lengthBytes > MaximumTotalArtifactBytes - _totalBytes)
             {
-                _destinations.Remove(normalizedPath);
-                _artifacts.Remove(normalizedPath);
                 throw new InvalidOperationException($"Artifact '{logicalName}' exceeds its evidence size limit.");
             }
 
+            _destinations.Add(normalizedPath);
+            _artifacts.Add(normalizedPath, null);
             _totalBytes += lengthBytes;
             _slotBytes[logicalName] = slotBytes + lengthBytes;
             _slotCounts[logicalName] = slotCount + 1;
         }
     }
 
-    private void AddArtifactBytes(string logicalName, long additionalBytes, long maximumBytes)
+    private void AddArtifactBytes(EvidenceArtifactSlot slot, long additionalBytes)
     {
+        var logicalName = slot.LogicalName;
         lock (_sync)
         {
             var slotBytes = _slotBytes[logicalName];
-            if (slotBytes > maximumBytes - additionalBytes
+            if (slotBytes > slot.MaximumBytes - additionalBytes
                 || additionalBytes > MaximumTotalArtifactBytes - _totalBytes)
             {
                 throw new InvalidOperationException($"Artifact '{logicalName}' exceeds its evidence size limit.");
@@ -1178,7 +1222,7 @@ public static class EvidenceArtifactValidation
         ArgumentNullException.ThrowIfNull(producer);
         artifacts ??= [];
         if (producer.ArtifactSlots.GroupBy(static slot => slot.LogicalName, StringComparer.Ordinal).Any(static group => group.Count() > 1)
-            || producer.ArtifactSlots.Any(static slot => slot.MaximumBytes < 0 || slot.MaximumFiles is <= 0 or > 128)
+            || producer.ArtifactSlots.Any(static slot => !slot.HasValidLimits)
             || artifacts.GroupBy(static artifact => artifact.RelativePath, StringComparer.Ordinal).Any(static group => group.Count() > 1))
         {
             return false;
@@ -1226,7 +1270,7 @@ public static class EvidenceArtifactValidation
         foreach (var slot in producer.ArtifactSlots)
         {
             var slotArtifacts = artifacts.Where(artifact => string.Equals(artifact.LogicalName, slot.LogicalName, StringComparison.Ordinal)).ToArray();
-            if (slotArtifacts.Length > (slot.MaximumFiles ?? 1)
+            if (slotArtifacts.Length > slot.EffectiveMaximumFiles
                 || slotArtifacts.Sum(static artifact => artifact.LengthBytes) > slot.MaximumBytes)
             {
                 return false;
@@ -1406,8 +1450,8 @@ public static class EvidenceCanonicalJson
             ? StrictContractReaderOptions
             : SerializerOptions;
         var value = JsonSerializer.Deserialize<TValue>(utf8Json, serializerOptions);
-        if (value is EvidencePlan plan && plan.ContractVersion is not ("1.0" or "1.1")
-            || value is EvidenceManifest manifest && manifest.ContractVersion is not ("1.0" or "1.1"))
+        if (value is EvidencePlan plan && !EvidenceContractVersions.IsSupported(plan.ContractVersion)
+            || value is EvidenceManifest manifest && !EvidenceContractVersions.IsSupported(manifest.ContractVersion))
         {
             throw new JsonException("Unsupported evidence contract version.");
         }
@@ -1571,12 +1615,10 @@ public static class EvidenceManifestBuilder
         var declaredResources = plan.Profile.Resources
             .GroupBy(static resource => resource.Id, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
-        var hasReuseData = producerResults.Any(static result => result.Outcome == EvidenceProducerOutcome.Reused
-            || result.ProducerKey is not null || result.OriginManifestDigest is not null || result.OriginCompletedAt is not null);
-        var policyDeclarations = (plan.PolicySnapshot?.Profiles ?? []).Append(plan.Profile);
-        var declarationsRequireV11 = policyDeclarations.Any(static profile =>
-            profile.Producers.Any(static producer => producer.RequiresContractVersion11()));
-        var invalid = plan.ContractVersion is not ("1.0" or "1.1")
+        var hasReuseData = producerResults.Any(static result =>
+            result.Outcome == EvidenceProducerOutcome.Reused || result.HasAnyReuseProvenance());
+        var declarationsRequireV11 = EvidenceContractVersions.RequiresVersion11(plan.PolicySnapshot, plan.Profile);
+        var invalid = !EvidenceContractVersions.IsSupported(plan.ContractVersion)
             || !Enum.IsDefined(plan.Profile.Scope)
             || !Enum.IsDefined(envelopeStatus)
             || duplicateDeclarations
@@ -1584,25 +1626,23 @@ public static class EvidenceManifestBuilder
             || duplicateResourceResults
             || plan.Profile.Resources.Count != declaredResources.Count
             || resourceResults.Any(static result => result.Outcome == EvidenceResourceOutcome.NotRequiredForExecution)
-                && plan.ContractVersion != "1.1"
+                && plan.ContractVersion != EvidenceContractVersions.V11
             || producerResults.Any(static result => !Enum.IsDefined(result.Outcome))
-            || plan.ContractVersion == "1.1" && producerResults.Any(static result => result.Outcome == EvidenceProducerOutcome.Invalid)
+            || plan.ContractVersion == EvidenceContractVersions.V11 && producerResults.Any(static result => result.Outcome == EvidenceProducerOutcome.Invalid)
             || resourceResults.Any(static result => !Enum.IsDefined(result.Outcome))
             || metrics.PreparationMilliseconds < 0 || metrics.ReceiptWaitMilliseconds < 0 || metrics.ArtifactRestoreMilliseconds < 0
-            || (metrics.PreparationMilliseconds != 0 || metrics.ReceiptWaitMilliseconds != 0 || metrics.ArtifactRestoreMilliseconds != 0)
-                && plan.ContractVersion != "1.1"
-            || hasReuseData && !string.Equals(plan.ContractVersion, "1.1", StringComparison.Ordinal)
-            || declarationsRequireV11 && !string.Equals(plan.ContractVersion, "1.1", StringComparison.Ordinal)
+            || metrics.HasNonzeroReuseTimings() && plan.ContractVersion != EvidenceContractVersions.V11
+            || hasReuseData && plan.ContractVersion != EvidenceContractVersions.V11
+            || declarationsRequireV11 && plan.ContractVersion != EvidenceContractVersions.V11
             || results.Keys.Any(id => !producerDeclarations.ContainsKey(id))
             || resources.Keys.Any(id => !declaredResources.ContainsKey(id))
             || results.Any(pair => !producerDeclarations.TryGetValue(pair.Key, out var declaration)
                 || pair.Value.SatisfiedAssertionIds.Any(assertion =>
                     !declaration.AssertionIds.Contains(assertion, StringComparer.Ordinal))
                 || pair.Value.Outcome == EvidenceProducerOutcome.Reused && !IsValidReuseProvenance(pair.Value)
-                || pair.Value.Outcome != EvidenceProducerOutcome.Reused
-                    && (pair.Value.ProducerKey is not null || pair.Value.OriginManifestDigest is not null || pair.Value.OriginCompletedAt is not null)
+                || pair.Value.Outcome != EvidenceProducerOutcome.Reused && pair.Value.HasAnyReuseProvenance()
                 || !EvidenceArtifactValidation.AreValid(
-                    plan.ContractVersion == "1.1" && pair.Value.Outcome is not (EvidenceProducerOutcome.Passed or EvidenceProducerOutcome.Reused)
+                    plan.ContractVersion == EvidenceContractVersions.V11 && pair.Value.Outcome is not (EvidenceProducerOutcome.Passed or EvidenceProducerOutcome.Reused)
                         ? declaration with { ArtifactSlots = declaration.ArtifactSlots.Select(static slot => slot with { Required = false }).ToArray() }
                         : declaration,
                     pair.Value.Artifacts));
@@ -1671,7 +1711,7 @@ public static class EvidenceManifestBuilder
             ClosedObligationIds: closed.OrderBy(static id => id, StringComparer.Ordinal).ToArray(),
             UnmediatedObligationIds: unmediated.OrderBy(static id => id, StringComparer.Ordinal).ToArray(),
             ProducerResults: producerResults.OrderBy(static result => result.ProducerId, StringComparer.Ordinal)
-                .Select(result => plan.ContractVersion == "1.1" && result.Artifacts is not null
+                .Select(result => plan.ContractVersion == EvidenceContractVersions.V11 && result.Artifacts is not null
                     ? result with
                     {
                         Artifacts = result.Artifacts.OrderBy(static artifact => artifact.LogicalName, StringComparer.Ordinal)
@@ -1697,15 +1737,14 @@ public static class EvidenceManifestBuilder
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(manifest);
 
-        if (plan.ContractVersion is not ("1.0" or "1.1")
-            || manifest.ContractVersion is not ("1.0" or "1.1")
+        if (!EvidenceContractVersions.IsSupported(plan.ContractVersion)
+            || !EvidenceContractVersions.IsSupported(manifest.ContractVersion)
             || !string.Equals(plan.ContractVersion, manifest.ContractVersion, StringComparison.Ordinal)
-            || plan.ContractVersion == "1.0" && (
-                (plan.PolicySnapshot?.Profiles ?? [plan.Profile]).Append(plan.Profile).Any(static profile =>
-                    profile.Producers.Any(static producer => producer.RequiresContractVersion11()))
-                || manifest.Metrics.PreparationMilliseconds != 0 || manifest.Metrics.ReceiptWaitMilliseconds != 0 || manifest.Metrics.ArtifactRestoreMilliseconds != 0
+            || plan.ContractVersion == EvidenceContractVersions.V10 && (
+                EvidenceContractVersions.RequiresVersion11(plan.PolicySnapshot, plan.Profile)
+                || manifest.Metrics.HasNonzeroReuseTimings()
                 || manifest.ReuseCount != 0
-                || manifest.ProducerResults.Any(static result => result.ProducerKey is not null || result.OriginManifestDigest is not null || result.OriginCompletedAt is not null)
+                || manifest.ProducerResults.Any(static result => result.HasAnyReuseProvenance())
                 || manifest.ResourceResults.Any(static result => result.Outcome == EvidenceResourceOutcome.NotRequiredForExecution)
                 || manifest.ClaimKind == EvidenceClaimKind.LocalReusedComplete))
         {
@@ -1747,7 +1786,7 @@ public static class EvidenceManifestBuilder
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(manifest);
-        return plan.ContractVersion is "1.0" or "1.1"
+        return EvidenceContractVersions.IsSupported(plan.ContractVersion)
             && string.Equals(plan.ContractVersion, manifest.ContractVersion, StringComparison.Ordinal)
             && manifest.ClaimKind is EvidenceClaimKind.TargetedComplete or EvidenceClaimKind.ReleaseComplete or EvidenceClaimKind.NoEvidenceRequired
             && manifest.Eligibility is EvidenceClaimEligibility.PullRequestGate or EvidenceClaimEligibility.ReleaseGate
@@ -1765,16 +1804,11 @@ public static class EvidenceManifestBuilder
     {
         var resources = profile.Resources.GroupBy(static resource => resource.Id, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
-        var required = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>(profile.Producers
+        var roots = profile.Producers
             .Where(producer => !results.TryGetValue(producer.Id, out var result) || result.Outcome != EvidenceProducerOutcome.Reused || !IsValidReuseProvenance(result))
-            .SelectMany(static producer => producer.RequiredResources));
-        while (pending.TryPop(out var id))
-        {
-            if (!required.Add(id) || !resources.TryGetValue(id, out var resource)) continue;
-            foreach (var dependency in resource.Requires) pending.Push(dependency);
-        }
-        return required;
+            .SelectMany(static producer => producer.RequiredResources);
+        return EvidenceResourceReachability.Enumerate(resources, roots)
+            .Select(static resource => resource.Id).ToHashSet(StringComparer.Ordinal);
     }
 }
 

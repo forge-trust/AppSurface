@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
@@ -137,6 +138,56 @@ public sealed class EvidenceProducerReuseSessionTests
             if (Directory.Exists(indexPath)) Directory.Delete(indexPath);
             if (File.Exists(savedIndexPath)) File.Move(savedIndexPath, indexPath);
         }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task RefusedProducerSettlementFailurePreservesConfirmedPublication(int refusedIndex)
+    {
+        await using var fixture = await Fixture.CreateAsync(producerCount: 2);
+        var refused = fixture.ProducerDeclarations[refusedIndex];
+        var published = fixture.ProducerDeclarations[1 - refusedIndex];
+        var settlementAttempts = new List<string>();
+        await using var session = await fixture.PrepareAsync(configureOptions: options => options with
+        {
+            BeforeRefusedPublicationSettlementForTests = producerId =>
+            {
+                settlementAttempts.Add(producerId);
+                throw new IOException("injected refusal settlement failure");
+            }
+        });
+        Assert.True(await session.BeginExecutionAsync(CancellationToken.None));
+        var results = new List<EvidenceProducerResult>();
+        foreach (var (declaration, producer) in fixture.ProducerDeclarations.Zip(fixture.Producers))
+        {
+            results.Add(await producer.ProduceAsync(new EvidenceProducerContext(fixture.Plan, declaration,
+                TimeProvider.System, session.GetWriter(declaration)), CancellationToken.None));
+        }
+        Assert.True(await session.BeforeCleanupAsync(true, CancellationToken.None));
+        await File.WriteAllTextAsync(Path.Join(fixture.LastArtifactRoot, refused.Id, "reports", "report.txt"),
+            "changed after cleanup");
+        var manifest = EvidenceManifestBuilder.Build(fixture.Plan, results,
+            resourceResults: [new EvidenceResourceResult("database", EvidenceResourceOutcome.Ready, 1)],
+            metrics: new EvidenceExecutionMetrics { CleanupCompleted = true });
+
+        var completed = await session.CompleteAsync(manifest, CancellationToken.None);
+
+        Assert.Equal(EvidenceExecutionVerdict.Passed, completed.ExecutionVerdict);
+        Assert.Equal([refused.Id], settlementAttempts);
+        var publishedDecision = Assert.Single(session.Decisions, decision => decision.ProducerId == published.Id);
+        var refusedDecision = Assert.Single(session.Decisions, decision => decision.ProducerId == refused.Id);
+        Assert.Equal(EvidenceReceiptPublication.Published, publishedDecision.Publication);
+        Assert.Equal("reuse.published", publishedDecision.Reason);
+        Assert.Equal(EvidenceReceiptPublication.Suppressed, refusedDecision.Publication);
+        Assert.Equal("reuse.payload-publication-failed", refusedDecision.Reason);
+        Assert.Contains("could not be confirmed", refusedDecision.Diagnostic, StringComparison.Ordinal);
+        var publishedState = Assert.IsType<EvidenceReceiptState>(await fixture.ReadStateAsync(publishedDecision.ProducerKey!));
+        Assert.NotNull(publishedState.PayloadDirectoryName);
+        Assert.Null(publishedState.InFlightExecutionId);
+        var refusedState = Assert.IsType<EvidenceReceiptState>(await fixture.ReadStateAsync(refusedDecision.ProducerKey!));
+        Assert.Null(refusedState.PayloadDirectoryName);
+        Assert.Equal(session.ExecutionId, refusedState.InFlightExecutionId);
     }
 
     [Fact]
@@ -400,6 +451,39 @@ public sealed class EvidenceProducerReuseSessionTests
             var state = EvidenceReceiptQuota.ReadAuthority(fixture.StoreRoot, identity.RepositoryNamespace, identity.Key);
             Assert.Equal(session.ExecutionId, state?.InFlightExecutionId);
         }
+    }
+
+    [Fact]
+    public async Task InvalidQuotaIndexDuringTwoKeyDisposalPreservesIndexAndReleasesBothNativeLocks()
+    {
+        await using var fixture = await Fixture.CreateAsync(producerCount: 2);
+        await using var session = await fixture.PrepareAsync();
+        var repository = (await fixture.BuildIdentityAsync(fixture.ProducerDeclaration)).RepositoryNamespace;
+        var keys = session.Decisions.Select(decision => Assert.IsType<string>(decision.ProducerKey)).ToArray();
+        Assert.Equal(2, keys.Length);
+        foreach (var key in keys)
+        {
+            var directory = Path.Join(fixture.StoreRoot, repository, key);
+            var busy = Assert.Throws<CoverageExecutionException>(() =>
+            {
+                using var contender = CoverageArtifactOperationLease.Acquire(directory, exclusive: true);
+            });
+            Assert.Equal("ASCOV202", busy.Code);
+        }
+
+        var indexPath = Path.Join(fixture.StoreRoot, "quota-index.json");
+        var index = JsonNode.Parse(await File.ReadAllBytesAsync(indexPath))!;
+        index["SchemaVersion"] = int.MaxValue;
+        var invalidBytes = Encoding.UTF8.GetBytes(index.ToJsonString());
+        await File.WriteAllBytesAsync(indexPath, invalidBytes);
+
+        await session.DisposeAsync();
+
+        Assert.Equal(invalidBytes, await File.ReadAllBytesAsync(indexPath));
+        using var first = CoverageArtifactOperationLease.Acquire(Path.Join(fixture.StoreRoot, repository, keys[0]), exclusive: true);
+        using var second = CoverageArtifactOperationLease.Acquire(Path.Join(fixture.StoreRoot, repository, keys[1]), exclusive: true);
+        first.VerifyBinding();
+        second.VerifyBinding();
     }
 
     [Fact]

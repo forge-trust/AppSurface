@@ -35,7 +35,7 @@ public static class EvidenceOwnedChild
     /// <returns>A task that completes after enrollment is acknowledged and the work and completion message settle.</returns>
     /// <exception cref="InvalidOperationException">A partially configured, invalid, unreachable, closed, or full invocation channel is present. The work callback has not been invoked.</exception>
     public static async Task RunAsync(Func<CancellationToken, Task> work, CancellationToken cancellationToken)
-        => await RunAsync(work, GetProcessChannelEnvironment(), cancellationToken).ConfigureAwait(false);
+        => await RunAsync(work, EvidenceOwnedChildChannel.ReadAmbientEnvironment(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Runs work with an explicitly supplied cooperative invocation channel, or normally when it is absent.</summary>
     /// <param name="work">Cooperative work that must await all child work and cleanup it owns.</param>
@@ -49,13 +49,14 @@ public static class EvidenceOwnedChild
         ArgumentNullException.ThrowIfNull(work);
         ArgumentNullException.ThrowIfNull(environment);
         cancellationToken.ThrowIfCancellationRequested();
-        if (!TryGetChannel(environment, out var pipeName, out var executionId, out var nonce))
+        var channel = EvidenceOwnedChildChannel.Read(environment);
+        if (channel is null)
         {
             await work(cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             return;
         }
-        await using var enrollment = await EnrollAsync(pipeName!, executionId!, nonce!, cancellationToken).ConfigureAwait(false);
+        await using var enrollment = await EnrollAsync(channel, cancellationToken).ConfigureAwait(false);
         Exception? workFailure = null;
         try { await work(cancellationToken).ConfigureAwait(false); }
         catch (Exception exception) { workFailure = exception; }
@@ -81,7 +82,7 @@ public static class EvidenceOwnedChild
     /// </remarks>
     /// <exception cref="InvalidOperationException">A partially configured, invalid, unreachable, closed, or full invocation channel is present. The process has not been started.</exception>
     public static async Task<int> RunProcessAsync(ProcessStartInfo startInfo, CancellationToken cancellationToken)
-        => await RunProcessAsync(startInfo, GetProcessChannelEnvironment(), cancellationToken).ConfigureAwait(false);
+        => await RunProcessAsync(startInfo, EvidenceOwnedChildChannel.ReadAmbientEnvironment(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Starts a process with an explicitly supplied cooperative channel and joins its actual root-process exit.</summary>
     /// <param name="startInfo">The process to start; an owned copy receives the supplied channel values.</param>
@@ -95,30 +96,22 @@ public static class EvidenceOwnedChild
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(environment);
         cancellationToken.ThrowIfCancellationRequested();
-        var enrolled = TryGetChannel(environment, out var pipeName, out var executionId, out var nonce);
-        if (enrolled)
+        var channel = EvidenceOwnedChildChannel.Read(environment);
+        if (channel is not null)
         {
             if (startInfo.UseShellExecute || !string.IsNullOrEmpty(startInfo.UserName))
                 throw new ArgumentException("Cooperative child processes must use the current user and UseShellExecute=false.", nameof(startInfo));
             if (OperatingSystem.IsWindows() && (!string.IsNullOrEmpty(startInfo.Domain) || startInfo.Password is not null))
                 throw new ArgumentException("Cooperative child processes must use the current user and UseShellExecute=false.", nameof(startInfo));
         }
-        Enrollment? enrollment = enrolled ? await EnrollAsync(pipeName!, executionId!, nonce!, cancellationToken).ConfigureAwait(false) : null;
+        var enrollment = channel is not null ? await EnrollAsync(channel, cancellationToken).ConfigureAwait(false) : null;
         await using var ownedEnrollment = enrollment;
-        var copyEnvironment = !OperatingSystem.IsWindows() || !startInfo.UseShellExecute || enrolled;
+        var copyEnvironment = !OperatingSystem.IsWindows() || !startInfo.UseShellExecute || channel is not null;
         var ownedStartInfo = Clone(startInfo, copyEnvironment);
-        if (enrolled)
-        {
-            ownedStartInfo.Environment[PipeEnvironmentName] = pipeName;
-            ownedStartInfo.Environment[ExecutionEnvironmentName] = executionId;
-            ownedStartInfo.Environment[NonceEnvironmentName] = nonce;
-        }
+        if (channel is not null)
+            channel.ApplyTo(ownedStartInfo.Environment);
         else if (copyEnvironment)
-        {
-            ownedStartInfo.Environment.Remove(PipeEnvironmentName);
-            ownedStartInfo.Environment.Remove(ExecutionEnvironmentName);
-            ownedStartInfo.Environment.Remove(NonceEnvironmentName);
-        }
+            EvidenceOwnedChildChannel.RemoveFrom(ownedStartInfo.Environment);
         using var process = new Process { StartInfo = ownedStartInfo };
         try
         {
@@ -170,14 +163,6 @@ public static class EvidenceOwnedChild
         return exitCode;
     }
 
-    private static IReadOnlyDictionary<string, string> GetProcessChannelEnvironment()
-    {
-        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var name in new[] { PipeEnvironmentName, ExecutionEnvironmentName, NonceEnvironmentName })
-            if (System.Environment.GetEnvironmentVariable(name) is { } value) environment[name] = value;
-        return environment;
-    }
-
     private static ProcessStartInfo Clone(ProcessStartInfo source, bool copyEnvironment)
     {
         var clone = new ProcessStartInfo
@@ -211,28 +196,15 @@ public static class EvidenceOwnedChild
         return clone;
     }
 
-    private static bool TryGetChannel(IReadOnlyDictionary<string, string> environment,
-        out string? pipeName, out string? executionId, out string? nonce)
+    private static async Task<Enrollment> EnrollAsync(EvidenceOwnedChildChannel channel, CancellationToken cancellationToken)
     {
-        var hasPipe = environment.TryGetValue(PipeEnvironmentName, out pipeName);
-        var hasExecution = environment.TryGetValue(ExecutionEnvironmentName, out executionId);
-        var hasNonce = environment.TryGetValue(NonceEnvironmentName, out nonce);
-        if (!hasPipe && !hasExecution && !hasNonce) return false;
-        if (!hasPipe || !hasExecution || !hasNonce
-            || !IsProtocolToken(pipeName, 180) || !IsProtocolToken(executionId, 128) || !IsProtocolToken(nonce, 128))
-            throw new InvalidOperationException("Cooperative child enrollment requires a valid current-user Evidence invocation channel.");
-        return true;
-    }
-
-    private static async Task<Enrollment> EnrollAsync(string pipeName, string executionId, string nonce, CancellationToken cancellationToken)
-    {
-        var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        var pipe = new NamedPipeClientStream(".", channel.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         using var protocolDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         protocolDeadline.CancelAfter(ProtocolIoDeadline);
         try
         {
             await pipe.ConnectAsync((int)ProtocolIoDeadline.TotalMilliseconds, protocolDeadline.Token).ConfigureAwait(false);
-            await WriteFrameAsync(pipe, FormatBegin(executionId, nonce), protocolDeadline.Token).ConfigureAwait(false);
+            await WriteFrameAsync(pipe, FormatBegin(channel.ExecutionId, channel.Nonce), protocolDeadline.Token).ConfigureAwait(false);
             var response = await ReadFrameAsync(pipe, protocolDeadline.Token).ConfigureAwait(false);
             if (!TryParseAcknowledgement(response, out var childId))
                 throw new InvalidOperationException("Cooperative child enrollment was rejected or the invocation channel was unavailable.");
@@ -251,10 +223,6 @@ public static class EvidenceOwnedChild
             throw new InvalidOperationException("Cooperative child enrollment could not connect to the current-user Evidence invocation channel.");
         }
     }
-
-    private static bool IsProtocolToken(string? value, int maximumLength)
-        => value is { Length: > 0 } && value.Length <= maximumLength
-            && value.All(static character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
 
     private static Task WriteFrameAsync(Stream stream, string value, CancellationToken cancellationToken) =>
         EvidenceOwnedChildWire.WriteFrameAsync(stream, value, cancellationToken,

@@ -115,6 +115,32 @@ public sealed class EvidenceProducerIdentityTests
     }
 
     [Fact]
+    public async Task BuildAsync_ShouldMatchTrailingDoubleStarAtZeroSegmentsAndRequireExactPathConsumption()
+    {
+        using (var directoryRepo = await TestRepository.CreateAsync())
+        {
+            await directoryRepo.WriteAsync("src/child.cs", "selected");
+            await directoryRepo.CommitAsync("directory input");
+
+            var prefixOnly = await BuildAsync(directoryRepo, ["src"]);
+
+            Assert.Null(prefixOnly.Identity);
+            Assert.Equal("reuse.identity.empty", prefixOnly.Reason);
+        }
+
+        using (var fileRepo = await TestRepository.CreateAsync())
+        {
+            await fileRepo.WriteAsync("src", "selected");
+            await fileRepo.CommitAsync("file input");
+
+            var trailingDoubleStar = await BuildAsync(fileRepo, ["src/**"]);
+
+            Assert.True(trailingDoubleStar.IsEligible, trailingDoubleStar.Diagnostic);
+            Assert.Equal("src", Assert.Single(trailingDoubleStar.Identity!.Files).RelativePath);
+        }
+    }
+
+    [Fact]
     public async Task BuildAsync_ShouldInvalidateForModeToolResourceAndMaterialChanges()
     {
         using var repo = await TestRepository.CreateAsync();
@@ -253,6 +279,8 @@ public sealed class EvidenceProducerIdentityTests
     {
         Assert.True(EvidenceProducerIdentityBuilder.IncludeMaySelectPathOrDescendant("module", ["module"], CancellationToken.None));
         Assert.True(EvidenceProducerIdentityBuilder.IncludeMaySelectPathOrDescendant("linked", ["linked/**/*.cs"], CancellationToken.None));
+        Assert.True(EvidenceProducerIdentityBuilder.IncludeMaySelectPathOrDescendant("linked", ["linked/**"], CancellationToken.None));
+        Assert.False(EvidenceProducerIdentityBuilder.IncludeMaySelectPathOrDescendant("linked/child", ["linked"], CancellationToken.None));
         Assert.False(EvidenceProducerIdentityBuilder.IncludeMaySelectPathOrDescendant("linked", ["src/**"], CancellationToken.None));
     }
 

@@ -688,9 +688,12 @@ public sealed class EvidencePreparedRunTests
             using var pipe = new NamedPipeClientStream(".", environment[EvidenceChildLifetimeSession.PipeEnvironmentName],
                 PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             await pipe.ConnectAsync(3000, cancellationToken);
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
-                $"BEGIN|{ExecutionId}|{environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}", cancellationToken);
-            Assert.StartsWith("ACK|", await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, cancellationToken), StringComparison.Ordinal);
+            var begin = Encoding.UTF8.GetBytes($"BEGIN|{ExecutionId}|{environment[EvidenceChildLifetimeSession.NonceEnvironmentName]}\n");
+            await pipe.WriteAsync(begin, cancellationToken);
+            await pipe.FlushAsync(cancellationToken);
+            using var reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
+                bufferSize: 1024, leaveOpen: true);
+            Assert.StartsWith("ACK|", await reader.ReadLineAsync(cancellationToken), StringComparison.Ordinal);
             ChildTask = Task.Run(() => ReleaseChild.Task);
             if (fatalProducer) throw Failure;
             await context.Artifacts!.WriteAsync("report", "reports/result.txt", Encoding.UTF8.GetBytes("bounded report"), cancellationToken);

@@ -42,16 +42,14 @@ public sealed class EvidenceReceiptStoreCoverageTests
         const int fileCount = 60_000;
         var hash = Hash("oversized-receipt-input").ToLowerInvariant();
         var leaf = new string('a', 190);
-        var receiptFiles = Enumerable.Range(0, fileCount)
-            .Select(index => new EvidenceReceiptInputFile($"inputs/{index:D5}/{leaf}", hash, 0, 1))
+        var files = Enumerable.Range(0, fileCount)
+            .Select(index => new EvidenceProducerInputFile($"inputs/{index:D5}/{leaf}", 0, 1, hash))
             .ToArray();
-        var producerFiles = receiptFiles.Select(file => new EvidenceProducerInputFile(
-            file.RelativePath, file.Mode, file.LengthBytes, file.Sha256)).ToArray();
 
         Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(
-            new Dictionary<string, string>(StringComparer.Ordinal), receiptFiles).ValidateAndEncode());
+            new Dictionary<string, string>(StringComparer.Ordinal), files).ValidateAndEncode());
         Assert.Throws<InvalidDataException>(() => EvidenceReceiptInputIdentity.Create(new EvidenceProducerIdentity(
-            Hash("oversized-receipt-key"), Hash("oversized-receipt-repository"), producerFiles,
+            Hash("oversized-receipt-key"), Hash("oversized-receipt-repository"), files,
             new Dictionary<string, string>(StringComparer.Ordinal))));
     }
 
@@ -86,8 +84,8 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var blockingFile = TestPathUtils.PathUnder(temporary.Path, "file-key-root");
         File.WriteAllText(blockingFile, "operator-owned blocker");
 
-        Assert.False(EvidenceReceiptStore.EvidenceReceiptKeyLease.TryDeleteOwnedPayload(missingRoot, payloadName));
-        Assert.False(EvidenceReceiptStore.EvidenceReceiptKeyLease.TryDeleteOwnedPayload(blockingFile, payloadName));
+        Assert.False(EvidenceReceiptPayload.TryDeleteExactDirectory(missingRoot, payloadName));
+        Assert.False(EvidenceReceiptPayload.TryDeleteExactDirectory(blockingFile, payloadName));
         Assert.Equal("operator-owned blocker", File.ReadAllText(blockingFile));
     }
 
@@ -125,6 +123,38 @@ public sealed class EvidenceReceiptStoreCoverageTests
         Assert.Empty(Directory.EnumerateDirectories(lease.DirectoryPath, "payload*"));
         Assert.Equal("replacement receipt payload",
             await File.ReadAllTextAsync(TestPathUtils.PathUnder(sourceRoot, "reports", "attempt.txt")));
+    }
+
+    [Fact]
+    public async Task OversizedOriginPreservesSettledReceiptUnderQuotaPressure()
+    {
+        const int originLimit = 4 * 1024 * 1024;
+        using var temporary = TestDirectory.Create();
+        var fixture = await CreatePublishedReceiptFixtureAsync(temporary.Path, "oversized-origin");
+        var key = Hash("oversized-origin-candidate").ToLowerInvariant();
+        var (plan, manifest, sourceRoot) = await CreatePublicationAttemptAsync(temporary.Path, fixture.Producer, "candidate");
+        var directory = string.Join('/', Enumerable.Repeat(new string('x', 126), 8));
+        var paths = Enumerable.Range(0, 4096).Select(index => new NormalizedDiffPath($"{directory}/{index:D4}.cs")).ToArray();
+        plan = plan with { ChangedPaths = paths, DiffDigest = EvidenceDigest.CanonicalSha256(paths), PlanDigest = string.Empty };
+        plan = plan with { PlanDigest = EvidenceDigest.CanonicalSha256(plan) };
+        manifest = EvidenceManifestBuilder.Build(plan, manifest.ProducerResults);
+        Assert.True(EvidenceCanonicalJson.Serialize(plan).Length > originLimit);
+
+        const string execution = "oversized-origin-execution";
+        using var lease = Assert.Single(await fixture.Store.AcquireAsync([key], CancellationToken.None));
+        lease.EstablishAuthority(execution);
+        // Keep less than the origin document's size free without allocating gigabytes on disk.
+        await LegacyAggregateReservationFixture.SeedAsync(fixture.StoreRoot, fixture.Repository, key,
+            EvidenceReceiptQuota.MaximumBytes - originLimit);
+        var before = SnapshotStoreBytes(fixture.StoreRoot);
+
+        var outcomes = await fixture.Store.PublishInvocationAsync(execution, plan, manifest,
+            [new EvidenceReceiptPublicationRequest(lease, fixture.Producer.Id, sourceRoot, DateTimeOffset.UtcNow)],
+            CancellationToken.None);
+
+        AssertStoreSnapshotUnchanged(before, fixture.StoreRoot);
+        Assert.False(outcomes[fixture.Producer.Id].Published);
+        Assert.Equal("payload-publication-failed", outcomes[fixture.Producer.Id].Reason);
     }
 
     [Fact]
@@ -174,6 +204,71 @@ public sealed class EvidenceReceiptStoreCoverageTests
         {
             foreach (var lease in leases.Reverse()) lease.Dispose();
         }
+    }
+
+    [Fact]
+    public async Task AcquisitionRefusesToRecreateMissingReservedKeyDirectory()
+    {
+        using var temporary = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(temporary.Path, "receipts");
+        var repository = Hash("missing-reserved-key").ToLowerInvariant();
+        var firstKey = new string('a', 64);
+        var secondKey = new string('b', 64);
+        var firstDirectory = TestPathUtils.PathUnder(root, repository, firstKey);
+        var secondDirectory = TestPathUtils.PathUnder(root, repository, secondKey);
+        var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+        {
+            RootDirectory = root,
+            RepositoryNamespace = repository,
+            Clock = new AcquisitionClock(read =>
+            {
+                // The first key is locked and its reservation is about to be confirmed.
+                if (read == 2) Directory.Delete(secondDirectory);
+            })
+        });
+
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => store.AcquireAsync([secondKey, firstKey], CancellationToken.None));
+
+        Assert.False(Directory.Exists(secondDirectory));
+        using var contender = CoverageArtifactOperationLease.Acquire(firstDirectory, exclusive: true);
+        contender.VerifyBinding();
+    }
+
+    [Fact]
+    public async Task AcquisitionRollbackWithInvalidIndexPreservesOriginalFailureAndReleasesBothNativeLocks()
+    {
+        using var temporary = TestDirectory.Create();
+        var root = TestPathUtils.PathUnder(temporary.Path, "receipts");
+        var repository = Hash("invalid-index-acquisition").ToLowerInvariant();
+        var firstKey = new string('a', 64);
+        var secondKey = new string('b', 64);
+        var indexPath = TestPathUtils.PathUnder(root, "quota-index.json");
+        var originalFailure = new TimeoutException("injected failure before second key confirmation");
+        byte[]? invalidBytes = null;
+        var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+        {
+            RootDirectory = root,
+            RepositoryNamespace = repository,
+            Clock = new AcquisitionClock(read =>
+            {
+                if (read != 3) return;
+                // The first lease has been retained and the second native lock is already held.
+                var index = JsonNode.Parse(File.ReadAllBytes(indexPath))!;
+                index["SchemaVersion"] = int.MaxValue;
+                invalidBytes = Encoding.UTF8.GetBytes(index.ToJsonString());
+                File.WriteAllBytes(indexPath, invalidBytes);
+                throw originalFailure;
+            })
+        });
+
+        var error = await Assert.ThrowsAsync<TimeoutException>(() => store.AcquireAsync([secondKey, firstKey], CancellationToken.None));
+
+        Assert.Same(originalFailure, error);
+        Assert.Equal(Assert.IsType<byte[]>(invalidBytes), await File.ReadAllBytesAsync(indexPath));
+        using var first = CoverageArtifactOperationLease.Acquire(TestPathUtils.PathUnder(root, repository, firstKey), exclusive: true);
+        using var second = CoverageArtifactOperationLease.Acquire(TestPathUtils.PathUnder(root, repository, secondKey), exclusive: true);
+        first.VerifyBinding();
+        second.VerifyBinding();
     }
 
     [Fact]
@@ -244,8 +339,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
 
         using var recovery = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
         var denied = recovery.ProposeReadReceipt();
-        Assert.False(denied.IsCandidate);
-        Assert.False(denied.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, denied.Outcome);
         Assert.Equal("audit-quarantined", denied.Reason);
         Assert.Throws<InvalidOperationException>(() => recovery.EstablishAuthority("ordinary-work"));
 
@@ -286,8 +380,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         Assert.Equal(indexBeforeRefusal, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json")));
 
         var quarantined = before! with { AuditMismatch = true, AuditIntentExecutionId = null };
-        EvidenceReceiptQuota.RecordState(root, repository, key, JsonSerializer.SerializeToUtf8Bytes(quarantined).Length,
-            quarantined);
+        EvidenceReceiptQuota.RecordState(lease, quarantined);
         var beforeQuarantineRefusal = lease.ReadState();
         var indexBeforeQuarantineRefusal = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(root, "quota-index.json"));
 
@@ -333,8 +426,10 @@ public sealed class EvidenceReceiptStoreCoverageTests
             Path.GetFileName(path).StartsWith("payload", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public async Task RecordSuccessfulUseRejectsSettledAuditIntentWithExistingPayloadWithoutChangingIndex()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecordSuccessfulUseRejectsQuarantineWithExistingPayloadWithoutChangingIndex(bool mismatchOnly)
     {
         using var temporary = TestDirectory.Create();
         var fixture = await CreatePublishedReceiptFixtureAsync(temporary.Path, "lru-settled-audit-intent");
@@ -342,12 +437,18 @@ public sealed class EvidenceReceiptStoreCoverageTests
         const string executionId = "settled-audit-intent-owner";
         lease.EstablishAuthority(executionId, auditIntent: true, expectedAssertions: "assertion");
         lease.SettleExecution(executionId);
+        if (mismatchOnly)
+        {
+            var mismatch = lease.ReadState()! with { AuditIntentExecutionId = null, AuditMismatch = true };
+            EvidenceReceiptQuota.RecordState(lease, mismatch);
+        }
         var authorityBefore = lease.ReadState();
         var indexPath = TestPathUtils.PathUnder(fixture.StoreRoot, "quota-index.json");
         var indexBefore = await File.ReadAllBytesAsync(indexPath);
 
         Assert.Null(authorityBefore?.InFlightExecutionId);
-        Assert.Equal(executionId, authorityBefore?.AuditIntentExecutionId);
+        Assert.Equal(mismatchOnly ? null : executionId, authorityBefore?.AuditIntentExecutionId);
+        Assert.True(authorityBefore?.IsQuarantined);
         Assert.NotNull(authorityBefore?.PayloadDirectoryName);
         Assert.Throws<InvalidOperationException>(() => lease.RecordSuccessfulUse(DateTimeOffset.UtcNow));
 
@@ -381,8 +482,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
 
             var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-            Assert.False(result.IsCandidate);
-            Assert.True(result.IsUnavailable);
+            Assert.Equal(EvidenceReceiptReadOutcome.Unavailable, result.Outcome);
             Assert.Equal("receipt-payload-io-unavailable", result.Reason);
             Assert.Null(result.Result);
             Assert.Empty(writer.WrittenArtifacts);
@@ -451,8 +551,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(producer, fixture.RestoreRoot);
         var read = await lease.ReadReceiptAsync(producer, writer, CancellationToken.None);
 
-        Assert.False(read.IsCandidate);
-        Assert.False(read.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, read.Outcome);
         Assert.Equal(expectedReason, read.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(File.Exists(TestPathUtils.PathUnder(fixture.RestoreRoot, "reports", "report.txt")));
@@ -485,8 +584,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal(expectedReason, result.Reason);
         Assert.Equal(result, explanation);
         Assert.Empty(writer.WrittenArtifacts);
@@ -510,8 +608,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.True(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Unavailable, result.Outcome);
         Assert.Equal("unresolved-execution", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.Equal("foreign-execution", lease.ReadState()?.InFlightExecutionId);
@@ -536,8 +633,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
 
         var proposal = lease.ProposeReadReceipt();
 
-        Assert.False(proposal.IsCandidate);
-        Assert.False(proposal.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, proposal.Outcome);
         Assert.Equal("no-passed-receipt", proposal.Reason);
         Assert.Null(lease.ReadState()?.PayloadDirectoryName);
         Assert.Equal(0, QuotaEntry(root, key).GetProperty("PayloadBytes").GetInt64());
@@ -563,8 +659,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
 
             var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
             var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
-            Assert.False(result.IsCandidate);
-            Assert.True(result.IsUnavailable);
+            Assert.Equal(EvidenceReceiptReadOutcome.Unavailable, result.Outcome);
             Assert.Equal("foreign-or-unsupported-state-preserved", result.Reason);
             Assert.Empty(writer.WrittenArtifacts);
             Assert.True(Directory.Exists(payloadPath));
@@ -598,8 +693,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("input-identity-noncanonical", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -637,8 +731,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("origin-binding-invalid", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -680,8 +773,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("passed-producer-invalid", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -720,8 +812,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("passed-producer-invalid", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -751,8 +842,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("passed-producer-invalid", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -773,8 +863,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(changedProducer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(changedProducer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("passed-producer-invalid", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -824,7 +913,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var restored = await readLease.ReadReceiptAsync(producer,
             new EvidenceArtifactWriter(producer, restoreRoot), CancellationToken.None);
 
-        Assert.True(restored.IsCandidate);
+        Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
         Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
         Assert.Empty(restored.Result?.Artifacts ?? []);
         Assert.Equal(payloadName, readLease.ReadState()?.PayloadDirectoryName);
@@ -849,8 +938,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("restore-or-lru-unavailable", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.Equal(fixture.PayloadName, lease.ReadState()?.PayloadDirectoryName);
@@ -878,8 +966,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("owned-payload-invalid", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -899,11 +986,11 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var identityPath = TestPathUtils.PathUnder(payloadPath, "identity.json");
         var original = EvidenceCanonicalJson.Deserialize<EvidenceReceiptInputIdentity>(await File.ReadAllBytesAsync(identityPath));
         var files = corruption == "invalid-mode"
-            ? new[] { new EvidenceReceiptInputFile("inputs/input.txt", Hash("identity-file"), 0x4000, 1) }
+            ? new[] { new EvidenceProducerInputFile("inputs/input.txt", 0x4000, 1, Hash("identity-file")) }
             : new[]
             {
-                new EvidenceReceiptInputFile("inputs/input.txt", Hash("identity-file-a"), 0, 1),
-                new EvidenceReceiptInputFile("inputs/input.txt", Hash("identity-file-b"), 0, 1)
+                new EvidenceProducerInputFile("inputs/input.txt", 0, 1, Hash("identity-file-a")),
+                new EvidenceProducerInputFile("inputs/input.txt", 0, 1, Hash("identity-file-b"))
             };
         var invalidIdentity = original with { Files = files };
         var identityBytes = EvidenceCanonicalJson.Serialize(invalidIdentity);
@@ -916,8 +1003,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("owned-payload-invalid", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -1153,8 +1239,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("owned-payload-invalid", result.Reason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(payloadPath));
@@ -1236,7 +1321,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
 
             var restoreWriter = new EvidenceArtifactWriter(producerA, restoreA);
             var restored = await leaseA.ReadReceiptAsync(producerA, restoreWriter, CancellationToken.None);
-            Assert.True(restored.IsCandidate, restored.Reason);
+            Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
             Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
             Assert.Equal(bytesA, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(restoreA, "reports", "report.txt")));
             Assert.Equal("operator-owned sentinel", await File.ReadAllTextAsync(sentinel));
@@ -1418,7 +1503,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
                 var restoreRoot = TestPathUtils.PathUnder(temporary.Path, "post-preflight-mutation", "restored");
                 var restoreWriter = new EvidenceArtifactWriter(producerA, restoreRoot);
                 var restored = await leaseA.ReadReceiptAsync(producerA, restoreWriter, CancellationToken.None);
-                Assert.True(restored.IsCandidate, restored.Reason);
+                Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
                 Assert.Equal(bytesA, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(restoreRoot, "reports", "a.txt")));
             }
 
@@ -1524,7 +1609,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
 
                 var restored = await lease.ReadReceiptAsync(producer,
                     new EvidenceArtifactWriter(producer, restoreRoot), CancellationToken.None);
-                Assert.True(restored.IsCandidate, restored.Reason);
+                Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
                 Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
                 Assert.Equal(expectedBytes, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(restoreRoot,
                     relativePath.Split('/'))));
@@ -1702,7 +1787,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
             using var lease = Assert.Single(await fixture.Store.AcquireAsync([fixture.Key], CancellationToken.None));
             var read = await lease.ReadReceiptAsync(fixture.Producer,
                 new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot), CancellationToken.None);
-            Assert.False(read.IsCandidate);
+            Assert.Equal(EvidenceReceiptReadOutcome.Miss, read.Outcome);
             var quota = QuotaEntry(fixture.StoreRoot, fixture.Key);
             Assert.Equal(0, quota.GetProperty("PayloadBytes").GetInt64());
             Assert.Empty(quota.GetProperty("RetiredPayloads").EnumerateArray());
@@ -2073,8 +2158,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         var writer = new EvidenceArtifactWriter(fixture.Producer, fixture.RestoreRoot);
         var result = await lease.ReadReceiptAsync(fixture.Producer, writer, CancellationToken.None);
 
-        Assert.True(result.IsCandidate, result.Reason);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Restored, result.Outcome);
         Assert.Equal(EvidenceProducerOutcome.Reused, result.Result?.Outcome);
         Assert.Equal(expected, result.Result?.Artifacts?.OrderBy(item => item.RelativePath, StringComparer.Ordinal).ToArray());
         Assert.Equal(expected.Length, writer.WrittenArtifacts.Count);
@@ -2255,8 +2339,8 @@ public sealed class EvidenceReceiptStoreCoverageTests
             if (Directory.Exists(payloadBackup)) Directory.Move(payloadBackup, payloadPath);
         }
 
-        Assert.False(result.IsCandidate);
-        Assert.Equal(corruption == "oversized-authority-record", result.IsUnavailable);
+        Assert.Equal(corruption == "oversized-authority-record"
+            ? EvidenceReceiptReadOutcome.Unavailable : EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal(expectedReason, result.Reason);
         Assert.Equal("operator-owned sentinel", await File.ReadAllTextAsync(fixture.SentinelPath));
     }
@@ -2320,6 +2404,50 @@ public sealed class EvidenceReceiptStoreCoverageTests
         Assert.True(comparable.Found, comparable.Reason);
         Assert.Equal(verifiedTime, comparable.OriginCompletedAt);
         Assert.NotEqual(indexedTime, comparable.OriginCompletedAt);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FindComparableFallsBackToOlderReceiptWhenNewerPayloadIsUnusable(bool missing)
+    {
+        using var temporary = TestDirectory.Create();
+        var fixture = await CreatePublishedReceiptFixtureAsync(temporary.Path, "comparable-fallback");
+        var identity = FixtureIdentity(fixture);
+        var olderTime = DateTimeOffset.UtcNow.AddMinutes(-2);
+        await UpdateFixtureAuthorityAsync(fixture, state => state["OriginCompletedAt"] = olderTime,
+            entry => entry["OriginCompletedAt"] = olderTime);
+        var (plan, manifest, sourceRoot) = await CreatePublicationAttemptAsync(temporary.Path, fixture.Producer, "newer");
+        var newerKey = Hash("comparable-newer-key").ToLowerInvariant();
+        var newerTime = olderTime.AddMinutes(1);
+        string payloadPath;
+        using (var lease = Assert.Single(await fixture.Store.AcquireAsync([newerKey], CancellationToken.None)))
+        {
+            const string executionId = "comparable-newer-execution";
+            lease.EstablishAuthority(executionId);
+            var outcomes = await fixture.Store.PublishInvocationAsync(executionId, plan, manifest,
+                [new EvidenceReceiptPublicationRequest(lease, fixture.Producer.Id, sourceRoot, newerTime)
+                    { Identity = identity with { Key = newerKey } }], CancellationToken.None);
+            var published = outcomes[fixture.Producer.Id];
+            Assert.True(published.Published, published.Reason);
+            payloadPath = TestPathUtils.PathUnder(lease.DirectoryPath, published.PayloadDirectoryName!);
+        }
+
+        var readOnly = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
+        { RootDirectory = fixture.StoreRoot, RepositoryNamespace = fixture.Repository });
+        Assert.Equal(newerTime, readOnly.FindComparable(fixture.Producer.Id, identity).OriginCompletedAt);
+        if (missing)
+            Directory.Move(payloadPath, TestPathUtils.PathUnder(temporary.Path, "missing-payload-fixture"));
+        else
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(payloadPath, "passed-producer.json"), "null");
+        var before = SnapshotStoreBytes(fixture.StoreRoot);
+
+        var comparable = readOnly.FindComparable(fixture.Producer.Id, identity);
+
+        Assert.True(comparable.Found, comparable.Reason);
+        Assert.Equal("identity-matches", comparable.Reason);
+        Assert.Equal(olderTime, comparable.OriginCompletedAt);
+        AssertStoreSnapshotUnchanged(before, fixture.StoreRoot);
     }
 
     [Theory]
@@ -2435,10 +2563,10 @@ public sealed class EvidenceReceiptStoreCoverageTests
         { RootDirectory = fixture.StoreRoot, RepositoryNamespace = fixture.Repository });
         var explanation = readOnly.Peek(fixture.Key);
 
-        Assert.False(proposal.IsCandidate);
-        Assert.False(proposal.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, proposal.Outcome);
         Assert.Equal("no-passed-receipt", proposal.Reason);
-        Assert.Equal(proposal with { State = lease.ReadState() }, explanation);
+        Assert.Equal(lease.ReadState(), proposal.State);
+        Assert.Equal(proposal, explanation);
         Assert.Equal(fixture.PayloadName, lease.ReadState()?.PayloadDirectoryName);
         AssertStoreSnapshotUnchanged(before, fixture.StoreRoot);
         Assert.Equal("operator-owned sentinel", await File.ReadAllTextAsync(fixture.SentinelPath));
@@ -2494,7 +2622,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         }
         Assert.True(Directory.EnumerateFileSystemEntries(payload, "*", SearchOption.AllDirectories).Count() > 264);
 
-        Assert.True(EvidenceReceiptStore.EvidenceReceiptKeyLease.TryDeleteOwnedPayload(keyDirectory, "payload-owned"));
+        Assert.True(EvidenceReceiptPayload.TryDeleteExactDirectory(keyDirectory, "payload-owned"));
 
         Assert.False(Directory.Exists(payload));
         Assert.Equal("preserved source", File.ReadAllText(origin));
@@ -2512,8 +2640,7 @@ public sealed class EvidenceReceiptStoreCoverageTests
         using (var root = CoverageRunOutputLease.AcquireArtifactDirectory(keyDirectory, true, true)!)
         using (root.CreateArtifactDirectory(stage)) { }
 
-        Assert.True(EvidenceReceiptStore.EvidenceReceiptKeyLease.TryDeleteOwnedPayload(keyDirectory, payload,
-            recoverCommittedStage: true));
+        Assert.True(EvidenceReceiptPayload.TryReclaimCommittedDirectory(keyDirectory, payload));
 
         Assert.True(Directory.Exists(TestPathUtils.PathUnder(keyDirectory, stage)));
     }
@@ -2545,8 +2672,8 @@ public sealed class EvidenceReceiptStoreCoverageTests
             }
         }
 
-        Assert.False(EvidenceReceiptStore.EvidenceReceiptKeyLease.TryDeleteOwnedPayload(keyDirectory, payload,
-            identity: refusal == "identity" ? "different-native-identity" : null, recoverCommittedStage: true));
+        Assert.False(EvidenceReceiptPayload.TryReclaimCommittedDirectory(keyDirectory, payload,
+            expectedIdentity: refusal == "identity" ? "different-native-identity" : null));
 
         Assert.True(Path.Exists(TestPathUtils.PathUnder(keyDirectory, stage)));
         if (refusal == "both") Assert.True(Directory.Exists(TestPathUtils.PathUnder(keyDirectory, payload)));
@@ -2840,6 +2967,17 @@ public sealed class EvidenceReceiptStoreCoverageTests
         { RootDirectory = storeRoot, RepositoryNamespace = repository });
         return new CoverageReceiptFixture(store, storeRoot, sourceRoot, restoreRoot, sentinelPath, repository, key,
             producer, plan, manifest, writer.WrittenArtifacts.ToArray());
+    }
+
+    private sealed class AcquisitionClock(Action<int> onRead) : TimeProvider
+    {
+        private int _reads;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            onRead(++_reads);
+            return TimeProvider.System.GetUtcNow();
+        }
     }
 
     private sealed record PublishedReceiptFixture(EvidenceReceiptStore Store, string StoreRoot, string SourceRoot,

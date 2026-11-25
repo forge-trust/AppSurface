@@ -41,8 +41,7 @@ public sealed class EvidenceReceiptStoreTests
         var store = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
         { RootDirectory = root, RepositoryNamespace = Hash("repo") });
         var result = store.Peek(Hash("key"));
-        Assert.False(result.IsCandidate);
-        Assert.False(result.IsUnavailable);
+        Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
         Assert.Equal("missing", result.Reason);
         Assert.False(Directory.Exists(root));
     }
@@ -76,22 +75,35 @@ public sealed class EvidenceReceiptStoreTests
     }
 
     [Fact]
-    public void PayloadCleanupReportsUnconfirmedWhenEntryIsNotAnOwnedDirectory()
+    public async Task PayloadCleanupGuardRetainsReservationUntilExactEntryIsAbsent()
     {
         var root = NewRoot();
         try
         {
-            using (CoverageRunOutputLease.AcquireArtifactDirectory(root, createMissing: true, requirePrivate: true)) { }
-            File.WriteAllText(Path.Join(root, "payload-stage-test"), "keep");
-            Assert.False(EvidenceReceiptStore.EvidenceReceiptKeyLease.TryDeleteOwnedPayload(root, "payload-stage-test"));
-            Assert.Equal("keep", File.ReadAllText(Path.Join(root, "payload-stage-test")));
-            var released = false;
-            Assert.False(EvidenceReceiptStore.EvidenceReceiptKeyLease.ReleaseReservationAfterConfirmedCleanup(false,
-                () => released = true));
-            Assert.False(released);
-            Assert.True(EvidenceReceiptStore.EvidenceReceiptKeyLease.ReleaseReservationAfterConfirmedCleanup(true,
-                () => released = true));
-            Assert.True(released);
+            var repositoryNamespace = Hash("repo").ToLowerInvariant();
+            var key = Hash("payload-cleanup-guard").ToLowerInvariant();
+            var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+            { RootDirectory = root, RepositoryNamespace = repositoryNamespace });
+            using var lease = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
+            var reservation = EvidenceReceiptPayloadReservation.Create(Guid.NewGuid().ToString("N"), 128);
+            Assert.True(EvidenceReceiptQuota.TryReservePayload(root, repositoryNamespace, key, DateTimeOffset.UtcNow, reservation));
+
+            var payloadFile = Path.Join(lease.DirectoryPath, reservation.PayloadDirectoryName);
+            File.WriteAllText(payloadFile, "keep");
+            Assert.False(EvidenceReceiptPayload.TryDeleteExactDirectory(lease.DirectoryPath, reservation.PayloadDirectoryName));
+            Assert.False(lease.ReleaseReservationAfterConfirmedCleanup(reservation, cleanupConfirmed: false));
+            var held = Assert.Single(ReadQuotaEntries(root), entry => entry.GetProperty("Key").GetString() == key);
+            Assert.Equal(reservation.ReservedBytes, held.GetProperty("ReservedPayloadBytes").GetInt64());
+            Assert.Equal(reservation.ReservationId, Assert.Single(held.GetProperty("PayloadReservations").EnumerateArray())
+                .GetProperty("ReservationId").GetString());
+            Assert.Equal("keep", File.ReadAllText(payloadFile));
+
+            File.Delete(payloadFile);
+            Assert.True(lease.ReleaseReservationAfterConfirmedCleanup(reservation,
+                cleanupConfirmed: EvidenceReceiptPayload.TryDeleteExactDirectory(lease.DirectoryPath, reservation.PayloadDirectoryName)));
+            var released = Assert.Single(ReadQuotaEntries(root), entry => entry.GetProperty("Key").GetString() == key);
+            Assert.Equal(0, released.GetProperty("ReservedPayloadBytes").GetInt64());
+            Assert.Empty(released.GetProperty("PayloadReservations").EnumerateArray());
         }
         finally { DeleteIfPresent(root); }
     }
@@ -267,8 +279,7 @@ public sealed class EvidenceReceiptStoreTests
                 lease.MarkAuditMismatch("audit-a", "assertion-a:required");
                 lease.SettleExecution("audit-a");
                 var quarantined = lease.ProposeReadReceipt();
-                Assert.False(quarantined.IsCandidate);
-                Assert.False(quarantined.IsUnavailable);
+                Assert.Equal(EvidenceReceiptReadOutcome.Miss, quarantined.Outcome);
                 Assert.Equal("audit-quarantined", quarantined.Reason);
 
                 lease.EstablishAuthority("audit-b", auditIntent: true, expectedAssertions: "replacement-must-not-win");
@@ -352,7 +363,7 @@ public sealed class EvidenceReceiptStoreTests
             var before = await File.ReadAllBytesAsync(statePath);
             var view = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") });
             var peek = view.Peek(key);
-            Assert.True(peek.IsCandidate);
+            Assert.Equal(EvidenceReceiptReadOutcome.Candidate, peek.Outcome);
             Assert.Equal(EvidenceProducerOutcome.Passed, peek.Result?.Outcome);
             Assert.Equal(39, peek.OriginElapsedMilliseconds);
             Assert.Equal(manifest.ManifestDigest, peek.OriginManifest?.ManifestDigest);
@@ -587,13 +598,12 @@ public sealed class EvidenceReceiptStoreTests
             {
                 var restoreWriter = new EvidenceArtifactWriter(producer, restoreRoot);
                 var restored = await readerLease.ReadReceiptAsync(producer, restoreWriter, CancellationToken.None);
-                Assert.True(restored.IsCandidate);
+                Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
                 Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
                 Assert.Equal(42, restored.OriginElapsedMilliseconds);
                 Assert.Equal(["assertion"], restored.Result?.SatisfiedAssertionIds);
                 Assert.Equal(manifest.ManifestDigest, restored.OriginManifest?.ManifestDigest);
-                Assert.Equal(identity.Files.Select(file => new EvidenceReceiptInputFile(file.RelativePath, file.Sha256,
-                    file.Mode, file.LengthBytes)), restored.InputIdentity?.Files);
+                Assert.Equal(identity.Files, restored.InputIdentity?.Files);
                 Assert.Equal("alpha", await File.ReadAllTextAsync(Path.Join(restoreRoot, "reports/a.txt")));
                 Assert.Equal("bravo", await File.ReadAllTextAsync(Path.Join(restoreRoot, "reports/nested/b.txt")));
                 Assert.True(await restoreWriter.VerifyWrittenArtifactsAsync());
@@ -663,7 +673,7 @@ public sealed class EvidenceReceiptStoreTests
 
                 var restoreWriter = new EvidenceArtifactWriter(producer, restoreRoot);
                 var restored = await lease.ReadReceiptAsync(producer, restoreWriter, CancellationToken.None);
-                Assert.True(restored.IsCandidate, restored.Reason);
+                Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
                 Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
                 Assert.Equal("committed payload", await File.ReadAllTextAsync(Path.Join(restoreRoot, "reports/committed.txt")));
             }
@@ -745,7 +755,7 @@ public sealed class EvidenceReceiptStoreTests
             {
                 var restoreWriter = new EvidenceArtifactWriter(producer, restoreRoot);
                 var restored = await reader.ReadReceiptAsync(producer, restoreWriter, CancellationToken.None);
-                Assert.True(restored.IsCandidate, restored.Reason);
+                Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
                 Assert.Equal(inputMode, Assert.Single(restored.InputIdentity!.Files).Mode);
                 Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
                 var restoredText = await File.ReadAllTextAsync(Path.Join(restoreRoot, "reports/result.txt"));
@@ -832,7 +842,7 @@ public sealed class EvidenceReceiptStoreTests
             {
                 var restoreWriter = new EvidenceArtifactWriter(reorderedProducer, restoreRoot);
                 var restored = await reader.ReadReceiptAsync(reorderedProducer, restoreWriter, CancellationToken.None);
-                Assert.True(restored.IsCandidate, restored.Reason);
+                Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
                 Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
                 Assert.Equal("alpha", await File.ReadAllTextAsync(Path.Join(restoreRoot, "reports/a.txt")));
                 Assert.Equal("bravo", await File.ReadAllTextAsync(Path.Join(restoreRoot, "reports/b.txt")));
@@ -951,7 +961,7 @@ public sealed class EvidenceReceiptStoreTests
 
                 var restoredWriter = new EvidenceArtifactWriter(producer, restoreRoot);
                 var restored = await lease.ReadReceiptAsync(producer, restoredWriter, CancellationToken.None);
-                Assert.True(restored.IsCandidate, restored.Reason);
+                Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
                 Assert.Equal(manifest.ManifestDigest, restored.OriginManifest?.ManifestDigest);
                 Assert.Equal(manifest.ManifestDigest, restored.Result?.OriginManifestDigest);
                 Assert.Equal(EvidenceProducerOutcome.Reused, restored.Result?.Outcome);
@@ -1037,7 +1047,7 @@ public sealed class EvidenceReceiptStoreTests
                     sourceRoot, DateTimeOffset.UtcNow, CancellationToken.None);
                 Assert.True(result.Published, result.Reason);
                 var restored = await lease.ReadReceiptAsync(producer, new EvidenceArtifactWriter(producer, restoredRoot), CancellationToken.None);
-                Assert.True(restored.IsCandidate, restored.Reason);
+                Assert.Equal(EvidenceReceiptReadOutcome.Restored, restored.Outcome);
                 Assert.Equal("declared", await File.ReadAllTextAsync(Path.Join(restoredRoot, "reports", "report.txt")));
                 Assert.False(File.Exists(Path.Join(restoredRoot, "unlisted.txt")));
                 Assert.Equal("not in producer inventory", await File.ReadAllTextAsync(Path.Join(sourceRoot, "unlisted.txt")));
@@ -1063,8 +1073,7 @@ public sealed class EvidenceReceiptStoreTests
             {
                 var result = await lease.ReadReceiptAsync(published.Producer,
                     new EvidenceArtifactWriter(published.Producer, restoreRoot), CancellationToken.None);
-                Assert.False(result.IsCandidate);
-                Assert.False(result.IsUnavailable);
+                Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
                 Assert.Equal("restore-or-lru-unavailable", result.Reason);
                 Assert.Equal(published.PayloadName, lease.ReadState()?.PayloadDirectoryName);
             }
@@ -1093,8 +1102,7 @@ public sealed class EvidenceReceiptStoreTests
             {
                 var result = await lease.ReadReceiptAsync(published.Producer,
                     new EvidenceArtifactWriter(published.Producer, restoreRoot), CancellationToken.None);
-                Assert.False(result.IsCandidate);
-                Assert.False(result.IsUnavailable);
+                Assert.Equal(EvidenceReceiptReadOutcome.Miss, result.Outcome);
                 Assert.Equal("restore-or-lru-unavailable", result.Reason);
                 Assert.Equal(published.PayloadName, lease.ReadState()?.PayloadDirectoryName);
             }
@@ -1210,8 +1218,7 @@ public sealed class EvidenceReceiptStoreTests
             {
                 var writer = new EvidenceArtifactWriter(producer, restoreRoot);
                 var read = await contender.ReadReceiptAsync(producer, writer, CancellationToken.None);
-                Assert.False(read.IsCandidate);
-                Assert.False(read.IsUnavailable);
+                Assert.Equal(EvidenceReceiptReadOutcome.Miss, read.Outcome);
                 Assert.Empty(writer.WrittenArtifacts);
                 Assert.False(File.Exists(Path.Join(restoreRoot, "reports/a.txt")));
                 Assert.Null(contender.ReadState()?.PayloadDirectoryName);

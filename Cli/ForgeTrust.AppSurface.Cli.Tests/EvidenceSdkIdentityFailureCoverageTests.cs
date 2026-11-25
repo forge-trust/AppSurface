@@ -154,6 +154,56 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
     }
 
     [Fact]
+    public async Task ExplainSharesInitialSdkProbeAcrossCoverageProducersAndKeepsLiveQueries()
+    {
+        using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        var (plan, solution) = await CreatePlanAsync(repository, producerCount: 2);
+        using var fixture = new SdkProcessFixture(repository.Root, "count");
+        var resolver = Resolver(out var runner, fixture.ExecutablePath);
+        var store = TestPathUtils.PathUnder(repository.Root, "receipts");
+
+        var decisions = await resolver.ExplainAsync(plan, null, solution, store,
+            TimeSpan.FromSeconds(3), CancellationToken.None);
+
+        Assert.Equal(2, decisions.Count);
+        Assert.All(decisions, decision =>
+        {
+            Assert.Equal("Miss", decision.Status);
+            Assert.NotNull(decision.ProducerKey);
+        });
+        var invocationCount = await File.ReadAllLinesAsync(TestPathUtils.PathUnder(repository.Root, "sdk-probe.invocations"));
+        // One invocation-wide query plus one live key-material query for each coverage producer.
+        Assert.Equal(3, invocationCount.Length);
+        Assert.Equal(0, runner.TestInvocationCount);
+        Assert.False(Directory.Exists(store));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExplainSkipsSdkProbeForOutsideWorktreeSolution(bool solutionExists)
+    {
+        using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        var (plan, _) = await CreatePlanAsync(repository);
+        using var outside = TestDirectory.Create();
+        var outsideSolution = TestPathUtils.PathUnder(outside.Path, "outside.slnx");
+        if (solutionExists) await File.WriteAllTextAsync(outsideSolution, "outside solution");
+        using var fixture = new SdkProcessFixture(repository.Root, "count");
+        var resolver = Resolver(out var runner, fixture.ExecutablePath);
+        var store = TestPathUtils.PathUnder(repository.Root, "receipts");
+
+        var decision = Assert.Single(await resolver.ExplainAsync(plan, null, outsideSolution, store,
+            TimeSpan.FromSeconds(3), CancellationToken.None));
+
+        Assert.Equal("Ineligible", decision.Status);
+        Assert.Equal("reuse.solution_required", decision.Reason);
+        Assert.Null(decision.ProducerKey);
+        Assert.Equal(0, runner.TestInvocationCount);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(repository.Root, "sdk-probe.invocations")));
+        Assert.False(Directory.Exists(store));
+    }
+
+    [Fact]
     public async Task SdkChangeDuringPreparationCannotRestoreAReceiptForThePreviousSdkIdentity()
     {
         using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
@@ -398,7 +448,7 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
     }
 
     private static async Task<(EvidencePlan Plan, string Solution)> CreatePlanAsync(
-        EvidenceIdentityCoverageTests.TestRepository repository)
+        EvidenceIdentityCoverageTests.TestRepository repository, int producerCount = 1)
     {
         await repository.WriteAsync("src/input.txt", "declared input");
         await repository.WriteAsync("sample.slnx", "solution fixture");
@@ -409,8 +459,14 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
             Inputs = new(["src/**"], []),
             CoverageExecution = new(TestResults: EvidenceCoverageTestResultFormat.Junit) { CooperativeChildLifetime = true },
         };
-        var profile = new EvidenceProfile("local", EvidenceProfileScope.Targeted, [], [producer],
-            [new("coverage", "test", "Declared coverage", [producer.Id], "coverage/assertion@1")]);
+        var producers = Enumerable.Range(0, producerCount).Select(index => index == 0 ? producer : producer with
+        {
+            Id = $"coverage-{index}",
+            AssertionIds = [$"coverage/assertion-{index}@1"]
+        }).ToArray();
+        var obligations = producers.Select(item => new EvidenceObligation(item.Id, "test", "Declared coverage",
+            [item.Id], item.AssertionIds.Single())).ToArray();
+        var profile = new EvidenceProfile("local", EvidenceProfileScope.Targeted, [], producers, obligations);
         var plan = new EvidencePlanner().Resolve(new("sdk-fixture", "1", profile.Id, [profile],
             [new("source", "src/**", profile.Id)]), [new NormalizedDiffPath("src/input.txt")]);
         return (plan, TestPathUtils.PathUnder(repository.Root, "sample.slnx"));

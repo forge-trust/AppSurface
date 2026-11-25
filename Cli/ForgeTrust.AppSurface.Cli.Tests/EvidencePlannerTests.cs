@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -1051,24 +1052,44 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
-    public void CliWorkflow_Summaries_ShouldExplainTargetedObservationAndReleaseClaims()
+    public async Task CliWorkflow_Summaries_ShouldExplainFreshClaimsInConsoleAndJson()
     {
-        var targetPlan = new EvidencePlanner().Resolve(CreatePolicy(), [new NormalizedDiffPath("src/Feature.cs")]);
+        using var directory = TestDirectory.Create();
+        var planner = new EvidencePlanner();
+        var workflow = new EvidenceCliWorkflow(planner);
+        var targetPlan = planner.Resolve(CreatePolicy(), [new NormalizedDiffPath("src/Feature.cs")]);
         var targetResult = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Passed, ["appsurface/coverage/behavioral-patch@1"]);
         var targeted = EvidenceManifestBuilder.Build(targetPlan, [targetResult]);
-        var observation = EvidenceManifestBuilder.Build(targetPlan, [targetResult], observationOnly: true);
+        var incomplete = EvidenceManifestBuilder.Build(targetPlan, []);
+        var noEvidencePlan = planner.Resolve(CreatePolicy(), [new NormalizedDiffPath("docs/readme.md")]);
+        var noEvidence = EvidenceManifestBuilder.Build(noEvidencePlan, []);
         var releasePolicy = CreatePolicy() with
         {
             Profiles = [CreateCoverageProfile(EvidenceProfileScope.Release)],
             Rules = [],
         };
-        var releasePlan = new EvidencePlanner().Resolve(releasePolicy, [new NormalizedDiffPath("src/Feature.cs")]);
+        var releasePlan = planner.Resolve(releasePolicy, [new NormalizedDiffPath("src/Feature.cs")]);
         var release = EvidenceManifestBuilder.Build(releasePlan, [targetResult], envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested);
 
         Assert.Contains("Required producers: coverage", EvidenceCliWorkflow.FormatSummary(targetPlan), StringComparison.Ordinal);
-        Assert.Contains("Targeted evidence is complete", EvidenceCliWorkflow.FormatSummary(targeted), StringComparison.Ordinal);
-        Assert.Contains("Observation recorded", EvidenceCliWorkflow.FormatSummary(observation), StringComparison.Ordinal);
-        Assert.Contains("Release evidence is complete", EvidenceCliWorkflow.FormatSummary(release), StringComparison.Ordinal);
+        const string gateReady = "Evidence claim is ready for its declared eligible consumer.";
+        (EvidenceManifest Manifest, EvidenceClaimKind Claim, string Console, string Json)[] cases =
+        [
+            (targeted, EvidenceClaimKind.TargetedComplete, "Targeted evidence is complete.", gateReady),
+            (release, EvidenceClaimKind.ReleaseComplete, "Release evidence is complete.", gateReady),
+            (noEvidence, EvidenceClaimKind.NoEvidenceRequired, "No evidence is required by the matched policy rule.", gateReady),
+            (incomplete, EvidenceClaimKind.None, "Evidence is incomplete. Review unmediated obligations and producer diagnostics.",
+                "Resolve the listed producer or obligation failure before gating."),
+        ];
+        foreach (var (manifest, claim, console, json) in cases)
+        {
+            Assert.Equal(claim, manifest.ClaimKind);
+            Assert.Contains($"Next: {console}", EvidenceCliWorkflow.FormatSummary(manifest), StringComparison.Ordinal);
+
+            await workflow.WriteManifestAsync(manifest, directory.Path, CancellationToken.None);
+            using var summary = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(directory.Path, "evidence-summary.json")));
+            Assert.Equal(json, summary.RootElement.GetProperty("next").GetString());
+        }
     }
 
     [Fact]

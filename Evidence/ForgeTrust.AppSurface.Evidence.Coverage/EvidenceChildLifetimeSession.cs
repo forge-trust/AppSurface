@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Collections.ObjectModel;
 using System.IO.Pipes;
 using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
@@ -18,17 +17,16 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// </remarks>
 internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
 {
-    internal const string PipeEnvironmentName = EvidenceOwnedChildWire.PipeEnvironmentName;
-    internal const string ExecutionEnvironmentName = EvidenceOwnedChildWire.ExecutionEnvironmentName;
-    internal const string NonceEnvironmentName = EvidenceOwnedChildWire.NonceEnvironmentName;
+    internal const string PipeEnvironmentName = EvidenceOwnedChildChannel.PipeEnvironmentName;
+    internal const string ExecutionEnvironmentName = EvidenceOwnedChildChannel.ExecutionEnvironmentName;
+    internal const string NonceEnvironmentName = EvidenceOwnedChildChannel.NonceEnvironmentName;
 
     private const int MaximumPendingBegins = 128;
     private const int MaximumPipeInstances = EvidenceOwnedChild.MaximumChildren + MaximumPendingBegins + 1;
     private static readonly TimeSpan BeginDeadline = TimeSpan.FromSeconds(5);
     private readonly object _gate = new();
     private readonly object _stopSourceGate = new();
-    private readonly string _nonce;
-    private readonly string _pipeName;
+    private readonly EvidenceOwnedChildChannel _channel;
     private readonly TimeProvider _clock;
     private readonly Action? _beforeListenerCreation;
     private readonly Func<NamedPipeServerStream, CancellationToken, Task>? _waitForConnectionForTests;
@@ -36,15 +34,13 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     private readonly CancellationTokenSource _pendingStop = new();
     private readonly TaskCompletionSource _stopCancellationCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<long, Task> _handlers = new();
-    private readonly ConcurrentDictionary<long, NamedPipeServerStream> _pendingPipes = new();
-    private readonly ConcurrentDictionary<long, NamedPipeServerStream> _activePipes = new();
+    private readonly Dictionary<long, NamedPipeServerStream> _pendingPipes = new(); // Guarded by _gate.
     private readonly TaskCompletionSource<bool> _settlement = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _listenerReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Task _acceptTask;
     private NamedPipeServerStream? _listener;
     private int _admitted;
     private int _active;
-    private int _pending;
     private long _handlerId;
     private bool _enrollmentClosed;
     private bool _unknown;
@@ -55,29 +51,23 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     private EvidenceChildLifetimeSession(string executionId, TimeProvider clock, Action? beforeListenerCreation,
         Func<NamedPipeServerStream, CancellationToken, Task>? waitForConnectionForTests)
     {
-        ExecutionId = executionId;
         _clock = clock;
         _beforeListenerCreation = beforeListenerCreation;
         _waitForConnectionForTests = waitForConnectionForTests;
         // Keep the Unix-domain socket path formed by BCL named pipes below the platform limit,
         // even when the system temporary-directory path is long.
-        _pipeName = RandomNumberGenerator.GetHexString(8).ToLowerInvariant();
-        _nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        Environment = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [PipeEnvironmentName] = _pipeName,
-            [ExecutionEnvironmentName] = executionId,
-            [NonceEnvironmentName] = _nonce,
-        });
+        var pipeName = RandomNumberGenerator.GetHexString(8).ToLowerInvariant();
+        var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        _channel = new(pipeName, executionId, nonce);
         _acceptTask = AcceptLoopAsync();
         _listenerReady.Task.GetAwaiter().GetResult();
     }
 
     /// <summary>Gets the caller-supplied unique execution ID.</summary>
-    internal string ExecutionId { get; }
+    internal string ExecutionId => _channel.ExecutionId;
 
     /// <summary>Gets only the run-specific child-channel environment variables to propagate to owned children.</summary>
-    internal IReadOnlyDictionary<string, string> Environment { get; }
+    internal IReadOnlyDictionary<string, string> Environment => _channel.Environment;
 
     /// <summary>Gets whether enrollment is closed and every admitted client reported actual completion without unknown state.</summary>
     internal bool IsSettled { get { lock (_gate) return _enrollmentClosed && _active == 0 && !_unknown; } }
@@ -108,7 +98,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
         Func<NamedPipeServerStream, CancellationToken, Task>? waitForConnectionForTests = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
-        if (executionId.Length > 128 || executionId.Any(static character => !char.IsAsciiLetterOrDigit(character) && character is not '-' and not '_'))
+        if (!EvidenceOwnedChildChannel.IsValidExecutionId(executionId))
             throw new ArgumentException("Execution ID must be at most 128 ASCII letters, digits, hyphens, or underscores.", nameof(executionId));
         return new EvidenceChildLifetimeSession(executionId, clock ?? TimeProvider.System, beforeListenerCreation, waitForConnectionForTests);
     }
@@ -126,7 +116,6 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
             _listener = null;
             pending = _pendingPipes.Values.ToArray();
             _pendingPipes.Clear();
-            _pending = 0;
             UpdateSettlementLocked();
         }
         try
@@ -166,7 +155,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
             try
             {
                 _beforeListenerCreation?.Invoke();
-                pipe = new NamedPipeServerStream(_pipeName, PipeDirection.InOut, MaximumPipeInstances,
+                pipe = new NamedPipeServerStream(_channel.PipeName, PipeDirection.InOut, MaximumPipeInstances,
                     PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException
@@ -225,9 +214,8 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
             lock (_gate)
             {
                 if (ReferenceEquals(_listener, pipe)) _listener = null;
-                if (!_enrollmentClosed && _pending < MaximumPendingBegins)
+                if (!_enrollmentClosed && _pendingPipes.Count < MaximumPendingBegins)
                 {
-                    _pending++;
                     _pendingPipes[id] = pipe;
                     pendingAdded = true;
                 }
@@ -263,7 +251,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
             await using (var beginTimer = _clock.CreateTimer(static state => ((CancellationTokenSource)state!).Cancel(),
                 beginCancellation, BeginDeadline, Timeout.InfiniteTimeSpan))
             {
-                begin = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, beginCancellation.Token).ConfigureAwait(false);
+                begin = await EvidenceOwnedChildWire.ReadFrameAsync(pipe, beginCancellation.Token).ConfigureAwait(false);
             }
             var valid = EvidenceOwnedChildWire.TryParseBegin(begin, out var beginExecutionId, out var beginNonce)
                 && string.Equals(beginExecutionId, ExecutionId, StringComparison.Ordinal)
@@ -281,8 +269,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
                     _admitted++;
                     _active++;
                     admitted = true;
-                    if (_pendingPipes.TryRemove(handlerId, out _)) _pending--;
-                    _activePipes[handlerId] = pipe;
+                    _pendingPipes.Remove(handlerId);
                     childId = Guid.NewGuid();
                 }
                 else childId = default;
@@ -290,15 +277,14 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
 
             if (rejection is not null)
             {
-                await EvidenceOwnedChildProtocol.TryWriteFrameAsync(pipe,
-                    EvidenceOwnedChildWire.FormatRejection(rejection), CancellationToken.None).ConfigureAwait(false);
+                await TryWriteRejectionAsync(pipe, rejection).ConfigureAwait(false);
                 return;
             }
 
             BeforeChildAcknowledgementForTests?.Invoke();
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+            await EvidenceOwnedChildWire.WriteFrameAsync(pipe,
                 EvidenceOwnedChildWire.FormatAcknowledgement(childId), CancellationToken.None).ConfigureAwait(false);
-            var complete = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, CancellationToken.None).ConfigureAwait(false);
+            var complete = await EvidenceOwnedChildWire.ReadFrameAsync(pipe, CancellationToken.None).ConfigureAwait(false);
             if (!EvidenceOwnedChildWire.IsCompletion(complete, childId))
                 throw new IOException("Admitted child did not send its completion frame.");
 
@@ -309,7 +295,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
                 completed = true;
                 UpdateSettlementLocked();
             }
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+            await EvidenceOwnedChildWire.WriteFrameAsync(pipe,
                 EvidenceOwnedChildWire.FormatDone(childId), CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!admitted) { }
@@ -319,8 +305,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
             if (admitted && !completed) MarkUnknown();
             lock (_gate)
             {
-                if (_pendingPipes.TryRemove(handlerId, out _)) _pending--;
-                _activePipes.TryRemove(handlerId, out _);
+                _pendingPipes.Remove(handlerId);
             }
             pipe.Dispose();
         }
@@ -329,7 +314,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
     private bool ValidNonce(string candidate)
     {
         var received = Encoding.ASCII.GetBytes(candidate);
-        var expected = Encoding.ASCII.GetBytes(_nonce);
+        var expected = Encoding.ASCII.GetBytes(_channel.Nonce);
         return received.Length == expected.Length && CryptographicOperations.FixedTimeEquals(received, expected);
     }
 
@@ -386,19 +371,18 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
 
     private void RecordFatal(Exception exception)
         => Interlocked.CompareExchange(ref _fatalFailure, ExceptionDispatchInfo.Capture(exception), null);
-}
 
-internal static class EvidenceOwnedChildProtocol
-{
-    internal static Task WriteFrameAsync(Stream stream, string value, CancellationToken cancellationToken) =>
-        EvidenceOwnedChildWire.WriteFrameAsync(stream, value, cancellationToken);
-
-    internal static async Task TryWriteFrameAsync(Stream stream, string value, CancellationToken cancellationToken)
+    /// <summary>Attempts to report why a connection was refused before admission.</summary>
+    /// <param name="stream">The unadmitted client's channel stream.</param>
+    /// <param name="reason">The bounded rejection code.</param>
+    /// <remarks>Expected transport failures leave the rejection in effect. Unexpected errors propagate to the owner.</remarks>
+    internal static async Task TryWriteRejectionAsync(Stream stream, string reason)
     {
-        try { await WriteFrameAsync(stream, value, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            await EvidenceOwnedChildWire.WriteFrameAsync(stream, EvidenceOwnedChildWire.FormatRejection(reason),
+                CancellationToken.None).ConfigureAwait(false);
+        }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException) { }
     }
-
-    internal static Task<string?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken) =>
-        EvidenceOwnedChildWire.ReadFrameAsync(stream, cancellationToken);
 }

@@ -2171,7 +2171,15 @@ internal static class GitDiffReader
 
 internal static class GitRepositoryRootResolver
 {
-    public static string FindRepositoryRoot(string startDirectory)
+    /// <summary>Finds the nearest Git worktree or falls back to the absolute starting directory.</summary>
+    public static string FindRepositoryRoot(string startDirectory) =>
+        FindWorktreeRoot(startDirectory) ?? Path.GetFullPath(startDirectory);
+
+    /// <summary>Finds the nearest ancestor, including the starting directory, with a Git directory or worktree marker file.</summary>
+    /// <param name="startDirectory">Directory from which to walk toward the filesystem root.</param>
+    /// <returns>The absolute matching path, or null when no marker is present.</returns>
+    /// <remarks>This lookup checks for the marker. Callers that need verified repository identity validate it separately.</remarks>
+    internal static string? FindWorktreeRoot(string startDirectory)
     {
         var current = Path.GetFullPath(startDirectory);
         while (!string.IsNullOrWhiteSpace(current))
@@ -2190,7 +2198,7 @@ internal static class GitRepositoryRootResolver
             current = parent.FullName;
         }
 
-        return Path.GetFullPath(startDirectory);
+        return null;
     }
 }
 

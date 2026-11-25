@@ -79,7 +79,7 @@ public sealed class EvidenceCoverageCustodyDeadlineTests
         var bytes = "<coverage />"u8.ToArray();
         await File.WriteAllBytesAsync(report, bytes);
         var originalTime = File.GetLastWriteTimeUtc(report);
-        var file = new CoverageEvidenceInventoryFile(relative, bytes.Length,
+        var file = new CoverageReportFile(relative, bytes.Length,
             Convert.ToHexStringLower(SHA256.HashData(bytes)));
         var inventory = new CoverageEvidenceInventory(CoverageEvidenceInventory.CurrentVersion, [file]);
         var slot = CoverageEvidenceInventory.CreateSlot();

@@ -9,10 +9,13 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 /// <summary>Independent input, JSON and byte assertions used by native acceptance producers.</summary>
 internal static class ValidationProof
 {
+    /// <summary>Identifies failures raised by the validator's own contract checks.</summary>
+    internal const string ContractFailurePrefix = "Native validation contract failed: ";
+
     /// <summary>Rejects a failed contract without copying untrusted output into a diagnostic.</summary>
     internal static void Require(bool condition, string contract)
     {
-        if (!condition) throw new InvalidOperationException("Native validation contract failed: " + contract);
+        if (!condition) throw new InvalidOperationException(ContractFailurePrefix + contract);
     }
 
     /// <summary>Computes a file digest without buffering the complete file.</summary>

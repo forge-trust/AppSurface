@@ -64,6 +64,22 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
     }
 
     [Fact]
+    public async Task RecordStateRejectsOversizedAuthorityWithoutChangingIndex()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("original-owner");
+        var original = fixture.Lease.ReadState()!;
+        var indexBefore = fixture.IndexBytes();
+        var oversized = original with { InFlightExecutionId = new string('x', EvidenceReceiptState.MaximumSerializedBytes) };
+
+        Assert.Throws<IOException>(() => EvidenceReceiptQuota.RecordState(fixture.Root, fixture.Repository,
+            fixture.Lease.Key, oversized));
+
+        Assert.Equal(original, fixture.Lease.ReadState());
+        Assert.Equal(indexBefore, fixture.IndexBytes());
+    }
+
+    [Fact]
     public async Task EstablishAuthorityCannotReplaceAnUnresolvedExecutionOwner()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -190,9 +206,7 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         var settled = new EvidenceReceiptState(1, fixture.Lease.Key, null, null, new string('b', 64), completedAt,
             malformedPayloadName, null, completedAt, false, null);
         var original = fixture.IndexBytes();
-        Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.RecordState(
-            fixture.Root, fixture.Repository, fixture.Lease.Key,
-            JsonSerializer.SerializeToUtf8Bytes(settled).Length, settled));
+        Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.RecordState(fixture.Lease, settled));
         Assert.Equal(original, fixture.IndexBytes());
         Assert.Null(EvidenceReceiptQuota.ReadAuthority(fixture.Root, fixture.Repository, fixture.Lease.Key, readOnly: true));
         var corrupt = JsonNode.Parse(original)!;
@@ -279,8 +293,8 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         var completedAt = fixture.Clock.GetUtcNow();
         var sentinelPath = TestPathUtils.PathUnder(fixture.DirectoryPath, "operator-sentinel.txt");
         await File.WriteAllTextAsync(sentinelPath, "preserve outside receipt custody");
-        Assert.True(EvidenceReceiptQuota.TryReservePayload(fixture.Root, repository, key, 3, completedAt,
-            reservationId, "payload-stage-" + reservationId, payloadName));
+        Assert.True(EvidenceReceiptQuota.TryReservePayload(fixture.Root, repository, key, completedAt,
+            EvidenceReceiptPayloadReservation.Create(reservationId, 3)));
         using (var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(fixture.Lease.DirectoryPath,
             createMissing: false, requirePrivate: true)!)
         using (var payload = keyRoot.CreateArtifactDirectory(payloadName))

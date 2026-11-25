@@ -362,9 +362,9 @@ public sealed class EvidenceChildLifetimeTests
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
         {
             await pipe.ConnectAsync(3000);
-            await EvidenceOwnedChildProtocol.WriteFrameAsync(pipe,
+            await EvidenceOwnedChildWire.WriteFrameAsync(pipe,
                 $"BEGIN|{session.ExecutionId}|{variables[EvidenceChildLifetimeSession.NonceEnvironmentName]}", CancellationToken.None);
-            var ack = await EvidenceOwnedChildProtocol.ReadFrameAsync(pipe, CancellationToken.None);
+            var ack = await EvidenceOwnedChildWire.ReadFrameAsync(pipe, CancellationToken.None);
             Assert.StartsWith("ACK|", ack, StringComparison.Ordinal);
             childWork = Task.Run(async () =>
             {

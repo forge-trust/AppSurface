@@ -16,9 +16,9 @@ public sealed class EvidenceOwnedChildEnrollmentDeadlineCoverageTests
         var serverTask = Task.Run(async () =>
         {
             await server.WaitForConnectionAsync(deadline.Token);
-            var begin = await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token);
+            var begin = await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token);
             Assert.StartsWith("BEGIN|", begin ?? string.Empty, StringComparison.Ordinal);
-            Assert.Null(await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+            Assert.Null(await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
         }, deadline.Token);
         var workInvoked = false;
 

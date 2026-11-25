@@ -173,9 +173,9 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
             await using (server)
             {
                 await server.WaitForConnectionAsync(deadline.Token);
-                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + Guid.NewGuid().ToString("N"), deadline.Token);
-                Assert.StartsWith("COMPLETE|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildWire.WriteFrameAsync(server, "ACK|" + Guid.NewGuid().ToString("N"), deadline.Token);
+                Assert.StartsWith("COMPLETE|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
             }
         }, deadline.Token);
         var info = new ProcessStartInfo(TestPathUtils.PathUnder(directory.Path, "absent-executable")) { UseShellExecute = false };
@@ -203,7 +203,7 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
             using (server)
             {
                 await server.WaitForConnectionAsync(deadline.Token);
-                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
                 var bytes = response switch
                 {
                     "empty" => [],
@@ -241,13 +241,13 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
             await using (server)
             {
                 await server.WaitForConnectionAsync(deadline.Token);
-                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildWire.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
                 Assert.Equal("COMPLETE|" + childId,
-                    await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                    await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
                 completionReceived.TrySetResult();
                 await releaseCompletionAcknowledgement.Task.WaitAsync(deadline.Token);
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "DONE|" + childId, deadline.Token);
+                await EvidenceOwnedChildWire.WriteFrameAsync(server, "DONE|" + childId, deadline.Token);
             }
         }, deadline.Token);
         var workFailure = new ListenerFailure();
@@ -310,10 +310,10 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
             using (server)
             {
                 await server.WaitForConnectionAsync(deadline.Token);
-                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
-                Assert.Equal("COMPLETE|" + childId, await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                if (response == "wrong-id") await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "DONE|" + Guid.NewGuid().ToString("N"), deadline.Token);
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildWire.WriteFrameAsync(server, "ACK|" + childId, deadline.Token);
+                Assert.Equal("COMPLETE|" + childId, await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
+                if (response == "wrong-id") await EvidenceOwnedChildWire.WriteFrameAsync(server, "DONE|" + Guid.NewGuid().ToString("N"), deadline.Token);
                 if (response == "truncated") await server.WriteAsync("DONE|unfinished"u8.ToArray(), deadline.Token);
             }
         }, deadline.Token);
@@ -342,11 +342,11 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
             await using (server)
             {
                 await server.WaitForConnectionAsync(deadline.Token);
-                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
-                await EvidenceOwnedChildProtocol.WriteFrameAsync(server, "ACK|" + Guid.NewGuid().ToString("N"), deadline.Token);
-                Assert.StartsWith("COMPLETE|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                Assert.StartsWith("BEGIN|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
+                await EvidenceOwnedChildWire.WriteFrameAsync(server, "ACK|" + Guid.NewGuid().ToString("N"), deadline.Token);
+                Assert.StartsWith("COMPLETE|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
                 completionReceived.TrySetResult();
-                Assert.Null(await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+                Assert.Null(await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
                 peerObservedClose.TrySetResult();
             }
         }, deadline.Token);
@@ -378,7 +378,7 @@ public sealed class EvidenceOwnedChildFailureCoverageTests
         var serverTask = Task.Run(async () =>
         {
             await server.WaitForConnectionAsync(deadline.Token);
-            Assert.StartsWith("BEGIN|", await EvidenceOwnedChildProtocol.ReadFrameAsync(server, deadline.Token));
+            Assert.StartsWith("BEGIN|", await EvidenceOwnedChildWire.ReadFrameAsync(server, deadline.Token));
             began.SetResult();
         }, deadline.Token);
         var invoked = false;

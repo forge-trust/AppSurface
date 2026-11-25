@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -13,7 +12,7 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// Portable paths are limited to 4096 characters and 32 components. Explicit slots may impose smaller aggregate limits.
 /// Missing, unsafe, changed or oversized sets are optimization failures; they never change a fresh gate outcome.
 /// </remarks>
-internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<CoverageEvidenceInventoryFile> Files)
+internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<CoverageReportFile> Files)
 {
     /// <summary>The supported closed-inventory format.</summary>
     internal const int CurrentVersion = 1;
@@ -66,7 +65,7 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
         var hasManifest = File.Exists(Path.Join(root, manifestPath));
         if (hasManifest && publications.Count == MaximumFiles)
             throw new CoverageEvidenceInventoryException("inventory-file-limit");
-        var paths = publications.Select(entry => new CoverageEvidenceInventoryFile("coverage/" + entry.Path, entry.Length, entry.Sha256)).ToList();
+        var paths = publications.Select(static entry => CoverageReportFile.FromPublication(entry)).ToList();
         if (hasManifest)
             using (var manifest = Open(root, manifestPath))
             {
@@ -99,7 +98,7 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
         foreach (var file in Files)
         {
             token.ThrowIfCancellationRequested();
-            ValidatePath(file.RelativePath);
+            CoverageReportFile.ValidatePath(file.RelativePath);
             if (!seen.Add(file.RelativePath) || !prefixes.TryAdd(file.RelativePath))
                 throw new CoverageEvidenceInventoryException("inventory-path-collision");
             if (previous is not null && StringComparer.Ordinal.Compare(previous, file.RelativePath) >= 0)
@@ -108,7 +107,7 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
             if (file.LengthBytes < 0 || file.LengthBytes > MaximumBytes - total)
                 throw new CoverageEvidenceInventoryException("inventory-byte-limit");
             total += file.LengthBytes;
-            if (file.Sha256.Length != 64 || file.Sha256.Any(c => !char.IsAsciiHexDigitLower(c)))
+            if (!file.HasCanonicalDigest)
                 throw new CoverageEvidenceInventoryException("inventory-digest-invalid");
         }
         if (JsonSerializer.SerializeToUtf8Bytes(this).Length > MaximumMetadataBytes)
@@ -182,33 +181,10 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
         return results;
     }
 
-    /// <summary>Rejects unsafe or noncanonical portable receipt paths without changing their identity.</summary>
-    internal static void ValidatePath(string path)
-    {
-        if (string.IsNullOrEmpty(path) || path.Length > 4096 || !path.StartsWith("coverage/", StringComparison.Ordinal)
-            || !path.IsNormalized(NormalizationForm.FormC) || Path.IsPathRooted(path) || path.Contains('\\') || path.Any(char.IsControl))
-            throw new CoverageEvidenceInventoryException("inventory-path-invalid");
-        var parts = path.Split('/');
-        if (parts.Length > 32) throw new CoverageEvidenceInventoryException("inventory-path-invalid");
-        foreach (var part in parts)
-        {
-            var stem = part.Split('.')[0];
-            if (part.Length == 0 || part is "." or ".." || part != part.Trim() || part.EndsWith('.')
-                || part.IndexOfAny([':', '*', '?', '"', '<', '>', '|']) >= 0
-                || stem.Equals("CON", StringComparison.OrdinalIgnoreCase) || stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
-                || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase) || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase)
-                || (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase) || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
-                    && stem[3] is (>= '1' and <= '9') or '¹' or '²' or '³'))
-                throw new CoverageEvidenceInventoryException("inventory-path-noncanonical");
-        }
-    }
-
     private static FileStream Open(string root, string relative)
     {
-        ValidatePath(relative);
-        var fullRoot = Path.GetFullPath(root);
-        return CoverageRunArtifactReader.OpenRegularFile(fullRoot, Path.Join(fullRoot, "coverage"),
-            Path.Join(fullRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
+        CoverageReportFile.ValidatePath(relative);
+        return CoverageReportFile.OpenRead(Path.GetFullPath(root), relative);
     }
 
     private static string Hash(Stream stream, CancellationToken token)
@@ -224,9 +200,6 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 }
-
-/// <summary>Original length and digest for one exact, portable run-relative path.</summary>
-internal sealed record CoverageEvidenceInventoryFile(string RelativePath, long LengthBytes, string Sha256);
 
 /// <summary>A bounded reason code for optional custody failure; contains no source paths or exception details.</summary>
 internal sealed class CoverageEvidenceInventoryException(string reason) : Exception(reason)

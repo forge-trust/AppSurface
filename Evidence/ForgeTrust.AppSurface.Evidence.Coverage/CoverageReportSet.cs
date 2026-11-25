@@ -57,7 +57,7 @@ internal static class CoverageReportSet
 
         void Require(string relative)
         {
-            if (!stored) CoverageEvidenceInventory.ValidatePath(relative);
+            if (!stored) CoverageReportFile.ValidatePath(relative);
             if (paths.Contains(relative)) return;
             if (ordinary)
                 throw new InvalidDataException("A required ordinary coverage report is missing from the closed publication set.");
@@ -104,8 +104,8 @@ internal static class CoverageReportSet
         var project = manifest.RootElement;
         var version = project.GetProperty("schemaVersion");
         var versionMatches = purpose == ReportPurpose.OrdinaryDelivery
-            ? version.GetInt32() == 1
-            : version.TryGetInt32(out var schemaVersion) && schemaVersion == 1;
+            ? version.GetInt32() == CoverageProjectManifest.SchemaVersion
+            : version.TryGetInt32(out var schemaVersion) && schemaVersion == CoverageProjectManifest.SchemaVersion;
         if (versionMatches && project.GetProperty("slug").GetString() == slug) return;
         if (purpose == ReportPurpose.OrdinaryDelivery)
             throw new InvalidDataException("A managed coverage project manifest does not match its timing entry.");
@@ -114,8 +114,7 @@ internal static class CoverageReportSet
 
     private static JsonDocument ReadDocument(string root, string relative, ReportPurpose purpose, CancellationToken token)
     {
-        using var stream = CoverageRunArtifactReader.OpenRegularFile(root, Path.Join(root, "coverage"),
-            Path.Join(root, relative.Replace('/', Path.DirectorySeparatorChar)));
+        using var stream = CoverageReportFile.OpenRead(root, relative);
         if (purpose == ReportPurpose.OrdinaryDelivery) return JsonDocument.Parse(stream);
         // Keep stream parsing's UTF-8 BOM handling while limiting the bytes supplied to the parser.
         using var snapshot = new MemoryStream(ReadReceiptMetadata(stream, token), writable: false);

@@ -2,7 +2,7 @@ using System.Text;
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
 
-/// <summary>Defines the shared cooperative child channel configuration and bounded UTF-8 frames.</summary>
+/// <summary>Defines the shared bounded UTF-8 frames for cooperative child enrollment.</summary>
 internal static class EvidenceOwnedChildWire
 {
     private const string BeginVerb = "BEGIN";
@@ -10,13 +10,6 @@ internal static class EvidenceOwnedChildWire
     private const string CompletionPrefix = "COMPLETE|";
     private const string DonePrefix = "DONE|";
     private const string RejectionPrefix = "REJECT|";
-
-    /// <summary>Identifies the current-user-only invocation pipe.</summary>
-    internal const string PipeEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_PIPE";
-    /// <summary>Identifies the current Evidence execution.</summary>
-    internal const string ExecutionEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID";
-    /// <summary>Authenticates enrollment in the current execution.</summary>
-    internal const string NonceEnvironmentName = "APPSURFACE_EVIDENCE_CHILD_NONCE";
 
     /// <summary>Formats the child enrollment request using the existing wire representation.</summary>
     /// <param name="executionId">The execution identifier supplied by the invocation.</param>
