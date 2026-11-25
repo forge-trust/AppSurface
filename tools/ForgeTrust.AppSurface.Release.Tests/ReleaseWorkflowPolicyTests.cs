@@ -1015,7 +1015,7 @@ public sealed class ReleaseWorkflowPolicyTests
     {
         var temporaryDirectory = Path.Join(Path.GetTempPath(), $"appsurface-release-prep-push-{Guid.NewGuid():N}");
         Directory.CreateDirectory(temporaryDirectory);
-        var scriptPath = Path.Join(temporaryDirectory, "release-prep-test.sh");
+        var scriptPath = TestPathUtils.PathUnder(temporaryDirectory, "release-prep-test.sh");
         var callLogPath = Path.Join(temporaryDirectory, "calls.log");
         var artifactDirectory = Path.Join(temporaryDirectory, "release-prep");
         Directory.CreateDirectory(artifactDirectory);

@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Testing;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -402,7 +403,7 @@ public sealed class NativeValidationJsonTests
     public void ReadJsonFile_AcceptsValidJsonAndPreservesBytes()
     {
         using var directory = new TemporaryDirectory();
-        var path = System.IO.Path.Join(directory.Root, "candidate.json");
+        var path = TestPathUtils.PathUnder(directory.Root, "candidate.json");
         var expected = Encoding.UTF8.GetBytes("{\"passed\":true}");
         File.WriteAllBytes(path, expected);
 
@@ -416,10 +417,10 @@ public sealed class NativeValidationJsonTests
     public void ReadJsonFile_RejectsOversizedAndEmptyFilesWithoutChangingBytes()
     {
         using var directory = new TemporaryDirectory();
-        var oversizedPath = System.IO.Path.Join(directory.Root, "oversized.json");
+        var oversizedPath = TestPathUtils.PathUnder(directory.Root, "oversized.json");
         var oversized = Encoding.UTF8.GetBytes("{\"value\":\"123456\"}");
         File.WriteAllBytes(oversizedPath, oversized);
-        var emptyPath = System.IO.Path.Join(directory.Root, "empty.json");
+        var emptyPath = TestPathUtils.PathUnder(directory.Root, "empty.json");
         File.WriteAllBytes(emptyPath, []);
 
         Assert.Throws<InvalidDataException>(() => ValidationProof.ReadJsonFile(oversizedPath, 8, CancellationToken.None));
@@ -432,8 +433,8 @@ public sealed class NativeValidationJsonTests
     public void ReadJsonFile_RejectsOneByteAboveTheGateAndRunManifestCaps()
     {
         using var directory = new TemporaryDirectory();
-        var gatePath = System.IO.Path.Join(directory.Root, "gate.json");
-        var manifestPath = System.IO.Path.Join(directory.Root, "manifest.json");
+        var gatePath = TestPathUtils.PathUnder(directory.Root, "gate.json");
+        var manifestPath = TestPathUtils.PathUnder(directory.Root, "manifest.json");
         foreach (var (path, maximum) in new[] { (gatePath, 1 * 1024 * 1024), (manifestPath, 16 * 1024 * 1024) })
         {
             var exact = "{}" + new string(' ', maximum - 2);
@@ -454,7 +455,7 @@ public sealed class NativeValidationJsonTests
     public void ReadJsonFile_RejectsInvalidJsonAndHonorsCancellation()
     {
         using var directory = new TemporaryDirectory();
-        var path = System.IO.Path.Join(directory.Root, "invalid.json");
+        var path = TestPathUtils.PathUnder(directory.Root, "invalid.json");
         File.WriteAllText(path, "{invalid");
 
         Assert.Throws<InvalidDataException>(() => ValidationProof.ReadJsonFile(path, 1024, CancellationToken.None));
@@ -467,7 +468,7 @@ public sealed class NativeValidationJsonTests
     public void GateReportContract_AcceptsBoundedValidCandidateReportAndPreservesBytes()
     {
         using var directory = new TemporaryDirectory();
-        var path = System.IO.Path.Join(directory.Root, "coverage-gate.json");
+        var path = TestPathUtils.PathUnder(directory.Root, "coverage-gate.json");
         var json = """
             {"passed":true,"tolerancePercent":0,"thresholds":{"line":95,"branch":85},"effectiveThresholds":{"line":95,"branch":85}}
             """;
@@ -483,7 +484,7 @@ public sealed class NativeValidationJsonTests
     public void GateReportContract_RejectsOversizedCandidateBytesBeforeParsing()
     {
         using var directory = new TemporaryDirectory();
-        var path = System.IO.Path.Join(directory.Root, "coverage-gate.json");
+        var path = TestPathUtils.PathUnder(directory.Root, "coverage-gate.json");
         const string validGate = """
             {"passed":true,"tolerancePercent":0,"thresholds":{"line":95,"branch":85},"effectiveThresholds":{"line":95,"branch":85}}
             """;
@@ -502,7 +503,7 @@ public sealed class NativeValidationJsonTests
     public void ReadJsonFile_RejectsInvalidLimitsAndMissingFiles()
     {
         using var directory = new TemporaryDirectory();
-        var path = System.IO.Path.Join(directory.Root, "missing.json");
+        var path = TestPathUtils.PathUnder(directory.Root, "missing.json");
 
         Assert.Throws<ArgumentOutOfRangeException>(() => ValidationProof.ReadJsonFile(path, 0, CancellationToken.None));
         Assert.Throws<ArgumentOutOfRangeException>(() => ValidationProof.ReadJsonFile(path, (long)int.MaxValue + 1, CancellationToken.None));

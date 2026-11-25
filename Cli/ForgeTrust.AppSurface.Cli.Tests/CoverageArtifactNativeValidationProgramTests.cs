@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Validation;
 using NativeProgram = ForgeTrust.AppSurface.Evidence.Validation.Program;
@@ -19,9 +20,9 @@ public sealed class CoverageArtifactNativeValidationProgramTests
         int expectedExitCode)
     {
         using var directory = TestDirectory.Create();
-        var package = Path.Join(directory.Path, "candidate.nupkg");
+        var package = TestPathUtils.PathUnder(directory.Path, "candidate.nupkg");
         await File.WriteAllBytesAsync(package, []);
-        var output = Path.Join(directory.Path, "evidence");
+        var output = TestPathUtils.PathUnder(directory.Path, "evidence");
         using var cancellation = new CancellationTokenSource();
         using var writer = new CancelOnLineWriter(cancellation, cancellationLine);
         using var errors = new StringWriter();
@@ -47,9 +48,9 @@ public sealed class CoverageArtifactNativeValidationProgramTests
         Assert.True(cancellation.IsCancellationRequested);
         Assert.Contains("Recipe: " + expectedOutcome, writer.ToString(), StringComparison.Ordinal);
         var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(
-            await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
+            await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, "evidence-plan.json")));
         var receipt = NativeValidationReceiptCodec.Deserialize(
-            await File.ReadAllBytesAsync(Path.Join(output, "native-validation-receipt.json")));
+            await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, "native-validation-receipt.json")));
         Assert.True(NativeValidationReceiptCodec.Verify(plan, receipt));
         Assert.Equal(expectedOutcome, receipt.RunOutcome);
         Assert.Equal(expectedCallerCancellation, receipt.CallerCancellationRequested);
@@ -57,7 +58,7 @@ public sealed class CoverageArtifactNativeValidationProgramTests
         Assert.Equal("none", receipt.EvidenceHostClaim);
         Assert.Equal("none", receipt.EvidenceHostEligibility);
         Assert.False(receipt.EvidenceHostProofProduced);
-        Assert.False(File.Exists(Path.Join(output, "evidence-manifest.json")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output, "evidence-manifest.json")));
     }
 
     private sealed class CancelOnLineWriter(CancellationTokenSource cancellation, string linePrefix) : StringWriter
@@ -74,9 +75,9 @@ public sealed class CoverageArtifactNativeValidationProgramTests
         var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
         if (!string.IsNullOrWhiteSpace(host) && Path.IsPathFullyQualified(host)) return host;
         var root = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-        if (!string.IsNullOrWhiteSpace(root)) return Path.Join(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        if (!string.IsNullOrWhiteSpace(root)) return TestPathUtils.PathUnder(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
         var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
         return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-            .Select(directory => Path.Join(directory, executable)).First(File.Exists);
+            .Select(directory => TestPathUtils.PathUnder(directory, executable)).First(File.Exists);
     }
 }

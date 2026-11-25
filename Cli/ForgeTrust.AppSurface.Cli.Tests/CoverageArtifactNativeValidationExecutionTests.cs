@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.Evidence.Validation;
@@ -297,7 +298,7 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
                 execution.WaitAsync(TimeSpan.FromSeconds(2)));
 
             Assert.False(disposalFinished.Task.IsCompleted);
-            Assert.False(File.Exists(Path.Combine(directory.Root, "native-validation-receipt.json")));
+            Assert.False(File.Exists(TestPathUtils.PathUnder(directory.Root, "native-validation-receipt.json")));
         }
         finally
         {
@@ -312,7 +313,7 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
     {
         using var directory = new TemporaryDirectory();
         var plan = ResolvePlan();
-        var artifactPath = Path.Combine(directory.Root, ProducerId, "proof", "result.json");
+        var artifactPath = TestPathUtils.PathUnder(directory.Root, ProducerId, "proof", "result.json");
         var producer = new FixedRecipeProducer(ProducerId, async (context, token) =>
         {
             var artifact = await WriteArtifactAsync(context, token);
@@ -334,7 +335,7 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
     {
         using var directory = new TemporaryDirectory();
         var plan = ResolvePlan();
-        var artifactPath = Path.Combine(directory.Root, ProducerId, "proof", "result.json");
+        var artifactPath = TestPathUtils.PathUnder(directory.Root, ProducerId, "proof", "result.json");
         var producer = new FixedRecipeProducer(ProducerId, async (context, token) =>
         {
             var artifact = await WriteArtifactAsync(context, token);
@@ -342,7 +343,7 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
         }, () =>
         {
             if (removal == "artifact") File.Delete(artifactPath);
-            else Directory.Delete(Path.Combine(directory.Root, ProducerId), recursive: true);
+            else Directory.Delete(TestPathUtils.PathUnder(directory.Root, ProducerId), recursive: true);
             return ValueTask.CompletedTask;
         });
 
@@ -542,7 +543,7 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
             await Assert.ThrowsAsync<NativeValidationUnjoinedWorkException>(() => execution);
 
             Assert.False(disposalFinished.Task.IsCompleted);
-            Assert.False(File.Exists(Path.Combine(directory.Root, "native-validation-receipt.json")));
+            Assert.False(File.Exists(TestPathUtils.PathUnder(directory.Root, "native-validation-receipt.json")));
         }
         finally
         {
@@ -629,7 +630,7 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
         await Assert.ThrowsAsync<AccessViolationException>(() => execution);
 
         Assert.False(disposed);
-        Assert.False(File.Exists(Path.Combine(directory.Root, "native-validation-receipt.json")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(directory.Root, "native-validation-receipt.json")));
     }
 
     [Theory]
@@ -722,10 +723,10 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
         plan = plan with { Profile = profile };
 
         await Assert.ThrowsAsync<ArgumentException>(() => NativeValidationExecution.ExecuteAsync(
-            plan, producers, Path.Combine(directory.Root, "artifacts"), InputDigest, CancellationToken.None));
+            plan, producers, TestPathUtils.PathUnder(directory.Root, "artifacts"), InputDigest, CancellationToken.None));
 
         Assert.Equal(0, dispatched);
-        Assert.False(Directory.Exists(Path.Combine(directory.Root, "artifacts")));
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(directory.Root, "artifacts")));
 
         FixedRecipeProducer CreateProducer(string id) => new(id, (_, _) =>
         {

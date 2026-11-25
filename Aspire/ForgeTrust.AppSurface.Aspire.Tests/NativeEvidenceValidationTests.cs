@@ -89,7 +89,7 @@ public sealed class NativeEvidenceValidationTests
             }
             var exitCode = await Program.RunAsync(arguments.ToArray());
             var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
-            var receipt = NativeValidationReceiptCodec.Deserialize(await File.ReadAllBytesAsync(Path.Join(output, "native-validation-receipt.json")));
+            var receipt = NativeValidationReceiptCodec.Deserialize(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, "native-validation-receipt.json")));
 
             Assert.True(exitCode == 0, "Native acceptance failed; retained evidence: " + parent);
             Assert.All(receipt.Journeys, journey => Assert.True(journey.Outcome == "passed", journey.Diagnostic + "; retained evidence: " + parent));
@@ -98,7 +98,7 @@ public sealed class NativeEvidenceValidationTests
             Assert.Equal("none", receipt.EvidenceHostEligibility);
             Assert.False(receipt.EvidenceHostProofProduced);
             Assert.True(receipt.CleanupCompleted);
-            Assert.False(File.Exists(Path.Join(output, "evidence-manifest.json")));
+            Assert.False(File.Exists(TestPathUtils.PathUnder(output, "evidence-manifest.json")));
             Assert.Empty(Directory.EnumerateDirectories(parent, "evidence-workspace-*"));
             Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
             using var result = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(output, "artifacts/installed-consumer/proof/result.json")));

@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Core;
 using System.Diagnostics;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -65,7 +66,7 @@ internal static class NativeValidationExecution
             foreach (var declaration in declarations)
             {
                 var producer = producerById[declaration.Id];
-                var writer = new EvidenceArtifactWriter(declaration, Path.Join(artifactRoot, declaration.Id));
+                var writer = new EvidenceArtifactWriter(declaration, PathUtils.PathUnder(artifactRoot, declaration.Id));
                 var stopwatch = Stopwatch.StartNew();
                 EvidenceProducerResult result;
                 if (cancellationToken.IsCancellationRequested)

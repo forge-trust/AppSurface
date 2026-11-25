@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Core;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -141,8 +142,8 @@ internal static class Program
             await File.WriteAllBytesAsync(Path.Join(output, "evidence-plan.json"), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
             Console.WriteLine("Native package journeys selected: " + string.Join(", ", declarations.Select(d => d.Id)));
             var receipt = await NativeValidationExecution.ExecuteAsync(
-                plan, producers, Path.Join(output, "artifacts"), inputDigest, cancellationToken);
-            var receiptPath = Path.Join(output, "native-validation-receipt.json");
+                plan, producers, PathUtils.PathUnder(output, "artifacts"), inputDigest, cancellationToken);
+            var receiptPath = PathUtils.PathUnder(output, "native-validation-receipt.json");
             await File.WriteAllBytesAsync(receiptPath, NativeValidationReceiptCodec.Serialize(receipt), CancellationToken.None);
             ValidationProof.Require(NativeValidationReceiptCodec.Verify(plan, receipt), "native validation receipt verification");
             Console.WriteLine($"Recipe: {receipt.RunOutcome}; cleanup: {receipt.CleanupCompleted}; receipt: {receiptPath}");
