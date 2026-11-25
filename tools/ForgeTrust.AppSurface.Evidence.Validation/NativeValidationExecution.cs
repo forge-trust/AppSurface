@@ -65,88 +65,9 @@ internal static class NativeValidationExecution
         {
             foreach (var declaration in declarations)
             {
-                var producer = producerById[declaration.Id];
-                var writer = new EvidenceArtifactWriter(declaration, PathUtils.PathUnder(artifactRoot, declaration.Id));
-                var stopwatch = Stopwatch.StartNew();
-                EvidenceProducerResult result;
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    result = ValidateResult(declaration, writer,
-                        Failure(declaration.Id, EvidenceProducerOutcome.Cancelled, "The native package journey was cancelled."), 0);
-                    completed.Add(new CompletedJourney(declaration, writer, result));
-                    continue;
-                }
-
-                var deadline = new CancellationTokenSource();
-                var producerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-                deadline.CancelAfter(TimeSpan.FromSeconds(declaration.TimeoutSeconds));
-                Task<EvidenceProducerResult>? execution = null;
-                try
-                {
-                    var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System, writer);
-                    execution = Task.Run(async () => await producer.ProduceAsync(context, producerCancellation.Token).ConfigureAwait(false), CancellationToken.None);
-                    result = await execution.WaitAsync(producerCancellation.Token).ConfigureAwait(false);
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        result = Failure(declaration.Id, EvidenceProducerOutcome.Cancelled, "The native package journey was cancelled.");
-                    }
-                    else if (deadline.IsCancellationRequested || stopwatch.Elapsed >= TimeSpan.FromSeconds(declaration.TimeoutSeconds))
-                    {
-                        result = Failure(declaration.Id, EvidenceProducerOutcome.TimedOut, "The native package journey exceeded its declared deadline.");
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    if (execution is not null)
-                    {
-                        try { await JoinAsync(execution, joinAllowance).ConfigureAwait(false); }
-                        catch (NativeValidationUnjoinedWorkException)
-                        {
-                            unjoined = true;
-                            throw;
-                        }
-                        catch (Exception exception) when (IsNonFatal(exception))
-                        {
-                            // Observe the joined callback fault; cancellation/deadline below owns its outcome.
-                            // Do not log exception messages, which can contain private command or path data.
-                            _ = exception;
-                        }
-                    }
-                    result = cancellationToken.IsCancellationRequested
-                        ? Failure(declaration.Id, EvidenceProducerOutcome.Cancelled, "The native package journey was cancelled.")
-                        : deadline.IsCancellationRequested
-                            ? Failure(declaration.Id, EvidenceProducerOutcome.TimedOut, "The native package journey exceeded its declared deadline.")
-                            : Failure(declaration.Id, EvidenceProducerOutcome.Failed, "The native package journey stopped before returning a result.");
-                }
-                catch (Exception exception) when (IsNonFatal(exception) && exception is not NativeValidationUnjoinedWorkException)
-                {
-                    result = Failure(declaration.Id, EvidenceProducerOutcome.Failed,
-                        "The native package journey failed with " + exception.GetType().Name + ".");
-                }
-                finally
-                {
-                    if (execution is { IsCompleted: false })
-                    {
-                        // A callback that outlives the runner still owns the token sources it can use.
-                        // Transfer their cleanup to actual completion, including a later fault/cancellation.
-                        _ = execution.ContinueWith(task =>
-                        {
-                            _ = task.Exception;
-                            producerCancellation.Dispose();
-                            deadline.Dispose();
-                        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                    }
-                    else
-                    {
-                        _ = execution?.Exception;
-                        producerCancellation.Dispose();
-                        deadline.Dispose();
-                    }
-                }
-
-                stopwatch.Stop();
-                result = ValidateResult(declaration, writer, result, stopwatch.ElapsedMilliseconds);
-                completed.Add(new CompletedJourney(declaration, writer, result));
+                completed.Add(await ExecuteJourneyAsync(
+                    plan, declaration, producerById[declaration.Id], artifactRoot, joinAllowance,
+                    cancellationToken, onUnjoinedWork: () => unjoined = true).ConfigureAwait(false));
             }
         }
         catch (Exception exception) when (!IsNonFatal(exception))
@@ -184,31 +105,7 @@ internal static class NativeValidationExecution
         var journeys = new List<NativeValidationJourneyReceipt>(completed.Count);
         foreach (var journey in completed)
         {
-            var artifacts = journey.Writer.WrittenArtifacts;
-            var valid = NativeValidationReceiptCodec.ValidArtifactSet(
-                journey.Declaration, artifacts, requireRequiredSlots: journey.Result.Outcome == EvidenceProducerOutcome.Passed);
-            try
-            {
-                valid &= await VerifyArtifactsAsync(journey.Writer.VerifyWrittenArtifactsAsync, joinAllowance).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (IsNonFatal(exception))
-            {
-                valid = false;
-            }
-
-            var result = valid
-                ? journey.Result
-                : Failure(journey.Declaration.Id, EvidenceProducerOutcome.Invalid,
-                    "A native package journey artifact failed final verification.", artifacts, journey.Result.ElapsedMilliseconds);
-            journeys.Add(new NativeValidationJourneyReceipt(
-                journey.Declaration.Id,
-                result.Outcome.ToString().ToLowerInvariant(),
-                journey.Declaration.AssertionIds.ToArray(),
-                result.SatisfiedAssertionIds.ToArray(),
-                journey.Declaration.ArtifactSlots.ToArray(),
-                artifacts,
-                BoundDiagnostic(result.Diagnostic),
-                result.ElapsedMilliseconds));
+            journeys.Add(await BuildJourneyReceiptAsync(journey, joinAllowance).ConfigureAwait(false));
         }
 
         var receipt = NativeValidationReceiptCodec.Create(
@@ -224,6 +121,143 @@ internal static class NativeValidationExecution
         }
 
         return receipt;
+    }
+
+    /// <summary>Executes one selected journey and retains cancellation-source ownership until its callback settles.</summary>
+    /// <param name="plan">The fixed package-recipe plan supplied to the callback.</param>
+    /// <param name="declaration">The selected callback's assertions, artifact slots and deadline.</param>
+    /// <param name="producer">The registered callback matching the declaration.</param>
+    /// <param name="artifactRoot">The caller-owned root beneath which this journey writes its declared artifacts.</param>
+    /// <param name="joinAllowance">The already validated maximum wait for cancelled callback work to settle.</param>
+    /// <param name="cancellationToken">Caller cancellation, distinct from the declaration's deadline.</param>
+    /// <param name="onUnjoinedWork">Notifies the outer lifetime supervisor only when a callback's cancellation join fails.</param>
+    /// <returns>The checked result and writer to retain through disposal and final artifact verification.</returns>
+    /// <remarks>
+    /// The explicit notification preserves the supervisor's cleanup decision without treating an identically
+    /// typed exception thrown directly by a producer as evidence that its callback remains live.
+    /// </remarks>
+    private static async Task<CompletedJourney> ExecuteJourneyAsync(
+        EvidencePlan plan,
+        EvidenceProducerDeclaration declaration,
+        IEvidenceProducer producer,
+        string artifactRoot,
+        TimeSpan joinAllowance,
+        CancellationToken cancellationToken,
+        Action onUnjoinedWork)
+    {
+        var writer = new EvidenceArtifactWriter(declaration, PathUtils.PathUnder(artifactRoot, declaration.Id));
+        var stopwatch = Stopwatch.StartNew();
+        EvidenceProducerResult result;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            result = ValidateResult(declaration, writer,
+                Failure(declaration.Id, EvidenceProducerOutcome.Cancelled, "The native package journey was cancelled."), 0);
+            return new CompletedJourney(declaration, writer, result);
+        }
+
+        var deadline = new CancellationTokenSource();
+        var producerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(declaration.TimeoutSeconds));
+        Task<EvidenceProducerResult>? execution = null;
+        try
+        {
+            var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System, writer);
+            execution = Task.Run(async () => await producer.ProduceAsync(context, producerCancellation.Token).ConfigureAwait(false), CancellationToken.None);
+            result = await execution.WaitAsync(producerCancellation.Token).ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                result = Failure(declaration.Id, EvidenceProducerOutcome.Cancelled, "The native package journey was cancelled.");
+            }
+            else if (deadline.IsCancellationRequested || stopwatch.Elapsed >= TimeSpan.FromSeconds(declaration.TimeoutSeconds))
+            {
+                result = Failure(declaration.Id, EvidenceProducerOutcome.TimedOut, "The native package journey exceeded its declared deadline.");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (execution is not null)
+            {
+                try { await JoinAsync(execution, joinAllowance).ConfigureAwait(false); }
+                catch (NativeValidationUnjoinedWorkException)
+                {
+                    onUnjoinedWork();
+                    throw;
+                }
+                catch (Exception exception) when (IsNonFatal(exception))
+                {
+                    // Observe the joined callback fault; cancellation/deadline below owns its outcome.
+                    // Do not log exception messages, which can contain private command or path data.
+                    _ = exception;
+                }
+            }
+            result = cancellationToken.IsCancellationRequested
+                ? Failure(declaration.Id, EvidenceProducerOutcome.Cancelled, "The native package journey was cancelled.")
+                : deadline.IsCancellationRequested
+                    ? Failure(declaration.Id, EvidenceProducerOutcome.TimedOut, "The native package journey exceeded its declared deadline.")
+                    : Failure(declaration.Id, EvidenceProducerOutcome.Failed, "The native package journey stopped before returning a result.");
+        }
+        catch (Exception exception) when (IsNonFatal(exception) && exception is not NativeValidationUnjoinedWorkException)
+        {
+            result = Failure(declaration.Id, EvidenceProducerOutcome.Failed,
+                "The native package journey failed with " + exception.GetType().Name + ".");
+        }
+        finally
+        {
+            if (execution is { IsCompleted: false })
+            {
+                // A callback that outlives the runner still owns the token sources it can use.
+                // Transfer their cleanup to actual completion, including a later fault/cancellation.
+                _ = execution.ContinueWith(task =>
+                {
+                    _ = task.Exception;
+                    producerCancellation.Dispose();
+                    deadline.Dispose();
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
+            else
+            {
+                _ = execution?.Exception;
+                producerCancellation.Dispose();
+                deadline.Dispose();
+            }
+        }
+
+        stopwatch.Stop();
+        result = ValidateResult(declaration, writer, result, stopwatch.ElapsedMilliseconds);
+        return new CompletedJourney(declaration, writer, result);
+    }
+
+    /// <summary>Verifies a disposed journey's finalized artifacts and projects its result into the receipt schema.</summary>
+    /// <param name="journey">The completed callback result and artifact writer retained through producer disposal.</param>
+    /// <param name="joinAllowance">The already validated, caller-independent artifact verification allowance.</param>
+    /// <returns>The journey's receipt row, with invalid artifacts preventing a passing outcome.</returns>
+    private static async Task<NativeValidationJourneyReceipt> BuildJourneyReceiptAsync(CompletedJourney journey, TimeSpan joinAllowance)
+    {
+        var artifacts = journey.Writer.WrittenArtifacts;
+        var valid = NativeValidationReceiptCodec.ValidArtifactSet(
+            journey.Declaration, artifacts, requireRequiredSlots: journey.Result.Outcome == EvidenceProducerOutcome.Passed);
+        try
+        {
+            valid &= await VerifyArtifactsAsync(journey.Writer.VerifyWrittenArtifactsAsync, joinAllowance).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsNonFatal(exception))
+        {
+            valid = false;
+        }
+
+        var result = valid
+            ? journey.Result
+            : Failure(journey.Declaration.Id, EvidenceProducerOutcome.Invalid,
+                "A native package journey artifact failed final verification.", artifacts, journey.Result.ElapsedMilliseconds);
+        return new NativeValidationJourneyReceipt(
+            journey.Declaration.Id,
+            result.Outcome.ToString().ToLowerInvariant(),
+            journey.Declaration.AssertionIds.ToArray(),
+            result.SatisfiedAssertionIds.ToArray(),
+            journey.Declaration.ArtifactSlots.ToArray(),
+            artifacts,
+            BoundDiagnostic(result.Diagnostic),
+            result.ElapsedMilliseconds);
     }
 
     /// <summary>Joins producer or disposal work under the runner's existing allowance.</summary>

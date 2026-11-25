@@ -35,7 +35,7 @@ public sealed class CoverageArtifactNativeValidationProgramTests
             global::System.Console.SetError(errors);
             exitCode = await NativeProgram.RunAsync(
                 ["--package", package, "--version", "1.0.0", "--source-commit", "source",
-                    "--dotnet", ResolveDotnetHost(), "--output", output, "--mode", "storage",
+                    "--dotnet", TestDotnetHost.Resolve(), "--output", output, "--mode", "storage",
                     "--scratch-parent", directory.Path, "--maximum-scratch-bytes", "1048576",
                     "--minimum-free-bytes", "0"], cancellation.Token);
         }
@@ -70,14 +70,4 @@ public sealed class CoverageArtifactNativeValidationProgramTests
         }
     }
 
-    private static string ResolveDotnetHost()
-    {
-        var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        if (!string.IsNullOrWhiteSpace(host) && Path.IsPathFullyQualified(host)) return host;
-        var root = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-        if (!string.IsNullOrWhiteSpace(root)) return TestPathUtils.PathUnder(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
-        var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-            .Select(directory => TestPathUtils.PathUnder(directory, executable)).First(File.Exists);
-    }
 }

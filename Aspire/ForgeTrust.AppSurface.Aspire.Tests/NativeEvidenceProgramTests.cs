@@ -31,7 +31,7 @@ public sealed class NativeEvidenceProgramTests
             var output = Path.Join(root, "evidence");
 
             var result = await InvokeAsync(["--package", package, "--version", "1.0.0", "--source-commit", "source",
-                "--dotnet", ResolveDotnetHost(), "--output", output, "--mode", "storage", "--scratch-parent", root,
+                "--dotnet", TestDotnetHost.Resolve(), "--output", output, "--mode", "storage", "--scratch-parent", root,
                 "--fan-in-request", requestPath]);
 
             Assert.Equal(1, result.ExitCode);
@@ -85,7 +85,7 @@ public sealed class NativeEvidenceProgramTests
         await File.WriteAllBytesAsync(package, []);
         var output = Path.Join(fixture.Root, "evidence");
         var result = await InvokeAsync(["--package", package, "--version", "1.0.0", "--source-commit", "source",
-            "--dotnet", ResolveDotnetHost(), "--output", output, "--mode", "storage", "--scratch-parent", fixture.Root,
+            "--dotnet", TestDotnetHost.Resolve(), "--output", output, "--mode", "storage", "--scratch-parent", fixture.Root,
             "--native-coverage-contract-version", "3"]);
 
         Assert.Equal(1, result.ExitCode);
@@ -103,7 +103,7 @@ public sealed class NativeEvidenceProgramTests
         var output = Path.Join(fixture.Root, "collection");
         var timings = Path.Join(fixture.Root, "prior-timings.json");
         var args = new List<string> { "--operation", "collect-coverage", "--repository", fixture.Repository,
-            "--dotnet", ResolveDotnetHost(), "--output", output };
+            "--dotnet", TestDotnetHost.Resolve(), "--output", output };
         if (history) args.AddRange(["--coverage-schedule-timings", relativeHistory ? Path.GetRelativePath(Directory.GetCurrentDirectory(), timings) : timings]);
         RepositoryCheckSettings? observed = null;
         using var cancellation = new CancellationTokenSource();
@@ -118,7 +118,7 @@ public sealed class NativeEvidenceProgramTests
         Assert.Equal(0, result);
         Assert.NotNull(observed);
         Assert.Equal(fixture.Repository, observed.RepositoryRoot);
-        Assert.Equal(ResolveDotnetHost(), observed.DotnetPath);
+        Assert.Equal(TestDotnetHost.Resolve(), observed.DotnetPath);
         Assert.Equal(output, observed.OutputDirectory);
         Assert.Equal(history ? timings : null, observed.CoverageScheduleTimingsPath);
         Assert.Null(observed.NativeCoverageDirectory);
@@ -131,7 +131,7 @@ public sealed class NativeEvidenceProgramTests
     {
         using var fixture = new NativeCaptureFixture();
         var output = Path.Join(fixture.Root, "collection");
-        var host = ResolveDotnetHost();
+        var host = TestDotnetHost.Resolve();
         RepositoryCheckSettings? observed = null;
 
         var result = await Program.RunAsync(["--operation", "collect-coverage", "--repository", fixture.Repository,
@@ -158,7 +158,7 @@ public sealed class NativeEvidenceProgramTests
         var output = Path.Join(fixture.Root, "collection");
         var args = new List<string> { "--operation", "collect-coverage" };
         if (failure != "missing-repository") args.AddRange(["--repository", fixture.Repository]);
-        if (failure != "missing-host") args.AddRange(["--dotnet", ResolveDotnetHost()]);
+        if (failure != "missing-host") args.AddRange(["--dotnet", TestDotnetHost.Resolve()]);
         if (failure != "missing-output") args.AddRange(["--output", output]);
         if (failure == "unsupported-option") args.AddRange(["--diff-file", "local.patch"]);
 
@@ -214,7 +214,7 @@ public sealed class NativeEvidenceProgramTests
     public async Task CaptureNative_UsesRealCheckoutAndWritesBoundIdentityReceipt()
     {
         using var fixture = new NativeCaptureFixture();
-        var sdk = await RunAsync(ResolveDotnetHost(), ["--version"], fixture.Repository);
+        var sdk = await RunAsync(TestDotnetHost.Resolve(), ["--version"], fixture.Repository);
         Assert.Equal(0, sdk.ExitCode);
         var runValues = new Dictionary<string, string?>
         {
@@ -228,7 +228,7 @@ public sealed class NativeEvidenceProgramTests
             foreach (var (key, value) in runValues) Environment.SetEnvironmentVariable(key, value);
             var result = await InvokeAsync(["--operation", "capture-native", "--repository", fixture.Repository,
                 "--report", fixture.Report, "--raw-report", fixture.RawReport, "--output", fixture.Output,
-                "--dotnet", ResolveDotnetHost()]);
+                "--dotnet", TestDotnetHost.Resolve()]);
 
             Assert.True(result.ExitCode == 0, result.StandardError);
             using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(fixture.Output, "manifest.json")));
@@ -269,7 +269,7 @@ public sealed class NativeEvidenceProgramTests
         var previous = runValues.ToDictionary(pair => pair.Key, pair => Environment.GetEnvironmentVariable(pair.Key));
         var args = new List<string> { "--operation", "capture-native", "--repository", fixture.Repository,
             "--report", fixture.Report, "--raw-report", fixture.RawReport, "--output", fixture.Output,
-            "--dotnet", failure == "missing-host" ? Path.Join(fixture.Root, "missing-dotnet") : ResolveDotnetHost() };
+            "--dotnet", failure == "missing-host" ? Path.Join(fixture.Root, "missing-dotnet") : TestDotnetHost.Resolve() };
         if (failure == "dirty") await File.WriteAllTextAsync(Path.Join(fixture.Repository, "dirty.txt"), "dirty");
         if (failure == "unsupported-option") args.AddRange(["--scope", "native"]);
         if (failure == "missing-project-inventory")
@@ -327,7 +327,7 @@ public sealed class NativeEvidenceProgramTests
             await File.WriteAllTextAsync(sentinel, "preserve me");
 
             var result = await InvokeAsync(["--package", Path.Join(root, "candidate.nupkg"), "--version", "1.0.0",
-                "--source-commit", "source", "--dotnet", ResolveDotnetHost(), "--output", output]);
+                "--source-commit", "source", "--dotnet", TestDotnetHost.Resolve(), "--output", output]);
 
             Assert.Equal(1, result.ExitCode);
             Assert.Contains("ArgumentException", result.StandardError, StringComparison.Ordinal);
@@ -349,7 +349,7 @@ public sealed class NativeEvidenceProgramTests
             cancellation.Cancel();
 
             var result = await InvokeAsync(["--package", Path.Join(root, "candidate.nupkg"), "--version", "1.0.0",
-                "--source-commit", "source", "--dotnet", ResolveDotnetHost(), "--output", output], cancellation.Token);
+                "--source-commit", "source", "--dotnet", TestDotnetHost.Resolve(), "--output", output], cancellation.Token);
 
             Assert.True(result.ExitCode == 130, result.StandardError);
             Assert.Contains("Validation cancelled", result.StandardError, StringComparison.Ordinal);
@@ -370,7 +370,7 @@ public sealed class NativeEvidenceProgramTests
             await File.WriteAllBytesAsync(package, []);
             var output = Path.Join(root, "evidence");
             var result = await InvokeAsync(["--package", package, "--version", "1.0.0", "--source-commit", "source",
-                "--dotnet", ResolveDotnetHost(), "--output", output, "--mode", mode, "--scratch-parent", root,
+                "--dotnet", TestDotnetHost.Resolve(), "--output", output, "--mode", mode, "--scratch-parent", root,
                 "--maximum-scratch-bytes", "1048576", "--minimum-free-bytes", "0"]);
 
             Assert.Equal(1, result.ExitCode);
@@ -411,7 +411,7 @@ public sealed class NativeEvidenceProgramTests
             var output = Path.Join(root, "evidence");
 
             var result = await InvokeAsync(["--package", package, "--version", "1.0.0", "--source-commit", "source",
-                "--dotnet", ResolveDotnetHost(), "--output", output, "--mode", "storage", "--scratch-parent", root,
+                "--dotnet", TestDotnetHost.Resolve(), "--output", output, "--mode", "storage", "--scratch-parent", root,
                 "--fan-in-request", request]);
 
             Assert.Equal(1, result.ExitCode); // Invalid storage package must still prevent completion.
@@ -443,7 +443,7 @@ public sealed class NativeEvidenceProgramTests
         {
             var output = Path.Join(root, "evidence");
             var args = new List<string> { "--package", Path.Join(root, "candidate.nupkg"), "--version", "1.0.0", "--source-commit", "source",
-                "--dotnet", ResolveDotnetHost(), "--output", output };
+                "--dotnet", TestDotnetHost.Resolve(), "--output", output };
             if (option is "--consumer-profile" or "--fan-in-request")
             {
                 var json = Path.Join(root, "input.json");
@@ -487,17 +487,6 @@ public sealed class NativeEvidenceProgramTests
             output.Dispose();
             error.Dispose();
         }
-    }
-
-    private static string ResolveDotnetHost()
-    {
-        var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        if (!string.IsNullOrWhiteSpace(host) && Path.IsPathFullyQualified(host)) return host;
-        var root = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-        if (!string.IsNullOrWhiteSpace(root)) return Path.Join(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
-        var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-            .Select(directory => Path.Join(directory, executable)).First(File.Exists);
     }
 
     private static async Task<ProcessResult> RunAsync(string executable, string[] arguments, string workingDirectory)

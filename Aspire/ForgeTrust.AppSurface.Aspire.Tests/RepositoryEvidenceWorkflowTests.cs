@@ -400,7 +400,7 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             ("--plan", Path.Join(planned.Output, "evidence-plan.json")),
             ("--output", output),
             ("--repository", repository),
-            ("--dotnet", ResolveDotnetHost()));
+            ("--dotnet", TestDotnetHost.Resolve()));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
 
@@ -760,17 +760,6 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
         var processPath = Environment.ProcessPath;
         if (!string.IsNullOrWhiteSpace(processPath) && File.Exists(processPath)) return processPath;
         throw new InvalidOperationException("The running test process path is unavailable.");
-    }
-
-    private static string ResolveDotnetHost()
-    {
-        var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        if (!string.IsNullOrWhiteSpace(host) && Path.IsPathFullyQualified(host)) return host;
-        var root = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-        if (!string.IsNullOrWhiteSpace(root)) return Path.Join(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
-        var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-            .Select(directory => Path.Join(directory, executable)).First(File.Exists);
     }
 
     public void Dispose()

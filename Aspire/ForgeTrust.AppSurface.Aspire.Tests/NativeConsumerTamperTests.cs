@@ -35,7 +35,7 @@ public sealed class NativeConsumerTamperTests
         var parent = Directory.CreateTempSubdirectory("native-consumer-tamper-").FullName;
         try
         {
-            var dotnet = ResolveDotnetHost();
+            var dotnet = TestDotnetHost.Resolve();
             var candidate = await PrepareCandidateAsync(repository, parent, dotnet);
             var candidateHash = Hash(candidate.Path);
             var source = TestPathUtils.PathUnder(parent, "original-consumer");
@@ -251,7 +251,7 @@ public sealed class NativeConsumerTamperTests
         var parent = Directory.CreateTempSubdirectory("native-consumer-no-artifacts-").FullName;
         try
         {
-            var dotnet = ResolveDotnetHost();
+            var dotnet = TestDotnetHost.Resolve();
             var candidate = await PrepareCandidateAsync(repository, parent, dotnet);
             var scratch = TestPathUtils.PathUnder(parent, "scratch");
             Directory.CreateDirectory(scratch);
@@ -313,7 +313,7 @@ public sealed class NativeConsumerTamperTests
             var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System,
                 new EvidenceArtifactWriter(declaration, artifacts));
             var settings = new ValidationSettings(repository, TestPathUtils.PathUnder(parent, "missing.nupkg"), "1", commit,
-                ResolveDotnetHost(), scratch, artifacts, MinimumFreeBytes: 0,
+                TestDotnetHost.Resolve(), scratch, artifacts, MinimumFreeBytes: 0,
                 Consumer: new ConsumerValidationOptions(source, commit, "Consumer.slnx"));
             var captureAttempts = 0;
             var runner = new EvidenceCommandRunner(stream =>
@@ -366,7 +366,7 @@ public sealed class NativeConsumerTamperTests
             var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System,
                 new EvidenceArtifactWriter(declaration, artifacts));
             var settings = new ValidationSettings(repository, TestPathUtils.PathUnder(parent, "missing.nupkg"), "1", commit,
-                ResolveDotnetHost(), scratch, artifacts, MinimumFreeBytes: 0,
+                TestDotnetHost.Resolve(), scratch, artifacts, MinimumFreeBytes: 0,
                 Consumer: new ConsumerValidationOptions(source, commit, "Consumer.slnx", ["missing-tests/Consumer.Tests.csproj"]));
 
             await using (var producer = new InstalledConsumerProducer(settings))
@@ -395,7 +395,7 @@ public sealed class NativeConsumerTamperTests
         var parent = Directory.CreateTempSubdirectory("native-consumer-command-failure-").FullName;
         try
         {
-            var dotnet = ResolveDotnetHost();
+            var dotnet = TestDotnetHost.Resolve();
             var candidate = await PrepareCandidateAsync(repository, parent, dotnet);
             var scratch = TestPathUtils.PathUnder(parent, "scratch");
             Directory.CreateDirectory(scratch);
@@ -507,17 +507,6 @@ public sealed class NativeConsumerTamperTests
             "git", arguments, directory, TimeSpan.FromSeconds(30)));
         Assert.True(result.ExitCode == 0 && !result.OutputTruncated, result.StandardError);
         return result.StandardOutput.Trim();
-    }
-
-    private static string ResolveDotnetHost()
-    {
-        var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        if (!string.IsNullOrWhiteSpace(host) && Path.IsPathFullyQualified(host)) return host;
-        var root = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-        if (!string.IsNullOrWhiteSpace(root)) return Path.Join(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
-        var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-            .Select(directory => Path.Join(directory, executable)).First(File.Exists);
     }
 
     private static string Hash(string path)

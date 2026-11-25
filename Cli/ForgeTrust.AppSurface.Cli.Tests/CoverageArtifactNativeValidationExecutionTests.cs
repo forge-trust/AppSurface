@@ -609,6 +609,28 @@ public sealed class CoverageArtifactNativeValidationExecutionTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_SettledCallbackExceptionDoesNotMarkItsWorkUnjoined()
+    {
+        using var directory = new TemporaryDirectory();
+        var plan = ResolvePlan();
+        var failure = new NativeValidationUnjoinedWorkException();
+        var disposed = false;
+        var producer = new FixedRecipeProducer(ProducerId,
+            (_, _) => ValueTask.FromException<EvidenceProducerResult>(failure),
+            () =>
+            {
+                disposed = true;
+                return ValueTask.CompletedTask;
+            });
+
+        var actual = await Assert.ThrowsAsync<NativeValidationUnjoinedWorkException>(
+            () => ExecuteAsync(plan, producer, directory.Root));
+
+        Assert.Same(failure, actual);
+        Assert.True(disposed);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_FatalCallbackExceptionPropagatesWithoutDisposalOrReceipt()
     {
         using var directory = new TemporaryDirectory();

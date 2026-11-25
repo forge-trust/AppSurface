@@ -131,7 +131,7 @@ internal static class NativeValidationReceiptCodec
     {
         ArgumentNullException.ThrowIfNull(receipt);
         var sealedReceipt = receipt with { ReceiptDigest = ComputeDigest(receipt with { ReceiptDigest = string.Empty }) };
-        if (!HasValidDigest(sealedReceipt))
+        if (!HasValidStructureAndDigest(sealedReceipt))
         {
             throw new InvalidDataException("Native validation receipt is invalid.");
         }
@@ -162,7 +162,7 @@ internal static class NativeValidationReceiptCodec
             throw new JsonException("Native validation receipt schema is unsupported.");
         }
 
-        if (!HasValidDigest(receipt))
+        if (!HasValidStructureAndDigest(receipt))
         {
             throw new JsonException("Native validation receipt is invalid.");
         }
@@ -183,7 +183,7 @@ internal static class NativeValidationReceiptCodec
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(receipt);
-        if (!HasValidDigest(receipt)
+        if (!HasValidStructureAndDigest(receipt)
             || plan.Profile.Producers.Count == 0
             || plan.Profile.Producers.Select(static item => item.Id).Distinct(StringComparer.Ordinal).Count() != plan.Profile.Producers.Count
             || !string.Equals(receipt.ProfileId, plan.Profile.Id, StringComparison.Ordinal)
@@ -230,7 +230,10 @@ internal static class NativeValidationReceiptCodec
         };
     }
 
-    private static bool HasValidDigest(NativeValidationReceipt receipt) =>
+    /// <summary>Checks the closed receipt structure and canonical digest before plan-dependent verification.</summary>
+    /// <param name="receipt">The receipt whose fields, bounds and digest must be internally valid.</param>
+    /// <returns>Whether the receipt satisfies the structural and digest requirements, without granting plan authority.</returns>
+    private static bool HasValidStructureAndDigest(NativeValidationReceipt receipt) =>
         receipt.SchemaVersion == CurrentSchemaVersion
         && string.Equals(receipt.ReceiptType, ReceiptTypeName, StringComparison.Ordinal)
         && receipt.EvidenceHostClaim == "none"
