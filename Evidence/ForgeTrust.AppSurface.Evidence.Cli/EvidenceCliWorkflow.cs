@@ -335,6 +335,8 @@ internal sealed class EvidenceCliWorkflow
             $"Required resources: {FormatIds(plan.Profile.Resources.Select(static resource => resource.Id))}",
             // Test producers list their projects, filters and minimums so a reviewer sees the selection before it runs.
             .. TestEvidenceRunSupport.FormatPlan(plan),
+            // Scoped coverage producers list their projects and sources, since the claim covers nothing outside them.
+            .. ScopedCoverageReceipt.FormatPlan(plan),
         ];
         return string.Join(Environment.NewLine, lines);
     }
@@ -529,9 +531,11 @@ internal sealed class EvidenceCliWorkflow
     {
         var obligations = plan.Profile.Obligations.Select(static obligation => obligation.Id).ToArray();
         var testProducers = reuseDecisions is null ? TestEvidenceRunSupport.DescribePlan(plan) : null;
+        var scopedProducers = ScopedCoverageReceipt.DescribePlan(plan);
 
         return new("plan", plan.Profile.Id, plan.Profile.Scope.ToString(), plan.MatchedRuleIds, obligations,
-            testProducers is { Length: > 0 } ? testProducers : null, reuseDecisions,
+            testProducers is { Length: > 0 } ? testProducers : null,
+            scopedProducers.Length > 0 ? scopedProducers : null, reuseDecisions,
             "Run 'appsurface evidence run' only when the selected producer capabilities are ready.");
     }
 
@@ -547,6 +551,7 @@ internal sealed class EvidenceCliWorkflow
         [property: JsonPropertyName("matchedRules")] IReadOnlyList<string> MatchedRules,
         [property: JsonPropertyName("obligations")] IReadOnlyList<string> Obligations,
         [property: JsonPropertyName("testProducers"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] object[]? TestProducers,
+        [property: JsonPropertyName("scopedCoverageProducers"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] object[]? ScopedCoverageProducers,
         [property: JsonPropertyName("reuseDecisions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EvidenceReuseSummaryDecision>? ReuseDecisions,
         [property: JsonPropertyName("next")] string Next);
 

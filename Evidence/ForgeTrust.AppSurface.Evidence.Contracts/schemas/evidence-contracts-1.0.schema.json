@@ -204,6 +204,83 @@
       ],
       "additionalProperties": false
     },
+    "CoverageScope": {
+      "type": "object",
+      "properties": {
+        "Projects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "Sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/CoverageScopeSource"
+          }
+        },
+        "MinPatchLinePercent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "MinPatchBranchPercent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "PatchLineMode": {
+          "type": "string",
+          "pattern": "^(?:[mM][eE][aA][sS][uU][rR][aA][bB][lL][eE]|[cC][oO][dD][eE][cC][oO][vV])$"
+        },
+        "TolerancePercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "Projects",
+        "Sources",
+        "MinPatchLinePercent",
+        "MinPatchBranchPercent",
+        "PatchLineMode",
+        "TolerancePercent"
+      ],
+      "additionalProperties": false
+    },
+    "CoverageScopeSource": {
+      "type": "object",
+      "properties": {
+        "Pattern": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "Assembly": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "Pattern",
+        "Assembly"
+      ],
+      "additionalProperties": false
+    },
     "Producer": {
       "type": "object",
       "properties": {
@@ -253,6 +330,9 @@
         },
         "Test": {
           "$ref": "#/$defs/TestDeclaration"
+        },
+        "CoverageScope": {
+          "$ref": "#/$defs/CoverageScope"
         },
         "CoverageArtifactRetention": {
           "type": "string",

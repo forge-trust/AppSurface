@@ -329,6 +329,7 @@ public sealed class EvidencePlanner
             }
 
             ValidateTestProducer(producer);
+            ValidateScopedCoverageProducer(profile, producer);
 
             foreach (var resourceId in producer.RequiredResources)
             {
@@ -597,6 +598,187 @@ public sealed class EvidencePlanner
                 $"Set timeoutSeconds to at least {EvidenceTestProducerContract.MinimumTimeoutSeconds}.");
         }
     }
+
+    /// <summary>
+    /// Applies the scoped patch coverage rules (ASEVD150 through ASEVD161).
+    /// </summary>
+    /// <remarks>
+    /// Check order, first failure wins: block on another kind (150), the scoped assertion on a producer without a block
+    /// (157), then for a scoped producer: id (151), coverage gate (152), projects (153), sources (154), thresholds (155),
+    /// assertion id (156), receipt slot shape and size (158, 159), profile scope (160), overlapping sources (161).
+    /// </remarks>
+    private static void ValidateScopedCoverageProducer(EvidenceProfile profile, EvidenceProducerDeclaration producer)
+    {
+        var scope = producer.CoverageScope;
+        if (scope is not null && !string.Equals(producer.Kind, EvidenceScopedCoverageContract.Kind, StringComparison.Ordinal))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD150",
+                $"Producer '{producer.Id}' has kind '{producer.Kind}' and declares a coverageScope block; only kind '{EvidenceScopedCoverageContract.Kind}' may.",
+                $"Remove the coverageScope block or set kind to '{EvidenceScopedCoverageContract.Kind}'.");
+        }
+
+        if (scope is null)
+        {
+            if (producer.AssertionIds.Contains(EvidenceScopedCoverageContract.AssertionId, StringComparer.Ordinal))
+            {
+                throw new EvidencePlanningException(
+                    "ASEVD157",
+                    $"Producer '{producer.Id}' declares assertion '{EvidenceScopedCoverageContract.AssertionId}' without a coverageScope block.",
+                    "Declare coverageScope with projects, sources and a patch threshold, or remove the scoped assertion id.");
+            }
+
+            return;
+        }
+
+        if (!IsSafePathSegment(producer.Id))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD151",
+                $"Scoped coverage producer id '{producer.Id}' is not one safe path segment.",
+                "Use only A-Z, a-z, 0-9, '.', '_' and '-', and not '.' or '..'; the id names the artifact and coverage directories.");
+        }
+
+        if (producer.CoverageGate is not null)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD152",
+                $"Scoped coverage producer '{producer.Id}' declares both coverageScope and coverageGate.",
+                "Use coverageGate for a repository-wide coverage claim and coverageScope for a scoped patch claim, in two producers.");
+        }
+
+        var projects = scope.Projects;
+        if (projects is null
+            || projects.Count is 0 or > EvidenceScopedCoverageContract.MaximumProjects
+            || projects.Any(static project => project is null || !IsTestProjectPath(project))
+            || projects.Distinct(StringComparer.OrdinalIgnoreCase).Count() != projects.Count)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD153",
+                $"Scoped coverage producer '{producer.Id}' has invalid coverageScope.projects.",
+                $"Declare 1 to {EvidenceScopedCoverageContract.MaximumProjects} unique repository-relative forward-slash test project paths of at most {EvidenceScopedCoverageContract.MaximumPathLength} characters ending in .csproj, .fsproj or .vbproj.");
+        }
+
+        var sources = scope.Sources;
+        if (sources is null
+            || sources.Count is 0 or > EvidenceScopedCoverageContract.MaximumSources
+            || sources.Any(static source => source is null
+                || source.Pattern is null
+                || source.Pattern.Length > EvidenceScopedCoverageContract.MaximumPathLength
+                || !EvidenceProducerInputPattern.IsValid(source.Pattern)
+                || !IsAssemblyName(source.Assembly))
+            || sources.Select(static source => source.Pattern).Distinct(StringComparer.Ordinal).Count() != sources.Count)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD154",
+                $"Scoped coverage producer '{producer.Id}' has invalid coverageScope.sources.",
+                $"Declare 1 to {EvidenceScopedCoverageContract.MaximumSources} entries with a unique repository-relative pattern (* inside a segment, ** as a whole segment) and an assembly name of letters, digits, '.', '_' and '-'.");
+        }
+
+        if (scope.MinPatchLinePercent is null && scope.MinPatchBranchPercent is null
+            || scope.MinPatchLinePercent is { } line && !IsPercentage(line)
+            || scope.MinPatchBranchPercent is { } branch && !IsPercentage(branch)
+            || !IsPercentage(scope.TolerancePercent)
+            || !string.Equals(scope.PatchLineMode, "measurable", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(scope.PatchLineMode, "codecov", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD155",
+                $"Scoped coverage producer '{producer.Id}' has invalid coverageScope thresholds.",
+                "Declare minPatchLinePercent, minPatchBranchPercent or both from 0 through 100, a tolerancePercent from 0 through 100, and a measurable or codecov patchLineMode.");
+        }
+
+        if (producer.AssertionIds.Count != 1
+            || !string.Equals(producer.AssertionIds[0], EvidenceScopedCoverageContract.AssertionId, StringComparison.Ordinal))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD156",
+                $"Scoped coverage producer '{producer.Id}' declares assertionIds [{string.Join(", ", producer.AssertionIds)}].",
+                $"Use exactly \"assertionIds\": [\"{EvidenceScopedCoverageContract.AssertionId}\"]; a scoped producer never closes a repository-wide coverage assertion.");
+        }
+
+        var minimumBytes = EvidenceScopedCoverageContract.GetMinimumReceiptBytes(scope);
+        var slot = producer.ArtifactSlots.Count == 1 ? producer.ArtifactSlots[0] : null;
+        if (slot is null
+            || !string.Equals(slot.LogicalName, EvidenceScopedCoverageContract.ReceiptSlotLogicalName, StringComparison.Ordinal)
+            || !string.Equals(slot.MediaType, EvidenceScopedCoverageContract.ReceiptMediaType, StringComparison.Ordinal)
+            || !string.Equals(slot.RelativeRoot, EvidenceScopedCoverageContract.ReceiptRelativeRoot, StringComparison.Ordinal)
+            || !slot.Required
+            || slot.MaximumFiles is not null)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD158",
+                $"Scoped coverage producer '{producer.Id}' must declare exactly one required '{EvidenceScopedCoverageContract.ReceiptSlotLogicalName}' artifact slot with media type {EvidenceScopedCoverageContract.ReceiptMediaType} and relativeRoot '{EvidenceScopedCoverageContract.ReceiptRelativeRoot}', and no maximumFiles; it declares {producer.ArtifactSlots.Count} slot(s).",
+                $"Use \"artifactSlots\": [ {{ \"logicalName\": \"{EvidenceScopedCoverageContract.ReceiptSlotLogicalName}\", \"relativeRoot\": \"{EvidenceScopedCoverageContract.ReceiptRelativeRoot}\", \"mediaType\": \"{EvidenceScopedCoverageContract.ReceiptMediaType}\", \"required\": true, \"maximumBytes\": {Math.Max(262144, minimumBytes)} }} ].");
+        }
+
+        if (slot.MaximumBytes < minimumBytes)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD159",
+                $"Scoped coverage producer '{producer.Id}' receipt slot maximumBytes is {slot.MaximumBytes}; the minimum for its declaration is {minimumBytes}.",
+                $"Set maximumBytes to at least {minimumBytes}.");
+        }
+
+        if (profile.Scope != EvidenceProfileScope.Targeted)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD160",
+                $"Scoped coverage producer '{producer.Id}' is in profile '{profile.Id}' with scope '{profile.Scope}'; a scoped claim is available only in a Targeted profile.",
+                "Move the producer to a Targeted profile; a release profile needs a repository-wide coverage producer with coverageGate.");
+        }
+
+        for (var left = 0; left < sources.Count; left++)
+        {
+            for (var right = left + 1; right < sources.Count; right++)
+            {
+                if (!string.Equals(sources[left].Assembly, sources[right].Assembly, StringComparison.Ordinal)
+                    && MayOverlap(sources[left].Pattern, sources[right].Pattern))
+                {
+                    throw new EvidencePlanningException(
+                        "ASEVD161",
+                        $"Scoped coverage producer '{producer.Id}' has sources '{sources[left].Pattern}' ({sources[left].Assembly}) and '{sources[right].Pattern}' ({sources[right].Assembly}) that can match the same path with different assemblies.",
+                        "Give each assembly patterns under its own directory, so every in-scope path has exactly one declared assembly.");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns whether two validated input patterns can match one path. The check is conservative: patterns can overlap
+    /// unless their literal leading segments differ at some position, so it never misses an overlap but may report one
+    /// for patterns that differ only after their first wildcard segment.
+    /// </summary>
+    private static bool MayOverlap(string left, string right)
+    {
+        var leftSegments = left.Split('/');
+        var rightSegments = right.Split('/');
+        for (var index = 0; index < Math.Min(leftSegments.Length, rightSegments.Length); index++)
+        {
+            var leftSegment = leftSegments[index];
+            var rightSegment = rightSegments[index];
+            if (leftSegment.Contains('*') || rightSegment.Contains('*'))
+            {
+                return true;
+            }
+
+            if (!string.Equals(leftSegment, rightSegment, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        // The shorter pattern is all literal and a prefix of the longer one, so it matches exactly one path. The longer
+        // pattern can match that path only when every extra segment is '**', which may match zero segments.
+        var longer = leftSegments.Length >= rightSegments.Length ? leftSegments : rightSegments;
+        var shorterLength = Math.Min(leftSegments.Length, rightSegments.Length);
+        return longer.Skip(shorterLength).All(static segment => segment == "**");
+    }
+
+    private static bool IsAssemblyName(string? value) =>
+        !string.IsNullOrEmpty(value)
+        && value.Length <= EvidenceScopedCoverageContract.MaximumAssemblyNameLength
+        && value.All(static character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-');
 
     private static bool IsSafePathSegment(string value)
     {

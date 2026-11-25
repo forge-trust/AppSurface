@@ -8,7 +8,7 @@ using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
-public sealed class CoverageEvidenceProducerTests
+public sealed partial class CoverageEvidenceProducerTests
 {
     [Fact]
     public async Task RunAsync_ShouldRejectAnUnsupportedExecutionResultFormatBeforeStartingTheCore()

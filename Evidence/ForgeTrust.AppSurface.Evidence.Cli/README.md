@@ -29,12 +29,12 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 | `init --sample` | Creates a marked, non-overwriting policy, host skeleton, and local README. `--force` may replace only previously marked starter files. |
 | `doctor` | Resolves policy and reports policy, diff, Docker, browser, and release-envelope prerequisites without starting anything. |
 | `explain` | Writes the resolved plan and a human-readable summary without running producers. |
-| `run` | Runs selected built-in `coverage` and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. It first deletes the earlier manifest, summary and the selected `test` producers' artifact directories, so a cancelled rerun cannot leave an old passing manifest behind. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
+| `run` | Runs selected built-in `coverage`, [scoped coverage](#scoped-patch-coverage) and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. It first deletes the earlier manifest, summary and the selected `test` and scoped coverage producers' artifact directories, so a cancelled rerun cannot leave an old passing manifest or receipt behind. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
 | `verify` | Recomputes binding and digest verification and checks every manifest-listed artifact on disk, without running any producer. See [Verifying evidence](#verifying-evidence). |
 
 ## Incomplete profiles are not complete evidence
 
-An intentionally selected `no-evidence` profile may close a gate. A skipped test project, unavailable browser, missing Docker runtime, or unsupported producer cannot. A filtered test suite cannot close a coverage assertion; it can close the [`test` assertion](#test-producer-preview) of a producer that names its filter in the plan. `run` returns a failing command and a manifest with `ClaimKind.None` for those cases, preserving the diagnostic and next action in `evidence-summary.json`.
+An intentionally selected `no-evidence` profile may close a gate. A skipped test project, unavailable browser, missing Docker runtime, or unsupported producer cannot. A filtered test suite cannot close a repository-wide coverage assertion; it can close the [`test` assertion](#test-producer-preview) of a producer that names its filter in the plan, or the [scoped patch coverage assertion](#scoped-patch-coverage) of a producer that names its projects and sources in the plan. `run` returns a failing command and a manifest with `ClaimKind.None` for those cases, preserving the diagnostic and next action in `evidence-summary.json`.
 
 For an `ObservationOnly` claim, the `next` field in `evidence-summary.json` identifies the result as informational and directs gate consumers to run fresh evidence without `--observation-only`.
 
@@ -301,7 +301,93 @@ Tested on 2026-11-22 with released CLI 0.2.0-preview.14 against a CLI that knows
 - `run` refuses to start with `ASEVD216` when the `artifacts` directory or a `test` producer's directory under it is a symbolic link, because retiring earlier outputs would delete through the link. It checks every such directory before it deletes anything. It does not check the `--output` directory itself or its parents. Only `test` producers' artifact directories are retired.
 - The receipt slot must use `relativeRoot` `test`, and its `maximumBytes` must be at least 4096 plus, per project, 512 plus six bytes per character of the project path. The planner checks both (`ASEVD146`, `ASEVD147`) so a run never finishes its tests and then fails to write the receipt.
 
-Profiles that select the preview test producer require a fresh CLI run. Omit `--reuse` for these profiles.
+Profiles that select the preview test producer require a fresh CLI run (`ASEVD219`). Omit `--reuse` for these profiles.
+
+## Scoped patch coverage
+
+A `coverage` producer that declares a `coverageScope` block runs only the test projects it names and closes one assertion, `appsurface/coverage/patch-scoped@1`, when the changed lines under its source patterns meet its patch thresholds, counting only the coverage of the assembly each source entry declares. It never closes a repository-wide coverage assertion and never evaluates overall thresholds.
+
+**When to use it.** Use it for a pull request that touches one package, where running every test project in the solution costs more than the evidence is worth, and keep a repository-wide gate somewhere else, such as on the default branch. Use an ordinary `coverage` producer with `coverageGate` when overall coverage is the evidence, and the [`test` producer](#test-producer-preview) when the evidence is that selected tests ran with no coverage claim.
+
+```json
+{
+  "id": "config-patch-coverage",
+  "kind": "coverage",
+  "version": "1.0.0",
+  "requiredResources": [],
+  "assertionIds": ["appsurface/coverage/patch-scoped@1"],
+  "artifactSlots": [
+    { "logicalName": "scoped-coverage-receipt", "relativeRoot": "coverage-scope", "mediaType": "application/json", "required": true, "maximumBytes": 262144 }
+  ],
+  "timeoutSeconds": 900,
+  "coverageScope": {
+    "projects": ["Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj"],
+    "sources": [
+      { "pattern": "Config/ForgeTrust.AppSurface.Config/**", "assembly": "ForgeTrust.AppSurface.Config" }
+    ],
+    "minPatchLinePercent": 95,
+    "minPatchBranchPercent": 85,
+    "patchLineMode": "codecov",
+    "tolerancePercent": 0.5
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `projects` | 1 to 32 unique repository-relative test project paths. Only these run. They are resolved against the repository root, not the current directory. |
+| `sources` | 1 to 32 entries. `pattern` uses the producer `inputs` grammar: `*` inside a segment, `**` as a whole segment. `assembly` is the Cobertura `package` name, which is the compiled assembly name. |
+| `minPatchLinePercent`, `minPatchBranchPercent` | At least one is required, each 0 to 100. |
+| `patchLineMode`, `tolerancePercent` | As in `coverageGate`: `measurable` or `codecov`, and a grace margin subtracted from each threshold. |
+
+The planner enforces the shape with `ASEVD150` to `ASEVD161`, listed in the [planner diagnostics](../ForgeTrust.AppSurface.Evidence.Planner/README.md#scoped-coverage-diagnostics). `coverageGate` must be absent, the profile must be `Targeted`, and the producer id must be one safe path segment.
+
+### How a scoped run is scored
+
+`run` requires `--solution` and `--diff-file`, runs the declared projects once into `coverage-scoped/<producer id>`, and reads the merged report by package. Each added line under a source pattern is scored only from rows of that entry's assembly:
+
+| Line | Result |
+| --- | --- |
+| The declared assembly has a row for the file and line | Covered or uncovered. `patchLineMode` decides partial branches. |
+| No row, and the assembly is in the report | Not applicable, for example an interface or a comment, unless another package has rows for the file. |
+| The declared assembly has no row for the file, but another package does | Mismatched. The run fails with `AssemblyMismatch`. |
+| No row, and the assembly is not in the report | Unknown. The run fails before scoring. |
+| The path matches no source pattern | Counted as out of scope, never scored. |
+
+The verdict is the first that applies:
+
+| Reason | Outcome | When |
+| --- | --- | --- |
+| `ScopeAssemblyNotInstrumented` | `Failed` | A declared assembly is missing from the merged report, whether or not the diff touched it. |
+| `AssemblyMismatch` | `Failed` | A changed in-scope file has rows only under a package other than its declared assembly, so the declared name is wrong for it. The file is listed in `unknownFiles`. |
+| `NothingInScope` | `Failed` | No changed file, by new or previous path, is under a source pattern or inside a declared test project's directory. |
+| `BelowThreshold` | `Failed` | A declared metric with at least one measurable point is under its threshold after tolerance. |
+| `Complete` | `Passed` | Otherwise. A metric with nothing to measure is `notApplicable`, never 100%. |
+| `RunFailed` | `Failed` | A declared test, the merge or the report step failed. |
+| `SolutionUnavailable`, `DiffUnavailable` | `Unavailable` | `--solution` or `--diff-file` is missing. |
+| `DeadlineExceeded` | `TimedOut` | `timeoutSeconds` expired. |
+
+A tests-only change inside a declared test project passes with both metrics `notApplicable`. A change that touches the scope and other files is scored on its in-scope lines, and the receipt counts the rest.
+
+### Scoped receipt
+
+`artifacts/<producer id>/coverage-scope/scoped-coverage-receipt.json`, schema version 1, is written for every reason, including a timeout. It holds totals only: `reason`, `overallGateEvaluated: false`, the declared `projects`, each source with `assemblyReported` (`true`, `false`, or `null` when no report was read), the `thresholds`, the `line` and `branch` metrics (`outcome`, `reason`, `changedLines`, `measurable`, `covered`, `percent`), `inScopeFiles`, `outOfScopeFiles`, and `unknownFiles` (changed files whose assembly was missing or mismatched), up to 50 paths of at most 512 characters with an `unknownFilesTruncated` flag. Per-line detail is in `coverage-scoped/<producer id>/coverage-patch-targets.json` and `.md`, which the manifest diagnostic names. The planner derives the smallest allowed slot `maximumBytes` from the declaration (`ASEVD159`), so a run never finishes its tests and then fails to write the receipt.
+
+`explain` lists each scoped producer's projects, sources and thresholds, and `evidence-summary.json` carries them under `scopedCoverageProducers`.
+
+### Scoped coverage pitfalls
+
+- A scoped pass says nothing about overall coverage or about changed files outside `sources`. Without an unconditional repository-wide gate, overall coverage can erode one scoped pull request at a time.
+- A line covered only by a test project that is not declared counts as uncovered. This fails closed and usually means the project list is incomplete.
+- A source file compiled into two assemblies is scored from the declared assembly only. Hits from the other assembly do not count.
+- The assembly name must match the Cobertura package name. A project that overrides `AssemblyName` needs that name declared. A name that is missing from the report fails with `ScopeAssemblyNotInstrumented`; a name that is in the report but wrong for a changed file fails with `AssemblyMismatch` when another package reports that file. A wrong name is not caught for a changed file that no package reports, such as an interface.
+- A file excluded from coverage by `[ExcludeFromCodeCoverage]` or a collector filter has no rows and is reported as not applicable. The repository-wide patch gate has the same gap.
+- Routing is not checked by the planner. A policy rule broader than the producer's sources, such as `Config/**` for a producer that answers for `Config/ForgeTrust.AppSurface.Config/**`, lets a change elsewhere under `Config/` reach the scoped producer, which then fails with `NothingInScope` or scores only part of the change. Add a policy test that every rule selecting a scoped profile matches only paths under its sources or declared test project directories.
+- The supplied patch is not checked against the checkout that was measured, as with every coverage claim today.
+- If a host enforces `timeoutSeconds` before the producer's own handler runs, the receipt is missing and the manifest is `Invalid`, which is never gate-eligible.
+- The run also writes the ordinary `coverage-gate.json` and `.md` with zero overall thresholds, only so the patch-targets files exist. Read the scoped receipt, not that gate result. If the merged report has no valid lines or branches at all, that gate step fails and the run reports `RunFailed`.
+- `--reuse` is refused for a profile with a scoped producer (`ASEVD220`). Run it fresh.
+- An older CLI drops the `coverageScope` block while reading the policy, plans the producer as an ordinary coverage producer, and reports it `Invalid` at `run` because it has no `coverageGate`. Upgrade every CLI that runs `run` or `verify` before adding a scoped producer to a shared policy.
 
 ## Verifying evidence
 
@@ -328,7 +414,7 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <
 
 ## Pitfalls
 
-- Do not run a repository-wide coverage gate after intentionally filtering out required tests and expect a complete claim. A filtered suite cannot close a coverage assertion; it can close only the `test` assertion of a producer whose filter is declared in the policy and bound into the plan.
+- Do not run a repository-wide coverage gate after intentionally filtering out required tests and expect a complete claim. A filtered suite cannot close a repository-wide coverage assertion. It can close the `test` assertion of a producer whose filter is declared in the policy, or the [scoped patch coverage](#scoped-patch-coverage) assertion of a producer whose projects and sources are declared in the policy, both bound into the plan.
 - Do not treat `doctor`'s `ready_with_external_prerequisites` status as a pass; it describes what the consumer CI image must provide.
 - Do not set `--observation-only` on a job that must satisfy a PR or release gate.
 - Do not hand-edit generated artifacts; use `verify`.

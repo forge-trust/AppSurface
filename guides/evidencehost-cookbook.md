@@ -52,6 +52,24 @@ The selected coverage producer runs the existing `coverage gate` evaluator with 
 
 If CI intentionally selects only part of the test suite, call that a targeted observation or create a policy profile whose declared obligations match that selection. Do not run a repository-wide threshold and call the outcome “full coverage.”
 
+## Scoped patch coverage for one package
+
+When a pull request touches one package, running every test project for coverage can cost far more than the evidence is worth. A [scoped coverage producer](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#scoped-patch-coverage) runs only the test projects you declare and scores only the changed lines under the source patterns you declare, from the assemblies you name.
+
+1. List the test projects that cover the package and the package's assembly name, as it appears in the Cobertura `package` element.
+2. Add a `Targeted` profile with the scoped producer and an obligation for `appsurface/coverage/patch-scoped@1`. Keep any other producers the path needs, such as package checks.
+3. Route only paths under the declared sources and test project directories to that profile, and add a policy test that says so. The planner does not check routing.
+4. Keep the repository-wide coverage producer on an unconditional route, such as every push to the default branch. A scoped claim never looks at overall coverage.
+5. Run it once and read the receipt under `artifacts/<producer id>/coverage-scope/`:
+
+   ```bash
+   appsurface evidence explain --path src/Orders/SubmitOrder.cs
+   appsurface evidence run --diff-file artifacts/changed.patch --solution App.slnx
+   appsurface evidence verify TestResults/evidence/evidence-manifest.json
+   ```
+
+Pitfall: a line covered only by a test project you did not declare counts as uncovered, and a declared assembly missing from the report fails the run. Both are deliberate; they mean the project list is incomplete.
+
 ## Tests-only evidence for tooling paths
 
 Some paths have no production code to cover: CI workflows, build scripts, release tooling. A coverage number for them is theater. The truthful evidence is that the tests which exercise them all ran and passed. The preview [`test` producer](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#test-producer-preview) records exactly that and makes no coverage claim.
