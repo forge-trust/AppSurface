@@ -39,6 +39,8 @@ internal static class Program
                 [--repository <checkout>] [--output <fresh-directory>] [--dotnet <absolute-host>]
                 [--policy <policy.json>] [--scope all|native|coverage|packages]
                 Local includes committed, staged, unstaged and untracked changes; only selected producers run.
+                Default local results are compact archives under TestResults/repository-evidence/local in the worktree.
+                Use --output with a fresh directory for complete unpacked results.
 
                 CI diff: --operation collect --repository <checkout> --event-file <event.json>
                 --event-name pull_request|push|workflow_dispatch --workflow-sha <sha> --output <fresh-directory>

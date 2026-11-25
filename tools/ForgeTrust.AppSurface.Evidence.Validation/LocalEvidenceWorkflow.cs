@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -11,7 +12,7 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 /// <remarks>
 /// No results are reused. The merge-base diff, index, working tree and untracked files are collected by
 /// <see cref="RepositoryGitChanges"/>. Source drift prevents gate success. Output belongs outside the
-/// source inventory (the default is ignored TestResults); package and producer logs remain in that output.
+/// source inventory. The default local output retains a compact result under ignored TestResults.
 /// </remarks>
 internal sealed class LocalEvidenceWorkflow
 {
@@ -41,16 +42,26 @@ internal sealed class LocalEvidenceWorkflow
         var operation = options.GetValueOrDefault("--operation");
         if (operation is not ("local" or "local-plan")) throw new ArgumentException("Expected local or local-plan.");
         var repository = Path.GetFullPath(options.GetValueOrDefault("--repository", Directory.GetCurrentDirectory()));
-        var policy = Path.GetFullPath(options.GetValueOrDefault("--policy", Path.Join(repository, ".github/evidence.policy.json")));
+        if (options.TryGetValue("--output", out var explicitOutput))
+            return await RunFreshAsync(options, repository, operation, Path.GetFullPath(explicitOutput), null, cancellationToken);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return await LocalEvidenceOutput.RunAsync(repository, operation,
+            (output, cache) => RunFreshAsync(options, repository, operation, output, cache, cancellationToken));
+    }
+
+    private async Task<int> RunFreshAsync(IReadOnlyDictionary<string, string> options, string repository, string operation,
+        string output, string? packageRestoreCache, CancellationToken cancellationToken)
+    {
+        var policy = Path.GetFullPath(options.GetValueOrDefault("--policy", PathUtils.PathUnder(repository, ".github", "evidence.policy.json")));
         var baseRevision = options.GetValueOrDefault("--base", "origin/main");
-        var output = Path.GetFullPath(options.GetValueOrDefault("--output",
-            Path.Join(repository, "TestResults", "repository-evidence", Guid.NewGuid().ToString("N"))));
-        if (Directory.Exists(output) || File.Exists(output)) throw new ArgumentException("Evidence output must be fresh.");
+        if (Path.Exists(output)) throw new ArgumentException("Evidence output must be fresh.");
         var git = new RepositoryGitChanges();
         var changes = await git.CollectLocalAsync(repository, baseRevision, cancellationToken);
         var policyDigest = EvidenceDigest.Sha256(await File.ReadAllBytesAsync(policy, cancellationToken));
         Directory.CreateDirectory(output);
-        Console.WriteLine("Local evidence output: " + output);
+        if (packageRestoreCache is null)
+            Console.WriteLine("Local evidence output: " + output);
         var paths = Path.Join(output, "changed-paths.json");
         await File.WriteAllBytesAsync(paths, EvidenceCanonicalJson.Serialize(changes.Paths), cancellationToken);
         await File.WriteAllTextAsync(Path.Join(output, "source-state.json"), JsonSerializer.Serialize(changes, Program.JsonOptions), cancellationToken);
@@ -127,7 +138,7 @@ internal sealed class LocalEvidenceWorkflow
         }
         var runExitCode = _workflow is null
             ? await RepositoryEvidenceWorkflow.RunAsync(common, cancellationToken,
-                token => RequireUnchangedAsync(git, repository, changes, policy, policyDigest, token))
+                token => RequireUnchangedAsync(git, repository, changes, policy, policyDigest, token), packageRestoreCache)
             : await _workflow(common, cancellationToken);
         ValidationProof.Require(runExitCode == 0, "local evidence execution");
         var manifestPath = Path.Join(proof, "evidence-manifest.json");

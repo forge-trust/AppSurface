@@ -1,0 +1,2 @@
+<!-- appsurface:unreleased-entry section="included" -->
+- **Keep local validation results in one folder per worktree.** The [repository validator](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) keeps the latest successful proof and failure diagnostics in separate compressed archives. Each run still validates current inputs in fresh scratch. Pass an explicit fresh `--output` path when you need the full unpacked run.

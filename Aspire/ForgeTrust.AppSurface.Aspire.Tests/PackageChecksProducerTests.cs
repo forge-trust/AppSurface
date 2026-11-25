@@ -21,13 +21,18 @@ public sealed class PackageChecksProducerTests
     }
     private static readonly string[] Assertions = ["package/manifest@1", "package/generated-docs@1", "package/archives-and-consumers@1"];
 
-    [Fact]
-    public async Task ProduceAsync_RunsOnlyThreePackageChecksAndRetainsBoundedProofs()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProduceAsync_RunsOnlyThreePackageChecksAndRetainsBoundedProofs(bool managedLocal)
     {
         using var root = new TemporaryDirectory("package-checks-tests-");
         var output = TestPathUtils.PathUnder(root.FullName, "evidence");
         Directory.CreateDirectory(output);
-        var settings = Settings(root.FullName, output);
+        var cache = managedLocal
+            ? TestPathUtils.PathUnder(root.FullName, "package-restore")
+            : TestPathUtils.PathUnder(output, "package-checks", "nuget-packages");
+        var settings = Settings(root.FullName, output) with { PackageRestoreCache = managedLocal ? cache : null };
         var requests = new List<EvidenceCommandRequest>();
         var producer = new PackageChecksProducer(settings, async (request, _) =>
         {
@@ -57,7 +62,7 @@ public sealed class PackageChecksProducerTests
         Assert.All(requests, request =>
         {
             Assert.Equal(Path.GetFullPath(root.FullName), request.WorkingDirectory);
-            Assert.StartsWith(TestPathUtils.PathUnder(output, "package-checks"), request.Environment["NUGET_PACKAGES"], StringComparison.Ordinal);
+            Assert.Equal(cache, request.Environment["NUGET_PACKAGES"]);
             Assert.Equal(settings.DotnetPath, request.Environment["DOTNET_HOST_PATH"]);
             Assert.StartsWith(Path.GetDirectoryName(settings.DotnetPath) + Path.PathSeparator, request.Environment["PATH"], StringComparison.Ordinal);
             Assert.DoesNotContain("restore", request.Arguments);

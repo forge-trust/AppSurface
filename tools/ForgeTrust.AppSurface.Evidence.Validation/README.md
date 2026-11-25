@@ -16,9 +16,22 @@ dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configura
 `local-plan` explains the selected profile, producers and obligations without packing or running tests.
 `local` executes that plan on the current OS and verifies its manifest and artifacts. Both default to the
 current checkout, `.github/evidence.policy.json`, and `--base origin/main`. Use `--base COMMIT_OR_REF` for
-another comparison, `--repository /absolute/checkout` from elsewhere, or `--output /absolute/fresh-output`
-to retain results in a chosen location. Default output is a fresh ignored directory beneath
-`TestResults/repository-evidence/`; each invocation prints its path. After building the tool once, invoke
+another comparison or `--repository /absolute/checkout` from elsewhere. The default uses
+`TestResults/repository-evidence/local/` in the selected worktree and prints the retained archive as
+`Local evidence output:`. Each invocation validates in fresh scratch. The command keeps separate
+archives for the most recent success, failure and cancellation (`latest.zip`, `latest-failure.zip`
+and `latest-cancelled.zip`). Planning uses the corresponding `latest-plan` names. An error before
+output exists leaves the previous archives available. Runs using the managed output are serialized
+per worktree by the SDK's file locking, which must remain enabled.
+The archives keep the source identity, plan, manifest and its files, validation logs and coverage
+diagnostics. Extract an archive to verify it using the same relative layout. Scratch is removed
+after successful retention and known cleanup. When cleanup cannot be confirmed, the printed scratch
+path remains available for inspection. Remove that scratch once its processes have settled. The private `package-restore/` cache keeps the
+package-gate build warm and its worktree restore metadata usable between runs. Installed-consumer and
+cold-cache proofs still have their own isolated restores and feeds.
+
+Use `--output /absolute/fresh-output` when you need a complete, unpacked run for a specific investigation
+or a script that consumes the raw files. After building the tool once, invoke
 its DLL directly or use `dotnet run --no-build --no-restore` with the same configuration to avoid rebuilding
 the driver. Keep the driver current when changing evidence code.
 
