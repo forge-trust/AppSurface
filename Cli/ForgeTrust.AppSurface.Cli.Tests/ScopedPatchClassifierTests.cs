@@ -375,8 +375,8 @@ public sealed class ScopedPatchClassifierTests
     public async Task ReadPackageCoverageAsync_ShouldKeepPackagesApartAndListEmptyPackages()
     {
         using var directory = TestDirectory.Create();
-        var path = Path.Join(directory.Path, "coverage.cobertura.xml");
-        var absolute = Path.Join(directory.Path, "src", "Alpha", "Feature.cs");
+        var path = TestPathUtils.PathUnder(directory.Path, "coverage.cobertura.xml");
+        var absolute = TestPathUtils.PathUnder(directory.Path, "src", "Alpha", "Feature.cs");
         await File.WriteAllTextAsync(path, $"""
             <?xml version="1.0"?>
             <coverage line-rate="1" branch-rate="1">
@@ -423,8 +423,8 @@ public sealed class ScopedPatchClassifierTests
     public async Task ReadPackageCoverageAsync_ShouldReportMalformedXmlAndBadConditionsAsAscov006()
     {
         using var directory = TestDirectory.Create();
-        var malformed = Path.Join(directory.Path, "malformed.xml");
-        var badConditions = Path.Join(directory.Path, "conditions.xml");
+        var malformed = TestPathUtils.PathUnder(directory.Path, "malformed.xml");
+        var badConditions = TestPathUtils.PathUnder(directory.Path, "conditions.xml");
         await File.WriteAllTextAsync(malformed, "<coverage><packages>");
         await File.WriteAllTextAsync(badConditions, """<coverage><packages><package name="A"><classes><class filename="a.cs"><lines><line number="1" hits="1" condition-coverage="(3/2)" /></lines></class></classes></package></packages></coverage>""");
 
@@ -441,7 +441,7 @@ public sealed class ScopedPatchClassifierTests
     public async Task ReadPackageCoverageAsync_ShouldHonorCancellation()
     {
         using var directory = TestDirectory.Create();
-        var path = Path.Join(directory.Path, "coverage.xml");
+        var path = TestPathUtils.PathUnder(directory.Path, "coverage.xml");
         await File.WriteAllTextAsync(path, "<coverage />");
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();

@@ -27,14 +27,14 @@ public sealed class EvidenceRunScopedCoverageTests
         var verified = await fixture.VerifyAsync();
         Assert.Equal(EvidenceClaimKind.TargetedComplete, verified.ClaimKind);
         Assert.Equal(["config-patch"], verified.ClosedObligationIds);
-        Assert.True(File.Exists(Path.Join(fixture.Output, "coverage-scoped", ProducerId, "coverage.cobertura.xml")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(fixture.Output, "coverage-scoped", ProducerId, "coverage.cobertura.xml")));
     }
 
     [Fact]
     public async Task Run_ShouldRetireAnEarlierReceiptAndFailIncompleteWhenTheAssemblyIsMissing()
     {
         using var fixture = Fixture.Create();
-        var stale = Path.Join(fixture.Output, "artifacts", ProducerId, "stale.json");
+        var stale = TestPathUtils.PathUnder(fixture.Output, "artifacts", ProducerId, "stale.json");
         Directory.CreateDirectory(Path.GetDirectoryName(stale)!);
         await File.WriteAllTextAsync(stale, "{}");
 
@@ -65,7 +65,7 @@ public sealed class EvidenceRunScopedCoverageTests
         Assert.Contains($"  project {ProjectPath}", output, StringComparison.Ordinal);
         Assert.Contains("  source src/Alpha/** -> assembly Alpha", output, StringComparison.Ordinal);
         Assert.Contains("The repository-wide gate is not evaluated", output, StringComparison.Ordinal);
-        using var summary = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Output, "evidence-summary.json")));
+        using var summary = JsonDocument.Parse(File.ReadAllBytes(TestPathUtils.PathUnder(fixture.Output, "evidence-summary.json")));
         var producer = summary.RootElement.GetProperty("scopedCoverageProducers")[0];
         Assert.Equal(ProducerId, producer.GetProperty("id").GetString());
         Assert.Equal(ProjectPath, producer.GetProperty("projects")[0].GetString());
@@ -104,27 +104,27 @@ public sealed class EvidenceRunScopedCoverageTests
         {
             _directory = directory;
             Root = Path.GetFullPath(directory.Path);
-            Output = Path.Join(Root, "evidence");
-            PolicyPath = Path.Join(Root, "evidence.policy.json");
+            Output = TestPathUtils.PathUnder(Root, "evidence");
+            PolicyPath = TestPathUtils.PathUnder(Root, "evidence.policy.json");
             File.WriteAllBytes(PolicyPath, EvidenceCanonicalJson.Serialize(Policy()));
-            var project = Path.Join(Repository, ProjectPath);
+            var project = TestPathUtils.PathUnder(Repository, ProjectPath);
             Directory.CreateDirectory(Path.GetDirectoryName(project)!);
             File.WriteAllText(project, "<Project />");
-            File.WriteAllText(Path.Join(Repository, "sample.slnx"), "{}");
+            File.WriteAllText(TestPathUtils.PathUnder(Repository, "sample.slnx"), "{}");
             File.WriteAllText(DiffPath, $"diff --git a/{Changed} b/{Changed}\n--- a/{Changed}\n+++ b/{Changed}\n@@ -0,0 +1 @@\n+line\n");
         }
 
         public string Root { get; }
 
-        public string Repository => Path.Join(Root, "repo");
+        public string Repository => TestPathUtils.PathUnder(Root, "repo");
 
         public string Output { get; }
 
         public string PolicyPath { get; }
 
-        public string DiffPath => Path.Join(Root, "change.diff");
+        public string DiffPath => TestPathUtils.PathUnder(Root, "change.diff");
 
-        public string ReceiptPath => Path.Join(Output, "artifacts", ProducerId, ScopedCoverageReceipt.ReceiptRelativePath);
+        public string ReceiptPath => TestPathUtils.PathUnder(Output, "artifacts", ProducerId, ScopedCoverageReceipt.ReceiptRelativePath);
 
         public FakeInMemoryConsole Console { get; } = new();
 
@@ -146,7 +146,7 @@ public sealed class EvidenceRunScopedCoverageTests
             {
                 PolicyPath = PolicyPath,
                 DiffFile = DiffPath,
-                SolutionPath = Path.Join(Repository, "sample.slnx"),
+                SolutionPath = TestPathUtils.PathUnder(Repository, "sample.slnx"),
                 OutputDirectory = Output,
                 RepositoryRootResolver = () => Repository,
                 StepSummaryPathResolver = static () => null,
@@ -156,8 +156,8 @@ public sealed class EvidenceRunScopedCoverageTests
 
         public async Task<EvidenceManifest> VerifyAsync() =>
             (await new EvidenceCliWorkflow(new EvidencePlanner()).VerifyAsync(
-                Path.Join(Output, "evidence-plan.json"),
-                Path.Join(Output, "evidence-manifest.json"),
+                TestPathUtils.PathUnder(Output, "evidence-plan.json"),
+                TestPathUtils.PathUnder(Output, "evidence-manifest.json"),
                 CancellationToken.None)).Manifest;
 
         public void Dispose()

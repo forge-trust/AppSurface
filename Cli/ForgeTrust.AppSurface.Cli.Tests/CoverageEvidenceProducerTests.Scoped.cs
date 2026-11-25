@@ -33,9 +33,9 @@ public sealed partial class CoverageEvidenceProducerTests
         var artifact = Assert.Single(result.Artifacts!);
         Assert.Equal(ScopedCoverageReceipt.ReceiptRelativePath, artifact.RelativePath);
         var arguments = Assert.Single(fixture.Runner.TestArguments);
-        Assert.Contains(Path.GetFullPath(Path.Join(fixture.Root, ScopedProject)), arguments);
-        Assert.True(File.Exists(Path.Join(fixture.Output, "coverage-scoped", ScopedProducerId, "coverage-patch-targets.json")));
-        Assert.False(File.Exists(Path.Join(fixture.Output, "coverage", "coverage-gate.json")));
+        Assert.Contains(TestPathUtils.PathUnder(fixture.Root, ScopedProject), arguments);
+        Assert.True(File.Exists(TestPathUtils.PathUnder(fixture.Output, "coverage-scoped", ScopedProducerId, "coverage-patch-targets.json")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(fixture.Output, "coverage", "coverage-gate.json")));
         using var receipt = fixture.ReadReceipt();
         Assert.Equal("Complete", receipt.RootElement.GetProperty("reason").GetString());
         Assert.True(receipt.RootElement.GetProperty("sources")[0].GetProperty("assemblyReported").GetBoolean());
@@ -182,7 +182,7 @@ public sealed partial class CoverageEvidenceProducerTests
     {
         using var fixture = await ScopedFixture.CreateAsync(Cobertura(("Alpha", "src/Alpha/Feature.cs", 1, 1), ("Beta", "src/Beta/Other.cs", 1, 1)));
         Directory.CreateDirectory(fixture.ArtifactRoot);
-        await File.WriteAllTextAsync(Path.Join(fixture.ArtifactRoot, EvidenceScopedCoverageContract.ReceiptRelativeRoot), "a file where the receipt directory belongs");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture.ArtifactRoot, EvidenceScopedCoverageContract.ReceiptRelativeRoot), "a file where the receipt directory belongs");
 
         var result = await fixture.RunAsync(Diff("src/Alpha/Feature.cs", 1));
 
@@ -281,13 +281,13 @@ public sealed partial class CoverageEvidenceProducerTests
 
         public string Root => _directory.Path;
 
-        public string Solution => Path.Join(Root, "sample.slnx");
+        public string Solution => TestPathUtils.PathUnder(Root, "sample.slnx");
 
-        public string Output => Path.Join(Root, "output");
+        public string Output => TestPathUtils.PathUnder(Root, "output");
 
-        public string ArtifactRoot => Path.Join(Output, "artifacts", ScopedProducerId);
+        public string ArtifactRoot => TestPathUtils.PathUnder(Output, "artifacts", ScopedProducerId);
 
-        public string ReceiptPath => Path.Join(ArtifactRoot, ScopedCoverageReceipt.ReceiptRelativePath);
+        public string ReceiptPath => TestPathUtils.PathUnder(ArtifactRoot, ScopedCoverageReceipt.ReceiptRelativePath);
 
         public CoverageEvidenceProducer Producer { get; }
 
@@ -303,8 +303,8 @@ public sealed partial class CoverageEvidenceProducerTests
             int timeoutSeconds = 60)
         {
             var directory = TestDirectory.Create();
-            await File.WriteAllTextAsync(Path.Join(directory.Path, "sample.slnx"), "{}");
-            var project = Path.Join(directory.Path, ScopedProject);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(directory.Path, "sample.slnx"), "{}");
+            var project = TestPathUtils.PathUnder(directory.Path, ScopedProject);
             Directory.CreateDirectory(Path.GetDirectoryName(project)!);
             await File.WriteAllTextAsync(project, "<Project />");
             var testRunner = new ScopedTestRunner(testExitCode);
@@ -358,9 +358,9 @@ public sealed partial class CoverageEvidenceProducerTests
                 case "test":
                     TestArguments.Add(request.Arguments);
                     var resultsIndex = request.Arguments.ToList().FindIndex(static argument => argument == "--results-directory");
-                    var collector = Path.Join(request.Arguments[resultsIndex + 1], "collector");
+                    var collector = TestPathUtils.PathUnder(request.Arguments[resultsIndex + 1], "collector");
                     Directory.CreateDirectory(collector);
-                    await File.WriteAllTextAsync(Path.Join(collector, "coverage.cobertura.xml"), "<coverage line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>", cancellationToken);
+                    await File.WriteAllTextAsync(TestPathUtils.PathUnder(collector, "coverage.cobertura.xml"), "<coverage line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>", cancellationToken);
                     if (request.OutputFile is not null)
                     {
                         await File.WriteAllTextAsync(request.OutputFile, "coverage test output", cancellationToken);
@@ -378,8 +378,8 @@ public sealed partial class CoverageEvidenceProducerTests
         public async Task<CoverageRunMergeResult> MergeAsync(IReadOnlyList<string> coverageFiles, string outputDirectory, CancellationToken cancellationToken)
         {
             Directory.CreateDirectory(outputDirectory);
-            var coberturaPath = Path.Join(outputDirectory, "Cobertura.xml");
-            var summaryPath = Path.Join(outputDirectory, "Summary.txt");
+            var coberturaPath = TestPathUtils.PathUnder(outputDirectory, "Cobertura.xml");
+            var summaryPath = TestPathUtils.PathUnder(outputDirectory, "Summary.txt");
             await File.WriteAllTextAsync(coberturaPath, cobertura, cancellationToken);
             await File.WriteAllTextAsync(summaryPath, "coverage summary", cancellationToken);
             return new CoverageRunMergeResult(0, coberturaPath, summaryPath);
