@@ -133,6 +133,23 @@ neither a successful run nor publication authority; use the [package guide](../.
 
 ## Tailwind artifact provenance (#798)
 
+### Exact artifact transport (#910)
+
+The protected, nonpublishing Tailwind rehearsal uses the internal `verify-tailwind-evidence --mode artifact-transport` gate to verify one current-attempt producer archive by exact artifact ID before content validation. Start with the canonical [receipt, command, trust boundary, limits, refusal-code anchors and recovery reference](../../docs/tailwind-artifact-provenance.md#exact-github-actions-artifact-transport-910); this private maintainer mode adds no public package API or dependency.
+
+Internal content callers use `TailwindProducerBindingRequest`; only the CLI maps `TailwindCommandOptions`, and the transport adapter passes typed values directly. Source validation and transport output exclusion share the immutable `TailwindSourceIdentity` input policy. The canonical [internal boundary and default rules](../../docs/tailwind-artifact-provenance.md#command-and-internal-boundary) explain the request shape, source-first ordering, continuation placeholders and path matching constraints. Use the shared policy when adding release inputs; do not duplicate its paths in a new guard.
+
+The mode requires all twelve documented options, plus `GH_TOKEN` supplied by the protected workflow. Never use a local token as evidence of hosted permissions. The trusted receipt is the named successful producer job output; repository/run/current attempt/source and artifact ID are independently supplied by guarded workflow context/output. The receipt is unsigned, and receipt/API/upload digest agreement plus recomputed archive bytes is consistency inside the producer trust boundary, not an independent signature or authentication. The adapter invokes the real source-stamp and Tailwind subject/manifest/package validators. Its HTTP handler, clock, source identity and narrow filesystem seams are internal test seams only.
+
+For a prepared .NET 10 checkout, the credential-free acceptance card command is:
+
+```bash
+dotnet restore tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj --locked-mode
+dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj -c Release --no-restore --filter 'FullyQualifiedName~TailwindArtifactTransportTests.AcceptanceCard'
+```
+
+Expect exactly three passing cases: matching evidence succeeds and writes the final marker; an attempt-1 receipt under simulated current attempt 2 fails before HTTP; and a changed archive byte fails before extraction. These controlled fixtures do not prove hosted `GITHUB_TOKEN` access, GitHub/storage behavior or source authority. A real protected hosted rehearsal remains required. Configure the work and bundle output on the same volume; installation uses `Directory.Move` without copy fallback. On `artifact-attempt-mismatch`, a failed-jobs-only rerun may retain stale producer outputs; recovery requires a separately authorized full run so the producer emits a receipt for the new current attempt. Never edit or replace the candidate under an existing identity. See the [recovery guidance](../../docs/tailwind-artifact-provenance.md#artifact-attempt-mismatch).
+
 The reusable [native evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/tailwind-native-host-evidence.yml) selects the frozen inventory through `artifact_manifest_file`. Its optional string default is `package-artifact-manifest.json` for manual rehearsal; both release publishers pass `package-artifact-manifest.unapproved.json`. Only those two basenames are accepted, and all native proof, mutation and aggregate commands use the selected file without discovery or aliasing. The [provenance reference](../../docs/tailwind-artifact-provenance.md#shared-bundle-and-producer-identity) explains the stage boundary: native proof validates the original manifest bytes; protected publication still validates the separate PostgreSQL candidate receipt before consuming the byte-identical approved copy.
 
 The approved [#798 design](../../docs/designs/issue-798-tailwind-artifact-provenance.md) and [implementation plan](../../docs/plans/issue-798-tailwind-artifact-provenance.md) define a release proof binding native Tailwind consumer tests to the exact package bundle passed to NuGet. See the canonical [API and operator reference](../../docs/tailwind-artifact-provenance.md) for the implemented CLI flags, evidence schemas, and release workflow.

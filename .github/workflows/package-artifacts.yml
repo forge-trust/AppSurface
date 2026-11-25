@@ -36,6 +36,7 @@ jobs:
     outputs:
       producer_artifact_id: ${{ steps.upload-package-artifacts.outputs.artifact-id }}
       expected_subject_sha256: ${{ steps.validate-producer-binding.outputs.expected_subject_sha256 }}
+      producer_receipt: ${{ steps.emit-producer-receipt.outputs.producer_receipt }}
       package_version: ${{ steps.producer-binding.outputs.package_version }}
       release_rehearsal: ${{ steps.producer-binding.outputs.release_rehearsal }}
     steps:
@@ -196,6 +197,58 @@ jobs:
              (.producerAttempt | type == "string" and test("^[1-9][0-9]*$"))' "$binding" >/dev/null
           echo "expected_subject_sha256=$(jq -r '.subjectSha256' "$binding")" >> "$GITHUB_OUTPUT"
 
+      - name: Emit protected producer receipt
+        id: emit-producer-receipt
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}
+        env:
+          ARTIFACT_ID: ${{ steps.upload-package-artifacts.outputs.artifact-id }}
+          ARCHIVE_DIGEST: ${{ steps.upload-package-artifacts.outputs.artifact-digest }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid upload output: artifact-id." >&2
+            exit 1
+          fi
+          if [[ ! "$ARCHIVE_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Invalid upload output: artifact-digest." >&2
+            exit 1
+          fi
+          if [[ ! "$REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid protected context: repository_id." >&2
+            exit 1
+          fi
+          if [[ ! "$RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid protected context: run_id." >&2
+            exit 1
+          fi
+          if [[ ! "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid protected context: run_attempt." >&2
+            exit 1
+          fi
+          if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid protected context: source_commit." >&2
+            exit 1
+          fi
+          if [[ "$EVENT_NAME" != workflow_dispatch ]]; then
+            echo "::error::Invalid protected context: event_name." >&2
+            exit 1
+          fi
+          receipt="$(jq -cn \
+            --arg repository "$REPOSITORY" --arg repositoryId "$REPOSITORY_ID" \
+            --arg workflowPath .github/workflows/package-artifacts.yml --arg event "$EVENT_NAME" \
+            --arg producerJob package-artifacts --arg runId "$RUN_ID" --arg runAttempt "$RUN_ATTEMPT" \
+            --arg sourceCommit "$SOURCE_COMMIT" --arg artifactId "$ARTIFACT_ID" \
+            --arg archiveSha256 "sha256:$ARCHIVE_DIGEST" \
+            '{schema:"appsurface-github-actions-producer-receipt-v1",repository:$repository,repositoryId:$repositoryId,workflowPath:$workflowPath,event:$event,producerJob:$producerJob,runId:$runId,runAttempt:$runAttempt,sourceCommit:$sourceCommit,artifactId:$artifactId,archiveSha256:$archiveSha256}')"
+          echo "producer_receipt=$receipt" >> "$GITHUB_OUTPUT"
+
   tailwind-native-rehearsal:
     name: Manual native evidence rehearsal
     needs: package-artifacts
@@ -226,7 +279,7 @@ jobs:
   tailwind-publish-rehearsal:
     name: Nonpublishing aggregate and publisher replay rehearsal
     needs: [package-artifacts, tailwind-native-rehearsal, docs-native-rehearsal, durable-template-evidence]
-    if: ${{ needs.package-artifacts.outputs.release_rehearsal == 'true' }}
+    if: ${{ needs.package-artifacts.outputs.release_rehearsal == 'true' && needs.package-artifacts.result == 'success' && needs.tailwind-native-rehearsal.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -234,6 +287,7 @@ jobs:
       contents: read
     env:
       SOURCE_COMMIT: ${{ github.sha }}
+      REHEARSAL_PRODUCER_SUBDIRECTORY: ${{ github.ref == 'refs/heads/main' && 'verified-producer' || 'rehearsal-producer' }}
       PRODUCER_ARTIFACT_ID: ${{ needs.package-artifacts.outputs.producer_artifact_id }}
       EXPECTED_SUBJECT_SHA256: ${{ needs.package-artifacts.outputs.expected_subject_sha256 }}
       AGGREGATE_ARTIFACT_ID: ${{ needs.tailwind-native-rehearsal.outputs.aggregate_artifact_id }}
@@ -249,15 +303,11 @@ jobs:
           ref: ${{ env.SOURCE_COMMIT }}
           persist-credentials: false
       - name: Download frozen producer by exact ID
+        if: ${{ github.ref != 'refs/heads/main' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ env.PRODUCER_ARTIFACT_ID }}
           path: ${{ runner.temp }}/rehearsal-producer
-      - name: Download aggregate by exact ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ env.AGGREGATE_ARTIFACT_ID }}
-          path: ${{ runner.temp }}/rehearsal-aggregate
       - name: Download separate Docs proof by immutable ID
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -281,10 +331,69 @@ jobs:
         env:
           SOURCE_REVISION_ID: ${{ env.SOURCE_COMMIT }}
         run: dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_REVISION_ID"
+      - name: Verify and extract producer artifact by exact ID
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface' }}
+        env:
+          PRODUCER_RECEIPT: ${{ needs.package-artifacts.outputs.producer_receipt }}
+          PRODUCER_ARTIFACT_ID: ${{ needs.package-artifacts.outputs.producer_artifact_id }}
+          EXPECTED_SUBJECT_SHA256: ${{ needs.package-artifacts.outputs.expected_subject_sha256 }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          PRODUCER_RUN_ID: ${{ github.run_id }}
+          CURRENT_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORK_DIRECTORY: ${{ runner.temp }}/artifact-transport-work
+          ARTIFACTS_OUTPUT: ${{ runner.temp }}/verified-producer
+          REPORT_DIRECTORY: ${{ runner.temp }}/artifact-transport-report
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCER_RECEIPT"
+          receipt_directory="$RUNNER_TEMP/producer-receipt"
+          mkdir "$receipt_directory"
+          receipt="$receipt_directory/receipt.json"
+          printf '%s\n' "$PRODUCER_RECEIPT" > "$receipt"
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
+            --mode artifact-transport --repo-root "$GITHUB_WORKSPACE" \
+            --repository "$REPOSITORY" --repository-id "$REPOSITORY_ID" \
+            --producer-run-id "$PRODUCER_RUN_ID" --producer-attempt "$CURRENT_ATTEMPT" \
+            --source-commit "$SOURCE_COMMIT" --producer-artifact-id "$PRODUCER_ARTIFACT_ID" \
+            --producer-receipt "$receipt" --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
+            --work-directory "$WORK_DIRECTORY" --artifacts-output "$ARTIFACTS_OUTPUT" \
+            --report-directory "$REPORT_DIRECTORY"
+          jq -e --slurpfile receipt "$receipt" \
+            --arg repository "$REPOSITORY" --arg repositoryId "$REPOSITORY_ID" \
+            --arg artifact "$PRODUCER_ARTIFACT_ID" --arg run "$PRODUCER_RUN_ID" \
+            --arg attempt "$CURRENT_ATTEMPT" --arg source "$SOURCE_COMMIT" \
+            '.schema == "appsurface-github-actions-verified-artifact-v1" and
+             .repository == $repository and .repository == $receipt[0].repository and
+             .repositoryId == $repositoryId and .repositoryId == $receipt[0].repositoryId and
+             .workflowPath == ".github/workflows/package-artifacts.yml" and
+             .workflowPath == $receipt[0].workflowPath and
+             .event == "workflow_dispatch" and .event == $receipt[0].event and
+             .producerJob == "package-artifacts" and .producerJob == $receipt[0].producerJob and
+             .artifactId == $artifact and .runId == $run and .runAttempt == $attempt and
+             .sourceCommit == $source and .archiveSha256 == $receipt[0].archiveSha256 and
+             (.archiveBytes | type == "number" and . == floor and . > 0 and . <= 1073741824) and
+             .status == "succeeded" and .releaseEligible == false' \
+            "$REPORT_DIRECTORY/verified-artifact.json" >/dev/null
+      - name: Download aggregate by exact ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.AGGREGATE_ARTIFACT_ID }}
+          path: ${{ runner.temp }}/rehearsal-aggregate
+      - name: Retain safe artifact transport report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: artifact-transport-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/artifact-transport-report
+          if-no-files-found: ignore
+          retention-days: ${{ github.retention_days }}
       - name: Validate frozen aggregate and prepare publication inputs without credentials
         env:
           AGGREGATE_DIRECTORY: ${{ runner.temp }}/rehearsal-aggregate
-          PRODUCER_DIRECTORY: ${{ runner.temp }}/rehearsal-producer
+          PRODUCER_DIRECTORY: ${{ runner.temp }}/${{ env.REHEARSAL_PRODUCER_SUBDIRECTORY }}
           PUBLICATION_DIRECTORY: ${{ runner.temp }}/rehearsal-publication
           REPORT_DIRECTORY: ${{ runner.temp }}/rehearsal-preflight
         run: |
@@ -316,7 +425,7 @@ jobs:
           path: ${{ runner.temp }}/rehearsal-start
       - name: Validate original receipt and credential-free replay
         env:
-          PRODUCER_DIRECTORY: ${{ runner.temp }}/rehearsal-producer
+          PRODUCER_DIRECTORY: ${{ runner.temp }}/${{ env.REHEARSAL_PRODUCER_SUBDIRECTORY }}
           AGGREGATE_DIRECTORY: ${{ runner.temp }}/rehearsal-aggregate
           PUBLICATION_DIRECTORY: ${{ runner.temp }}/rehearsal-publication
           START_ARTIFACT_ID: ${{ steps.upload-rehearsal-start.outputs.artifact-id }}
@@ -345,7 +454,7 @@ jobs:
           SOURCE_REVISION_ID: ${{ env.SOURCE_COMMIT }}
           TAILWIND_REHEARSAL_ENABLED: "true"
           TAILWIND_REHEARSAL_REPOSITORY_ROOT: ${{ github.workspace }}
-          TAILWIND_REHEARSAL_PRODUCER_DIRECTORY: ${{ runner.temp }}/rehearsal-producer
+          TAILWIND_REHEARSAL_PRODUCER_DIRECTORY: ${{ runner.temp }}/${{ env.REHEARSAL_PRODUCER_SUBDIRECTORY }}
           TAILWIND_REHEARSAL_AGGREGATE_DIRECTORY: ${{ runner.temp }}/rehearsal-aggregate
           TAILWIND_REHEARSAL_START_RECEIPT: ${{ runner.temp }}/rehearsal-start/publication-start-receipt.json
           TAILWIND_REHEARSAL_PREPARED_DIRECTORY: ${{ runner.temp }}/rehearsal-publication

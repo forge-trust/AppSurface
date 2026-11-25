@@ -121,6 +121,185 @@ class WorkflowTransportTests(unittest.TestCase):
     def calls_read(self) -> list[list[str]]:
         return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
 
+    def test_producer_receipt_run_block_emits_exact_context_and_preserves_large_ids(self) -> None:
+        workflow = (ROOT / ".github/workflows/package-artifacts.yml").read_text()
+        script = workflow_step_script(workflow, "Emit protected producer receipt")
+        artifact_id = "987654321098765432109876543210987654321"
+        digest = "a" * 64
+        env = os.environ.copy()
+        env.update(
+            ARTIFACT_ID=artifact_id,
+            ARCHIVE_DIGEST=digest,
+            REPOSITORY="forge-trust/AppSurface",
+            REPOSITORY_ID="12345678901234567890",
+            RUN_ID="98765432109876543210",
+            RUN_ATTEMPT="2",
+            SOURCE_COMMIT="b" * 40,
+            EVENT_NAME="workflow_dispatch",
+        )
+        with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as output:
+            env["GITHUB_OUTPUT"] = output.name
+            result = subprocess.run(["bash", "-c", script], env=env, text=True, capture_output=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            output.seek(0)
+            receipt_line = output.read().strip()
+        key, receipt_json = receipt_line.split("=", 1)
+        receipt = json.loads(receipt_json)
+        self.assertEqual("producer_receipt", key)
+        self.assertEqual(
+            {
+                "schema": "appsurface-github-actions-producer-receipt-v1",
+                "repository": "forge-trust/AppSurface",
+                "repositoryId": "12345678901234567890",
+                "workflowPath": ".github/workflows/package-artifacts.yml",
+                "event": "workflow_dispatch",
+                "producerJob": "package-artifacts",
+                "runId": "98765432109876543210",
+                "runAttempt": "2",
+                "sourceCommit": "b" * 40,
+                "artifactId": artifact_id,
+                "archiveSha256": f"sha256:{digest}",
+            },
+            receipt,
+        )
+
+    def test_producer_receipt_run_block_rejects_malformed_upload_outputs_and_context(self) -> None:
+        workflow = (ROOT / ".github/workflows/package-artifacts.yml").read_text()
+        script = workflow_step_script(workflow, "Emit protected producer receipt")
+        base = dict(
+            ARTIFACT_ID="42", ARCHIVE_DIGEST="a" * 64, REPOSITORY="forge-trust/AppSurface",
+            REPOSITORY_ID="1", RUN_ID="2", RUN_ATTEMPT="1", SOURCE_COMMIT="b" * 40,
+            EVENT_NAME="workflow_dispatch",
+        )
+        invalid = [
+            ({"ARTIFACT_ID": ""}, "::error::Invalid upload output: artifact-id."),
+            ({"ARTIFACT_ID": "0"}, "::error::Invalid upload output: artifact-id."),
+            ({"ARTIFACT_ID": "042"}, "::error::Invalid upload output: artifact-id."),
+            ({"ARTIFACT_ID": "42x"}, "::error::Invalid upload output: artifact-id."),
+            ({"ARCHIVE_DIGEST": ""}, "::error::Invalid upload output: artifact-digest."),
+            ({"ARCHIVE_DIGEST": "A" * 64}, "::error::Invalid upload output: artifact-digest."),
+            ({"ARCHIVE_DIGEST": "a" * 63}, "::error::Invalid upload output: artifact-digest."),
+            ({"ARCHIVE_DIGEST": "sha256:" + "a" * 64}, "::error::Invalid upload output: artifact-digest."),
+            ({"REPOSITORY_ID": "0"}, "::error::Invalid protected context: repository_id."),
+            ({"RUN_ID": "2\n3"}, "::error::Invalid protected context: run_id."),
+            ({"RUN_ATTEMPT": "01"}, "::error::Invalid protected context: run_attempt."),
+            ({"SOURCE_COMMIT": "B" * 40}, "::error::Invalid protected context: source_commit."),
+            ({"EVENT_NAME": "push"}, "::error::Invalid protected context: event_name."),
+        ]
+        for changes, expected_message in invalid:
+            with self.subTest(changes=changes), tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as output:
+                env = os.environ.copy()
+                env.update(base)
+                env.update(changes)
+                env["GITHUB_OUTPUT"] = output.name
+                result = subprocess.run(["bash", "-c", script], env=env, text=True, capture_output=True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(expected_message, result.stderr.strip())
+                output.seek(0)
+                self.assertEqual("", output.read())
+
+    def test_transport_consumer_executes_yaml_block_and_requires_matching_marker(self) -> None:
+        workflow = (ROOT / ".github/workflows/package-artifacts.yml").read_text()
+        script = workflow_step_script(workflow, "Verify and extract producer artifact by exact ID")
+        dotnet = self.bin / "dotnet"
+        dotnet.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, pathlib, sys\n"
+            "args=sys.argv[1:]\n"
+            "pathlib.Path(os.environ['CAPTURE_ARGS']).write_text(json.dumps(args))\n"
+            "if os.environ.get('DOTNET_FAIL') == '1': raise SystemExit(9)\n"
+            "report=pathlib.Path(os.environ['REPORT_DIRECTORY'])\n"
+            "report.mkdir(parents=True, exist_ok=True)\n"
+            "if os.environ.get('MARKER_MODE') != 'missing':\n"
+            " marker={'schema':'appsurface-github-actions-verified-artifact-v1','repository':'forge-trust/AppSurface','repositoryId':os.environ['REPOSITORY_ID'],'workflowPath':'.github/workflows/package-artifacts.yml','event':'workflow_dispatch','producerJob':'package-artifacts','artifactId':os.environ['PRODUCER_ARTIFACT_ID'],'runId':os.environ['PRODUCER_RUN_ID'],'runAttempt':os.environ['CURRENT_ATTEMPT'],'sourceCommit':os.environ['SOURCE_COMMIT'],'archiveSha256':'sha256:'+'a'*64,'archiveBytes':int(os.environ.get('ARCHIVE_BYTES','123')),'status':'succeeded','releaseEligible':False}\n"
+            " if os.environ.get('MARKER_MODE') == 'bad-bytes': marker['archiveBytes']=json.loads(os.environ['BAD_ARCHIVE_BYTES'])\n"
+            " if os.environ.get('MARKER_MODE') == 'mismatch':\n"
+            "  field=os.environ['MISMATCH_FIELD']\n"
+            "  marker[field]=True if field == 'releaseEligible' else (1073741825 if field == 'archiveBytes' else 'mismatch')\n"
+            " (report/'verified-artifact.json').write_text(json.dumps(marker))\n",
+            encoding="utf-8",
+        )
+        dotnet.chmod(0o755)
+        marker_mismatch_fields = [
+            "schema", "repository", "repositoryId", "workflowPath", "event", "producerJob",
+            "runId", "runAttempt", "sourceCommit", "artifactId", "archiveSha256", "archiveBytes",
+            "status", "releaseEligible",
+        ]
+        scenarios = [("valid", "0", None, None, True),
+                     ("valid", "0", None, "1073741824", True),
+                     ("missing", "0", None, None, False), ("valid", "1", None, None, False)]
+        scenarios.extend(("mismatch", "0", field, None, False) for field in marker_mismatch_fields)
+        scenarios.extend(("bad-bytes", "0", None, value, False) for value in ("0", "-1", "1.5", "1073741825"))
+        for mode, fail, mismatch_field, archive_bytes, should_pass in scenarios:
+            with self.subTest(mode=mode, fail=fail, field=mismatch_field, archive_bytes=archive_bytes), tempfile.TemporaryDirectory(dir=self.root) as tmp:
+                temp = Path(tmp)
+                receipt = json.dumps({
+                    "schema": "appsurface-github-actions-producer-receipt-v1",
+                    "repository": "forge-trust/AppSurface", "repositoryId": "12345678901234567890",
+                    "workflowPath": ".github/workflows/package-artifacts.yml", "event": "workflow_dispatch",
+                    "producerJob": "package-artifacts", "runId": "98765432109876543210", "runAttempt": "2",
+                    "sourceCommit": "b" * 40, "artifactId": "987654321098765432109876543210987654321",
+                    "archiveSha256": "sha256:" + "a" * 64, "quoted": "spaces ' ; $(touch nope)",
+                })
+                env = os.environ.copy()
+                env.update(
+                    PATH=f"{self.bin}{os.pathsep}{env.get('PATH', '')}", RUNNER_TEMP=str(temp),
+                    GITHUB_WORKSPACE=str(ROOT), PRODUCER_RECEIPT=receipt,
+                    PRODUCER_ARTIFACT_ID="987654321098765432109876543210987654321",
+                    EXPECTED_SUBJECT_SHA256="c" * 64, REPOSITORY="forge-trust/AppSurface",
+                    REPOSITORY_ID="12345678901234567890", PRODUCER_RUN_ID="98765432109876543210",
+                    CURRENT_ATTEMPT="2", SOURCE_COMMIT="b" * 40, GH_TOKEN="fixture-token",
+                    WORK_DIRECTORY=str(temp / "work"), ARTIFACTS_OUTPUT=str(temp / "bundle"),
+                    REPORT_DIRECTORY=str(temp / "report"), CAPTURE_ARGS=str(temp / "args.json"),
+                    MARKER_MODE=mode, MISMATCH_FIELD=mismatch_field or "", DOTNET_FAIL=fail,
+                    ARCHIVE_BYTES=archive_bytes if mode != "bad-bytes" and archive_bytes else "123",
+                    BAD_ARCHIVE_BYTES=archive_bytes or "0",
+                )
+                result = subprocess.run(["bash", "-c", script], env=env, text=True, capture_output=True)
+                self.assertEqual(result.returncode == 0, should_pass, result.stderr)
+                args = json.loads((temp / "args.json").read_text())
+                self.assertIn("--producer-attempt", args)
+                self.assertEqual("2", args[args.index("--producer-attempt") + 1])
+                self.assertEqual(receipt, Path(args[args.index("--producer-receipt") + 1]).read_text().strip())
+                receipt_path = Path(args[args.index("--producer-receipt") + 1])
+                self.assertEqual(temp / "producer-receipt", receipt_path.parent)
+                if mode == "bad-bytes":
+                    marker = json.loads((temp / "report" / "verified-artifact.json").read_text())
+                    self.assertEqual(json.loads(archive_bytes), marker["archiveBytes"])
+                    self.assertNotIn("Traceback", result.stderr)
+                self.assertFalse((temp / "nope").exists())
+
+    def test_workflow_receipt_and_verified_bundle_ordering_and_no_replacement_download(self) -> None:
+        workflow = (ROOT / ".github/workflows/package-artifacts.yml").read_text()
+        self.assertIn("producer_receipt: ${{ steps.emit-producer-receipt.outputs.producer_receipt }}", workflow)
+        self.assertIn("needs.package-artifacts.result == 'success'", workflow)
+        self.assertLess(workflow.index("- name: Revalidate frozen producer bundle with typed verifier"), workflow.index("- name: Emit protected producer receipt"))
+        rehearsal = workflow[workflow.index("  tailwind-publish-rehearsal:"):workflow.index("  durable-template-evidence:")]
+        self.assertLess(rehearsal.index("- name: Build source-stamped verifier"), rehearsal.index("- name: Verify and extract producer artifact by exact ID"))
+        self.assertLess(rehearsal.index("- name: Verify and extract producer artifact by exact ID"), rehearsal.index("- name: Download aggregate by exact ID"))
+        download = rehearsal.split("      - name: Download frozen producer by exact ID\n", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("if: ${{ github.ref != 'refs/heads/main' }}", download)
+        self.assertIn("artifact-ids: ${{ env.PRODUCER_ARTIFACT_ID }}", download)
+        self.assertIn("path: ${{ runner.temp }}/rehearsal-producer", download)
+        self.assertIn("REHEARSAL_PRODUCER_SUBDIRECTORY: ${{ github.ref == 'refs/heads/main' && 'verified-producer' || 'rehearsal-producer' }}", rehearsal)
+        self.assertEqual(2, rehearsal.count("verified-producer"))
+        self.assertEqual(3, rehearsal.count("PRODUCER_DIRECTORY: ${{ runner.temp }}/${{ env.REHEARSAL_PRODUCER_SUBDIRECTORY }}"))
+        self.assertIn("TAILWIND_REHEARSAL_PRODUCER_DIRECTORY: ${{ runner.temp }}/${{ env.REHEARSAL_PRODUCER_SUBDIRECTORY }}", rehearsal)
+        self.assertIn("CURRENT_ATTEMPT: ${{ github.run_attempt }}", rehearsal)
+        self.assertNotIn("runAttempt\"", rehearsal[rehearsal.index("--producer-attempt"):rehearsal.index("--producer-attempt") + 100])
+        # protects=protected nonpublishing scope; fails_when=guards or read-only/report policy drifts;
+        # no_claim=source checks do not prove hosted GITHUB_TOKEN capabilities.
+        guard = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'forge-trust/AppSurface'"
+        self.assertIn(guard, rehearsal)
+        permissions = rehearsal.split("    permissions:\n", 1)[1].split("    env:\n", 1)[0]
+        self.assertEqual("      actions: read\n      contents: read\n", permissions)
+        receipt_step = workflow[workflow.index("      - name: Emit protected producer receipt"):workflow.index("  tailwind-native-rehearsal:")]
+        self.assertIn(guard, receipt_step)
+        report_step = rehearsal[rehearsal.index("      - name: Retain safe artifact transport report"):rehearsal.index("      - name: Validate frozen aggregate")]
+        self.assertIn("if: ${{ always() }}", report_step)
+        self.assertIn("path: ${{ runner.temp }}/artifact-transport-report", report_step)
+        self.assertNotIn("GH_TOKEN", report_step)
+
     def test_complete_pagination_resolves_producer_by_exact_id(self) -> None:
         name = "appsurface-prerelease-packages-42"
         decoys = [artifact(100 + index, f"unrelated-{index}") for index in range(100)]
