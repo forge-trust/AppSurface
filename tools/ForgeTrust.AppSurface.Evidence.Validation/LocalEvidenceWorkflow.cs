@@ -49,8 +49,11 @@ internal sealed class LocalEvidenceWorkflow
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        if (!Path.Exists(PathUtils.PathUnder(repository, ".git")))
+        if (!Path.Exists(PathUtils.PathUnder(repository, ".git"))
+            || await RepositoryGitChanges.ReadIdentityAsync(repository, cancellationToken, "rev-parse", "--is-inside-work-tree") != "true")
+        {
             throw new ArgumentException("Managed local evidence requires a Git worktree root.");
+        }
         return await LocalEvidenceOutput.RunAsync(repository, operation,
             (output, cache) => RunFreshAsync(options, repository, operation, output, cache, cancellationToken));
     }

@@ -463,18 +463,49 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         Assert.Equal(previous, await File.ReadAllBytesAsync(latest));
     }
 
-    [Fact]
-    public async Task ManagedOutput_RejectsNonWorktreeWithoutCreatingOutput()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManagedOutput_RejectsInvalidWorktreeWithoutCreatingOutput(bool staleGitPointer)
     {
         var fixture = await CreateFixtureAsync();
         var options = Options(fixture, "local");
         options.Remove("--output");
         var missing = TestPathUtils.PathUnder(_root, "non-worktree");
         options["--repository"] = missing;
+        var workflow = new LocalEvidenceWorkflow();
 
-        await Assert.ThrowsAsync<ArgumentException>(() => new LocalEvidenceWorkflow().RunAsync(options, CancellationToken.None));
+        if (staleGitPointer)
+        {
+            Directory.CreateDirectory(missing);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(missing, ".git"), "gitdir: missing-admin\n");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RunAsync(options, CancellationToken.None));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => workflow.RunAsync(options, CancellationToken.None));
+            Assert.False(Directory.Exists(missing));
+        }
 
-        Assert.False(Directory.Exists(missing));
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(missing, "TestResults")));
+    }
+
+    [Fact]
+    public async Task ManagedOutput_AcceptsLinkedGitWorktree()
+    {
+        var fixture = await CreateFixtureAsync();
+        var linked = new Fixture(TestPathUtils.PathUnder(_root, "linked"), fixture.Head);
+        await GitAsync(fixture.Root, "worktree", "add", "--detach", "--quiet", linked.Root, fixture.Head);
+        await ChangeAsync(linked, "docs/guide.md", "linked worktree change");
+        var options = Options(linked, "local");
+        options.Remove("--output");
+        var workflow = new LocalEvidenceWorkflow();
+
+        Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
+
+        var retained = TestPathUtils.PathUnder(linked.Root, "TestResults", "repository-evidence", "local");
+        Assert.NotNull(ReadArchive(retained, "latest.zip", "proof/evidence-manifest.json"));
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(fixture.Root, "TestResults")));
     }
 
     [Fact]
