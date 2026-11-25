@@ -1,5 +1,5 @@
-using ForgeTrust.AppSurface.Core;
 using System.Diagnostics;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
