@@ -1005,6 +1005,7 @@
       "forgetrust.appsurface.evidence.validation": {
         "type": "Project",
         "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Aspire": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )"
         }

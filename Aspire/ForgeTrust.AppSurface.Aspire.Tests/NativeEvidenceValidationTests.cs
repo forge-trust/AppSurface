@@ -46,7 +46,7 @@ public sealed class NativeEvidenceValidationTests
             await File.WriteAllTextAsync(sentinel, "preserve caller bytes");
             var hostPath = await runner.RunAsync(new EvidenceCommandRequest(dotnet, ["--list-sdks"], repository, TimeSpan.FromSeconds(30)));
             Assert.Equal(0, hostPath.ExitCode);
-            var resolvedHost = Path.IsPathFullyQualified(dotnet) ? dotnet : ResolveDotnetHost();
+            var resolvedHost = Path.IsPathFullyQualified(dotnet) ? dotnet : TestDotnetHost.Resolve();
             var arguments = new List<string> { "--package", Path.Join(feed, "ForgeTrust.AppSurface.Cli.0.0.0-native-evidence-tests.nupkg"),
                 "--version", "0.0.0-native-evidence-tests", "--source-commit", identity.StandardOutput.Trim(), "--dotnet", resolvedHost,
                 "--repository", repository, "--scratch-parent", parent, "--output", output };
@@ -89,13 +89,16 @@ public sealed class NativeEvidenceValidationTests
             }
             var exitCode = await Program.RunAsync(arguments.ToArray());
             var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
-            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
+            var receipt = NativeValidationReceiptCodec.Deserialize(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, "native-validation-receipt.json")));
 
             Assert.True(exitCode == 0, "Native acceptance failed; retained evidence: " + parent);
-            Assert.All(manifest.ProducerResults, result => Assert.True(result.Outcome == EvidenceProducerOutcome.Passed, result.Diagnostic + "; retained evidence: " + parent));
-            Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
-            Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-            Assert.True(manifest.Metrics.CleanupCompleted);
+            Assert.All(receipt.Journeys, journey => Assert.True(journey.Outcome == "passed", journey.Diagnostic + "; retained evidence: " + parent));
+            Assert.Equal("passed", receipt.RunOutcome);
+            Assert.Equal("none", receipt.EvidenceHostClaim);
+            Assert.Equal("none", receipt.EvidenceHostEligibility);
+            Assert.False(receipt.EvidenceHostProofProduced);
+            Assert.True(receipt.CleanupCompleted);
+            Assert.False(File.Exists(TestPathUtils.PathUnder(output, "evidence-manifest.json")));
             Assert.Empty(Directory.EnumerateDirectories(parent, "evidence-workspace-*"));
             Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
             using var result = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(output, "artifacts/installed-consumer/proof/result.json")));
@@ -117,7 +120,7 @@ public sealed class NativeEvidenceValidationTests
         try
         {
             var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-            var settings = new ValidationSettings(root, Path.Join(parent, "missing.nupkg"), "0.0.0", "source", ResolveDotnetHost(), parent, parent);
+            var settings = new ValidationSettings(root, Path.Join(parent, "missing.nupkg"), "0.0.0", "source", TestDotnetHost.Resolve(), parent, parent);
             await using var producer = new InstalledConsumerProducer(settings);
             var declaration = Declaration(producer.Id, ["consumer/package-identity@1"], false);
             var context = new EvidenceProducerContext(new EvidencePlan("1", "p", "pd", "diff", new("p", EvidenceProfileScope.Targeted, [], [declaration], []), [], [], "digest"), declaration, TimeProvider.System);
@@ -148,7 +151,7 @@ public sealed class NativeEvidenceValidationTests
             var sentinel = Path.Join(parent, "caller-owned.txt");
             await File.WriteAllTextAsync(sentinel, "preserve");
             var settings = new ValidationSettings(TestPathUtils.FindRepoRoot(AppContext.BaseDirectory), packagePath,
-                "1.0.0", "source", missingExecutable ? Path.Join(parent, "missing-dotnet") : ResolveDotnetHost(), parent, parent,
+                "1.0.0", "source", missingExecutable ? Path.Join(parent, "missing-dotnet") : TestDotnetHost.Resolve(), parent, parent,
                 MinimumFreeBytes: 0);
             await using (var producer = new PackedStorageProducer(settings))
             {
@@ -174,14 +177,4 @@ public sealed class NativeEvidenceValidationTests
             transcript ? [new("result", "proof", "application/json", true, 1024 * 1024), new("transcript", "proof", "application/json", true, 16 * 1024 * 1024)]
                 : [new("result", "proof", "application/json", true, 1024 * 1024)], 900);
 
-    private static string ResolveDotnetHost()
-    {
-        var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        if (!string.IsNullOrWhiteSpace(host) && Path.IsPathFullyQualified(host)) return host;
-        var root = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-        if (!string.IsNullOrWhiteSpace(root)) return Path.Join(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
-        var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-            .Select(directory => Path.Join(directory, executable)).First(File.Exists);
-    }
 }

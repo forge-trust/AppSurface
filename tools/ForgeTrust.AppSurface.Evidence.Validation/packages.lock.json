@@ -481,6 +481,14 @@
         "resolved": "10.0.14",
         "contentHash": "lVqovhCt3HlZe7ONG5ydaj6BYwYI004gldVfMMkJl/lR5ueeCtWNpW4nejOX75sPmzm8vXCxB69GqwHaYCnyUQ=="
       },
+      "forgetrust.appsurface.core": {
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )",
+          "Microsoft.Extensions.Hosting": "[10.0.14, )",
+          "Microsoft.Extensions.Logging.Console": "[10.0.14, )"
+        }
+      },
       "forgetrust.appsurface.coverage": {
         "type": "Project",
         "dependencies": {

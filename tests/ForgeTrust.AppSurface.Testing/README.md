@@ -1,6 +1,21 @@
 # AppSurface test path helpers
 
-`ForgeTrust.AppSurface.Testing` is test-only infrastructure for building fixture paths with clear containment intent. It is not a public package and it is not a production filesystem sandbox.
+`ForgeTrust.AppSurface.Testing` provides test-only fixture paths with clear containment intent and subprocess tool selection. It is not a public package and it is not a production filesystem sandbox.
+
+## Resolve dotnet for test subprocesses
+
+Use [`TestDotnetHost.Resolve()`](TestDotnetHost.cs) when a test needs the SDK host executable. The shared
+resolver prefers a fully qualified `DOTNET_HOST_PATH`, then a host under `DOTNET_ROOT`,
+then the first existing candidate in `PATH`. Empty `PATH` entries resolve against the
+current directory. The preferred host and root candidates are returned without
+checking that a file exists; `PATH` candidates are
+checked in order. Root and `PATH` candidates are returned as fully qualified paths.
+
+Its explicit-input overload is internal and is covered by
+[`TestDotnetHostTests`](../ForgeTrust.AppSurface.Testing.Tests/TestDotnetHostTests.cs).
+Those tests use temporary files and supplied environment values instead of changing
+process-wide environment variables or the current directory. Keep this helper limited
+to test subprocess host selection; production command validation has different rules.
 
 ## Use `PathUnder` for full fixture paths
 

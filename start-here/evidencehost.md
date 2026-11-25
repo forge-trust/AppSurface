@@ -6,6 +6,8 @@ EvidenceHost is AppSurface's contract-first approach to CI evidence. Its purpose
 
 It is not a replacement for a test framework, coverage collector, GitHub Actions, Aspire AppHost, Docker, or a hosted coverage dashboard. It starts no infrastructure by default and has no outbound telemetry.
 
+For AppSurface repository validation, keep the two workflows distinct. The direct `--package` recipe in the [validation reference](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys) runs fixed package journeys outside EvidenceHost and writes `native-validation-receipt.json`; its receipt carries no claim or gate authority. The policy-backed `--operation local`, `plan`, and `run` workflows select changed-path evidence; execution writes the EvidenceHost manifest consumed by the repository gate. CI's `collect` operation snapshots event changes for that policy workflow. A direct receipt is useful package validation, but it does not substitute for a policy-selected manifest.
+
 ## The first five minutes
 
 Install the [AppSurface CLI](../Cli/ForgeTrust.AppSurface.Cli/README.md), then create the deliberately small policy starter:
@@ -51,7 +53,7 @@ A filtered suite can close exactly one kind of assertion: the selection-complete
 | --- | --- | --- |
 | Existing coverage command needs clearer scope and artifacts. | [`appsurface evidence`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) | Policy planning, diagnostics, canonical plan/manifest, and GitHub summary. |
 | An Aspire resource needs its native healthy condition only. | [Aspire resource notifications](https://learn.microsoft.com/dotnet/aspire/testing/accessing-resources) | Use Aspire's health wait when resource health is the complete precondition. |
-| A test needs one profile-based AppHost started and an HTTP status condition checked. | [Typed AppSurface Aspire fixture](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture) and the neutral [HTTP readiness package](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md) | One startup budget covers typed profile creation, build, start, native health, endpoint allocation, and the HTTP check. Ordinary tests do not need an EvidenceHost plan or producer. |
+| A test needs one profile-based AppHost started and an HTTP status condition checked. | [Typed AppSurface Aspire fixture](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture) and the neutral [HTTP readiness package](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md) | One startup budget covers typed profile creation, build, start, native health, endpoint allocation, and the HTTP check. Ordinary tests do not need an EvidenceHost plan or producer and make no EvidenceHost claim; see the [claim-free AppHost example](../examples/aspire-apphost/README.md#deterministic-profile-test). |
 | Consumer has PostgreSQL, a browser, or a real E2E journey to prove. | [`ForgeTrust.AppSurface.Evidence.Aspire`](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) | A separate explicit EvidenceHost waits for consumer-owned readiness, runs typed producers, and cleans them up. Its optional HTTP adapter composes native health with one declared HTTP condition. |
 | You are writing a producer, external gate, or policy editor. | [`ForgeTrust.AppSurface.Evidence.Contracts`](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) and [`Planner`](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) | Stable contracts and deterministic diff-to-plan resolution. |
 | A changed path has no production code to cover: a workflow, a script, release tooling. | Preview [`test` producer](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#test-producer-preview) | Runs the test projects the policy declares and closes one assertion only when every selected test ran and passed. It makes no coverage claim, and its filter is declared in the policy and bound into the plan. |
@@ -89,7 +91,7 @@ Similarly, v1 validates a registered release envelope but labels it `ValidatedNo
 
 ## Read next
 
-For a complete native example that validates AppSurface's own packed CLI and installed consumer, use the [native EvidenceHost acceptance recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). It demonstrates bounded commands, owned storage, independent assertions and durable manifest output.
+For ordinary validation of a supplied package, use the [direct package recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys); it writes a native validation receipt and makes no EvidenceHost claim. For AppSurface's changed-path solution coverage, package checks, and native acceptance, use the [policy-backed local workflow](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development), which plans and runs the checked-in policy and retains a verifiable manifest for completed execution.
 
 AppSurface's own [native CI policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) now selects those journeys from the
 real PR diff. The [local development command](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development)
