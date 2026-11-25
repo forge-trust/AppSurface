@@ -1,3 +1,4 @@
+using System.Collections;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -11,7 +12,7 @@ public sealed class EvidenceRunBudgetTests
         clock.MoveUtcBy(TimeSpan.FromDays(-1));
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(20),
             [new(EvidenceRunStage.Producer, TimeSpan.FromSeconds(5))],
-            TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5), out var budget));
+            collection: TimeSpan.FromSeconds(5), cleanup: TimeSpan.FromSeconds(10), stopping: TimeSpan.FromSeconds(5), out var budget));
         Assert.True(budget!.TryBeginNextStage(default, out _));
         clock.Advance(TimeSpan.FromSeconds(2));
         clock.MoveUtcBy(TimeSpan.FromDays(-1));
@@ -136,7 +137,7 @@ public sealed class EvidenceRunBudgetTests
         };
         var total = TimeSpan.FromSeconds(10 + 20 + 5 + 10 + 30);
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, total, stages,
-            TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(20), out var budget));
+            collection: TimeSpan.FromSeconds(10), cleanup: TimeSpan.FromSeconds(30), stopping: TimeSpan.FromSeconds(20), out var budget));
         Assert.Equal(total, budget!.JobRemaining);
 
         foreach (var expectedStage in stages)
@@ -157,6 +158,30 @@ public sealed class EvidenceRunBudgetTests
     }
 
     [Fact]
+    public void TimeBudget_ChargesElapsedTimeFromTheSameReadingThatAdmittedEachWindow()
+    {
+        var clock = new AdjustableTimeProvider();
+        var window = TimeSpan.FromSeconds(2);
+        var tick = TimeSpan.FromTicks(1);
+        Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, window + window + window,
+            [new(EvidenceRunStage.Producer, window)], collection: window, cleanup: window, stopping: window, out var budget));
+
+        clock.AdvanceAfterNextTimestampRead(tick);
+        Assert.True(budget!.TryBeginNextStage(default, out _));
+        Assert.Equal(window - tick, budget.CurrentStageRemaining);
+        Assert.True(budget.CompleteCurrentStage());
+
+        clock.AdvanceAfterNextTimestampRead(tick);
+        Assert.True(budget.TryAbandonStagesAndBeginCleanup(stageClosed: true));
+        Assert.Equal(window - tick, budget.CleanupRemaining);
+        Assert.True(budget.CompleteCleanup());
+
+        clock.AdvanceAfterNextTimestampRead(tick);
+        Assert.True(budget.TryBeginCollection());
+        Assert.Equal(window - tick, budget.CollectionRemaining);
+    }
+
+    [Fact]
     public void TimeBudget_ShouldRejectOneTickShortAndInitiallyExpiredJob()
     {
         var clock = new AdjustableTimeProvider();
@@ -164,9 +189,11 @@ public sealed class EvidenceRunBudgetTests
         var required = TimeSpan.FromSeconds(2 + 1 + 1);
 
         Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, required - TimeSpan.FromTicks(1), stages,
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out _));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out _));
+        Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(2) - TimeSpan.FromTicks(1), [],
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out _));
         Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.Zero, stages,
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out _));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out _));
     }
 
     [Fact]
@@ -176,17 +203,17 @@ public sealed class EvidenceRunBudgetTests
         var allowance = TimeSpan.FromHours(1);
         Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, allowance,
             [new EvidenceRunStageDeadline(EvidenceRunStage.Admission, TimeSpan.FromSeconds(30) + TimeSpan.FromTicks(1))],
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out _));
-        Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, allowance, [], TimeSpan.FromSeconds(61),
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out _));
-        Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, allowance, [], TimeSpan.FromSeconds(1),
-            TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(11), out _));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out _));
+        Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, allowance, [], collection: TimeSpan.FromSeconds(61),
+            cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out _));
+        Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, allowance, [], collection: TimeSpan.FromSeconds(1),
+            cleanup: TimeSpan.FromSeconds(10), stopping: TimeSpan.FromSeconds(11), out _));
         Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, allowance,
             [new EvidenceRunStageDeadline(EvidenceRunStage.Producer, TimeSpan.Zero)],
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out _));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out _));
         Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, allowance,
             [new EvidenceRunStageDeadline(EvidenceRunStage.Producer, TimeSpan.MaxValue)],
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out _));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out _));
     }
 
     [Fact]
@@ -195,7 +222,7 @@ public sealed class EvidenceRunBudgetTests
         var clock = new AdjustableTimeProvider();
         var stages = new[] { new EvidenceRunStageDeadline(EvidenceRunStage.Admission, TimeSpan.FromSeconds(5)) };
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(10), stages,
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var budget));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out var budget));
         clock.MoveUtcBy(TimeSpan.FromHours(-4));
         clock.Advance(TimeSpan.FromSeconds(5));
 
@@ -205,6 +232,7 @@ public sealed class EvidenceRunBudgetTests
         clock.Advance(TimeSpan.FromSeconds(5));
         Assert.Equal(TimeSpan.Zero, budget.CurrentStageRemaining);
         Assert.Equal(TimeSpan.Zero, budget.JobRemaining);
+        Assert.False(budget.TryAbandonStagesAndBeginCleanup(stageClosed: true));
         Assert.False(budget.TryBeginCollection());
     }
 
@@ -218,7 +246,7 @@ public sealed class EvidenceRunBudgetTests
             new EvidenceRunStageDeadline(EvidenceRunStage.Producer, TimeSpan.FromSeconds(3)),
         };
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(12), stages,
-            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(1), out var budget));
+            collection: TimeSpan.FromSeconds(2), cleanup: TimeSpan.FromSeconds(3), stopping: TimeSpan.FromSeconds(1), out var budget));
         Assert.True(budget!.TryBeginNextStage(CancellationToken.None, out _));
         clock.Advance(TimeSpan.FromSeconds(5));
         Assert.True(budget.CompleteCurrentStage());
@@ -232,7 +260,7 @@ public sealed class EvidenceRunBudgetTests
         var clock = new AdjustableTimeProvider();
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(10),
             [new EvidenceRunStageDeadline(EvidenceRunStage.Admission, TimeSpan.FromSeconds(1))],
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var budget));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out var budget));
         using var barrier = new Barrier(8);
         var attempts = Enumerable.Range(0, 8).Select(index => Task.Run(() =>
         {
@@ -251,7 +279,7 @@ public sealed class EvidenceRunBudgetTests
         var clock = new AdjustableTimeProvider();
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(10),
             [new EvidenceRunStageDeadline(EvidenceRunStage.Admission, TimeSpan.FromSeconds(1))],
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var budget));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out var budget));
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
@@ -269,7 +297,7 @@ public sealed class EvidenceRunBudgetTests
             [
                 new EvidenceRunStageDeadline(EvidenceRunStage.Admission, TimeSpan.FromSeconds(5)),
                 new EvidenceRunStageDeadline(EvidenceRunStage.Producer, TimeSpan.FromSeconds(5)),
-            ], TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), out var budget));
+            ], collection: TimeSpan.FromSeconds(2), cleanup: TimeSpan.FromSeconds(5), stopping: TimeSpan.FromSeconds(2), out var budget));
         Assert.True(budget!.TryBeginNextStage(CancellationToken.None, out _));
 
         Assert.False(budget.TryAbandonStagesAndBeginCleanup(stageClosed: false));
@@ -287,7 +315,7 @@ public sealed class EvidenceRunBudgetTests
         var clock = new AdjustableTimeProvider();
         Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.MaxValue,
             [new(EvidenceRunStage.Resource, TimeSpan.MaxValue), new(EvidenceRunStage.Producer, TimeSpan.FromTicks(1))],
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var rejected));
+            collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out var rejected));
         Assert.Null(rejected);
     }
 
@@ -305,7 +333,7 @@ public sealed class EvidenceRunBudgetTests
     {
         Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(new AdjustableTimeProvider(), TimeSpan.FromSeconds(allowance),
             [new((EvidenceRunStage)stage, TimeSpan.FromSeconds(duration))],
-            TimeSpan.FromSeconds(collection), TimeSpan.FromSeconds(cleanup), TimeSpan.FromSeconds(stopping), out var budget));
+            collection: TimeSpan.FromSeconds(collection), cleanup: TimeSpan.FromSeconds(cleanup), stopping: TimeSpan.FromSeconds(stopping), out var budget));
         Assert.Null(budget);
     }
 
@@ -313,8 +341,26 @@ public sealed class EvidenceRunBudgetTests
     public void TimeBudget_NullStageCannotBeAdmittedAsUnboundedWork()
     {
         Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(new AdjustableTimeProvider(), TimeSpan.FromSeconds(20),
-            [null!], TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var budget));
+            [null!], collection: TimeSpan.FromSeconds(1), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out var budget));
         Assert.Null(budget);
+    }
+
+    [Fact]
+    public void TimeBudget_AccountsForTheSameStageSnapshotItValidates()
+    {
+        var stage = new EvidenceRunStageDeadline(EvidenceRunStage.Start, TimeSpan.FromSeconds(2));
+        var declarations = new[] { stage };
+        var stages = new ObservedStageList(declarations);
+        var reserve = TimeSpan.FromSeconds(1);
+
+        Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(new AdjustableTimeProvider(), TimeSpan.FromSeconds(4),
+            stages, collection: reserve, cleanup: reserve, stopping: reserve, out var budget));
+        Assert.Equal(1, stages.EnumerationCount);
+        declarations[0] = stage with { Duration = TimeSpan.FromSeconds(3) };
+
+        Assert.True(budget!.TryBeginNextStage(default, out var admitted));
+        Assert.Equal(stage, admitted);
+        Assert.Equal(stage.Duration, budget.CurrentStageRemaining);
     }
 
     [Fact]
@@ -324,9 +370,9 @@ public sealed class EvidenceRunBudgetTests
         var reserve = TimeSpan.FromSeconds(1);
 
         Assert.Throws<ArgumentNullException>("timeProvider", () =>
-            EvidenceRunTimeBudget.TryCreateFromAllowance(null!, allowance, [], reserve, reserve, reserve, out _));
+            EvidenceRunTimeBudget.TryCreateFromAllowance(null!, allowance, [], collection: reserve, cleanup: reserve, stopping: reserve, out _));
         Assert.Throws<ArgumentNullException>("stages", () =>
-            EvidenceRunTimeBudget.TryCreateFromAllowance(new AdjustableTimeProvider(), allowance, null!, reserve, reserve, reserve, out _));
+            EvidenceRunTimeBudget.TryCreateFromAllowance(new AdjustableTimeProvider(), allowance, null!, collection: reserve, cleanup: reserve, stopping: reserve, out _));
     }
 
     [Fact]
@@ -335,7 +381,7 @@ public sealed class EvidenceRunBudgetTests
         var clock = new AdjustableTimeProvider();
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(20),
             [new(EvidenceRunStage.Resource, TimeSpan.FromSeconds(3)), new(EvidenceRunStage.Producer, TimeSpan.FromSeconds(2))],
-            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), out var budget));
+            collection: TimeSpan.FromSeconds(2), cleanup: TimeSpan.FromSeconds(5), stopping: TimeSpan.FromSeconds(2), out var budget));
         Assert.False(budget!.CompleteCurrentStage());
         Assert.False(budget.CompleteCollection());
         Assert.Equal(TimeSpan.Zero, budget.CleanupRemaining);
@@ -369,7 +415,7 @@ public sealed class EvidenceRunBudgetTests
     {
         var clock = new AdjustableTimeProvider();
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(7), [],
-            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), out var budget));
+            collection: TimeSpan.FromSeconds(2), cleanup: TimeSpan.FromSeconds(5), stopping: TimeSpan.FromSeconds(2), out var budget));
         Assert.False(budget!.CompleteCleanup());
         Assert.True(budget.TryAbandonStagesAndBeginCleanup(stageClosed: true));
         clock.Advance(TimeSpan.FromSeconds(5));
@@ -387,7 +433,7 @@ public sealed class EvidenceRunBudgetTests
     {
         var clock = new AdjustableTimeProvider();
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(3), [],
-            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var budget));
+            collection: TimeSpan.FromSeconds(2), cleanup: TimeSpan.FromSeconds(1), stopping: TimeSpan.FromSeconds(1), out var budget));
         Assert.True(budget!.TryAbandonStagesAndBeginCleanup(stageClosed: true));
         Assert.True(budget.CompleteCleanup());
         Assert.True(budget.TryBeginCollection());
@@ -405,7 +451,7 @@ public sealed class EvidenceRunBudgetTests
         var clock = new AdjustableTimeProvider();
         var reserve = TimeSpan.FromSeconds(2);
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(20), [],
-            reserve, reserve, reserve, out var budget));
+            collection: reserve, cleanup: reserve, stopping: reserve, out var budget));
         Assert.True(budget!.TryAbandonStagesAndBeginCleanup(stageClosed: true));
         Assert.True(budget.CompleteCleanup());
 
@@ -425,7 +471,7 @@ public sealed class EvidenceRunBudgetTests
         var clock = new AdjustableTimeProvider();
         var reserve = TimeSpan.FromSeconds(2);
         Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(4), [],
-            reserve, reserve, reserve, out var budget));
+            collection: reserve, cleanup: reserve, stopping: reserve, out var budget));
         Assert.True(budget!.TryAbandonStagesAndBeginCleanup(stageClosed: true));
         Assert.True(budget.CompleteCleanup());
 
@@ -502,14 +548,36 @@ public sealed class EvidenceRunBudgetTests
         Assert.Equal(1, notifications);
     }
 
+    private sealed class ObservedStageList(EvidenceRunStageDeadline[] stages) : IReadOnlyList<EvidenceRunStageDeadline>
+    {
+        public int Count => stages.Length;
+
+        public EvidenceRunStageDeadline this[int index] => stages[index];
+
+        internal int EnumerationCount { get; private set; }
+
+        public IEnumerator<EvidenceRunStageDeadline> GetEnumerator()
+        {
+            EnumerationCount++;
+            return ((IEnumerable<EvidenceRunStageDeadline>)stages).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private sealed class AdjustableTimeProvider : TimeProvider
     {
         private long _timestamp;
+        private long _advanceAfterRead;
         private DateTimeOffset _utcNow = DateTimeOffset.Parse("2026-10-02T12:00:00Z");
 
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
-        public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+        public override long GetTimestamp()
+        {
+            var advance = Interlocked.Exchange(ref _advanceAfterRead, 0);
+            return Interlocked.Add(ref _timestamp, advance) - advance;
+        }
 
         public override DateTimeOffset GetUtcNow() => _utcNow;
 
@@ -520,5 +588,7 @@ public sealed class EvidenceRunBudgetTests
         }
 
         internal void MoveUtcBy(TimeSpan delta) => _utcNow += delta;
+
+        internal void AdvanceAfterNextTimestampRead(TimeSpan duration) => Interlocked.Exchange(ref _advanceAfterRead, duration.Ticks);
     }
 }

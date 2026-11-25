@@ -59,6 +59,16 @@ internal sealed record EvidenceRunStageDeadline(EvidenceRunStage Stage, TimeSpan
 /// </summary>
 internal sealed class EvidenceRunTimeBudget
 {
+    private enum RunPhase
+    {
+        BetweenStages,
+        StageActive,
+        CleaningUp,
+        ReadyForCollection,
+        Collecting,
+        Finished,
+    }
+
     private readonly object _gate = new();
     private readonly TimeProvider _timeProvider;
     private readonly long _admissionTimestamp;
@@ -68,17 +78,14 @@ internal sealed class EvidenceRunTimeBudget
     private readonly TimeSpan _cleanup;
     private readonly TimeSpan _stopping;
     private int _nextStage;
-    private long? _stageStartedAt;
-    private long? _cleanupStartedAt;
-    private long? _collectionStartedAt;
-    private bool _cleanupCompleted;
-    private bool _collectionCompleted;
+    private RunPhase _phase = RunPhase.BetweenStages;
+    private long _phaseStartedAt;
 
     private EvidenceRunTimeBudget(
         TimeProvider timeProvider,
         long admissionTimestamp,
         TimeSpan jobAllowance,
-        IReadOnlyList<EvidenceRunStageDeadline> stages,
+        ReadOnlyCollection<EvidenceRunStageDeadline> stages,
         TimeSpan collection,
         TimeSpan cleanup,
         TimeSpan stopping)
@@ -86,7 +93,7 @@ internal sealed class EvidenceRunTimeBudget
         _timeProvider = timeProvider;
         _admissionTimestamp = admissionTimestamp;
         _jobAllowance = jobAllowance;
-        _stages = Array.AsReadOnly(stages.ToArray());
+        _stages = stages;
         _collection = collection;
         _cleanup = cleanup;
         _stopping = stopping;
@@ -95,13 +102,17 @@ internal sealed class EvidenceRunTimeBudget
     /// <summary>Validates serial stages and reserves against the independently supplied remaining job allowance.</summary>
     /// <param name="timeProvider">The monotonic clock used for admission and elapsed-time checks.</param>
     /// <param name="allowance">The positive remaining allowance delivered by the independent launcher.</param>
-    /// <param name="stages">Ordered serial stages; each deadline must be positive and within its stage cap.</param>
+    /// <param name="stages">Ordered serial stages, captured once for validation and accounting. Each deadline must be positive and within its stage cap.</param>
     /// <param name="collection">Positive collection allowance, no greater than 60 seconds.</param>
     /// <param name="cleanup">Positive cumulative stopping/disposal allowance, no greater than ten minutes.</param>
     /// <param name="stopping">Positive stopping grace, no greater than 30 seconds or cleanup.</param>
     /// <param name="budget">The created budget on success; otherwise <see langword="null"/>.</param>
     /// <returns><see langword="true"/> when all declared stages and reserves fit the frozen job allowance.</returns>
-    /// <remarks>Use this after obtaining the remaining allowance from the launcher. Budget creation grants no execution authority.</remarks>
+    /// <remarks>
+    /// Use this after obtaining the remaining allowance from the launcher. Name the
+    /// <c>collection:</c>, <c>cleanup:</c>, and <c>stopping:</c> arguments at the call site.
+    /// Budget creation grants no execution authority.
+    /// </remarks>
     internal static bool TryCreateFromAllowance(TimeProvider timeProvider, TimeSpan allowance,
         IReadOnlyList<EvidenceRunStageDeadline> stages, TimeSpan collection, TimeSpan cleanup, TimeSpan stopping,
         out EvidenceRunTimeBudget? budget)
@@ -117,44 +128,31 @@ internal sealed class EvidenceRunTimeBudget
             return false;
         }
 
-        var sum = TimeSpan.Zero;
-        foreach (var stage in stages)
-        {
-            if (stage is null || stage.Duration <= TimeSpan.Zero || !IsAllowedStage(stage.Stage, stage.Duration))
-            {
-                return false;
-            }
-
-            try
-            {
-                sum = checked(sum + stage.Duration);
-            }
-            catch (OverflowException)
-            {
-                return false;
-            }
-        }
-
-        try
-        {
-            sum = checked(sum + collection + cleanup);
-        }
-        catch (OverflowException)
+        var reserves = collection + cleanup;
+        if (reserves > allowance)
         {
             return false;
         }
 
-        if (sum > allowance)
+        var remaining = allowance - reserves;
+        var stageSnapshot = Array.AsReadOnly(stages.ToArray());
+        foreach (var stage in stageSnapshot)
         {
-            return false;
+            if (stage is null || stage.Duration <= TimeSpan.Zero || !IsAllowedStage(stage.Stage, stage.Duration)
+                || stage.Duration > remaining)
+            {
+                return false;
+            }
+
+            remaining -= stage.Duration;
         }
 
-        budget = new EvidenceRunTimeBudget(timeProvider, admissionTimestamp, allowance, stages, collection, cleanup, stopping);
+        budget = new EvidenceRunTimeBudget(timeProvider, admissionTimestamp, allowance, stageSnapshot, collection, cleanup, stopping);
         return true;
     }
 
     /// <summary>The remaining monotonic time until the job deadline, never negative.</summary>
-    internal TimeSpan JobRemaining => Remaining(_jobAllowance, _admissionTimestamp);
+    internal TimeSpan JobRemaining => JobRemainingAt(_timeProvider.GetTimestamp());
 
     /// <summary>Begins the next declared stage only when its full deadline and all later reserves fit.</summary>
     /// <param name="cancellationToken">A caller cancellation signal checked before the stage is admitted.</param>
@@ -165,20 +163,21 @@ internal sealed class EvidenceRunTimeBudget
         lock (_gate)
         {
             stage = null;
-            if (cancellationToken.IsCancellationRequested || _stageStartedAt.HasValue || _collectionStartedAt.HasValue || _cleanupStartedAt.HasValue
-                || _nextStage >= _stages.Count)
+            if (cancellationToken.IsCancellationRequested || _phase != RunPhase.BetweenStages || _nextStage >= _stages.Count)
             {
                 return false;
             }
 
             var candidate = _stages[_nextStage];
             var reserve = candidate.Duration + RemainingStageDuration(_nextStage + 1) + _collection + _cleanup;
-            if (JobRemaining < reserve)
+            var now = _timeProvider.GetTimestamp();
+            if (JobRemainingAt(now) < reserve)
             {
                 return false;
             }
 
-            _stageStartedAt = _timeProvider.GetTimestamp();
+            _phaseStartedAt = now;
+            _phase = RunPhase.StageActive;
             stage = candidate;
             return true;
         }
@@ -191,8 +190,8 @@ internal sealed class EvidenceRunTimeBudget
         {
             lock (_gate)
             {
-                return _stageStartedAt is long started && _nextStage < _stages.Count
-                    ? Min(Remaining(_stages[_nextStage].Duration, started), JobRemaining)
+                return _phase == RunPhase.StageActive
+                    ? GetActivePhaseRemaining(_stages[_nextStage].Duration)
                     : TimeSpan.Zero;
             }
         }
@@ -205,13 +204,13 @@ internal sealed class EvidenceRunTimeBudget
     {
         lock (_gate)
         {
-            if (!_stageStartedAt.HasValue)
+            if (_phase != RunPhase.StageActive)
             {
                 return false;
             }
 
-            _stageStartedAt = null;
             _nextStage++;
+            _phase = RunPhase.BetweenStages;
             return true;
         }
     }
@@ -222,13 +221,19 @@ internal sealed class EvidenceRunTimeBudget
     {
         lock (_gate)
         {
-            if (!_cleanupCompleted || _collectionCompleted || _collectionStartedAt.HasValue
-                || JobRemaining < _collection)
+            if (_phase != RunPhase.ReadyForCollection)
             {
                 return false;
             }
 
-            _collectionStartedAt = _timeProvider.GetTimestamp();
+            var now = _timeProvider.GetTimestamp();
+            if (JobRemainingAt(now) < _collection)
+            {
+                return false;
+            }
+
+            _phaseStartedAt = now;
+            _phase = RunPhase.Collecting;
             return true;
         }
     }
@@ -240,8 +245,8 @@ internal sealed class EvidenceRunTimeBudget
         {
             lock (_gate)
             {
-                return _collectionStartedAt is long started
-                    ? Min(Remaining(_collection, started), JobRemaining)
+                return _phase == RunPhase.Collecting
+                    ? GetActivePhaseRemaining(_collection)
                     : TimeSpan.Zero;
             }
         }
@@ -254,13 +259,12 @@ internal sealed class EvidenceRunTimeBudget
     {
         lock (_gate)
         {
-            if (!_collectionStartedAt.HasValue)
+            if (_phase != RunPhase.Collecting)
             {
                 return false;
             }
 
-            _collectionStartedAt = null;
-            _collectionCompleted = true;
+            _phase = RunPhase.Finished;
             return true;
         }
     }
@@ -276,16 +280,21 @@ internal sealed class EvidenceRunTimeBudget
     {
         lock (_gate)
         {
-            if (!stageClosed || _cleanupStartedAt.HasValue || _cleanupCompleted || JobRemaining <= TimeSpan.Zero)
+            if (!stageClosed || _phase is not (RunPhase.BetweenStages or RunPhase.StageActive))
+            {
+                return false;
+            }
+
+            var now = _timeProvider.GetTimestamp();
+            if (JobRemainingAt(now) <= TimeSpan.Zero)
             {
                 return false;
             }
 
             // Completion may arrive from a timeout/cancellation path. Once cleanup begins,
             // no later serial stage can be admitted, even if its declared deadline remains.
-            _nextStage = _stages.Count;
-            _stageStartedAt = null;
-            _cleanupStartedAt = _timeProvider.GetTimestamp();
+            _phaseStartedAt = now;
+            _phase = RunPhase.CleaningUp;
             return true;
         }
     }
@@ -297,18 +306,13 @@ internal sealed class EvidenceRunTimeBudget
         {
             lock (_gate)
             {
-                if (_cleanupStartedAt is not long started)
-                {
-                    return TimeSpan.Zero;
-                }
-
-                var collectionReserveRemaining = JobRemaining - _collection;
-                return Min(Remaining(_cleanup, started), collectionReserveRemaining > TimeSpan.Zero ? collectionReserveRemaining : TimeSpan.Zero);
+                return GetCleanupRemaining();
             }
         }
     }
 
     /// <summary>Returns stopping grace capped by the shared cleanup and job reserves.</summary>
+    /// <remarks>The caller samples this allowance when stopping begins and enforces that deadline through stop and join.</remarks>
     internal TimeSpan StoppingAllowance => Min(_stopping, CleanupRemaining);
 
     /// <summary>Completes stopping/disposal, leaving the collection allowance reserved.</summary>
@@ -316,15 +320,27 @@ internal sealed class EvidenceRunTimeBudget
     {
         lock (_gate)
         {
-            if (!_cleanupStartedAt.HasValue || CleanupRemaining <= TimeSpan.Zero)
+            if (GetCleanupRemaining() <= TimeSpan.Zero)
             {
                 return false;
             }
 
-            _cleanupStartedAt = null;
-            _cleanupCompleted = true;
+            _phase = RunPhase.ReadyForCollection;
             return true;
         }
+    }
+
+    // Caller holds _gate while evaluating the active cleanup window.
+    private TimeSpan GetCleanupRemaining()
+    {
+        if (_phase != RunPhase.CleaningUp)
+        {
+            return TimeSpan.Zero;
+        }
+
+        var now = _timeProvider.GetTimestamp();
+        var timeBeforeCollection = JobRemainingAt(now) - _collection;
+        return Min(Remaining(_cleanup, _phaseStartedAt, now), timeBeforeCollection > TimeSpan.Zero ? timeBeforeCollection : TimeSpan.Zero);
     }
 
     private TimeSpan RemainingStageDuration(int firstIndex)
@@ -338,9 +354,17 @@ internal sealed class EvidenceRunTimeBudget
         return sum;
     }
 
-    private TimeSpan Remaining(TimeSpan duration, long started)
+    private TimeSpan GetActivePhaseRemaining(TimeSpan duration)
     {
-        var elapsed = _timeProvider.GetElapsedTime(started, _timeProvider.GetTimestamp());
+        var now = _timeProvider.GetTimestamp();
+        return Min(Remaining(duration, _phaseStartedAt, now), JobRemainingAt(now));
+    }
+
+    private TimeSpan JobRemainingAt(long now) => Remaining(_jobAllowance, _admissionTimestamp, now);
+
+    private TimeSpan Remaining(TimeSpan duration, long started, long now)
+    {
+        var elapsed = _timeProvider.GetElapsedTime(started, now);
         return elapsed >= duration ? TimeSpan.Zero : duration - elapsed;
     }
 
@@ -417,6 +441,15 @@ internal sealed class EvidenceRunByteQuota
     /// <param name="reservation">An owned reservation on success; otherwise <see langword="null"/>.</param>
     /// <returns><see langword="false"/> after any quota crossing or when this reservation would exceed the limit.</returns>
     internal bool TryReserve(long bytes, out EvidenceRunByteReservation? reservation)
+        => TryAccountBytes(bytes, reserve: true, out reservation);
+
+    /// <summary>Charges actual received bytes, including bytes streamed or discarded after the retained prefix.</summary>
+    /// <param name="bytes">The nonnegative byte count observed from a process output stream.</param>
+    /// <returns><see langword="false"/> after any quota crossing or when this charge would exceed the limit.</returns>
+    internal bool TryChargeReceived(long bytes)
+        => TryAccountBytes(bytes, reserve: false, out _);
+
+    private bool TryAccountBytes(long bytes, bool reserve, out EvidenceRunByteReservation? reservation)
     {
         reservation = null;
         if (bytes < 0)
@@ -437,44 +470,10 @@ internal sealed class EvidenceRunByteQuota
                 _failed = true;
                 notify = true;
             }
-            else
+            else if (reserve)
             {
                 _reservedBytes += bytes;
                 reservation = new EvidenceRunByteReservation(_finishReservation, bytes);
-            }
-        }
-
-        if (notify)
-        {
-            try { _onExceeded?.Invoke(); }
-            catch { /* Host notification must not expose callback exception text or undo the latch. */ }
-        }
-
-        return !notify;
-    }
-
-    /// <summary>Charges actual received bytes, including bytes streamed or discarded after the retained prefix.</summary>
-    /// <param name="bytes">The nonnegative byte count observed from a process output stream.</param>
-    /// <returns><see langword="false"/> after any quota crossing or when this charge would exceed the limit.</returns>
-    internal bool TryChargeReceived(long bytes)
-    {
-        if (bytes < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(bytes));
-        }
-
-        var notify = false;
-        lock (_gate)
-        {
-            if (_failed)
-            {
-                return false;
-            }
-
-            if (bytes > Limit - _committedBytes - _reservedBytes)
-            {
-                _failed = true;
-                notify = true;
             }
             else
             {
