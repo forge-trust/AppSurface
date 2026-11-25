@@ -49,6 +49,7 @@
 
   <ItemGroup>
     <Compile Remove="TestData/Issue164CSharpApi/**/*.cs" />
+    <None Update="TestData/AppSurfaceDocsReleaseBaseline/unreleased.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="TestData/Issue164CSharpApi/**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

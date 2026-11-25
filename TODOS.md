@@ -1,5 +1,9 @@
 # Deferred work
 
+## A supported PostgreSQL fixture for additional consumers
+
+The [shared fixture](PostgreSql/ForgeTrust.AppSurface.PostgreSql.Testing/README.md) now owns the lease lifecycle used by the [Durable experiment](docs/designs/issue-931-durable-postgresql-fixtures.md). The [Skoolit trial](docs/designs/skoolit-persistence-fixture-trial.md) identified a downstream workload and measured the code it could remove. Publication remains on hold. Before supporting an external release, confirm a compatibility owner and run Skoolit's Linux acceptance procedure against a restorable package. Priority P3.
+
 ## Measure real Cloud Run observer adoption after #891
 
 **What:** Evaluate one consenting internal workflow using the exact execution observer and measure classification usefulness and replaced custom code.

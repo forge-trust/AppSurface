@@ -16,6 +16,71 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     private static readonly string[] Rids = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"];
     private readonly string _root = TestPathUtils.PathUnder(TailwindTestPaths.TemporaryRoot, "tailwind-aggregate-publication", Guid.NewGuid().ToString("N"));
 
+    [Theory]
+    [InlineData("defaults")]
+    [InlineData("continuation")]
+    [InlineData("absolute-subject")]
+    public async Task TypedProducerBindingMatchesCliMappingAndPreservesPublicationDefaults(string scenario)
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        var options = fixture.CreateProducerBindingOptions(TestPathUtils.PathUnder(_root, "typed-report"));
+        if (scenario == "defaults") options = options with { ProducerSubject = null, ReportDirectory = null };
+        if (scenario == "absolute-subject")
+            options = options with { ProducerSubject = TestPathUtils.PathUnder(fixture.Bundle, TailwindProofSubjectService.FileName) };
+        if (scenario == "continuation")
+        {
+            options = options with
+            {
+                AggregateInput = TestPathUtils.PathUnder(_root, "aggregate"),
+                AggregateArtifactId = "702",
+                ExpectedAggregateSha256 = new string('c', 64),
+                PublicationDirectory = "relative-publication",
+                PublicationStartReceipt = "relative-start.json",
+                PublicationStartArtifactId = "703"
+            };
+        }
+        var typedInput = new TailwindProducerBindingRequest(fixture.Repository, fixture.Bundle, fixture.ManifestPath,
+            options.ProducerSubject, "501", fixture.SubjectHash, "12345", "901", fixture.SourceCommit)
+        {
+            ReportDirectory = options.ReportDirectory,
+            AggregateInput = options.AggregateInput,
+            AggregateArtifactId = options.AggregateArtifactId,
+            ExpectedAggregateSha256 = options.ExpectedAggregateSha256,
+            PublicationDirectory = options.PublicationDirectory,
+            PublicationStartReceipt = options.PublicationStartReceipt,
+            PublicationStartArtifactId = options.PublicationStartArtifactId
+        };
+
+        var legacy = await TailwindEvidenceWorkflow.ValidateProducerBindingAsync(
+            fixture.Repository, fixture.Bundle, fixture.ManifestPath, options, CancellationToken.None);
+        var typed = await TailwindEvidenceWorkflow.ValidateProducerBindingAsync(
+            typedInput, CancellationToken.None, TailwindSourceIdentity.RequireAsync);
+
+        Assert.Equal(legacy.Request, typed.Request);
+        Assert.Equal("901", typed.Subject.ProducerRunId);
+        Assert.Equal(fixture.SubjectHash, typed.Request.ExpectedSubjectSha256);
+        Assert.Equal(TestPathUtils.PathUnder(fixture.Bundle, TailwindProofSubjectService.FileName), typed.Request.ProducerSubjectPath);
+        Assert.Equal(options.ReportDirectory ?? TestPathUtils.PathUnder(fixture.Bundle, "report-placeholder"), typed.Request.ReportDirectory);
+        if (scenario == "continuation")
+        {
+            Assert.Equal("702", typed.Request.AggregateArtifactId);
+            Assert.Equal(new string('c', 64), typed.Request.ExpectedAggregateSha256);
+            Assert.Equal("relative-publication", typed.Request.PublicationDirectory);
+            Assert.Equal("relative-start.json", typed.Request.PublicationStartReceiptPath);
+            Assert.Equal("703", typed.Request.PublicationStartArtifactId);
+        }
+        else
+        {
+            Assert.Equal("1", typed.Request.AggregateArtifactId);
+            Assert.Equal(new string('0', 64), typed.Request.ExpectedAggregateSha256);
+            Assert.Equal(TestPathUtils.PathUnder(fixture.Bundle, "aggregate-placeholder"), typed.Request.AggregateInputPath);
+            Assert.Equal(TestPathUtils.PathUnder(typed.Request.ReportDirectory, "publication"), typed.Request.PublicationDirectory);
+            Assert.Equal(TestPathUtils.PathUnder(typed.Request.ReportDirectory, "publication-start-receipt.json"), typed.Request.PublicationStartReceiptPath);
+            Assert.Empty(typed.Request.PublicationStartArtifactId);
+        }
+        Assert.False(Directory.Exists(typed.Request.ReportDirectory));
+    }
+
     [Fact]
     public async Task Aggregate_ValidatesRealProducerBundleAndFiveReceipts_AndRejectsEvidenceMutations()
     {

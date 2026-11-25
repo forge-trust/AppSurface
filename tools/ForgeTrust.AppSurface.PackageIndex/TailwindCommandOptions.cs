@@ -28,6 +28,12 @@ internal sealed record TailwindCommandOptions(
     string? DocsNativeArtifactId = null,
     string? DocsNativeSha256 = null)
 {
+    /// <summary>Gets the explicit owner/repository expected by artifact transport; never inferred from a receipt.</summary>
+    internal string? Repository { get; init; }
+
+    /// <summary>Gets the protected producer receipt path for artifact transport, resolved by its adapter.</summary>
+    internal string? ProducerReceipt { get; init; }
+
     private static readonly IReadOnlySet<string> Keys = new HashSet<string>(StringComparer.Ordinal)
     {
         "--mode", "--producer-subject", "--producer-artifact-id", "--expected-subject-sha256", "--repository-id",
@@ -35,7 +41,8 @@ internal sealed record TailwindCommandOptions(
         "--work-directory", "--report-directory", "--evidence-input", "--host-artifacts-map", "--aggregate-input",
         "--aggregate-artifact-id", "--expected-aggregate-sha256", "--publication-directory",
         "--publication-start-receipt", "--publication-start-artifact-id", "--resolved-binding-output",
-        "--docs-native-proof", "--docs-native-artifact-id", "--docs-native-sha256"
+        "--docs-native-proof", "--docs-native-artifact-id", "--docs-native-sha256",
+        "--repository", "--producer-receipt"
     };
 
     internal static TailwindCommandOptions Extract(string[] args)
@@ -58,8 +65,32 @@ internal sealed record TailwindCommandOptions(
             Get("--report-directory"), Get("--evidence-input"), Get("--host-artifacts-map"), Get("--aggregate-input"),
             Get("--aggregate-artifact-id"), Get("--expected-aggregate-sha256"), Get("--publication-directory"),
             Get("--publication-start-receipt"), Get("--publication-start-artifact-id"), Get("--resolved-binding-output"), remaining.ToArray(),
-            Get("--docs-native-proof"), Get("--docs-native-artifact-id"), Get("--docs-native-sha256"));
+            Get("--docs-native-proof"), Get("--docs-native-artifact-id"), Get("--docs-native-sha256"))
+        {
+            Repository = Get("--repository"),
+            ProducerReceipt = Get("--producer-receipt")
+        };
     }
+
+    /// <summary>Maps parsed CLI values to producer-binding inputs without resolving paths or manufacturing producer identity.</summary>
+    /// <param name="repositoryRoot">Explicit checkout root.</param>
+    /// <param name="artifactsInputPath">Explicit producer bundle directory.</param>
+    /// <param name="artifactManifestPath">Explicit manifest path.</param>
+    /// <returns>Required identity values plus unchanged optional continuation values; the validator owns path normalization and placeholders.</returns>
+    internal TailwindProducerBindingRequest CreateProducerBindingRequest(
+        string repositoryRoot, string artifactsInputPath, string artifactManifestPath)
+        => new(repositoryRoot, artifactsInputPath, artifactManifestPath, ProducerSubject,
+            Require(ProducerArtifactId, "--producer-artifact-id"), Require(ExpectedSubjectSha256, "--expected-subject-sha256"),
+            Require(RepositoryId, "--repository-id"), Require(ProducerRunId, "--producer-run-id"), Require(SourceCommit, "--source-commit"))
+        {
+            AggregateInput = AggregateInput,
+            AggregateArtifactId = AggregateArtifactId,
+            ExpectedAggregateSha256 = ExpectedAggregateSha256,
+            PublicationDirectory = PublicationDirectory,
+            PublicationStartReceipt = PublicationStartReceipt,
+            PublicationStartArtifactId = PublicationStartArtifactId,
+            ReportDirectory = ReportDirectory
+        };
 
     internal TailwindPublicationRequest CreatePublicationRequest(
         string repositoryRoot,

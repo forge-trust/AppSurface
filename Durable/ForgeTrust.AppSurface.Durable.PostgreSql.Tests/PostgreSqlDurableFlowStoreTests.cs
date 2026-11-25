@@ -6,17 +6,23 @@ using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
-public sealed class DurableSlice4ReferenceWorkloadTests
+public sealed class DurableSlice4ReferenceWorkloadTests : IClassFixture<PostgreSqlCohortFixture<DurableSlice4ReferenceWorkloadTests>>
 {
+    private readonly PostgreSqlCohortFixture<DurableSlice4ReferenceWorkloadTests> _fixture;
+
+    public DurableSlice4ReferenceWorkloadTests(
+        PostgreSqlCohortFixture<DurableSlice4ReferenceWorkloadTests> fixture)
+    {
+        _fixture = fixture;
+    }
+
     [Fact]
     public async Task Flow_StartWaitEventResumeComplete_IsIdempotentAndAuthoritative()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-flow");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-flow");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec(
             "tests.flow.context",
             "v1",
@@ -120,12 +126,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task EventDuplicate_ReturnsPersistedTruthAfterEventCodecRetires()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-event-codec-retirement");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-event-codec-retirement");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var eventCodec = new PostgreSqlOpaqueTestCodec("tests.flow.event", "v1");
         var payloads = new DurablePayloadCodecRegistry([contextCodec, eventCodec]);
@@ -180,12 +184,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowClaim_ConcurrentProcessorsApplyOneDecisionAndRejectStaleCandidates()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-flow-concurrent-claim");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-flow-concurrent-claim");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -228,12 +230,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task EventBeforeWait_DoesNotConsumeIdentity_AndChangedStartConflicts()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-identities");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-identities");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -332,12 +332,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowStore_BoundsUniqueViolationRetriesForEventsAndLifecycleCommands()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-command-retry");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-command-retry");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -430,12 +428,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowStore_RejectsInvalidRuntimeMetadataAndEventsForMissingFlows()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-runtime-metadata");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-runtime-metadata");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -507,12 +503,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowStore_FailsClosedWhenPersistedCommandIdentitiesCross()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-crossed-identities");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-crossed-identities");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -658,12 +652,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task Flow_IdentityAndTimerGuards_RejectChangedRetriesAndStaleTimerRows()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-identity-coverage");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-identity-coverage");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -787,12 +779,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowClaim_RecoversExpiredLeaseAndReportsAConcurrentSuspensionAsStale()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-claim-recovery");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-claim-recovery");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -881,12 +871,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowClaim_ReturnsNullWhenScopeIsInactiveOrRemoved()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-flow-claim-disabled-scope");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-flow-claim-disabled-scope");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -962,12 +950,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowClaim_RejectsPersistedContextWithAnInvalidHash()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-context-hash");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-context-hash");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -1015,12 +1001,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowClaim_RejectsPersistedEventPayloadWithAnInvalidHash()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-event-hash");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-event-hash");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var eventCodec = new PostgreSqlOpaqueTestCodec("tests.flow.event", "v1");
         var payloads = new DurablePayloadCodecRegistry([contextCodec, eventCodec]);
@@ -1138,12 +1122,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowClaim_RejectsPersistedActivityResultWithAnInvalidHash()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-activity-result-hash");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-activity-result-hash");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var workCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity", "v1");
         var resultCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity.result", "v1");
@@ -1220,12 +1202,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowProcessor_SuspendsAnActivityDecisionWithAnInvalidWorkPayload()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-invalid-activity-payload");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-invalid-activity-payload");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var workCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity", "v1");
         var resultCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity.result", "v1");
@@ -1270,12 +1250,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task ActivityCompletion_ProjectsWorkResultAndResumesParentAtomically()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-activity");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-activity");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var workCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity", "v1");
         var resultCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity.result", "v1");
@@ -1758,12 +1736,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task ClaimTimeRecovery_SuspendsTheParentActivityFlowAtomically()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var originalEpoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(originalEpoch, "tests", "slice4-claim-recovery");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-claim-recovery");
+        var database = fixtureDatabase.Database;
+        var originalEpoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var workCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity", "v1");
         var resultCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity.result", "v1");
@@ -1808,6 +1784,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             await originalWorkStore.DiscoverAsync(10),
             item => item.WorkId == activity.ChildWorkId);
         var recoveryEpoch = Guid.NewGuid();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.RotateRuntimeEpochAsync(originalEpoch, recoveryEpoch, "tests", "claim-recovery");
 
         var recoveryStore = new PostgreSqlDurableWorkStore(database.DataSource, recoveryEpoch);
@@ -1838,12 +1815,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowActivityCommit_GuardsProviderSafetyAndRollsBackStaleChildAcceptance()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-activity-commit-guards");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-activity-commit-guards");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var workCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity", "v1");
         var resultCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity.result", "v1");
@@ -2013,7 +1988,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task FlowClient_StartRejectsANonAuthoritativeContextCodec()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var database = await _fixture.CreateEmptyDatabaseAsync();
         var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var alternateContextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([contextCodec]);
@@ -2041,12 +2016,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task TimerAndEventRace_HasOneRevisionWinnerAndDuplicateStableLoser()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-timer-race");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-timer-race");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2196,12 +2169,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task TimerResolution_MissingFlowDispatchRollsBackEveryWinnerMutation()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-timer-cardinality");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-timer-cardinality");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2284,12 +2255,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task TraceAttachment_MissingRequestedPointerRollsBackEveryTraceMutation()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-trace-attachment-cardinality");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-trace-attachment-cardinality");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2351,12 +2320,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task TimerResolution_SupersedesACandidateThatIsNoLongerDue()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-timer-not-due");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-timer-not-due");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2411,12 +2378,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task TimerResolution_ObservesItsCommittedBarrier()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-timer-barrier");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-timer-barrier");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2475,12 +2440,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task Flow_EventAndLifecycleCardinalityGuards_RollBackPartialProjections()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-cardinality-coverage");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-cardinality-coverage");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2576,12 +2539,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task ScopeDisable_SuspendsFlowDispatchWaitAndHistoryTogether()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-scope-disable");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-scope-disable");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2705,12 +2666,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task Flow_StateProjectionFiltersPaginationAndRecovery_CoverEveryPersistedShape()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-state-projection");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-state-projection");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2830,12 +2789,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task Flow_Processor_CoversNextFaultAndTimedOutTransitions()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-transition-coverage");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-transition-coverage");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -2888,12 +2845,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task Flow_LifecycleCommands_CoverFailureDuplicateRaceAndReleaseRecoveryPaths()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-lifecycle-coverage");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-lifecycle-coverage");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -3109,12 +3064,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task Flow_Processor_SuspendsEvaluationFailureManifestMismatchAndInvalidDecision()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-suspension-coverage");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-suspension-coverage");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);
@@ -3196,12 +3149,10 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     [Fact]
     public async Task Flow_EventContractAndEventWinner_CoverEveryPayloadMismatchAndTimerRaceLoss()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await schema.ApplyAsync();
-        var epoch = Guid.NewGuid();
-        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-event-contract-coverage");
-        var status = await schema.GetStatusAsync();
+        await using var fixtureDatabase = await _fixture.CreateReadyDatabaseAsync("tests", "slice4-event-contract-coverage");
+        var database = fixtureDatabase.Database;
+        var epoch = fixtureDatabase.RuntimeEpoch;
+        var status = fixtureDatabase.Status;
         var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
         var payloads = new DurablePayloadCodecRegistry([codec]);
         var work = new DurableWorkRegistry([]);

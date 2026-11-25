@@ -467,6 +467,12 @@
           "Microsoft.Extensions.Options": "[10.0.14, )"
         }
       },
+      "forgetrust.appsurface.postgresql.testing": {
+        "type": "Project",
+        "dependencies": {
+          "Npgsql": "[10.0.3, )"
+        }
+      },
       "forgetrust.appsurface.testing": {
         "type": "Project"
       },

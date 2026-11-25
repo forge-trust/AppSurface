@@ -237,7 +237,9 @@ public sealed class TestFixturePathPolicyTests
         Assert.Contains("Test fixture path policy violation: DynamicUnderBasePath", message, StringComparison.Ordinal);
         Assert.Contains("Web/Sample.Tests/SampleTests.cs:42:17", message, StringComparison.Ordinal);
         Assert.Contains("Risky argument: outputRelativePath", message, StringComparison.Ordinal);
-        Assert.Contains("Use: TestPathUtils.PathUnder", message, StringComparison.Ordinal);
+        Assert.Contains("TestPathUtils.PathUnder(basePath, segments)", message, StringComparison.Ordinal);
+        Assert.Contains("keep every child segment in order", message, StringComparison.Ordinal);
+        Assert.Contains("CONTRIBUTING.md#filesystem-paths", message, StringComparison.Ordinal);
         Assert.Contains("path-policy-allowlist.yml", message, StringComparison.Ordinal);
     }
 
@@ -673,9 +675,9 @@ internal sealed class PathPolicyAllowlist
 /// Formats test fixture path policy failures into human-readable diagnostics for test output.
 /// </summary>
 /// <remarks>
-/// The output is a multi-line string separated with <see cref="Environment.NewLine" />. It starts with policy guidance
-/// headers, then emits one block per <see cref="PathPolicyViolation" /> containing the kind, file location, invocation,
-/// risky argument, reason, replacement guidance, allowlist instructions, and allowlist key. Unmatched allowlist entries
+/// The output is a multi-line string separated with <see cref="Environment.NewLine" />. It lists the shared helpers
+/// first, then emits one block per <see cref="PathPolicyViolation" /> containing the kind, file
+/// location, invocation, risky argument, reason, allowlist instructions, and allowlist key. Unmatched allowlist entries
 /// are listed in separate blocks. Callers should treat the result as a diagnostic for assertion messages and logs.
 /// </remarks>
 internal static class PathPolicyFailureFormatter
@@ -699,8 +701,9 @@ internal static class PathPolicyFailureFormatter
         var lines = new List<string>
         {
             "Test fixture path policy failed.",
-            "Use TestPathUtils.PathUnder(basePath, segments) for full paths under a base.",
-            "Docs: tests/ForgeTrust.AppSurface.Testing/README.md#policy-failures"
+            "For full fixture paths, use TestPathUtils.PathUnder(basePath, segments) and keep every child segment in order, including literals.",
+            "For a validated relative fixture path, use TestPathUtils.RelativePath(segments).",
+            "Docs: CONTRIBUTING.md#filesystem-paths"
         };
 
         foreach (var violation in violations)
@@ -711,7 +714,6 @@ internal static class PathPolicyFailureFormatter
             lines.Add($"Invocation: {violation.Invocation}");
             lines.Add($"Risky argument: {violation.RiskyArgument}");
             lines.Add($"Why: {violation.Reason}.");
-            lines.Add($"Use: TestPathUtils.PathUnder(basePath, {violation.RiskyArgument})");
             lines.Add("Intentional exception: add a reasoned entry to tests/ForgeTrust.AppSurface.Testing/path-policy-allowlist.yml.");
             lines.Add($"Allowlist key: {violation.Key}");
         }

@@ -16,6 +16,37 @@ internal sealed record PreparedTailwindPublication(string PackageVersion, string
 internal sealed record TailwindEvidenceCommandResult(bool Succeeded, string Status, string ReportPath);
 internal sealed record TailwindHostArtifact(string Rid, string ArtifactId, string Directory);
 internal sealed record TailwindProducerBinding(TailwindPublicationRequest Request, TailwindProofSubject Subject);
+
+/// <summary>Typed inputs to producer content validation, independent of CLI flags and parsing.</summary>
+/// <param name="RepositoryRoot">Exact checkout used by the source-identity validator.</param>
+/// <param name="ArtifactsInputPath">Producer bundle directory; normalized before content reads.</param>
+/// <param name="ArtifactManifestPath">Explicit inventory path; normalized before validation.</param>
+/// <param name="ProducerSubjectPath">Subject path relative to the bundle, or null to select the canonical subject basename.</param>
+/// <param name="ProducerArtifactId">Protected artifact ID, supplied independently of bundle contents.</param>
+/// <param name="ExpectedSubjectSha256">Protected digest of the serialized producer subject.</param>
+/// <param name="RepositoryId">Protected numeric repository identity.</param>
+/// <param name="ProducerRunId">Protected workflow run identity.</param>
+/// <param name="SourceCommit">Expected source commit, checked before bundle content.</param>
+internal sealed record TailwindProducerBindingRequest(
+    string RepositoryRoot, string ArtifactsInputPath, string ArtifactManifestPath, string? ProducerSubjectPath,
+    string ProducerArtifactId, string ExpectedSubjectSha256, string RepositoryId, string ProducerRunId, string SourceCommit)
+{
+    /// <summary>Optional aggregate location retained for the returned publication request; null uses an inert bundle placeholder.</summary>
+    internal string? AggregateInput { get; init; }
+    /// <summary>Optional protected aggregate ID retained for later validation; null uses the existing non-authoritative placeholder.</summary>
+    internal string? AggregateArtifactId { get; init; }
+    /// <summary>Optional protected aggregate digest retained for later validation; null uses the existing all-zero placeholder.</summary>
+    internal string? ExpectedAggregateSha256 { get; init; }
+    /// <summary>Optional publication location retained verbatim; null places it under the resolved report directory.</summary>
+    internal string? PublicationDirectory { get; init; }
+    /// <summary>Optional publication-start receipt retained verbatim; null places the canonical receipt under the report directory.</summary>
+    internal string? PublicationStartReceipt { get; init; }
+    /// <summary>Optional protected publication-start artifact ID; null retains an empty, non-authoritative placeholder.</summary>
+    internal string? PublicationStartArtifactId { get; init; }
+    /// <summary>Optional report location; null uses a bundle-relative placeholder, without writing any report during validation.</summary>
+    internal string? ReportDirectory { get; init; }
+}
+
 internal sealed record TailwindDiagnosticError(
     [property: JsonPropertyName("code")] string Code,
     [property: JsonPropertyName("message")] string Message,
@@ -34,29 +65,38 @@ internal static class TailwindEvidenceWorkflow
     private const string DiagnosticSchema = "appsurface-tailwind-diagnostic-v1";
     private const string DiagnosticDocsUrl = "https://github.com/forge-trust/AppSurface/issues/798";
 
-    internal static async Task<TailwindProducerBinding> ValidateProducerBindingAsync(
+    /// <summary>Maps legacy CLI options once and validates the exact producer content with the production source check.</summary>
+    internal static Task<TailwindProducerBinding> ValidateProducerBindingAsync(
         string repositoryRoot, string artifactsInputPath, string artifactManifestPath,
         TailwindCommandOptions options, CancellationToken cancellationToken)
+        => ValidateProducerBindingAsync(options.CreateProducerBindingRequest(repositoryRoot, artifactsInputPath, artifactManifestPath),
+            cancellationToken, TailwindSourceIdentity.RequireAsync);
+
+    /// <summary>Validates the real subject, manifest and package bindings through a typed, CLI-independent boundary.</summary>
+    /// <param name="input">Protected producer identity, subject, bundle paths and optional publication continuation values.</param>
+    /// <param name="cancellationToken">Cancellation covering all binding work.</param>
+    /// <param name="sourceIdentity">Source check; controlled fixtures may replace only this boundary, never content validation.</param>
+    /// <returns>The actual validated Tailwind subject and publication request. Placeholder continuation values grant no publication authority.</returns>
+    internal static async Task<TailwindProducerBinding> ValidateProducerBindingAsync(
+        TailwindProducerBindingRequest input, CancellationToken cancellationToken,
+        Func<string, string, CancellationToken, Task> sourceIdentity)
     {
-        var producerArtifactId = TailwindCommandOptions.Require(options.ProducerArtifactId, "--producer-artifact-id");
-        var expectedSubjectSha256 = TailwindCommandOptions.Require(options.ExpectedSubjectSha256, "--expected-subject-sha256");
-        var repositoryId = TailwindCommandOptions.Require(options.RepositoryId, "--repository-id");
-        var producerRunId = TailwindCommandOptions.Require(options.ProducerRunId, "--producer-run-id");
-        var sourceCommit = TailwindCommandOptions.Require(options.SourceCommit, "--source-commit");
-        await TailwindSourceIdentity.RequireAsync(repositoryRoot, sourceCommit, cancellationToken);
-        var bundleRoot = Path.GetFullPath(artifactsInputPath);
-        var subjectPath = TailwindProofSubjectService.ResolvePath(options.ProducerSubject, bundleRoot, TailwindProofSubjectService.FileName);
-        var manifestPath = Path.GetFullPath(artifactManifestPath);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(sourceIdentity);
+        await sourceIdentity(input.RepositoryRoot, input.SourceCommit, cancellationToken);
+        var bundleRoot = Path.GetFullPath(input.ArtifactsInputPath);
+        var subjectPath = TailwindProofSubjectService.ResolvePath(input.ProducerSubjectPath, bundleRoot, TailwindProofSubjectService.FileName);
+        var manifestPath = Path.GetFullPath(input.ArtifactManifestPath);
         var subject = await TailwindProofSubjectService.ValidateAsync(subjectPath, bundleRoot, manifestPath,
-            expectedSubjectSha256, repositoryId, producerRunId, sourceCommit, producerArtifactId, cancellationToken);
-        var aggregatePath = Path.GetFullPath(options.AggregateInput is null ? Path.Combine(bundleRoot, "aggregate-placeholder") : options.AggregateInput);
-        var reportDirectory = Path.GetFullPath(options.ReportDirectory is null ? Path.Combine(bundleRoot, "report-placeholder") : options.ReportDirectory);
-        var request = new TailwindPublicationRequest(repositoryRoot, bundleRoot, manifestPath, subjectPath,
-            producerArtifactId, expectedSubjectSha256, repositoryId, producerRunId, sourceCommit,
-            aggregatePath, options.AggregateArtifactId ?? "1", options.ExpectedAggregateSha256 ?? new string('0', 64),
-            options.PublicationDirectory is null ? Path.Combine(reportDirectory, "publication") : options.PublicationDirectory,
-            options.PublicationStartReceipt ?? Path.Combine(reportDirectory, StartReceiptFile),
-            options.PublicationStartArtifactId ?? string.Empty, reportDirectory);
+            input.ExpectedSubjectSha256, input.RepositoryId, input.ProducerRunId, input.SourceCommit, input.ProducerArtifactId, cancellationToken);
+        var aggregatePath = Path.GetFullPath(input.AggregateInput is null ? Path.Combine(bundleRoot, "aggregate-placeholder") : input.AggregateInput);
+        var reportDirectory = Path.GetFullPath(input.ReportDirectory is null ? Path.Combine(bundleRoot, "report-placeholder") : input.ReportDirectory);
+        var request = new TailwindPublicationRequest(input.RepositoryRoot, bundleRoot, manifestPath, subjectPath,
+            input.ProducerArtifactId, input.ExpectedSubjectSha256, input.RepositoryId, input.ProducerRunId, input.SourceCommit,
+            aggregatePath, input.AggregateArtifactId ?? "1", input.ExpectedAggregateSha256 ?? new string('0', 64),
+            input.PublicationDirectory is null ? Path.Combine(reportDirectory, "publication") : input.PublicationDirectory,
+            input.PublicationStartReceipt ?? Path.Combine(reportDirectory, StartReceiptFile),
+            input.PublicationStartArtifactId ?? string.Empty, reportDirectory);
         return new TailwindProducerBinding(request, subject);
     }
 

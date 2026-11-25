@@ -5,6 +5,32 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class PostgreSqlIntegrationTestDatabaseTests
 {
     [Fact]
+    public async Task CreateOwnedAsync_BusyTemplateReportsRejectedCreateAndLeavesSourceUsable()
+    {
+        await using var anchor = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var template = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(anchor.ConnectionString, isTemplate: true);
+        var templateStoreId = await template.PrepareTemplateAsync();
+        var acknowledged = false;
+        await using (var busy = await template.DataSource.OpenConnectionAsync())
+        {
+            var error = await Assert.ThrowsAsync<PostgreSqlFixtureException>(async () =>
+                await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(anchor.ConnectionString, template, afterCreate: (_, _) =>
+                {
+                    acknowledged = true;
+                    return ValueTask.CompletedTask;
+                }));
+
+            Assert.Contains(PostgresErrorCodes.ObjectInUse, error.Message, StringComparison.Ordinal);
+            Assert.Contains("No ownership was registered", error.Message, StringComparison.Ordinal);
+            Assert.False(acknowledged);
+        }
+
+        await using var clone = await PostgreSqlIntegrationTestDatabase.CreateOwnedAsync(anchor.ConnectionString, template);
+        var status = await clone.ActivateCloneAsync(templateStoreId, Guid.NewGuid(), "tests", "retry-after-template-in-use");
+        Assert.NotEqual(templateStoreId, status.StoreId);
+    }
+
+    [Fact]
     public async Task ExecuteContainerStartupProbeAsync_RetriesTimedOutNpgsqlConnection()
     {
         var attempts = 0;
@@ -217,6 +243,42 @@ public sealed class PostgreSqlIntegrationTestDatabaseTests
         {
             // Retry only this owned fixture's deletion after the failure case, and verify idempotent disposal.
             await database.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task FailedDrop_PreservesAClockRolesGrantOnAnotherDatabase()
+    {
+        await using var other = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
+        await database.SetExecutionTimeAsync(DateTimeOffset.UtcNow);
+        await using var owner = database.DataSource.CreateCommand(
+            "SELECT pg_get_userbyid(proowner) FROM pg_proc WHERE oid = 'appsurface_durable.work_execution_now()'::regprocedure");
+        var roleName = Assert.IsType<string>(await owner.ExecuteScalarAsync());
+        var otherName = new NpgsqlConnectionStringBuilder(other.ConnectionString).Database;
+        using var identifiers = new NpgsqlCommandBuilder();
+        var databaseIdentifier = identifiers.QuoteIdentifier(otherName!);
+        var roleIdentifier = identifiers.QuoteIdentifier(roleName);
+        await using var connection = await other.DataSource.OpenConnectionAsync();
+        await using var grant = new NpgsqlCommand($"GRANT CREATE ON DATABASE {databaseIdentifier} TO {roleIdentifier}", connection);
+        await grant.ExecuteNonQueryAsync();
+        try
+        {
+            var failure = new InvalidOperationException("Owned database drop failed.");
+            var observed = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                database.DisposeAsync(_ => ValueTask.FromException(failure)).AsTask());
+            Assert.Same(failure, observed);
+            Assert.IsType<PostgresException>(observed.Data["ExecutionClockCleanupException"]);
+            await using var verifyGrant = new NpgsqlCommand(
+                "SELECT has_database_privilege(@role, current_database(), 'CREATE')", connection);
+            verifyGrant.Parameters.AddWithValue("role", roleName);
+            Assert.Equal(true, await verifyGrant.ExecuteScalarAsync());
+        }
+        finally
+        {
+            await using var revoke = new NpgsqlCommand($"REVOKE CREATE ON DATABASE {databaseIdentifier} FROM {roleIdentifier}", connection);
+            await revoke.ExecuteNonQueryAsync();
         }
     }
 

@@ -1,10 +1,11 @@
+using ForgeTrust.AppSurface.PostgreSql.Testing;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit.Sdk;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
-internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
+internal sealed partial class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 {
     /// <summary>
     /// The inclusive PostgreSQL <c>server_version_num</c> floor accepted by integration tests.
@@ -28,28 +29,53 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     private const int ContainerStartupProbeMaximumAttempts = 3;
     private static readonly TimeSpan ContainerStartupProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly SemaphoreSlim SharedContainerServerGate = new(1, 1);
-    private readonly SemaphoreSlim _executionClockGate = new(1, 1);
     private readonly List<NpgsqlDataSource> _additionalDataSources = [];
-    private readonly string _databaseName;
+    private readonly PostgreSqlDatabaseLease _lease;
     private readonly string _maintenanceConnectionString;
     private string? _executionClockReaderRole;
     private static Task<PostgreSqlTestServer>? _sharedContainerServer;
 
+    private static readonly TimeSpan LifecycleBudget = TimeSpan.FromSeconds(60);
+    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+    private readonly bool _isTemplate;
+    private uint? _clockRoleOid;
+    private uint? _clockFunctionOid;
+    private bool _disposed;
+    private bool _closing;
+    private Task? _closeSources;
+
+    /// <summary>Receives elapsed teardown time once, after the first attempt that acquired the lifecycle gate.</summary>
+    internal Action<TimeSpan>? ObserveTeardown { get; set; }
+
+    /// <summary>Releases the class fixture's case lease after owned-resource cleanup succeeds.
+    /// A timed-out or failed cleanup leaves the callback registered for a safe retry.</summary>
+    internal Action? AfterDispose { get; set; }
+
     private PostgreSqlIntegrationTestDatabase(
-        string databaseName,
+        PostgreSqlDatabaseLease lease,
         string maintenanceConnectionString,
-        string connectionString,
-        NpgsqlDataSource dataSource)
+        bool isTemplate)
     {
-        _databaseName = databaseName;
+        _lease = lease;
+        _isTemplate = isTemplate;
         _maintenanceConnectionString = maintenanceConnectionString;
-        ConnectionString = connectionString;
-        DataSource = dataSource;
+        var settings = new NpgsqlConnectionStringBuilder(lease.ConnectionString);
+        if (isTemplate)
+        {
+            settings.Pooling = false;
+        }
+
+        ConnectionString = settings.ConnectionString;
+        DataSource = NpgsqlDataSource.Create(ConnectionString);
     }
 
     internal NpgsqlDataSource DataSource { get; }
 
     internal string ConnectionString { get; }
+
+    private string _databaseName => _lease.Name;
+
+    private uint _databaseOid => _lease.Oid;
 
     /// <summary>
     /// Sets this isolated database's authoritative execution time for integration tests.
@@ -64,14 +90,16 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     internal async ValueTask SetExecutionTimeAsync(DateTimeOffset executionTimeUtc)
     {
         var instant = executionTimeUtc.ToUniversalTime();
-        await _executionClockGate.WaitAsync();
+        await _lifecycleGate.WaitAsync();
         try
         {
+            ObjectDisposedException.ThrowIf(_closing, this);
             await using var connection = await DataSource.OpenConnectionAsync();
             if (_executionClockReaderRole is null)
             {
                 var roleName = $"appsurface_clock_reader_{Guid.NewGuid():N}";
                 await using var transaction = await connection.BeginTransactionAsync();
+                await VerifyConnectedIdentityAsync(connection, transaction, CancellationToken.None);
                 await ExecuteAsync($"CREATE ROLE \"{roleName}\" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;", transaction);
                 await ExecuteAsync("CREATE SCHEMA appsurface_test_clock;", transaction);
                 await ExecuteAsync($"GRANT USAGE, CREATE ON SCHEMA appsurface_durable TO {roleName};", transaction);
@@ -103,24 +131,42 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
                 await ExecuteAsync("REVOKE ALL ON FUNCTION appsurface_durable.work_execution_now() FROM PUBLIC;", transaction);
                 await ExecuteAsync($"REVOKE CREATE ON SCHEMA appsurface_durable FROM {roleName};", transaction);
                 await ExecuteAsync($"REVOKE {roleName} FROM CURRENT_USER;", transaction);
-                await transaction.CommitAsync();
+                await using (var identity = new NpgsqlCommand(
+                    "SELECT proowner, oid FROM pg_catalog.pg_proc WHERE oid = 'appsurface_durable.work_execution_now()'::regprocedure",
+                    connection, transaction))
+                await using (var reader = await identity.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        throw new PostgreSqlFixtureException("Clock role and function identity capture failed.");
+                    }
+
+                    _clockRoleOid = reader.GetFieldValue<uint>(0);
+                    _clockFunctionOid = reader.GetFieldValue<uint>(1);
+                }
                 _executionClockReaderRole = roleName;
+                // Record the transactional role OID before COMMIT, whose acknowledgement can be lost.
+                await transaction.CommitAsync();
             }
             else
             {
+                await using var transaction = await connection.BeginTransactionAsync();
+                await VerifyConnectedIdentityAsync(connection, transaction, CancellationToken.None);
                 await using var update = new NpgsqlCommand(
                     "UPDATE appsurface_test_clock.execution_clock SET clock_value = @clock_value WHERE singleton;",
-                    connection);
+                    connection, transaction);
                 update.Parameters.AddWithValue("clock_value", instant);
                 if (await update.ExecuteNonQueryAsync() != 1)
                 {
                     throw new InvalidOperationException("The isolated PostgreSQL execution clock row is missing.");
                 }
+
+                await transaction.CommitAsync();
             }
         }
         finally
         {
-            _executionClockGate.Release();
+            _lifecycleGate.Release();
         }
 
         async ValueTask ExecuteAsync(string sql, NpgsqlTransaction transaction)
@@ -133,9 +179,13 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     /// <summary>Creates a separately owned data source for testing configuration that requires distinct instances.</summary>
     internal NpgsqlDataSource CreateDataSource()
     {
-        var dataSource = NpgsqlDataSource.Create(ConnectionString);
-        _additionalDataSources.Add(dataSource);
-        return dataSource;
+        lock (_additionalDataSources)
+        {
+            ObjectDisposedException.ThrowIf(_closing, this);
+            var dataSource = NpgsqlDataSource.Create(ConnectionString);
+            _additionalDataSources.Add(dataSource);
+            return dataSource;
+        }
     }
 
     /// <summary>
@@ -172,31 +222,89 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 
     private static async Task<PostgreSqlIntegrationTestDatabase> CreateDatabaseAsync(PostgreSqlTestServer server)
     {
-        var databaseName = $"appsurface_durable_{Guid.NewGuid():N}";
         try
         {
-            await using (var maintenance = new NpgsqlConnection(server.MaintenanceConnectionString))
-            {
-                await maintenance.OpenAsync();
-                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{databaseName}\";", maintenance);
-                await create.ExecuteNonQueryAsync();
-            }
-
-            var sourceBuilder = new NpgsqlConnectionStringBuilder(server.ConnectionString)
-            {
-                Database = databaseName,
-            };
-            var dataSource = NpgsqlDataSource.Create(sourceBuilder.ConnectionString);
-            return new PostgreSqlIntegrationTestDatabase(
-                databaseName,
-                server.MaintenanceConnectionString,
-                sourceBuilder.ConnectionString,
-                dataSource);
+            using var deadline = new CancellationTokenSource(LifecycleBudget);
+            return await CreateRegisteredAsync(server, template: null, isTemplate: false, afterCreate: null,
+                CancellationToken.None, deadline.Token);
         }
-        catch (NpgsqlException) when (server.Container is not null)
+        catch (PostgreSqlFixtureException) when (server.Container is not null)
         {
             await InvalidateSharedContainerServerAsync(server);
             throw;
+        }
+    }
+
+    private static async ValueTask<PostgreSqlIntegrationTestDatabase> CreateRegisteredAsync(
+        PostgreSqlTestServer server,
+        PostgreSqlIntegrationTestDatabase? template,
+        bool isTemplate,
+        Func<string, CancellationToken, ValueTask>? afterCreate,
+        CancellationToken cancellationToken,
+        CancellationToken deadline)
+    {
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline);
+        PostgreSqlDatabaseLease lease;
+        try
+        {
+            lease = template is null
+                ? await PostgreSqlDatabaseLease.CreateAsync(
+                    server.ConnectionString,
+                    "appsurface_durable",
+                    afterCreate,
+                    operation.Token)
+                : await template._lease.CloneAsync(
+                    "appsurface_durable",
+                    afterCreate,
+                    operation.Token);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            throw new PostgreSqlFixtureException("Fixture creation timed out within the lifecycle budget. Check the dedicated server before retrying.");
+        }
+        catch (PostgreSqlDatabaseCleanupException)
+        {
+            throw;
+        }
+        catch (PostgreSqlDatabaseOwnershipException ownershipError)
+        {
+            throw new PostgreSqlFixtureException(ownershipError.Message);
+        }
+        catch (PostgresException error) when (error.SqlState is
+            PostgresErrorCodes.InsufficientPrivilege or PostgresErrorCodes.DuplicateDatabase or
+            PostgresErrorCodes.ObjectInUse or PostgresErrorCodes.InvalidCatalogName)
+        {
+            throw new PostgreSqlFixtureException(
+                $"Fixture server rejected database creation (SQLSTATE {error.SqlState}). No ownership was registered. " +
+                "Check the server and template before retrying.");
+        }
+        catch (Exception error)
+        {
+            throw new PostgreSqlFixtureException(
+                $"Database creation failed ({PostgreSqlFixtureException.Describe(error)}). Check the fixture server.");
+        }
+
+        try
+        {
+            return new PostgreSqlIntegrationTestDatabase(lease, server.MaintenanceConnectionString, isTemplate);
+        }
+        catch (Exception setupError)
+        {
+            try
+            {
+                await lease.DisposeAsync();
+            }
+            catch (Exception cleanupError)
+            {
+                throw new PostgreSqlDatabaseCleanupException(lease, cleanupError, setupError);
+            }
+
+            throw new PostgreSqlFixtureException(
+                $"Fixture data source creation failed ({PostgreSqlFixtureException.Describe(setupError)}). The owned database was removed.");
         }
     }
 
@@ -295,7 +403,8 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 
     private static async Task<PostgreSqlTestServer> CreateServerAsync(
         string connectionString,
-        PostgreSqlContainer? container)
+        PostgreSqlContainer? container,
+        CancellationToken cancellationToken = default)
     {
         var maintenanceBuilder = new NpgsqlConnectionStringBuilder(connectionString)
         {
@@ -304,7 +413,7 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         };
         if (container is null)
         {
-            await VerifyServerAsync(maintenanceBuilder.ConnectionString, CancellationToken.None);
+            await VerifyServerAsync(maintenanceBuilder.ConnectionString, cancellationToken);
         }
         else
         {
@@ -319,7 +428,7 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     {
         await using var maintenance = new NpgsqlConnection(maintenanceConnectionString);
         await maintenance.OpenAsync(cancellationToken);
-        await EnsureRequiredServerVersionAsync(maintenance);
+        await EnsureRequiredServerVersionAsync(maintenance, cancellationToken);
     }
 
     private static Exception CreateContainerPrerequisiteException(Exception exception)
@@ -388,10 +497,10 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         await EnsureRequiredServerVersionAsync(connection);
     }
 
-    private static async ValueTask EnsureRequiredServerVersionAsync(NpgsqlConnection connection)
+    private static async ValueTask EnsureRequiredServerVersionAsync(NpgsqlConnection connection, CancellationToken cancellationToken = default)
     {
         await using var command = new NpgsqlCommand("SHOW server_version_num;", connection);
-        var value = (string?)await command.ExecuteScalarAsync();
+        var value = (string?)await command.ExecuteScalarAsync(cancellationToken);
         EnsureRequiredServerVersion(value);
     }
 
@@ -424,70 +533,229 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         }
     }
 
-    public ValueTask DisposeAsync() => DisposeAsync(async maintenance =>
+    // The dedicated server has no independent administrators renaming resources between this check and the DDL.
+    // Look up both directions so a registered OID surviving under another name is never classified as absent.
+    private async ValueTask<bool> VerifyClockRoleAsync(NpgsqlConnection connection, CancellationToken token)
     {
-        await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{_databaseName}\" WITH (FORCE);", maintenance);
-        await drop.ExecuteNonQueryAsync();
-    });
+        var name = _executionClockReaderRole!;
+        var oid = _clockRoleOid!.Value;
+        await using var cmd = new NpgsqlCommand(
+            "SELECT (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = @name), EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE oid = @oid)", connection);
+        cmd.Parameters.AddWithValue("name", name);
+        cmd.Parameters.AddWithValue("oid", NpgsqlTypes.NpgsqlDbType.Oid, oid);
+        await using var reader = await cmd.ExecuteReaderAsync(token);
+        await reader.ReadAsync(token);
+        var actual = reader.IsDBNull(0) ? (uint?)null : reader.GetFieldValue<uint>(0);
+        if (actual == oid)
+        {
+            return true;
+        }
 
-    /// <summary>Disposes this fixture with a replaceable database-drop operation for deterministic failure tests.</summary>
-    /// <param name="dropDatabaseAsync">The drop operation, supplied an open administrative maintenance connection.</param>
-    /// <remarks>
-    /// Clock-role cleanup always runs. If the isolated database survives, its uniquely owned clock function and grants
-    /// are removed before the cluster role is dropped. A cleanup failure is attached to the original drop exception's
-    /// Data under ExecutionClockCleanupException so it cannot replace the initial failure. This seam is test-only;
-    /// callers remain responsible for retrying database deletion after an injected failure.
-    /// </remarks>
-    internal async ValueTask DisposeAsync(Func<NpgsqlConnection, ValueTask> dropDatabaseAsync)
+        if (actual is null && !reader.GetBoolean(1))
+        {
+            return false;
+        }
+
+        throw IdentityError("role", name, oid, actual);
+    }
+
+    private static PostgreSqlFixtureException IdentityError(string kind, string name, uint? expected, uint? actual) =>
+        new($"Fixture server {kind} {name} ownership mismatch (expected OID {expected}, observed {actual?.ToString() ?? "absent"}). " +
+            "Cleanup incomplete. Preserve this resource and its dependencies for the disposable-server owner.");
+
+    private async ValueTask VerifyConnectedIdentityAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
+        await _lease.VerifyConnectedIdentityAsync(connection, transaction, cancellationToken);
+    }
+
+    public ValueTask DisposeAsync() => DisposeRegisteredAsync(null);
+
+    /// <summary>Replaces the drop command for failure tests. Verified survivors can be retried with a fresh connection.</summary>
+    internal ValueTask DisposeAsync(Func<NpgsqlConnection, ValueTask> dropDatabaseAsync)
     {
         ArgumentNullException.ThrowIfNull(dropDatabaseAsync);
-        foreach (var additionalDataSource in _additionalDataSources)
-        {
-            await additionalDataSource.DisposeAsync();
-        }
+        return DisposeRegisteredAsync(dropDatabaseAsync);
+    }
 
-        await DataSource.DisposeAsync();
-        await using var maintenance = new NpgsqlConnection(_maintenanceConnectionString);
-        await maintenance.OpenAsync();
-        Exception? databaseDropFailure = null;
+    private async ValueTask DisposeRegisteredAsync(Func<NpgsqlConnection, ValueTask>? dropDatabaseAsync)
+    {
+        using var deadline = new CancellationTokenSource(LifecycleBudget);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
-            await dropDatabaseAsync(maintenance);
+            await _lifecycleGate.WaitAsync(deadline.Token);
         }
-        catch (Exception exception)
+        catch (OperationCanceledException)
         {
-            databaseDropFailure = exception;
-            throw;
+            throw new PostgreSqlFixtureException($"Fixture database {_databaseName} expected OID {_databaseOid}: timed out waiting for active setup. " +
+                "Cleanup incomplete. Reconcile the disposable server before retrying.");
+        }
+
+        Exception? cleanupFailure = null;
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (_lease.HasRegisteredClones)
+            {
+                throw new PostgreSqlFixtureException($"Template {_databaseName} still has registered clones. Release them before template teardown.");
+            }
+
+            lock (_additionalDataSources)
+            {
+                _closing = true;
+                _closeSources ??= CloseSourcesAsync();
+            }
+
+            await _closeSources.WaitAsync(deadline.Token);
+            if (_executionClockReaderRole is null)
+            {
+                await _lease.DropAsync(dropDatabaseAsync, deadline.Token);
+            }
+            else
+            {
+                await using var maintenance = new NpgsqlConnection(_maintenanceConnectionString);
+                await maintenance.OpenAsync(deadline.Token);
+                await _lease.ExistsAsync(maintenance, deadline.Token);
+                await VerifyClockRoleAsync(maintenance, deadline.Token);
+
+                Exception? dropError = null;
+                try
+                {
+                    Func<NpgsqlConnection, ValueTask>? dropOnRoleConnection = dropDatabaseAsync is null
+                        ? null
+                        : _ => dropDatabaseAsync(maintenance);
+                    await _lease.DropAsync(dropOnRoleConnection, deadline.Token);
+                }
+                catch (Exception error)
+                {
+                    dropError = error;
+                    throw;
+                }
+                finally
+                {
+                    try
+                    {
+                        await ReleaseClockRoleAsync(maintenance, deadline.Token);
+                    }
+                    catch (Exception cleanupError) when (dropError is not null)
+                    {
+                        dropError.Data["ExecutionClockCleanupException"] = cleanupError;
+                    }
+                }
+            }
+
+            _disposed = true;
+        }
+        catch (Exception error)
+        {
+            cleanupFailure = error;
+            var secondary = error.Data["ExecutionClockCleanupException"] is Exception roleError
+                ? $" Role cleanup failed ({PostgreSqlFixtureException.Describe(roleError)})." : string.Empty;
+            if (dropDatabaseAsync is not null || error is PostgreSqlDatabaseCleanupException ||
+                error is PostgreSqlFixtureException && secondary.Length == 0)
+            {
+                throw;
+            }
+
+            if (error is PostgreSqlDatabaseOwnershipException && secondary.Length == 0)
+            {
+                cleanupFailure = new PostgreSqlFixtureException(
+                    $"Fixture server database {_databaseName} expected OID {_databaseOid}: cleanup incomplete " +
+                    $"({PostgreSqlFixtureException.Describe(error)}). Reconcile the dedicated server before retrying.");
+                throw cleanupFailure;
+            }
+
+            cleanupFailure = new PostgreSqlFixtureException($"Fixture server database {_databaseName} expected OID {_databaseOid}: cleanup incomplete " +
+                $"({PostgreSqlFixtureException.Describe(error)}).{secondary} Reconcile the dedicated server before retrying.");
+            throw cleanupFailure;
         }
         finally
         {
-            if (_executionClockReaderRole is { } roleName)
+            var timing = ObserveTeardown;
+            var release = _disposed ? AfterDispose : null;
+            ObserveTeardown = null;
+            if (_disposed)
             {
-                try
-                {
-                    await using var dependencies = new NpgsqlCommand(
-                        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = @database) AND EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = @role);",
-                        maintenance);
-                    dependencies.Parameters.AddWithValue("database", _databaseName);
-                    dependencies.Parameters.AddWithValue("role", roleName);
-                    if ((bool)(await dependencies.ExecuteScalarAsync())!)
-                    {
-                        await using var survivingDatabase = new NpgsqlConnection(ConnectionString);
-                        await survivingDatabase.OpenAsync();
-                        await using var release = new NpgsqlCommand($"DROP OWNED BY \"{roleName}\";", survivingDatabase);
-                        await release.ExecuteNonQueryAsync();
-                    }
+                AfterDispose = null;
+            }
 
-                    await using var dropRole = new NpgsqlCommand($"DROP ROLE IF EXISTS \"{roleName}\";", maintenance);
-                    await dropRole.ExecuteNonQueryAsync();
-                    _executionClockReaderRole = null;
-                }
-                catch (Exception cleanupFailure) when (databaseDropFailure is not null)
-                {
-                    databaseDropFailure.Data["ExecutionClockCleanupException"] = cleanupFailure;
-                }
+            _lifecycleGate.Release();
+            try
+            {
+                timing?.Invoke(System.Diagnostics.Stopwatch.GetElapsedTime(started));
+            }
+            catch (Exception timingError) when (cleanupFailure is not null)
+            {
+                throw new PostgreSqlFixtureException($"{PostgreSqlFixtureException.Describe(cleanupFailure)} " +
+                    $"Timing output also failed ({PostgreSqlFixtureException.Describe(timingError)}). Retain the invalid run.");
+            }
+            finally
+            {
+                release?.Invoke();
             }
         }
+    }
+
+    private async ValueTask ReleaseClockRoleAsync(NpgsqlConnection maintenance, CancellationToken token)
+    {
+        // Recheck the target after DROP. Release only the recorded clock function and its case-local grants.
+        var databaseExists = await _lease.ExistsAsync(maintenance, token);
+        if (await VerifyClockRoleAsync(maintenance, token))
+        {
+            if (databaseExists && _clockFunctionOid is not null)
+            {
+                var settings = new NpgsqlConnectionStringBuilder(ConnectionString) { Pooling = false };
+                await using var survivor = new NpgsqlConnection(settings.ConnectionString);
+                await survivor.OpenAsync(token);
+                await using var transaction = await survivor.BeginTransactionAsync(token);
+                await VerifyConnectedIdentityAsync(survivor, transaction, token);
+                await using var check = new NpgsqlCommand(
+                    "SELECT oid FROM pg_catalog.pg_proc WHERE oid = pg_catalog.to_regprocedure('appsurface_durable.work_execution_now()') AND proowner = @role",
+                    survivor, transaction);
+                check.Parameters.AddWithValue("role", NpgsqlTypes.NpgsqlDbType.Oid, _clockRoleOid!.Value);
+                var observedFunction = (uint?)await check.ExecuteScalarAsync(token);
+                if (observedFunction != _clockFunctionOid)
+                {
+                    throw IdentityError("clock function", _databaseName, _clockFunctionOid, observedFunction);
+                }
+
+                await using var release = new NpgsqlCommand(
+                    $"""
+                    DROP FUNCTION appsurface_durable.work_execution_now();
+                    REVOKE USAGE ON SCHEMA appsurface_durable, appsurface_test_clock FROM "{_executionClockReaderRole}";
+                    REVOKE SELECT ON appsurface_test_clock.execution_clock FROM "{_executionClockReaderRole}";
+                    """, survivor, transaction);
+                await release.ExecuteNonQueryAsync(token);
+                await transaction.CommitAsync(token);
+                _clockFunctionOid = null;
+            }
+
+            await using var drop = new NpgsqlCommand($"DROP ROLE \"{_executionClockReaderRole}\"", maintenance);
+            await drop.ExecuteNonQueryAsync(token);
+            if (await VerifyClockRoleAsync(maintenance, token))
+            {
+                throw new PostgreSqlFixtureException("Clock role cleanup incomplete. Reconcile the dedicated server.");
+            }
+        }
+
+        _executionClockReaderRole = null;
+        _clockRoleOid = null;
+        _clockFunctionOid = null;
+    }
+
+    private async Task CloseSourcesAsync()
+    {
+        foreach (var source in _additionalDataSources)
+        {
+            await source.DisposeAsync();
+        }
+
+        await DataSource.DisposeAsync();
     }
 
     private sealed record PostgreSqlTestServer(
@@ -495,4 +763,17 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         string MaintenanceConnectionString,
         // Retain the container instance until the test process and its resource-reaper session exit.
         PostgreSqlContainer? Container);
+}
+
+/// <summary>Safe test-fixture failure text. Raw connection strings, credentials and server detail stay out of TRX.</summary>
+internal sealed class PostgreSqlFixtureException(string safeMessage) : InvalidOperationException(safeMessage)
+{
+    internal static string Describe(Exception error) => error switch
+    {
+        PostgreSqlFixtureException fixture => fixture.Message,
+        PostgreSqlDatabaseOwnershipException ownership => ownership.Message,
+        PostgresException postgres => $"PostgreSQL SQLSTATE {postgres.SqlState}",
+        AggregateException aggregate => string.Join(", ", aggregate.InnerExceptions.Select(Describe)),
+        _ => error.GetType().Name,
+    };
 }

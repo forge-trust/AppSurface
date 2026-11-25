@@ -7,6 +7,32 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 /// <summary>Checks that release evidence is produced by the exact, clean source and stamped verifier build.</summary>
 internal static class TailwindSourceIdentity
 {
+    // One policy serves both the clean-source Git pathspecs and transport output confinement.
+    private static readonly IReadOnlyList<string> RelevantInputPaths = Array.AsReadOnly<string>(
+    [
+        "tools/ForgeTrust.AppSurface.PackageIndex",
+        "tools/ForgeTrust.AppSurface.ReleaseContracts",
+        "Web/ForgeTrust.AppSurface.Web.Tailwind",
+        "packages/package-index.yml",
+        "scripts/verify-tailwind-package-consumer.sh",
+        "Directory.Build.props",
+        "Directory.Build.targets",
+        "Directory.Packages.props",
+        "NuGet.package-gate.config",
+        "NuGet.config",
+        "global.json"
+    ]);
+
+    /// <summary>Matches a repository-relative release input or its descendants, conservatively excluding case variants on every filesystem.</summary>
+    /// <param name="relativePath">A path already made relative to the repository; native directory separators are normalized.</param>
+    /// <returns>True only for a listed input or a descendant separated by a directory boundary, never a sibling prefix.</returns>
+    internal static bool IsRelevantInputPath(string relativePath)
+    {
+        var normalized = relativePath.Replace(Path.DirectorySeparatorChar, '/');
+        return RelevantInputPaths.Any(path => normalized.Equals(path, StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase));
+    }
+
     internal static async Task RequireAsync(string repositoryRoot, string expectedCommit, CancellationToken cancellationToken)
     {
         if (!Regex.IsMatch(expectedCommit, "^[0-9a-fA-F]{40}$", RegexOptions.CultureInvariant))
@@ -17,17 +43,7 @@ internal static class TailwindSourceIdentity
         var status = await RunGitAsync(repositoryRoot,
         [
             "status", "--porcelain", "--untracked-files=all", "--",
-            "tools/ForgeTrust.AppSurface.PackageIndex",
-            "tools/ForgeTrust.AppSurface.ReleaseContracts",
-            "Web/ForgeTrust.AppSurface.Web.Tailwind",
-            "packages/package-index.yml",
-            "scripts/verify-tailwind-package-consumer.sh",
-            "Directory.Build.props",
-            "Directory.Build.targets",
-            "Directory.Packages.props",
-            "NuGet.package-gate.config",
-            "NuGet.config",
-            "global.json"
+            .. RelevantInputPaths
         ], cancellationToken);
         if (!string.IsNullOrWhiteSpace(status))
             throw new PackageIndexException("Exact-source check failed: relevant release inputs in the checkout are modified, staged, or untracked.");
