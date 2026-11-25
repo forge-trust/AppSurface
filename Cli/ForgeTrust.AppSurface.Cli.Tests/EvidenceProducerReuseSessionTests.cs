@@ -159,7 +159,8 @@ public sealed class EvidenceProducerReuseSessionTests
                 throw new IOException("injected refusal settlement failure");
             }
         });
-        Assert.True(await session.BeginExecutionAsync(CancellationToken.None));
+        Assert.False(session.IsUnavailable, FormatDecisions(session));
+        Assert.True(await session.BeginExecutionAsync(CancellationToken.None), FormatDecisions(session));
         var results = new List<EvidenceProducerResult>();
         foreach (var (declaration, producer) in fixture.ProducerDeclarations.Zip(fixture.Producers))
         {
@@ -191,6 +192,10 @@ public sealed class EvidenceProducerReuseSessionTests
         Assert.Null(refusedState.PayloadDirectoryName);
         Assert.Equal(session.ExecutionId, refusedState.InFlightExecutionId);
     }
+
+    private static string FormatDecisions(EvidenceProducerReuseSession session)
+        => string.Join(Environment.NewLine, session.Decisions.Select(static decision =>
+            $"{decision.ProducerId}: {decision.Reason}: {decision.Diagnostic}"));
 
     [Fact]
     public async Task KeyMaterialResultIsAnImmutableSnapshotDistinctFromProducerOwnedDictionary()
@@ -985,8 +990,9 @@ public sealed class EvidenceProducerReuseSessionTests
             var outputRoot = artifactRoot ?? NextArtifactRoot();
             LastArtifactRoot = outputRoot;
             Directory.CreateDirectory(outputRoot);
+            // The wait budget includes durable quota and key setup on the test host's disk.
             var options = new EvidenceProducerReuseOptions(true, RepositoryRoot, storeRoot ?? StoreRoot,
-                waitTimeout ?? TimeSpan.FromSeconds(2), _callbackCleanupTimeout, verifyReuse, false,
+                waitTimeout ?? TimeSpan.FromSeconds(10), _callbackCleanupTimeout, verifyReuse, false,
                 ReadOnlyMemory<byte>.Empty, TimeProvider.System)
             {
                 ForbiddenRoots = [outputRoot],
