@@ -24,7 +24,9 @@ and `latest-cancelled.zip`). Planning uses the corresponding `latest-plan` names
 output exists leaves the previous archives available. Runs using the managed output are serialized
 per worktree by the SDK's file locking, which must remain enabled.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage
-diagnostics. Extract an archive to verify it using the same relative layout. Scratch is removed
+diagnostics. Before replacing a successful archive, the validator independently checks its plan,
+manifest and bound files against the verified run. Extract an archive to verify it using the same
+relative layout. Scratch is removed
 after successful retention and known cleanup. When cleanup cannot be confirmed, the printed scratch
 path remains available for inspection. Remove that scratch once its processes have settled. The private `package-restore/` cache keeps the
 package-gate build warm and its worktree restore metadata usable between runs. Installed-consumer and

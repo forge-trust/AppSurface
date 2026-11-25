@@ -43,14 +43,20 @@ internal sealed class LocalEvidenceWorkflow
         if (operation is not ("local" or "local-plan")) throw new ArgumentException("Expected local or local-plan.");
         var repository = Path.GetFullPath(options.GetValueOrDefault("--repository", Directory.GetCurrentDirectory()));
         if (options.TryGetValue("--output", out var explicitOutput))
-            return await RunFreshAsync(options, repository, operation, Path.GetFullPath(explicitOutput), null, cancellationToken);
+        {
+            await RunFreshAsync(options, repository, operation, Path.GetFullPath(explicitOutput), null, cancellationToken);
+            return 0;
+        }
 
         cancellationToken.ThrowIfCancellationRequested();
+        if (!Path.Exists(PathUtils.PathUnder(repository, ".git")))
+            throw new ArgumentException("Managed local evidence requires a Git worktree root.");
         return await LocalEvidenceOutput.RunAsync(repository, operation,
             (output, cache) => RunFreshAsync(options, repository, operation, output, cache, cancellationToken));
     }
 
-    private async Task<int> RunFreshAsync(IReadOnlyDictionary<string, string> options, string repository, string operation,
+    private async Task<(EvidencePlan Plan, EvidenceManifest Manifest)?> RunFreshAsync(
+        IReadOnlyDictionary<string, string> options, string repository, string operation,
         string output, string? packageRestoreCache, CancellationToken cancellationToken)
     {
         var policy = Path.GetFullPath(options.GetValueOrDefault("--policy", PathUtils.PathUnder(repository, ".github", "evidence.policy.json")));
@@ -69,7 +75,7 @@ internal sealed class LocalEvidenceWorkflow
         {
             Console.WriteLine("No local changes relative to the selected base; no evidence collected.");
             await File.WriteAllTextAsync(Path.Join(output, "evidence-summary.md"), "No changed paths. No evidence claim was produced.\n", cancellationToken);
-            return 0;
+            return null;
         }
 
         // Preserve checked-in rules/contracts while binding dirty local content into the canonical
@@ -90,7 +96,7 @@ internal sealed class LocalEvidenceWorkflow
         await RepositoryEvidenceWorkflow.RunAsync(common, cancellationToken);
         var planPath = Path.Join(output, "plan", "evidence-plan.json");
         var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(planPath, cancellationToken));
-        if (operation == "local-plan") return 0;
+        if (operation == "local-plan") return null;
 
         // Pin the resolved base, not a moving branch name, when checking for edits during collection.
         await RequireUnchangedAsync(git, repository, changes, policy, policyDigest, cancellationToken);
@@ -158,7 +164,7 @@ internal sealed class LocalEvidenceWorkflow
         }
         await RepositoryEvidenceWorkflow.VerifyAsync(plan, manifest, Path.Join(proof, "artifacts"), cancellationToken);
         Console.WriteLine($"Local evidence gate passed: {manifest.ClaimKind}. This run covers the current OS; CI requires its native matrix.");
-        return 0;
+        return (plan, manifest);
     }
 
     private static async Task RequireUnchangedAsync(RepositoryGitChanges git, string repository, RepositoryChangeSet original,

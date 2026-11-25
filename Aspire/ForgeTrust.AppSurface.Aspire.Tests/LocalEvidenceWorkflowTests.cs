@@ -414,7 +414,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
                 if (phase == "invalid-manifest")
                     File.WriteAllText(TestPathUtils.PathUnder(proof, "evidence-manifest.json"), "not a manifest");
             }
-            return Task.FromException(failure);
+            return Task.FromException<(EvidencePlan, EvidenceManifest)?>(failure);
         }));
 
         Assert.Same(failure, thrown);
@@ -423,6 +423,58 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
             Assert.Equal("earlier diagnostics", await File.ReadAllTextAsync(failureArchive));
         if (phase is not ("preflight" or "archive-collision"))
             Assert.Contains(failure.Message, ReadArchive(retained, archive, "run-status.txt")!);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManagedOutput_RejectsUnverifiedZipBeforeReplacingPreviousProof(bool omitArtifact)
+    {
+        var fixture = await CreateFixtureAsync();
+        await ChangeAsync(fixture, "src/feature.cs", "class Feature { }");
+        var options = Options(fixture, "local", "coverage");
+        options.Remove("--output");
+        var workflow = new LocalEvidenceWorkflow(workflow: async (runOptions, token) =>
+        {
+            await WriteCompleteProofAsync(runOptions, token);
+            return 0;
+        });
+        Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
+
+        var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
+        var latest = TestPathUtils.PathUnder(retained, "latest.zip");
+        var previous = await File.ReadAllBytesAsync(latest);
+        var extracted = TestPathUtils.PathUnder(_root, "verified-input");
+        ZipFile.ExtractToDirectory(latest, extracted);
+        var plan = ReadPlan(extracted);
+        var manifest = ReadManifest(extracted);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => LocalEvidenceOutput.RunAsync(fixture.Root, "local", (output, _) =>
+        {
+            ZipFile.ExtractToDirectory(latest, output);
+            var artifact = TestPathUtils.PathUnder(output, "proof", "artifacts", "solution-coverage", "proof", "result.json");
+            if (omitArtifact)
+                File.Delete(artifact);
+            else
+                File.WriteAllText(artifact, "[]");
+            return Task.FromResult<(EvidencePlan, EvidenceManifest)?>((plan, manifest));
+        }));
+
+        Assert.Equal(previous, await File.ReadAllBytesAsync(latest));
+    }
+
+    [Fact]
+    public async Task ManagedOutput_RejectsNonWorktreeWithoutCreatingOutput()
+    {
+        var fixture = await CreateFixtureAsync();
+        var options = Options(fixture, "local");
+        options.Remove("--output");
+        var missing = TestPathUtils.PathUnder(_root, "non-worktree");
+        options["--repository"] = missing;
+
+        await Assert.ThrowsAsync<ArgumentException>(() => new LocalEvidenceWorkflow().RunAsync(options, CancellationToken.None));
+
+        Assert.False(Directory.Exists(missing));
     }
 
     [Fact]

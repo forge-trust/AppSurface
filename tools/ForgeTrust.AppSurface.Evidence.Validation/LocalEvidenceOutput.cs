@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -17,7 +18,8 @@ internal static class LocalEvidenceOutput
 
     /// <summary>Runs against fresh scratch and replaces the matching compact archive after the run.</summary>
     /// <remarks>Explicit output paths bypass this lifecycle. The package-gate build cache remains separate from scratch.</remarks>
-    internal static async Task<int> RunAsync(string repository, string operation, Func<string, string, Task> run)
+    internal static async Task<int> RunAsync(string repository, string operation,
+        Func<string, string, Task<(EvidencePlan Plan, EvidenceManifest Manifest)?>> run)
     {
         var results = RequireDirectory(PathUtils.PathUnder(repository, "TestResults"));
         var evidence = RequireDirectory(PathUtils.PathUnder(results, "repository-evidence"));
@@ -32,9 +34,10 @@ internal static class LocalEvidenceOutput
         var output = workspace.GetPath("run");
         var archive = operation == "local-plan" ? "latest-plan" : "latest";
         Console.WriteLine("Local evidence scratch: " + output);
+        (EvidencePlan Plan, EvidenceManifest Manifest)? proof;
         try
         {
-            await run(output, packageCache);
+            proof = await run(output, packageCache);
         }
         catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
         {
@@ -66,7 +69,7 @@ internal static class LocalEvidenceOutput
             throw;
         }
 
-        Publish(workspace, output, root, archive + ".zip", "Validation and proof verification passed.");
+        Publish(workspace, output, root, archive + ".zip", "Validation completed.", proof);
         await workspace.DisposeAsync();
         return 0;
     }
@@ -86,7 +89,8 @@ internal static class LocalEvidenceOutput
             producer.Diagnostic?.Contains("cleanup_failed", StringComparison.Ordinal) == true);
     }
 
-    private static void Publish(EvidenceWorkspace workspace, string output, string root, string name, string status)
+    private static void Publish(EvidenceWorkspace workspace, string output, string root, string name, string status,
+        (EvidencePlan Plan, EvidenceManifest Manifest)? proof = null)
     {
         var temporary = workspace.GetPath("retained.zip");
         using (var archive = ZipFile.Open(temporary, ZipArchiveMode.Create))
@@ -105,10 +109,41 @@ internal static class LocalEvidenceOutput
             }
         }
 
+        if (proof is { } verified)
+            VerifyArchivedProof(temporary, verified.Plan, verified.Manifest);
+
         var destination = PathUtils.PathUnder(root, name);
         RequirePlainPath(destination);
         File.Move(temporary, destination, overwrite: true);
         Console.WriteLine("Local evidence output: " + destination);
+    }
+
+    private static void VerifyArchivedProof(string path, EvidencePlan plan, EvidenceManifest manifest)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        var planBytes = EvidenceCanonicalJson.Serialize(plan);
+        var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
+        VerifyEntry(archive, "plan/evidence-plan.json", planBytes.LongLength, EvidenceDigest.Sha256(planBytes));
+        VerifyEntry(archive, "proof/evidence-manifest.json", manifestBytes.LongLength, EvidenceDigest.Sha256(manifestBytes));
+        foreach (var producer in manifest.ProducerResults)
+        {
+            foreach (var artifact in producer.Artifacts ?? [])
+            {
+                var entry = $"proof/artifacts/{producer.ProducerId}/{artifact.RelativePath}";
+                VerifyEntry(archive, entry, artifact.LengthBytes, artifact.Sha256);
+            }
+        }
+    }
+
+    private static void VerifyEntry(ZipArchive archive, string name, long length, string sha256)
+    {
+        var entry = archive.GetEntry(name);
+        if (entry is null || entry.Length != length)
+            throw new InvalidDataException($"Local evidence archive is missing the verified content for {name}.");
+        using var stream = entry.Open();
+        var archivedSha256 = Convert.ToHexString(SHA256.HashData(stream));
+        if (!string.Equals(archivedSha256, sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Local evidence archive digest mismatch for {name}.");
     }
 
     private static readonly HashSet<string> EvidenceFiles =
