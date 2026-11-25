@@ -446,7 +446,7 @@ The consumer producer installs the supplied package in an isolated tool director
 
 Use `reuse-package-proof` to validate a packed candidate CLI and an independent package-only prepared host. It checks candidate archive identity and dependency closure, installs the packed tool, and runs the host and CLI reuse assertions. The [local producer reuse guide](../../guides/evidence-reuse.md) explains the reuse contract, adoption choices, and pitfalls.
 
-The validator copies the [packed host fixture](fixtures/packed-host/Program.cs) into proof scratch and fills in the exact candidate version in its [project template](fixtures/packed-host/PackedHost.csproj.template). It passes the expected assembly IDs to both the built and published host, then verifies their reported paths and hashes against the candidate archives.
+The validator copies the [packed host fixture](https://github.com/forge-trust/AppSurface/blob/dea581f6e39ca8b3c7ea1d89cc4d61b37a86ba49/tools/ForgeTrust.AppSurface.Evidence.Validation/fixtures/packed-host/Program.cs) into proof scratch and fills in the exact candidate version in its [project template](https://github.com/forge-trust/AppSurface/blob/dea581f6e39ca8b3c7ea1d89cc4d61b37a86ba49/tools/ForgeTrust.AppSurface.Evidence.Validation/fixtures/packed-host/PackedHost.csproj.template). It passes the expected assembly IDs to both the built and published host, then verifies their reported paths and hashes against the candidate archives.
 
 Build or select a candidate feed, build the validator from the repository root, then invoke its assembly with all five required values:
 

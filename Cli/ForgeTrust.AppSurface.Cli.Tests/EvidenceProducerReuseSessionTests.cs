@@ -130,6 +130,8 @@ public sealed class EvidenceProducerReuseSessionTests
             else
                 Assert.Equal(EvidenceExecutionVerdict.Passed, completed.ExecutionVerdict);
 
+            Assert.Contains("Settlement of this key's execution authority could not be confirmed.",
+                Assert.Single(session.Decisions).Diagnostic, StringComparison.Ordinal);
             Assert.Equal(Convert.ToHexString(originalIndex),
                 Convert.ToHexString(await File.ReadAllBytesAsync(savedIndexPath)));
         }
@@ -1061,7 +1063,7 @@ public sealed class EvidenceProducerReuseSessionTests
         internal async Task CommitAsync(string message)
         {
             await GitAsync("add", "--all");
-            await GitAsync("commit", "--quiet", "--allow-empty", "-m", message);
+            await GitAsync("commit", "--quiet", "--no-gpg-sign", "--allow-empty", "-m", message);
         }
 
         internal async Task GitAsync(params string[] arguments)

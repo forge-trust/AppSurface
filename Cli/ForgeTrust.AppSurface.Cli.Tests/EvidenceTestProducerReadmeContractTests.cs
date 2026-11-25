@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json.Nodes;
-using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -14,11 +13,11 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// </summary>
 public sealed class EvidenceTestProducerReadmeContractTests
 {
-    private static readonly string Readme = File.ReadAllText(Path.Join(
-        PathUtils.FindRepositoryRoot(AppContext.BaseDirectory),
+    private static readonly string Readme = File.ReadAllText(TestPathUtils.PathUnder(
+        TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
         "Evidence",
         "ForgeTrust.AppSurface.Evidence.Cli",
-        "README.md"));
+        "README.md")).ReplaceLineEndings("\n");
 
     [Fact]
     public async Task FirstRunFragment_ShouldValidateAndSelectTheTestProfileWhenMergedIntoTheStarterPolicy()

@@ -36,6 +36,7 @@ internal static class EvidenceReceiptQuota
     /// <param name="waitTimeout">Remaining caller-owned wait budget; this root-index wait is capped at 30 seconds.</param>
     /// <param name="cancellationToken">Cancels a bounded wait for the root-index native lease.</param>
     /// <param name="unixDirectoryFsyncForTests">Optional directory-sync failure seam; production omits it.</param>
+    /// <param name="onIndexContentionForTests">Optional fixture signal after an unsuccessful native lock attempt.</param>
     /// <remarks>
     /// A null timeout preserves the historical 30-second wait. Larger or infinite timeouts are capped at 30 seconds;
     /// zero permits one immediate acquisition attempt but does not wait if the index is busy, and other negative
@@ -44,12 +45,12 @@ internal static class EvidenceReceiptQuota
     /// </remarks>
     internal static string ReserveEssential(string rootPath, string repositoryNamespace, IReadOnlyList<string> keys,
         DateTimeOffset now, TimeSpan? waitTimeout = null, CancellationToken cancellationToken = default,
-        Func<int, int>? unixDirectoryFsyncForTests = null)
+        Func<int, int>? unixDirectoryFsyncForTests = null, Action? onIndexContentionForTests = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var reservationId = Guid.NewGuid().ToString("N");
         using var root = OpenRoot(rootPath);
-        using var indexLease = AcquireIndexLease(rootPath, waitTimeout, cancellationToken);
+        using var indexLease = AcquireIndexLease(rootPath, waitTimeout, cancellationToken, onIndexContentionForTests);
         cancellationToken.ThrowIfCancellationRequested();
         var index = ReadIndex(root);
         if (index.Entries.Any(static entry => entry.EvictionPending))
@@ -93,6 +94,7 @@ internal static class EvidenceReceiptQuota
     /// <param name="now">The current time used by ordinary quota maintenance.</param>
     /// <param name="waitTimeout">Remaining caller-owned wait budget; this root-index wait is capped at 30 seconds.</param>
     /// <param name="cancellationToken">Cancels a bounded wait for the root-index native lease.</param>
+    /// <param name="onIndexContentionForTests">Optional fixture signal after an unsuccessful native lock attempt.</param>
     /// <remarks>
     /// A null timeout preserves the historical 30-second wait. Larger or infinite timeouts are capped at 30 seconds;
     /// zero permits one immediate acquisition attempt but does not wait if the index is busy, and other negative
@@ -102,11 +104,11 @@ internal static class EvidenceReceiptQuota
     /// </remarks>
     internal static void ConfirmEssentialReservation(string rootPath, string repositoryNamespace, string key,
         string reservationId, DateTimeOffset now, TimeSpan? waitTimeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Action? onIndexContentionForTests = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var root = OpenRoot(rootPath);
-        using var indexLease = AcquireIndexLease(rootPath, waitTimeout, cancellationToken);
+        using var indexLease = AcquireIndexLease(rootPath, waitTimeout, cancellationToken, onIndexContentionForTests);
         cancellationToken.ThrowIfCancellationRequested();
         var index = ReadIndex(root);
         var entry = Find(index, repositoryNamespace, key);
@@ -977,7 +979,7 @@ internal static class EvidenceReceiptQuota
 
     /// <summary>Acquires the root-index native lease with a cancellable caller budget capped at 30 seconds.</summary>
     private static CoverageArtifactOperationLease AcquireIndexLease(string rootPath, TimeSpan? waitTimeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Action? onIndexContentionForTests = null)
     {
         var timeout = waitTimeout ?? MaximumIndexWait;
         if (timeout < TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
@@ -1000,6 +1002,7 @@ internal static class EvidenceReceiptQuota
             }
             catch (CoverageExecutionException exception) when (CoverageArtifactOperationLease.IsContention(exception))
             {
+                onIndexContentionForTests?.Invoke();
                 cancellationToken.ThrowIfCancellationRequested();
                 var remaining = timeout - deadline.Elapsed;
                 if (remaining <= TimeSpan.Zero)

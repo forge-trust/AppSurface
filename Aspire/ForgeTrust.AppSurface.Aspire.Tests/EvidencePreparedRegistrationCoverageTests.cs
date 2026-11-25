@@ -1,3 +1,5 @@
+using CliWrap;
+using CliWrap.Buffered;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
@@ -270,8 +272,8 @@ public sealed class EvidencePreparedRegistrationCoverageTests
     public async Task PreparedHostDoesNotSynthesizeAbsentCapturedPatch(bool provideEmptySnapshot)
     {
         using var fixture = new Fixture();
-        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
-        const string selectedInput = "Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidencePreparedRegistrationCoverageTests.cs";
+        var repositoryRoot = await fixture.InitializeRepositoryAsync();
+        const string selectedInput = Fixture.SelectedInput;
         var producer = new Producer("patch-bound-check");
         var declaration = new EvidenceProducerDeclaration(producer.Id, "coverage", "1", ["database"], ["valid"], [], 30)
         {
@@ -338,8 +340,8 @@ public sealed class EvidencePreparedRegistrationCoverageTests
     public async Task OptedInNoArtifactProducer_ShouldReuseSuccessfulResultWithoutStartingResources()
     {
         using var fixture = new Fixture();
-        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
-        const string selectedInput = "Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidencePreparedRegistrationCoverageTests.cs";
+        var repositoryRoot = await fixture.InitializeRepositoryAsync();
+        const string selectedInput = Fixture.SelectedInput;
         var declaration = new EvidenceProducerDeclaration("check", "custom", "1", [], ["valid"], [], 30)
         {
             Inputs = new EvidenceProducerInputs([selectedInput], []),
@@ -425,8 +427,8 @@ public sealed class EvidencePreparedRegistrationCoverageTests
     public async Task ContendedReceiptPreparation_ShouldReportBoundedWaitProgressAndResumeAfterOwnerDisposal()
     {
         using var fixture = new Fixture();
-        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
-        const string selectedInput = "Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidencePreparedRegistrationCoverageTests.cs";
+        var repositoryRoot = await fixture.InitializeRepositoryAsync();
+        const string selectedInput = Fixture.SelectedInput;
         var declaration = new EvidenceProducerDeclaration("check", "custom", "1", [], ["valid"], [], 30)
         {
             Inputs = new EvidenceProducerInputs([selectedInput], []),
@@ -793,12 +795,41 @@ public sealed class EvidencePreparedRegistrationCoverageTests
 
     private sealed class Fixture : IDisposable
     {
+        internal const string SelectedInput = "input.txt";
         internal readonly string Root = Directory.CreateTempSubdirectory("prepared-registration-evidence-").FullName;
         internal string Repository => TestPathUtils.PathUnder(Root, "repo");
 
         internal Fixture()
         {
             Directory.CreateDirectory(Repository);
+        }
+
+        internal async Task<string> InitializeRepositoryAsync()
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var environment = Environment.GetEnvironmentVariables().Keys.Cast<string>()
+                .Where(static name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(static name => name, static _ => (string?)null, StringComparer.Ordinal);
+            environment["GIT_CONFIG_NOSYSTEM"] = "1";
+            environment["GIT_CONFIG_GLOBAL"] = TestPathUtils.PathUnder(Root, "absent-git-config");
+            var hooks = TestPathUtils.PathUnder(Root, "empty-hooks");
+            Directory.CreateDirectory(hooks);
+            await RunGitAsync("init", "--quiet");
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(Repository, SelectedInput), "stable receipt input", deadline.Token);
+            await RunGitAsync("add", "--", SelectedInput);
+            await RunGitAsync("commit", "--quiet", "--no-gpg-sign", "-m", "fixture input");
+            return Repository;
+
+            async Task RunGitAsync(params string[] arguments)
+            {
+                var result = await CliWrap.Cli.Wrap("git").WithWorkingDirectory(Repository)
+                    .WithEnvironmentVariables(environment)
+                    .WithArguments(["-c", "user.name=Evidence Test", "-c", "user.email=evidence@example.invalid",
+                        "-c", "core.hooksPath=" + hooks, .. arguments])
+                    .WithValidation(CommandResultValidation.None).ExecuteBufferedAsync(deadline.Token);
+                Assert.True(result.ExitCode == 0,
+                    $"Git exited {result.ExitCode}. stdout: {result.StandardOutput} stderr: {result.StandardError}");
+            }
         }
 
         internal Task<EvidencePreparedRun> PrepareAsync(Action<EvidenceHostPreparationRegistration> configure, bool requireEnvelope = false)
@@ -837,7 +868,7 @@ public sealed class EvidencePreparedRegistrationCoverageTests
                 [new NormalizedDiffPath("input.txt")]);
         }
 
-        public void Dispose() => Directory.Delete(Root, recursive: true);
+        public void Dispose() => NativeEvidenceTestDirectory.Delete(Root);
     }
 
     private sealed class Producer(string id, Exception? disposalFailure = null) : IEvidenceProducer, IAsyncDisposable

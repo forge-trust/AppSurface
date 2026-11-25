@@ -1730,7 +1730,7 @@ public sealed class EvidenceReceiptQuotaCoverageTests
             case "tombstone-producer": entry["ProducerId"] = "producer"; break;
             case "tombstone-input-hash": entry["InputIdentityDigest"] = Hash("tombstone-input"); break;
             case "tombstone-essential-id": entry["EssentialReservationIds"] = new JsonArray(JsonValue.Create("0123456789abcdef0123456789abcdef")); break;
-            case "tombstone-payload-binding": SetPayloadReservations(entry, validId, validStage, validPayload, 1); break;
+            case "tombstone-payload-binding": entry["PayloadReservations"] = PayloadReservations(1, validId); break;
             case "unsupported-index-schema": index["SchemaVersion"] = 5; break;
         }
         return Encoding.UTF8.GetBytes(index.ToJsonString());

@@ -34,19 +34,26 @@ public sealed class EvidenceProducerKeyMaterialExecutionTests
             entered.SetResult();
             return new ValueTask<IReadOnlyDictionary<string, string>>(release.Task);
         }), Context(), TimeSpan.FromMilliseconds(20), cancellation.Token);
-        var wait = execution.WaitAsync();
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        cancellation.Cancel();
+        Task? cleanup = null;
+        try
+        {
+            var wait = execution.WaitAsync();
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            cancellation.Cancel();
 
-        var result = await wait.WaitAsync(TimeSpan.FromSeconds(10));
-        var cleanup = execution.DisposeAsync().AsTask();
-        Assert.True(result.CallerCancelled);
-        Assert.False(result.Settled);
-        Assert.Null(result.Material);
-        Assert.False(cleanup.IsCompleted);
-        release.SetResult(new Dictionary<string, string> { ["late"] = "discarded" });
-        await cleanup;
-        Assert.Equal("reuse.material_cancelled_active", result.Reason);
+            var result = await wait.WaitAsync(TimeSpan.FromSeconds(10));
+            cleanup = execution.DisposeAsync().AsTask();
+            Assert.True(result.CallerCancelled);
+            Assert.False(result.Settled);
+            Assert.Null(result.Material);
+            Assert.False(cleanup.IsCompleted);
+            Assert.Equal("reuse.material_cancelled_active", result.Reason);
+        }
+        finally
+        {
+            release.TrySetResult(new Dictionary<string, string> { ["late"] = "discarded" });
+            await (cleanup ?? execution.DisposeAsync().AsTask());
+        }
     }
 
     [Fact]

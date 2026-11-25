@@ -712,7 +712,13 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             if (_publicationSuppressed.Contains(producer.Id) || _quarantined.Contains(producer.Id) && !_auditComparisons.ContainsKey(producer.Id))
             {
                 RecordPublicationRefusal(producer.Id, ref auditFailed);
-                TrySettleKnownExecution(lease);
+                if (!TrySettleKnownExecution(lease) && _decisions.TryGetValue(producer.Id, out var decision))
+                {
+                    _decisions[producer.Id] = decision with
+                    {
+                        Diagnostic = decision.Diagnostic + " Settlement of this key's execution authority could not be confirmed. Verify the previous execution before retrying.",
+                    };
+                }
                 continue;
             }
             try
@@ -843,10 +849,18 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         }
     }
 
-    private void TrySettleKnownExecution(EvidenceReceiptStore.EvidenceReceiptKeyLease lease)
+    private bool TrySettleKnownExecution(EvidenceReceiptStore.EvidenceReceiptKeyLease lease)
     {
-        try { SettleKnownExecution(lease); }
-        catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception)) { /* Unconfirmed settlement preserves authority. */ }
+        try
+        {
+            SettleKnownExecution(lease);
+            return true;
+        }
+        catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
+        {
+            // Unconfirmed settlement preserves authority.
+            return false;
+        }
     }
 
     private void SettleKnownExecution(EvidenceReceiptStore.EvidenceReceiptKeyLease lease)

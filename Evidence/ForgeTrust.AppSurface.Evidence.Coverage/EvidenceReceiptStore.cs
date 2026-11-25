@@ -125,9 +125,16 @@ internal sealed class EvidenceReceiptStore
         => await AcquireAsync(keys, _waitTimeout, cancellationToken, progress).ConfigureAwait(false);
 
     /// <summary>Acquires keys using a caller-owned remaining invocation budget.</summary>
+    /// <param name="keys">The producer keys requiring exclusive ownership.</param>
+    /// <param name="remainingWaitBudget">The remaining time in the caller's invocation budget.</param>
+    /// <param name="cancellationToken">Cancels acquisition and unwinds partial ownership.</param>
+    /// <param name="progress">Optional bounded key-lease wait progress.</param>
+    /// <param name="onIndexContentionForTests">Optional fixture signal when the initial quota reservation observes root-index contention.</param>
+    /// <returns>Owned key leases in canonical order.</returns>
     /// <remarks>Pass the same monotonic invocation budget across reprepare attempts; this method never replenishes it.</remarks>
     internal async Task<IReadOnlyList<EvidenceReceiptKeyLease>> AcquireAsync(IEnumerable<string> keys,
-        TimeSpan remainingWaitBudget, CancellationToken cancellationToken, Action<string, TimeSpan, TimeSpan>? progress = null)
+        TimeSpan remainingWaitBudget, CancellationToken cancellationToken, Action<string, TimeSpan, TimeSpan>? progress = null,
+        Action? onIndexContentionForTests = null)
     {
         ObjectDisposedException.ThrowIf(_readOnly, this);
         ArgumentNullException.ThrowIfNull(keys);
@@ -144,7 +151,7 @@ internal sealed class EvidenceReceiptStore
         {
             EnsureStoreRoot();
             essentialReservationId = EvidenceReceiptQuota.ReserveEssential(_root, _namespace, ordered, _clock.GetUtcNow(),
-                RemainingWait(), cancellationToken);
+                RemainingWait(), cancellationToken, onIndexContentionForTests: onIndexContentionForTests);
             var namespaceDirectory = Path.Combine(_root, _namespace);
             VerifyReservedDirectory(namespaceDirectory);
             foreach (var key in ordered)

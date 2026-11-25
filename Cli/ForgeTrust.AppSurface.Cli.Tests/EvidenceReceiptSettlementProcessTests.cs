@@ -13,7 +13,7 @@ public sealed class EvidenceReceiptSettlementProcessTests
     [Fact]
     public async Task NormalCompletion_JoinsCooperativeDescendantThenClearsOnlyMatchingFlight()
     {
-        using var tree = SettlementTree.Create();
+        var tree = SettlementTree.Create();
         using var holder = StartHolder(tree);
         Process? client = null;
         Process? heartbeat = null;
@@ -55,13 +55,14 @@ public sealed class EvidenceReceiptSettlementProcessTests
         finally
         {
             await CleanupOwnedProcessesAsync(tree, holder, client, heartbeat, executionId, nonce);
+            tree.Dispose();
         }
     }
 
     [Fact]
     public async Task KilledHolder_LeavesLiveChildAndDurableInFlightThatRefusesContender_UntilSeparateDomainRecovery()
     {
-        using var tree = SettlementTree.Create();
+        var tree = SettlementTree.Create();
         using var holder = StartHolder(tree);
         Process? client = null;
         Process? heartbeat = null;
@@ -79,11 +80,10 @@ public sealed class EvidenceReceiptSettlementProcessTests
             client = OpenRecordedProcess(launch.ProcessId);
             var firstHeartbeat = await WaitForHeartbeatAsync(tree, executionId, nonce);
             heartbeat = OpenRecordedProcess(firstHeartbeat.ProcessId);
-            var beforeKill = ReadHeartbeats(tree, executionId, nonce).Max(static item => item.Sequence);
-
             holder.Kill(entireProcessTree: false);
             await WaitForExitAsync(holder, "holder root after non-tree kill");
-            var afterKill = await WaitForHeartbeatAfterAsync(tree, executionId, nonce, beforeKill);
+            var afterExitSequence = ReadHeartbeats(tree, executionId, nonce).Max(static item => item.Sequence);
+            var afterKill = await WaitForHeartbeatAfterAsync(tree, executionId, nonce, afterExitSequence);
             Assert.Equal(firstHeartbeat.ProcessId, afterKill.ProcessId);
             Assert.False(heartbeat.HasExited);
             Assert.False(client.HasExited);
@@ -125,6 +125,7 @@ public sealed class EvidenceReceiptSettlementProcessTests
         finally
         {
             await CleanupOwnedProcessesAsync(tree, holder, client, heartbeat, executionId, nonce);
+            tree.Dispose();
         }
     }
 
@@ -290,44 +291,38 @@ public sealed class EvidenceReceiptSettlementProcessTests
             await holder.WaitForExitAsync(holderTimeout.Token);
         }
 
-        if (executionId is not null && nonce is not null && File.Exists(tree.ChannelPath))
+        try
         {
-            var channel = await WaitForJsonAsync<ChannelRecord>(tree.ChannelPath);
-            if (channel.ExecutionId == executionId && channel.Nonce == nonce
-                && File.Exists(tree.ClientPath))
+            // The holder writes the channel before it starts the client. Recover that record
+            // even when admission stdout or the first client observation did not arrive.
+            if (File.Exists(tree.ChannelPath))
             {
-                var launch = await WaitForJsonAsync<ClientLaunch>(tree.ClientPath);
-                if (launch.ExecutionId == executionId && launch.Nonce == nonce)
-                    client ??= TryOpenRecordedProcess(launch.ProcessId);
-                if (client is { HasExited: false })
-                {
-                    var ownedHeartbeat = await WaitForHeartbeatAsync(tree, executionId, nonce);
-                    heartbeat ??= TryOpenRecordedProcess(ownedHeartbeat.ProcessId);
-                }
-                else if (File.Exists(tree.HeartbeatPath))
-                {
-                    var ownedHeartbeat = ReadHeartbeats(tree, executionId, nonce).FirstOrDefault();
-                    if (ownedHeartbeat is not null)
-                        heartbeat ??= TryOpenRecordedProcess(ownedHeartbeat.ProcessId);
-                }
-                if (heartbeat is { HasExited: false })
-                    await File.WriteAllTextAsync(tree.StopPath, executionId + "|" + nonce);
-            }
-        }
+                var channel = await WaitForJsonAsync<ChannelRecord>(tree.ChannelPath);
+                Assert.Equal(tree.ExecutionId, channel.ExecutionId);
+                Assert.Equal(executionId ?? channel.ExecutionId, channel.ExecutionId);
+                Assert.Equal(nonce ?? channel.Nonce, channel.Nonce);
+                executionId = channel.ExecutionId;
+                nonce = channel.Nonce;
 
-        if (heartbeat is { HasExited: false })
-        {
-            using var heartbeatTimeout = new CancellationTokenSource(ProcessDeadline);
-            await heartbeat.WaitForExitAsync(heartbeatTimeout.Token);
+                // Write the stop request before waiting for the client so a late heartbeat can exit.
+                await File.WriteAllTextAsync(tree.StopPath, executionId + "|" + nonce);
+                var launch = await WaitForJsonAsync<ClientLaunch>(tree.ClientPath);
+                Assert.Equal(executionId, launch.ExecutionId);
+                Assert.Equal(nonce, launch.Nonce);
+                client ??= TryOpenRecordedProcess(launch.ProcessId);
+                if (client is { HasExited: false }) await WaitForExitAsync(client, "owned child client during cleanup");
+
+                var ownedHeartbeat = ReadHeartbeats(tree, executionId, nonce).FirstOrDefault();
+                if (ownedHeartbeat is not null) heartbeat ??= TryOpenRecordedProcess(ownedHeartbeat.ProcessId);
+            }
+            if (heartbeat is { HasExited: false }) await WaitForExitAsync(heartbeat, "owned heartbeat during cleanup");
+            if (!holder.HasExited) throw new InvalidOperationException("Owned receipt holder remained alive after cleanup.");
         }
-        if (client is { HasExited: false })
+        finally
         {
-            using var clientTimeout = new CancellationTokenSource(ProcessDeadline);
-            await client.WaitForExitAsync(clientTimeout.Token);
+            client?.Dispose();
+            heartbeat?.Dispose();
         }
-        client?.Dispose();
-        heartbeat?.Dispose();
-        if (!holder.HasExited) throw new InvalidOperationException("Owned receipt holder remained alive after cleanup.");
     }
 
     private static Process? TryOpenRecordedProcess(int processId)

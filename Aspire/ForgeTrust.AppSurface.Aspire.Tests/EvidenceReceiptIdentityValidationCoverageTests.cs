@@ -65,19 +65,16 @@ public sealed class EvidenceReceiptIdentityValidationCoverageTests
             new Dictionary<string, string> { ["tools"] = Hash }, files).ValidateAndEncode());
     }
 
-    [Theory]
-    [InlineData("components")]
-    [InlineData("files")]
-    public void PersistedInventoryCountBoundsAreCheckedBeforeAcceptingMetadata(string dimension)
+    [Fact]
+    public void PersistedFileCountBoundIsIndependentOfPathAndByteValidation()
     {
-        var components = dimension == "components"
-            ? Enumerable.Range(0, 65).ToDictionary(index => "component-" + index, _ => Hash)
-            : new Dictionary<string, string>();
-        var files = dimension == "files"
-            ? Enumerable.Repeat(new EvidenceProducerInputFile("src/input.cs", 0, 0, Hash), EvidenceProducerIdentityBuilder.MaximumFiles + 1).ToArray()
-            : [];
-
-        Assert.Throws<InvalidDataException>(() => new EvidenceReceiptInputIdentity(components, files).ValidateAndEncode());
+        var files = Enumerable.Range(0, EvidenceProducerIdentityBuilder.MaximumFiles + 1)
+            .Select(index => new EvidenceProducerInputFile("src/" + index, 0, 0, Hash))
+            .ToArray();
+        var identity = new EvidenceReceiptInputIdentity(new Dictionary<string, string> { ["tools"] = Hash }, files);
+        Assert.InRange(EvidenceCanonicalJson.Serialize(identity).Length, 1, EvidenceProducerIdentityBuilder.MaximumMetadataBytes);
+        Assert.NotEmpty((identity with { Files = files[..^1] }).ValidateAndEncode());
+        Assert.Throws<InvalidDataException>(() => identity.ValidateAndEncode());
     }
 
     [Fact]

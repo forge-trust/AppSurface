@@ -171,8 +171,9 @@ public sealed class EvidenceReusePackageProofTests
             cancellation.Cancel();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => activeRun.WaitAsync(deadline.Token));
+            Assert.False(deadline.IsCancellationRequested, "The proof must cancel before the test deadline.");
+            Assert.True(activeRun.IsCanceled);
             Assert.True(cancellation.IsCancellationRequested);
-            await process.WaitForExitAsync().WaitAsync(deadline.Token);
             Assert.True(process.HasExited);
             Assert.False(Directory.Exists(TestPathUtils.PathUnder(output, "host-app")));
             Assert.False(Directory.Exists(TestPathUtils.PathUnder(output, "cli-inputs")));
@@ -264,8 +265,9 @@ public sealed class EvidenceReusePackageProofTests
     public async Task RejectedOutputOrSdkPreservesCallerOwnedFiles(string defect)
     {
         using var fixture = new FeedFixture();
-        var output = TestPathUtils.PathUnder(fixture.Root, "output");
-        var sdk = TestPathUtils.PathUnder(fixture.Root, "sdk");
+        using var scratch = new ProofScratch();
+        var output = TestPathUtils.PathUnder(defect == "inside-feed" ? fixture.Root : scratch.Root, "output");
+        var sdk = TestPathUtils.PathUnder(scratch.Root, "sdk");
         // Admission checks existence before starting a process; these bytes must never execute.
         if (defect != "missing-sdk") await File.WriteAllTextAsync(sdk, "caller SDK marker");
         if (defect == "existing-directory")
@@ -354,10 +356,11 @@ public sealed class EvidenceReusePackageProofTests
     public async Task PackedProofOperationRejectsUnrelatedOptionsBeforeCreatingOutput(string unrelatedOption)
     {
         using var fixture = new FeedFixture();
-        var output = TestPathUtils.PathUnder(fixture.Root, "output");
+        using var scratch = new ProofScratch();
+        var output = TestPathUtils.PathUnder(scratch.Root, "output");
         var result = await ForgeTrust.AppSurface.Evidence.Validation.Program.RunAsync(
             ["--operation", "reuse-package-proof", "--feed", fixture.Root, "--version", Version,
-                "--source-commit", Commit, "--dotnet", TestPathUtils.PathUnder(fixture.Root, "sdk"),
+                "--source-commit", Commit, "--dotnet", typeof(EvidenceReusePackageProofTests).Assembly.Location,
                 "--output", output, unrelatedOption, "caller-owned" ]);
 
         Assert.Equal(1, result);
@@ -693,6 +696,13 @@ public sealed class EvidenceReusePackageProofTests
             }
         }
         public void Dispose() => Directory.Delete(Root, recursive: true);
+    }
+
+    private sealed class ProofScratch : IDisposable
+    {
+        internal string Root { get; } = Directory.CreateTempSubdirectory("evidence-proof-output-").FullName;
+
+        public void Dispose() => NativeEvidenceTestDirectory.Delete(Root);
     }
 
     private sealed class SdkCancellationProbeFixture : IDisposable

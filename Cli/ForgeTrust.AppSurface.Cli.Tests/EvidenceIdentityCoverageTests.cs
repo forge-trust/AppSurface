@@ -204,7 +204,7 @@ public sealed class EvidenceIdentityCoverageTests
         await repository.WriteAsync("docs/keep.txt", "docs");
         await repository.CommitAsync();
         var producer = new EvidenceProducerDeclaration("producer", "check", "1", [], [], [], 10)
-        { Inputs = new EvidenceProducerInputs(["src/**/keep*", "docs/**"], ["src/**/omit*"]) };
+        { Inputs = new EvidenceProducerInputs(["src/**/*.txt", "docs/**"], ["src/**/omit*"]) };
 
         var result = await BuildIdentityAsync(repository, producer, [], new Dictionary<string, string>());
 

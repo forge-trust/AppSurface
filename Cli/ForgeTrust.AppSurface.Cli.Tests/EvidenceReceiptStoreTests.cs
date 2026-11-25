@@ -55,7 +55,7 @@ public sealed class EvidenceReceiptStoreTests
         try
         {
             Directory.CreateDirectory(target);
-            Directory.CreateSymbolicLink(link, target);
+            TestFileSystem.CreateDirectoryLinkOrSkip(link, target);
             var store = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
             { RootDirectory = link, RepositoryNamespace = Hash("repo") });
             Assert.True(store.Peek(Hash("key")).IsUnavailable);
@@ -1159,9 +1159,15 @@ public sealed class EvidenceReceiptStoreTests
             { Inputs = new EvidenceProducerInputs(["**"], []) };
             var plan = CreatePlan(producer);
             var writer = new EvidenceArtifactWriter(producer, sourceRoot);
-            await writer.WriteAsync("report", "reports/unsafe:name.txt", Encoding.UTF8.GetBytes("legacy-valid fresh output"));
+            var report = await writer.WriteAsync("report", "reports/result.txt", Encoding.UTF8.GetBytes("legacy-valid fresh output"));
+            // Legacy manifests accept backslashes for an existing file. Receipt custody requires the portable spelling.
+            EvidenceArtifactResult[] artifacts = [report with { RelativePath = @"reports\result.txt" }];
+            Assert.True(EvidenceArtifactValidation.AreValid(producer, artifacts));
+            var rejected = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                EvidenceReceiptPayload.VerifySourceArtifactsAsync(sourceRoot, producer, artifacts, CancellationToken.None));
+            Assert.Equal("Receipt artifact path is not portable.", rejected.Message);
             var manifest = EvidenceManifestBuilder.Build(plan,
-                [new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, ["assertion"], Artifacts: writer.WrittenArtifacts)]);
+                [new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, ["assertion"], Artifacts: artifacts)]);
             var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
             { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") });
             var lease = Assert.Single(await store.AcquireAsync([Hash("unsafe-path-key")], CancellationToken.None));
@@ -1212,7 +1218,7 @@ public sealed class EvidenceReceiptStoreTests
             var foreignTarget = Path.Combine(sourceRoot, "foreign-target.txt");
             await File.WriteAllTextAsync(foreignTarget, "preserve");
             var foreignLink = Path.Combine(Path.GetDirectoryName(payload)!, "foreign-link");
-            File.CreateSymbolicLink(foreignLink, foreignTarget);
+            TestFileSystem.CreateFileLinkOrSkip(foreignLink, foreignTarget);
             var contender = Assert.Single(await store.AcquireAsync([key], CancellationToken.None));
             using (contender)
             {

@@ -368,10 +368,13 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 var unavailable = await Assert.ThrowsAsync<EvidenceReceiptQuotaUnavailableException>(() => budgetOperation);
                 Assert.Equal("receipt-index-busy", unavailable.Message);
 
+                var reserveContended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var cancellationOperation = Task.Run(() => EvidenceReceiptQuota.ReserveEssential(root, repositoryNamespace,
-                    [key], DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5), cancellation.Token));
+                    [key], DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5), cancellation.Token,
+                    onIndexContentionForTests: () => reserveContended.TrySetResult()));
                 ownedTasks.Add(cancellationOperation);
-                cancellation.CancelAfter(TimeSpan.FromMilliseconds(250));
+                await reserveContended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                cancellation.Cancel();
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancellationOperation);
 
                 var confirmBudgetOperation = Task.Run(() => EvidenceReceiptQuota.ConfirmEssentialReservation(root,
@@ -380,11 +383,13 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 var confirmUnavailable = await Assert.ThrowsAsync<EvidenceReceiptQuotaUnavailableException>(() => confirmBudgetOperation);
                 Assert.Equal("receipt-index-busy", confirmUnavailable.Message);
 
+                var confirmContended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var confirmCancellationOperation = Task.Run(() => EvidenceReceiptQuota.ConfirmEssentialReservation(root,
                     repositoryNamespace, key, reservationId, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5),
-                    confirmCancellation.Token));
+                    confirmCancellation.Token, () => confirmContended.TrySetResult()));
                 ownedTasks.Add(confirmCancellationOperation);
-                confirmCancellation.CancelAfter(TimeSpan.FromMilliseconds(250));
+                await confirmContended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                confirmCancellation.Cancel();
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => confirmCancellationOperation);
             }
             finally
@@ -424,20 +429,24 @@ public sealed class EvidenceReceiptQuotaCapacityTests
                 var unavailable = await Assert.ThrowsAsync<EvidenceReceiptQuotaUnavailableException>(() => budgetOperation);
                 Assert.Equal("receipt-index-busy", unavailable.Message);
 
+                var acquisitionContended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var cancellationOperation = Task.Run(() => store.AcquireAsync(keys,
-                    TimeSpan.FromSeconds(5), cancellation.Token));
+                    TimeSpan.FromSeconds(5), cancellation.Token,
+                    onIndexContentionForTests: () => acquisitionContended.TrySetResult()));
                 ownedTasks.Add(cancellationOperation);
-                cancellation.CancelAfter(TimeSpan.FromMilliseconds(250));
+                await acquisitionContended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                cancellation.Cancel();
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancellationOperation);
             }
             finally
             {
                 cancellation.Cancel();
                 rootLease.Dispose();
+                var cleanupFailures = new List<Exception>();
                 try { await Task.WhenAll(ownedTasks); }
                 catch (EvidenceReceiptQuotaUnavailableException) { }
                 catch (OperationCanceledException) { }
-                var cleanupFailures = new List<Exception>();
+                catch (Exception failure) { cleanupFailures.Add(failure); }
                 foreach (var task in ownedTasks.Where(static task => task.IsCompletedSuccessfully))
                 {
                     var acquired = await task;

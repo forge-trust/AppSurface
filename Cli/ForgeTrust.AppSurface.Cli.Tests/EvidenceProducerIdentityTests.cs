@@ -257,16 +257,9 @@ public sealed class EvidenceProducerIdentityTests
         using var repo = await TestRepository.CreateAsync();
         await repo.WriteAsync("src/file.cs", "outer");
         await repo.CommitAsync("base");
-        var nested = new TestRepository(Path.Combine(repo.Root, "module"));
-        Directory.CreateDirectory(nested.Root);
-        await nested.GitAsync("init", "--quiet");
-        await nested.GitAsync("config", "user.email", "nested@example.invalid");
-        await nested.GitAsync("config", "user.name", "Nested Test");
-        await nested.WriteAsync("inside.cs", "nested");
-        await nested.CommitAsync("nested base");
-        var nestedCommit = await nested.GitOutputAsync("rev-parse", "HEAD");
-        await repo.GitAsync("update-index", "--add", "--cacheinfo", $"160000,{nestedCommit},module");
-        Directory.Delete(nested.Root, recursive: true);
+        var linkedCommit = await repo.GitOutputAsync("rev-parse", "HEAD");
+        await repo.GitAsync("update-index", "--add", "--cacheinfo", $"160000,{linkedCommit},module");
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(repo.Root, "module")));
 
         var selected = await BuildAsync(repo, ["src/**", "module"]);
 
