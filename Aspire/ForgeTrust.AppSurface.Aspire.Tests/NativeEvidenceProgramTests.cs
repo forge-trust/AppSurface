@@ -89,7 +89,7 @@ public sealed class NativeEvidenceProgramTests
             "--native-coverage-contract-version", "3"]);
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("Native validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("Validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
         Assert.False(Directory.Exists(output));
     }
 
