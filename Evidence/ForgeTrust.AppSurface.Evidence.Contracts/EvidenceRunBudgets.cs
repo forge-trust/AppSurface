@@ -48,9 +48,17 @@ internal enum EvidenceRunStage
 }
 
 /// <summary>A declared serial stage and its positive, protected deadline.</summary>
-/// <param name="Stage">The stage category, used to enforce its immutable cap.</param>
+/// <param name="Stage">The stage category, used to enforce any category-specific cap.</param>
 /// <param name="Duration">The positive stage deadline declared by protected registration.</param>
 internal sealed record EvidenceRunStageDeadline(EvidenceRunStage Stage, TimeSpan Duration);
+
+/// <summary>Identifies one admitted stage execution, even when declarations repeat.</summary>
+/// <param name="deadline">The declaration admitted for this execution.</param>
+internal sealed class EvidenceRunStageAdmission(EvidenceRunStageDeadline deadline)
+{
+    /// <summary>The admitted stage declaration and its duration.</summary>
+    internal EvidenceRunStageDeadline Deadline { get; } = deadline;
+}
 
 /// <summary>
 /// Admits declared serial work against a frozen monotonic job allowance and preserves
@@ -71,29 +79,33 @@ internal sealed class EvidenceRunTimeBudget
 
     private readonly object _gate = new();
     private readonly TimeProvider _timeProvider;
-    private readonly long _admissionTimestamp;
+    private readonly long _allowanceSampledAt;
     private readonly TimeSpan _jobAllowance;
     private readonly ReadOnlyCollection<EvidenceRunStageDeadline> _stages;
     private readonly TimeSpan _collection;
     private readonly TimeSpan _cleanup;
     private readonly TimeSpan _stopping;
+    private TimeSpan _remainingStageDuration;
     private int _nextStage;
+    private EvidenceRunStageAdmission? _activeStage;
     private RunPhase _phase = RunPhase.BetweenStages;
     private long _phaseStartedAt;
 
     private EvidenceRunTimeBudget(
         TimeProvider timeProvider,
-        long admissionTimestamp,
+        long allowanceSampledAt,
         TimeSpan jobAllowance,
         ReadOnlyCollection<EvidenceRunStageDeadline> stages,
+        TimeSpan totalStageDuration,
         TimeSpan collection,
         TimeSpan cleanup,
         TimeSpan stopping)
     {
         _timeProvider = timeProvider;
-        _admissionTimestamp = admissionTimestamp;
+        _allowanceSampledAt = allowanceSampledAt;
         _jobAllowance = jobAllowance;
         _stages = stages;
+        _remainingStageDuration = totalStageDuration;
         _collection = collection;
         _cleanup = cleanup;
         _stopping = stopping;
@@ -101,26 +113,27 @@ internal sealed class EvidenceRunTimeBudget
 
     /// <summary>Validates serial stages and reserves against the independently supplied remaining job allowance.</summary>
     /// <param name="timeProvider">The monotonic clock used for admission and elapsed-time checks.</param>
-    /// <param name="allowance">The positive remaining allowance delivered by the independent launcher.</param>
-    /// <param name="stages">Ordered serial stages, captured once for validation and accounting. Each deadline must be positive and within its stage cap.</param>
+    /// <param name="allowance">The positive remaining allowance measured by the independent launcher.</param>
+    /// <param name="allowanceSampledAt">The timestamp from the same monotonic clock when the launcher measured the allowance.</param>
+    /// <param name="stages">Ordered serial stages, captured once for validation and accounting. Deadlines must be positive. Admission and startup also have category-specific caps.</param>
     /// <param name="collection">Positive collection allowance, no greater than 60 seconds.</param>
     /// <param name="cleanup">Positive cumulative stopping/disposal allowance, no greater than ten minutes.</param>
     /// <param name="stopping">Positive stopping grace, no greater than 30 seconds or cleanup.</param>
     /// <param name="budget">The created budget on success; otherwise <see langword="null"/>.</param>
     /// <returns><see langword="true"/> when all declared stages and reserves fit the frozen job allowance.</returns>
     /// <remarks>
-    /// Use this after obtaining the remaining allowance from the launcher. Name the
+    /// Carry the launcher's original timestamp with its allowance so handoff time
+    /// counts against the job. Name the
     /// <c>collection:</c>, <c>cleanup:</c>, and <c>stopping:</c> arguments at the call site.
     /// Budget creation grants no execution authority.
     /// </remarks>
-    internal static bool TryCreateFromAllowance(TimeProvider timeProvider, TimeSpan allowance,
+    internal static bool TryCreateFromAllowance(TimeProvider timeProvider, TimeSpan allowance, long allowanceSampledAt,
         IReadOnlyList<EvidenceRunStageDeadline> stages, TimeSpan collection, TimeSpan cleanup, TimeSpan stopping,
         out EvidenceRunTimeBudget? budget)
     {
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(stages);
         budget = null;
-        var admissionTimestamp = timeProvider.GetTimestamp();
         if (allowance <= TimeSpan.Zero || !IsWithin(collection, EvidenceRunBudgetLimits.Collection)
             || !IsWithin(cleanup, EvidenceRunBudgetLimits.Cleanup)
             || !IsWithin(stopping, EvidenceRunBudgetLimits.Stopping) || stopping > cleanup)
@@ -128,13 +141,19 @@ internal sealed class EvidenceRunTimeBudget
             return false;
         }
 
-        var reserves = collection + cleanup;
-        if (reserves > allowance)
+        var elapsed = timeProvider.GetElapsedTime(allowanceSampledAt, timeProvider.GetTimestamp());
+        if (elapsed < TimeSpan.Zero || elapsed >= allowance)
         {
             return false;
         }
 
-        var remaining = allowance - reserves;
+        var stageAllowance = allowance - elapsed - collection - cleanup;
+        if (stageAllowance < TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        var remaining = stageAllowance;
         var stageSnapshot = Array.AsReadOnly(stages.ToArray());
         foreach (var stage in stageSnapshot)
         {
@@ -147,7 +166,8 @@ internal sealed class EvidenceRunTimeBudget
             remaining -= stage.Duration;
         }
 
-        budget = new EvidenceRunTimeBudget(timeProvider, admissionTimestamp, allowance, stageSnapshot, collection, cleanup, stopping);
+        budget = new EvidenceRunTimeBudget(timeProvider, allowanceSampledAt, allowance, stageSnapshot,
+            stageAllowance - remaining, collection, cleanup, stopping);
         return true;
     }
 
@@ -156,29 +176,29 @@ internal sealed class EvidenceRunTimeBudget
 
     /// <summary>Begins the next declared stage only when its full deadline and all later reserves fit.</summary>
     /// <param name="cancellationToken">A caller cancellation signal checked before the stage is admitted.</param>
-    /// <param name="stage">The admitted stage on success; otherwise <see langword="null"/>.</param>
+    /// <param name="admission">The handle to pass back on completion; otherwise <see langword="null"/>.</param>
     /// <returns><see langword="true"/> only when this ordered stage can start without consuming later reserves.</returns>
-    internal bool TryBeginNextStage(CancellationToken cancellationToken, out EvidenceRunStageDeadline? stage)
+    internal bool TryBeginNextStage(CancellationToken cancellationToken, out EvidenceRunStageAdmission? admission)
     {
         lock (_gate)
         {
-            stage = null;
+            admission = null;
             if (cancellationToken.IsCancellationRequested || _phase != RunPhase.BetweenStages || _nextStage >= _stages.Count)
             {
                 return false;
             }
 
-            var candidate = _stages[_nextStage];
-            var reserve = candidate.Duration + RemainingStageDuration(_nextStage + 1) + _collection + _cleanup;
+            var reserve = _remainingStageDuration + _collection + _cleanup;
             var now = _timeProvider.GetTimestamp();
             if (JobRemainingAt(now) < reserve)
             {
                 return false;
             }
 
+            admission = new EvidenceRunStageAdmission(_stages[_nextStage]);
+            _activeStage = admission;
             _phaseStartedAt = now;
             _phase = RunPhase.StageActive;
-            stage = candidate;
             return true;
         }
     }
@@ -198,18 +218,21 @@ internal sealed class EvidenceRunTimeBudget
     }
 
     /// <summary>Closes accounting for the active stage so the next stage can be considered.</summary>
-    /// <returns>Whether there was an active stage to close.</returns>
+    /// <param name="admission">The handle returned by this budget when it started the stage.</param>
+    /// <returns>Whether the handle matched and the active stage was closed.</returns>
     /// <remarks>The execution layer determines the stage outcome and enforces the deadline before starting more work.</remarks>
-    internal bool CompleteCurrentStage()
+    internal bool CompleteCurrentStage(EvidenceRunStageAdmission? admission)
     {
         lock (_gate)
         {
-            if (_phase != RunPhase.StageActive)
+            if (_phase != RunPhase.StageActive || !ReferenceEquals(admission, _activeStage))
             {
                 return false;
             }
 
+            _remainingStageDuration -= _stages[_nextStage].Duration;
             _nextStage++;
+            _activeStage = null;
             _phase = RunPhase.BetweenStages;
             return true;
         }
@@ -276,6 +299,7 @@ internal sealed class EvidenceRunTimeBudget
     /// </summary>
     /// <param name="stageClosed">Whether the caller has closed admission to work in the current stage.</param>
     /// <returns>Whether the cleanup window was started.</returns>
+    /// <remarks>Deadline exhaustion prevents a successful cleanup claim. The caller still owns stop, join, and disposal.</remarks>
     internal bool TryAbandonStagesAndBeginCleanup(bool stageClosed)
     {
         lock (_gate)
@@ -293,6 +317,7 @@ internal sealed class EvidenceRunTimeBudget
 
             // Completion may arrive from a timeout/cancellation path. Once cleanup begins,
             // no later serial stage can be admitted, even if its declared deadline remains.
+            _activeStage = null;
             _phaseStartedAt = now;
             _phase = RunPhase.CleaningUp;
             return true;
@@ -316,11 +341,18 @@ internal sealed class EvidenceRunTimeBudget
     internal TimeSpan StoppingAllowance => Min(_stopping, CleanupRemaining);
 
     /// <summary>Completes stopping/disposal, leaving the collection allowance reserved.</summary>
+    /// <returns>Whether active cleanup finished before its own deadline with at least the collection reserve remaining.</returns>
     internal bool CompleteCleanup()
     {
         lock (_gate)
         {
-            if (GetCleanupRemaining() <= TimeSpan.Zero)
+            if (_phase != RunPhase.CleaningUp)
+            {
+                return false;
+            }
+
+            var now = _timeProvider.GetTimestamp();
+            if (Remaining(_cleanup, _phaseStartedAt, now) <= TimeSpan.Zero || JobRemainingAt(now) < _collection)
             {
                 return false;
             }
@@ -343,24 +375,13 @@ internal sealed class EvidenceRunTimeBudget
         return Min(Remaining(_cleanup, _phaseStartedAt, now), timeBeforeCollection > TimeSpan.Zero ? timeBeforeCollection : TimeSpan.Zero);
     }
 
-    private TimeSpan RemainingStageDuration(int firstIndex)
-    {
-        var sum = TimeSpan.Zero;
-        for (var index = firstIndex; index < _stages.Count; index++)
-        {
-            sum += _stages[index].Duration;
-        }
-
-        return sum;
-    }
-
     private TimeSpan GetActivePhaseRemaining(TimeSpan duration)
     {
         var now = _timeProvider.GetTimestamp();
         return Min(Remaining(duration, _phaseStartedAt, now), JobRemainingAt(now));
     }
 
-    private TimeSpan JobRemainingAt(long now) => Remaining(_jobAllowance, _admissionTimestamp, now);
+    private TimeSpan JobRemainingAt(long now) => Remaining(_jobAllowance, _allowanceSampledAt, now);
 
     private TimeSpan Remaining(TimeSpan duration, long started, long now)
     {
@@ -437,9 +458,10 @@ internal sealed class EvidenceRunByteQuota
     }
 
     /// <summary>Reserves artifact bytes. Dispose releases an unfinished write; Commit retains its charge.</summary>
-    /// <param name="bytes">The nonnegative expected byte count for one artifact write; zero supports empty artifacts.</param>
+    /// <param name="bytes">The nonnegative byte ceiling the owner must enforce for one artifact write. Zero supports empty artifacts.</param>
     /// <param name="reservation">An owned reservation on success; otherwise <see langword="null"/>.</param>
     /// <returns><see langword="false"/> after any quota crossing or when this reservation would exceed the limit.</returns>
+    /// <remarks>Pending reservations count against the limit. Releasing one after a rejected charge leaves the failure latched.</remarks>
     internal bool TryReserve(long bytes, out EvidenceRunByteReservation? reservation)
         => TryAccountBytes(bytes, reserve: true, out reservation);
 
@@ -484,7 +506,7 @@ internal sealed class EvidenceRunByteQuota
         if (notify)
         {
             try { _onExceeded?.Invoke(); }
-            catch { /* Host notification must not expose callback exception text or undo the latch. */ }
+            catch (Exception) { /* Host notification must not expose callback exception text or undo the latch. */ }
         }
 
         return !notify;
@@ -504,6 +526,7 @@ internal sealed class EvidenceRunByteQuota
 }
 
 /// <summary>An owned, exactly-once artifact quota reservation.</summary>
+/// <remarks>One owner serializes commit and disposal for each reservation. Separate reservations can settle concurrently.</remarks>
 internal sealed class EvidenceRunByteReservation : IDisposable
 {
     private Action<long, bool>? _finish;
@@ -521,6 +544,7 @@ internal sealed class EvidenceRunByteReservation : IDisposable
     internal long Bytes { get; }
 
     /// <summary>Commits the reservation after the corresponding write succeeds.</summary>
+    /// <remarks>The owner enforces <see cref="Bytes"/> as the write ceiling. Committing charges the reserved amount.</remarks>
     /// <exception cref="InvalidOperationException">The reservation has already been committed or released.</exception>
     internal void Commit()
     {
@@ -530,6 +554,7 @@ internal sealed class EvidenceRunByteReservation : IDisposable
     }
 
     /// <summary>Releases an uncommitted reservation after its write has settled.</summary>
+    /// <remarks>Only the owner disposes this reservation. Repeated disposal by the owner is safe after the first call returns.</remarks>
     public void Dispose()
     {
         Interlocked.Exchange(ref _finish, null)?.Invoke(Bytes, false);
