@@ -28,8 +28,9 @@ diagnostics. Before replacing a successful archive, the validator independently 
 manifest and bound files against the verified run. Extract an archive to verify it using the same
 relative layout. Scratch is removed
 after successful retention and known cleanup. When cleanup cannot be confirmed, the printed scratch
-path remains available for inspection. Remove that scratch once its processes have settled. The private `package-restore/` cache keeps the
-package-gate build warm and its worktree restore metadata usable between runs. Installed-consumer and
+path remains available for inspection. Remove that scratch once its processes have settled.
+Scratch and the private `.scratch/package-restore/` cache stay outside package discovery.
+The cache keeps the package-gate build warm and its worktree restore metadata usable between runs. Installed-consumer and
 cold-cache proofs still have their own isolated restores and feeds.
 
 Use `--output /absolute/fresh-output` when you need a complete, unpacked run for a specific investigation

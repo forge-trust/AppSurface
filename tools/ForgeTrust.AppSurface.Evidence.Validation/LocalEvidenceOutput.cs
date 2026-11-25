@@ -28,9 +28,11 @@ internal static class LocalEvidenceOutput
         RequirePlainPath(lockPath);
         using var lease = Acquire(lockPath);
 
-        var packageCache = PathUtils.PathUnder(root, "package-restore");
+        // Package discovery excludes hidden ancestors, not every ignored Git path.
+        var scratch = RequireDirectory(PathUtils.PathUnder(root, ".scratch"));
+        var packageCache = PathUtils.PathUnder(scratch, "package-restore");
         RequirePlainPath(packageCache);
-        var workspace = EvidenceWorkspace.Create(root, new(MinimumFreeBytes: 0));
+        var workspace = EvidenceWorkspace.Create(scratch, new(MinimumFreeBytes: 0));
         var output = workspace.GetPath("run");
         var archive = operation == "local-plan" ? "latest-plan" : "latest";
         Console.WriteLine("Local evidence scratch: " + output);

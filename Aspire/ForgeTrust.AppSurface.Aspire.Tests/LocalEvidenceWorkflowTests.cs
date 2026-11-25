@@ -326,10 +326,13 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         var options = Options(fixture, "local", "coverage");
         options.Remove("--output");
         var run = 0;
+        var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
+        var scratch = TestPathUtils.PathUnder(retained, ".scratch");
         var workflow = new LocalEvidenceWorkflow(workflow: async (runOptions, token) =>
         {
             run++;
             var output = runOptions["--output"];
+            Assert.StartsWith("evidence-workspace-", Path.GetRelativePath(scratch, output), StringComparison.Ordinal);
             Assert.False(Directory.Exists(output));
             await WriteCompleteProofAsync(runOptions, token);
             var coverage = TestPathUtils.PathUnder(output, "coverage");
@@ -347,7 +350,6 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(nested, "generated.md"), "generated input", token);
             return run == 2 ? 1 : 0;
         });
-        var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
 
         Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
         Assert.Equal("run 1", ReadArchive(retained, "latest.zip", "proof/coverage/coverage.cobertura.xml"));
@@ -374,7 +376,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         Assert.Equal("package manifest", ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/package-artifact-manifest.json"));
         Assert.Null(ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/candidate.nupkg"));
         Assert.Null(ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/generated/generated.md"));
-        Assert.Empty(Directory.EnumerateDirectories(retained, "evidence-workspace-*"));
+        Assert.Empty(Directory.EnumerateDirectories(scratch, "evidence-workspace-*"));
     }
 
     [Theory]
@@ -403,8 +405,10 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
             "cancelled" => new OperationCanceledException(),
             _ => new InvalidOperationException("original failure"),
         };
-        var thrown = await Record.ExceptionAsync(() => LocalEvidenceOutput.RunAsync(_root, preflight ? "local-plan" : "local", (output, _) =>
+        var scratch = TestPathUtils.PathUnder(retained, ".scratch");
+        var thrown = await Record.ExceptionAsync(() => LocalEvidenceOutput.RunAsync(_root, preflight ? "local-plan" : "local", (output, packageCache) =>
         {
+            Assert.Equal(TestPathUtils.PathUnder(scratch, "package-restore"), packageCache);
             if (!preflight)
                 Directory.CreateDirectory(output);
             if (phase is "missing-manifest" or "invalid-manifest")
@@ -418,7 +422,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         }));
 
         Assert.Same(failure, thrown);
-        Assert.Equal(retainScratch, Directory.EnumerateDirectories(retained, "evidence-workspace-*").Any());
+        Assert.Equal(retainScratch, Directory.EnumerateDirectories(scratch, "evidence-workspace-*").Any());
         if (phase is "preflight" or "cancelled")
             Assert.Equal("earlier diagnostics", await File.ReadAllTextAsync(failureArchive));
         if (phase is not ("preflight" or "archive-collision"))
