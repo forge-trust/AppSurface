@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -24,8 +25,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private readonly ValidationSettings _settings;
     private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _runCommand;
-    private EvidenceWorkspace? _workspace;
-    private int _disposed;
+    private readonly NativeProducerWorkspace _scratch = new();
     private string? _settingsHash;
     private List<CommandSummary> _commandSummaries = [];
     private string _stageDetail = "";
@@ -62,7 +62,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             _commandSummaries = [];
             _stageDetail = "";
             _lastExitCode = null;
-            _workspace = EvidenceWorkspace.Create(
+            _scratch.Create(
                 _settings.ScratchParent,
                 new EvidenceWorkspaceOptions(_settings.MaximumScratchBytes, _settings.MinimumFreeBytes));
             var budget = new Func<CancellationToken, ValueTask>(_ => CheckBudgetAsync());
@@ -111,6 +111,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
         catch (EvidenceCommandException exception)
         {
+            _scratch.RecordCommandFailure(exception);
             return Failure($"The installed-consumer command journey did not complete/{exception.Code}.", stopwatch.ElapsedMilliseconds);
         }
         catch (Exception exception) when (IsContractFailure(exception))
@@ -118,7 +119,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             var exitDetail = _lastExitCode is { } exitCode ? $"/exit-{exitCode}" : "";
             if (context.Artifacts is not null)
             {
-                var root = _workspace?.RootPath ?? "";
+                var root = _scratch.Current?.RootPath ?? "";
                 string Safe(string value) => RedactAndBoundDiagnostic(value, root);
                 await context.Artifacts.WriteAsync("result", "proof/result.json", JsonSerializer.SerializeToUtf8Bytes(new
                 {
@@ -135,16 +136,8 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
     }
 
-    /// <summary>Disposes the producer-owned workspace so host cleanup is part of the claim.</summary>
-    public ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0 || _workspace is null)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        return _workspace.DisposeAsync();
-    }
+    /// <summary>Disposes settled scratch or reports an unsettled command to the supervisor.</summary>
+    public ValueTask DisposeAsync() => _scratch.DisposeAsync();
 
     private async Task<SourceSnapshot> PrepareSourceAsync(ConsumerValidationOptions options, Func<CancellationToken, ValueTask> budget, CancellationToken cancellationToken)
     {
@@ -173,14 +166,15 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
 
         var beforeHash = await HashTrackedFilesAsync(sourceDirectory, budget, cancellationToken).ConfigureAwait(false);
-        var destination = Path.Join(_workspace!.RootPath, "consumer");
+        var workspace = _scratch.Current!;
+        var destination = PathUtils.PathUnder(workspace.RootPath, "consumer");
         if (options.SourceDirectory is null)
         {
             CopyDirectory(sourceDirectory, destination);
         }
         else
         {
-            await RunCheckedAsync("git", ["clone", "--no-local", "--no-checkout", sourceDirectory, destination], _workspace.RootPath, new Dictionary<string, string>(), budget, cancellationToken).ConfigureAwait(false);
+            await RunCheckedAsync("git", ["clone", "--no-local", "--no-checkout", sourceDirectory, destination], workspace.RootPath, new Dictionary<string, string>(), budget, cancellationToken).ConfigureAwait(false);
             await RunCheckedAsync("git", ["checkout", "--detach", expectedCommit ?? originalCommit], destination, new Dictionary<string, string>(), budget, cancellationToken).ConfigureAwait(false);
         }
         var afterHash = await HashTrackedFilesAsync(destination, budget, cancellationToken).ConfigureAwait(false);
@@ -222,20 +216,21 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             ValidationProof.VerifyPackage(archive, _settings);
         }
 
-        var toolPath = Path.Join(_workspace!.RootPath, "tool");
-        var cliHome = Path.Join(_workspace.RootPath, "cli-home");
+        var workspace = _scratch.Current!;
+        var toolPath = PathUtils.PathUnder(workspace.RootPath, "tool");
+        var cliHome = PathUtils.PathUnder(workspace.RootPath, "cli-home");
         Directory.CreateDirectory(toolPath);
         Directory.CreateDirectory(cliHome);
         // Explicitly selected for installation only; a conventional NuGet.Config
         // here would also redirect the consumer's ordinary dependency restore.
-        var sourceConfig = Path.Join(_workspace.RootPath, "NuGet.tool.config");
+        var sourceConfig = PathUtils.PathUnder(workspace.RootPath, "NuGet.tool.config");
         await File.WriteAllTextAsync(sourceConfig, $"<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><packageSources><clear /><add key=\"candidate\" value=\"{SecurityElementEscape(Path.GetDirectoryName(packagePath)!)}\" /></packageSources></configuration>", cancellationToken).ConfigureAwait(false);
 
         // Keep tool installation's package graph private to this workspace, then
         // let the consumer's ordinary restore read the existing shared cache. The
         // package identity proof is anchored to the private .store and the exact
         // local feed above; the fixture dependencies do not need to be recopied.
-        var installEnvironment = BuildEnvironment(cliHome, Path.Join(_workspace.RootPath, "nuget"));
+        var installEnvironment = BuildEnvironment(cliHome, PathUtils.PathUnder(workspace.RootPath, "nuget"));
         var args = new List<string>
         {
             "tool", "install", PackageId, "--tool-path", toolPath,
@@ -280,7 +275,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         {
             var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var candidate = string.IsNullOrWhiteSpace(userProfile) ? "" : Path.Join(userProfile, ".nuget", "packages");
-            sharedNuGetCache = Directory.Exists(candidate) ? candidate : Path.Join(_workspace.RootPath, "nuget");
+            sharedNuGetCache = Directory.Exists(candidate) ? candidate : PathUtils.PathUnder(workspace.RootPath, "nuget");
         }
         var consumerEnvironment = BuildEnvironment(cliHome, sharedNuGetCache);
         return new PackageSnapshot(packageHash, archiveAssemblyHash, executable, consumerEnvironment);
@@ -324,7 +319,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private async Task<CoverageSnapshot> RunCoverageAsync(SourceSnapshot source, PackageSnapshot package, ConsumerValidationOptions options, Func<CancellationToken, ValueTask> budget, CancellationToken cancellationToken)
     {
-        var output = Path.Join(_workspace!.RootPath, "coverage");
+        var output = PathUtils.PathUnder(_scratch.Current!.RootPath, "coverage");
         var args = new List<string> { "coverage", "run", "--solution", source.SolutionPath, "--configuration", "Release", "--output", output, "--test-results", "junit", "--artifact-retention", "managed", "--no-progress-timeout", "10m" };
         foreach (var project in source.TestProjects) args.AddRange(["--test-project", project]);
         _stageDetail = "run";
@@ -394,7 +389,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private async ValueTask CheckBudgetAsync()
     {
-        _workspace?.CheckBudget();
+        _scratch.Current?.CheckBudget();
         await ValueTask.CompletedTask;
     }
 

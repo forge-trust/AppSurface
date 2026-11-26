@@ -12,7 +12,7 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 // The native coverage collector runs this project and must observe the same local workflow paths as the primary run.
 [Collection("CoverageGate process state")]
-public sealed class LocalEvidenceWorkflowTests : IDisposable
+public sealed partial class LocalEvidenceWorkflowTests : IDisposable
 {
     private const string PolicyPath = ".github/evidence.policy.json";
     private const string StoragePath = "tools/ForgeTrust.AppSurface.Evidence.Validation/PackedStorageProducer.cs";
@@ -599,10 +599,12 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         var retained = TestPathUtils.PathUnder(_root, "TestResults", "repository-evidence", "local");
         var scratch = Assert.Single(Directory.EnumerateDirectories(TestPathUtils.PathUnder(retained, ".scratch"), "evidence-workspace-*"));
         Assert.True(File.Exists(TestPathUtils.PathUnder(scratch, "run", "candidate.nupkg")));
+        Assert.Single(Directory.EnumerateDirectories(_root, "evidence-workspace-*"));
         var archived = ReadArchive(retained, "latest-failure.zip", "proof/evidence-manifest.json");
         Assert.NotNull(archived);
         var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(Encoding.UTF8.GetBytes(archived));
-        Assert.True(manifest.Metrics.CleanupCompleted);
+        Assert.False(manifest.Metrics.CleanupCompleted);
+        Assert.Contains(nameof(EvidenceCommandException), manifest.Metrics.CleanupDiagnostic);
         Assert.EndsWith("/cleanup_failed.", Assert.Single(manifest.ProducerResults).Diagnostic, StringComparison.Ordinal);
     }
 

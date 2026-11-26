@@ -14,7 +14,7 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed class PackedStorageProducer(ValidationSettings settings,
     Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>>? runCommand = null) : IEvidenceProducer, IAsyncDisposable
 {
-    private EvidenceWorkspace? _workspace;
+    private readonly NativeProducerWorkspace _scratch = new();
     private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _runCommand =
         runCommand ?? new EvidenceCommandRunner().RunAsync;
     private readonly List<object> _transcript = [];
@@ -43,18 +43,18 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
         }
         finally
         {
-            if (_workspace is not null) await _workspace.DisposeAsync().ConfigureAwait(false);
+            if (!_scratch.CleanupUnconfirmed) await DisposeAsync().ConfigureAwait(false);
         }
     }
 
     private async ValueTask<EvidenceProducerResult> RunJourneyAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
     {
-        _workspace = EvidenceWorkspace.Create(settings.ScratchParent,
+        var workspace = _scratch.Create(settings.ScratchParent,
             new EvidenceWorkspaceOptions(settings.MaximumScratchBytes, settings.MinimumFreeBytes));
-        var root = _workspace.RootPath;
+        var root = workspace.RootPath;
         using var package = ZipFile.OpenRead(settings.PackagePath);
         ValidationProof.VerifyPackage(package, settings);
-        var toolRoot = _workspace.GetPath("tool");
+        var toolRoot = workspace.GetPath("tool");
         Directory.CreateDirectory(toolRoot);
         const string prefix = "tools/net10.0/any/";
         var budgetTimer = System.Diagnostics.Stopwatch.StartNew();
@@ -64,7 +64,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
             var relative = entry.FullName[prefix.Length..];
             ValidationProof.Require(!Path.IsPathRooted(relative) && !relative.Contains('\\') && !relative.Contains(':') &&
                 !relative.Split('/').Any(segment => segment is "." or ".." or ""), "normalized packed tool member");
-            var target = _workspace.GetPath("tool/" + relative);
+            var target = workspace.GetPath("tool/" + relative);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             ValidationProof.Require(entry.Length <= settings.MaximumScratchBytes, "bounded package member");
             await using var input = entry.Open();
@@ -76,20 +76,20 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
                 await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
                 if (budgetTimer.ElapsedMilliseconds >= 250)
                 {
-                    _workspace.CheckBudget();
+                    workspace.CheckBudget();
                     budgetTimer.Restart();
                 }
             }
         }
         var tool = Path.Join(toolRoot, "ForgeTrust.AppSurface.Cli.dll");
-        _workspace.CheckBudget();
+        workspace.CheckBudget();
         ValidationProof.Require(File.Exists(tool), "packed tool assembly exists");
-        var domain = _workspace.GetPath("domain");
+        var domain = workspace.GetPath("domain");
         var environment = new Dictionary<string, string>
         {
             ["APPSURFACE_ARTIFACT_HOME"] = domain,
             ["DOTNET_ROOT"] = Path.GetDirectoryName(settings.DotnetPath)!,
-            ["DOTNET_CLI_HOME"] = _workspace.GetPath("cli-home"),
+            ["DOTNET_CLI_HOME"] = workspace.GetPath("cli-home"),
             ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
         };
 
@@ -98,7 +98,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
             var request = new EvidenceCommandRequest(settings.DotnetPath, [tool, .. arguments], root, TimeSpan.FromSeconds(60))
             {
                 Environment = environment,
-                CheckBudget = _ => { _workspace.CheckBudget(); return ValueTask.CompletedTask; },
+                CheckBudget = _ => { workspace.CheckBudget(); return ValueTask.CompletedTask; },
             };
             var result = await _runCommand(request, cancellationToken);
             _transcript.Add(new
@@ -117,11 +117,11 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
         {
             await Run(0, "coverage", "storage", "status", "--json");
             ValidationProof.Require(!Directory.Exists(domain), "absent status is read-only");
-            var shard = _workspace.GetPath("shards/coverage.cobertura.xml");
+            var shard = workspace.GetPath("shards/coverage.cobertura.xml");
             Directory.CreateDirectory(Path.GetDirectoryName(shard)!);
             await File.WriteAllTextAsync(shard, FixtureCoverage, cancellationToken);
             await Run(0, "coverage", "merge", "--source", "shards", "--output", "merged");
-            var currentRoot = _workspace.GetPath("merged");
+            var currentRoot = workspace.GetPath("merged");
             using var firstManifest = ValidationProof.ReadJsonFile(Path.Join(currentRoot, ".appsurface-coverage-run.json"), 16 * 1024 * 1024, cancellationToken);
             var first = firstManifest.RootElement.GetProperty("inventory").EnumerateArray().ToDictionary(
                 item => item.GetProperty("path").GetString()!, item => item.GetProperty("sha256").GetString()!, StringComparer.Ordinal);
@@ -140,7 +140,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
             var pinned = ValidationProof.Data(await Run(0, "coverage", "storage", "pin", "--run", runId, "--json"));
             ValidationProof.Require(pinned.GetProperty("pinned").GetBoolean(), "pin protects history");
             await Run(0, "coverage", "storage", "restore", "--run", runId, "--output", "restored/", "--json");
-            var restoredRoot = _workspace.GetPath("restored");
+            var restoredRoot = workspace.GetPath("restored");
             var restored = await ValidationProof.InventoryAsync(restoredRoot, cancellationToken);
             ValidationProof.Require(first.Count > 0 && first.All(pair => restored.TryGetValue(pair.Key, out var hash) && hash == pair.Value), "restore exact original bytes");
             var current = await ValidationProof.InventoryAsync(currentRoot, cancellationToken);
@@ -169,6 +169,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
         }
         catch (EvidenceCommandException exception)
         {
+            _scratch.RecordCommandFailure(exception);
             return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Failed, [], "Packed storage command failed: " + exception.Code + ". " + exception.Message);
         }
         finally
@@ -179,7 +180,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => _workspace?.DisposeAsync() ?? ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => _scratch.DisposeAsync();
 
     /// <summary>Writes this journey's zero-history policy inside its freshly owned scratch domain.</summary>
     /// <param name="path">Policy path in the producer-owned domain; never a caller-owned policy.</param>
