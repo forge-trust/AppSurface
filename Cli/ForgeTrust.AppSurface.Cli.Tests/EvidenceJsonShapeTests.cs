@@ -62,6 +62,7 @@ public sealed class EvidenceJsonShapeTests
         { "EvidenceProducerDeclaration.RequiredResources", "producer", "RequiredResources" },
         { "EvidenceProducerDeclaration.AssertionIds", "producer", "AssertionIds" },
         { "EvidenceProducerDeclaration.ArtifactSlots", "producer", "ArtifactSlots" },
+        { "EvidenceTestDeclaration.Projects", "test", "Projects" },
         { "EvidenceObligation.RequiredProducerIds", "obligation", "RequiredProducerIds" },
         { "EvidencePlan.ChangedPaths", "plan", "ChangedPaths" },
         { "EvidencePlan.MatchedRuleIds", "plan", "MatchedRuleIds" },
@@ -123,9 +124,7 @@ public sealed class EvidenceJsonShapeTests
     public void Deserialize_RejectsNullItemsInEveryKnownContractCollection(string caseName, string contract, string path)
     {
         var fixture = CreateFixture();
-        var json = MutateContract(fixture, contract, root => SetNullCollectionItem(root, path));
-
-        AssertContractRejects(contract, json, caseName);
+        AssertNullCollectionRejected(fixture, contract, path, caseName);
     }
 
     [Fact]
@@ -294,50 +293,46 @@ public sealed class EvidenceJsonShapeTests
         return new EvidenceFixture(policy, profile, resource, producer, obligation, plan, resourceResult, producerResult, manifest);
     }
 
-    private static byte[] MutateContract(EvidenceFixture fixture, string contract, Action<JsonNode> mutation) => contract switch
-    {
-        "policy" => Mutate(fixture.Policy, mutation),
-        "profile" => Mutate(fixture.Profile, mutation),
-        "resource" => Mutate(fixture.Resource, mutation),
-        "producer" => Mutate(fixture.Producer, mutation),
-        "obligation" => Mutate(fixture.Obligation, mutation),
-        "plan" => Mutate(fixture.Plan, mutation),
-        "manifest" => Mutate(fixture.Manifest, mutation),
-        "producer-result" => Mutate(fixture.ProducerResult, mutation),
-        _ => throw new ArgumentOutOfRangeException(nameof(contract), contract, "Unknown contract fixture."),
-    };
-
-    private static void AssertContractRejects(string contract, byte[] json, string caseName)
+    private static void AssertNullCollectionRejected(EvidenceFixture fixture, string contract, string path, string caseName)
     {
         switch (contract)
         {
             case "policy":
-                AssertSafeJsonException<EvidencePolicy>(json);
+                AssertNullCollectionRejected(fixture.Policy, path);
                 break;
             case "profile":
-                AssertSafeJsonException<EvidenceProfile>(json);
+                AssertNullCollectionRejected(fixture.Profile, path);
                 break;
             case "resource":
-                AssertSafeJsonException<EvidenceResourceDeclaration>(json);
+                AssertNullCollectionRejected(fixture.Resource, path);
                 break;
             case "producer":
-                AssertSafeJsonException<EvidenceProducerDeclaration>(json);
+                AssertNullCollectionRejected(fixture.Producer, path);
+                break;
+            case "test":
+                var declaration = new EvidenceTestDeclaration([new EvidenceTestProject("tests/Example.Tests.csproj")]);
+                AssertNullCollectionRejected(declaration, path);
                 break;
             case "obligation":
-                AssertSafeJsonException<EvidenceObligation>(json);
+                AssertNullCollectionRejected(fixture.Obligation, path);
                 break;
             case "plan":
-                AssertSafeJsonException<EvidencePlan>(json);
+                AssertNullCollectionRejected(fixture.Plan, path);
                 break;
             case "manifest":
-                AssertSafeJsonException<EvidenceManifest>(json);
+                AssertNullCollectionRejected(fixture.Manifest, path);
                 break;
             case "producer-result":
-                AssertSafeJsonException<EvidenceProducerResult>(json);
+                AssertNullCollectionRejected(fixture.ProducerResult, path);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(contract), contract, $"Unknown contract fixture for {caseName}.");
         }
+    }
+
+    private static void AssertNullCollectionRejected<T>(T value, string path)
+    {
+        AssertSafeJsonException<T>(Mutate(value, root => SetNullCollectionItem(root, path)));
     }
 
     private static void AssertSafeJsonException<TValue>(byte[] json)

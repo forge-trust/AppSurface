@@ -1,3 +1,4 @@
+using System.Security;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -24,23 +25,18 @@ public sealed class EvidenceCliJsonInputTests
         Array.Fill(replacement, (byte)' ');
         original.CopyTo(replacement, 0);
         var access = new ReplacingInputAccess(targetPath, replacement);
-        var workflow = new EvidenceCliWorkflow(new EvidencePlanner(), jsonFileAccess: access);
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner(), inputFileAccess: access);
 
-        async Task ExecuteAsync()
-        {
-            if (input == "policy")
+        Task ExecuteAsync() => ExecuteWorkflowAsync(
+            workflow,
+            paths,
+            input,
+            report =>
             {
-                var report = await workflow.DoctorAsync(
-                    new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
                 Assert.Equal("ready", report.Status);
                 Assert.Equal("docs", report.Plan.Profile.Id);
-            }
-            else
-            {
-                var (plan, manifest) = await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
-                Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-            }
-        }
+            },
+            (plan, manifest) => Assert.True(EvidenceManifestBuilder.Verify(plan, manifest)));
 
         if (oversized)
         {
@@ -68,7 +64,7 @@ public sealed class EvidenceCliJsonInputTests
     public async Task Doctor_RejectsAmbiguousOrInvalidPolicyWithSafeDiagnostic(string json)
     {
         using var directory = TestDirectory.Create();
-        var policyPath = Path.Join(directory.Path, "policy.json");
+        var policyPath = TestPathUtils.PathUnder(directory.Path, "policy.json");
         await File.WriteAllTextAsync(policyPath, json);
 
         var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
@@ -82,9 +78,9 @@ public sealed class EvidenceCliJsonInputTests
     }
 
     [Theory]
-    [InlineData("plan", "ASEVD209")]
-    [InlineData("manifest", "ASEVD209")]
-    public async Task Verify_RejectsUnsupportedSchemaBeforeBindingWithSafeDiagnostic(string input, string code)
+    [InlineData("plan", "Evidence plan")]
+    [InlineData("manifest", "Evidence manifest")]
+    public async Task Verify_RejectsUnsupportedSchemaBeforeBindingWithSafeDiagnostic(string input, string inputName)
     {
         using var directory = TestDirectory.Create();
         var paths = await CreateInputsAsync(directory.Path);
@@ -95,37 +91,43 @@ public sealed class EvidenceCliJsonInputTests
         var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
             new EvidenceCliWorkflow(new EvidencePlanner()).VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None));
 
-        Assert.Equal(code, exception.Code);
+        Assert.Equal("ASEVD209", exception.Code);
+        Assert.StartsWith($"ASEVD209: {inputName} could not be read", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("json-secret-canary", exception.Message, StringComparison.Ordinal);
         Assert.Contains("current supported schema", exception.Fix, StringComparison.Ordinal);
+        Assert.Contains("https://github.com/forge-trust/AppSurface/", exception.Fix, StringComparison.Ordinal);
     }
 
     [Theory]
-    [InlineData("policy")]
-    [InlineData("plan")]
-    [InlineData("manifest")]
-    public async Task Workflow_DoesNotEchoInputOpenFailure(string input)
+    [InlineData("policy", "access", "ASEVD205")]
+    [InlineData("plan", "access", "ASEVD209")]
+    [InlineData("manifest", "access", "ASEVD209")]
+    [InlineData("policy", "security", "ASEVD205")]
+    [InlineData("plan", "security", "ASEVD209")]
+    [InlineData("manifest", "security", "ASEVD209")]
+    [InlineData("policy", "unsupported", "ASEVD204")]
+    [InlineData("plan", "unsupported", "ASEVD208")]
+    [InlineData("manifest", "unsupported", "ASEVD208")]
+    public async Task Workflow_DoesNotEchoInputOpenFailure(string input, string failure, string code)
     {
         using var directory = TestDirectory.Create();
         var paths = await CreateInputsAsync(directory.Path);
         File.Delete(paths[input]);
-        var workflow = new EvidenceCliWorkflow(new EvidencePlanner(), jsonFileAccess: new FailingInputAccess(paths[input]));
-
-        var exception = await Assert.ThrowsAsync<EvidenceCliException>(async () =>
+        const string canary = "json-secret-canary";
+        Exception openFailure = failure switch
         {
-            if (input == "policy")
-            {
-                await workflow.DoctorAsync(
-                    new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
-            }
-            else
-            {
-                await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
-            }
-        });
+            "access" => new UnauthorizedAccessException(canary),
+            "security" => new SecurityException(canary),
+            "unsupported" => new NotSupportedException(canary),
+            _ => throw new ArgumentOutOfRangeException(nameof(failure)),
+        };
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner(), new FailingInputAccess(paths[input], openFailure));
 
-        Assert.Equal(input == "policy" ? "ASEVD205" : "ASEVD209", exception.Code);
-        Assert.DoesNotContain("json-secret-canary", exception.Message, StringComparison.Ordinal);
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
+            ExecuteWorkflowAsync(workflow, paths, input));
+
+        Assert.Equal(code, exception.Code);
+        Assert.DoesNotContain(canary, exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -142,22 +144,12 @@ public sealed class EvidenceCliJsonInputTests
         File.Delete(paths[input]);
         if (missingDirectory)
         {
-            paths[input] = Path.Join(directory.Path, "missing-directory", input + ".json");
+            paths[input] = TestPathUtils.PathUnder(directory.Path, "missing-directory", input + ".json");
         }
 
         var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
-        var exception = await Assert.ThrowsAsync<EvidenceCliException>(async () =>
-        {
-            if (input == "policy")
-            {
-                await workflow.DoctorAsync(
-                    new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
-            }
-            else
-            {
-                await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
-            }
-        });
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
+            ExecuteWorkflowAsync(workflow, paths, input));
 
         Assert.Equal(input == "policy" ? "ASEVD204" : "ASEVD208", exception.Code);
     }
@@ -176,18 +168,8 @@ public sealed class EvidenceCliJsonInputTests
         paths[input] = path;
         var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
 
-        var exception = await Assert.ThrowsAsync<EvidenceCliException>(async () =>
-        {
-            if (input == "policy")
-            {
-                await workflow.DoctorAsync(
-                    new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
-            }
-            else
-            {
-                await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
-            }
-        });
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
+            ExecuteWorkflowAsync(workflow, paths, input));
 
         Assert.Equal(input == "policy" ? "ASEVD204" : "ASEVD208", exception.Code);
         Assert.DoesNotContain("path-secret-canary", exception.ToString(), StringComparison.Ordinal);
@@ -211,22 +193,31 @@ public sealed class EvidenceCliJsonInputTests
         await File.WriteAllBytesAsync(paths[input], json);
 
         var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
-        var exception = await Assert.ThrowsAsync<EvidenceCliException>(async () =>
-        {
-            if (input == "policy")
-            {
-                await workflow.DoctorAsync(
-                    new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
-            }
-            else
-            {
-                await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
-            }
-        });
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
+            ExecuteWorkflowAsync(workflow, paths, input));
 
         Assert.Equal(input == "policy" ? "ASEVD205" : "ASEVD209", exception.Code);
         Assert.DoesNotContain("unicode-secret-canary", exception.ToString(), StringComparison.Ordinal);
         Assert.Null(exception.InnerException);
+    }
+
+    private static async Task ExecuteWorkflowAsync(
+        EvidenceCliWorkflow workflow,
+        IReadOnlyDictionary<string, string> paths,
+        string input,
+        Action<EvidenceDoctorReport>? doctorSuccessAssertions = null,
+        Action<EvidencePlan, EvidenceManifest>? verifySuccessAssertions = null)
+    {
+        if (input == "policy")
+        {
+            var report = await workflow.DoctorAsync(
+                new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
+            doctorSuccessAssertions?.Invoke(report);
+            return;
+        }
+
+        var (plan, manifest) = await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
+        verifySuccessAssertions?.Invoke(plan, manifest);
     }
 
     private static async Task<Dictionary<string, string>> CreateInputsAsync(string root)
@@ -243,9 +234,9 @@ public sealed class EvidenceCliJsonInputTests
         var manifest = EvidenceManifestBuilder.Build(plan, []);
         var paths = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["policy"] = Path.Join(root, "policy.json"),
-            ["plan"] = Path.Join(root, "plan.json"),
-            ["manifest"] = Path.Join(root, "manifest.json"),
+            ["policy"] = TestPathUtils.PathUnder(root, "policy.json"),
+            ["plan"] = TestPathUtils.PathUnder(root, "plan.json"),
+            ["manifest"] = TestPathUtils.PathUnder(root, "manifest.json"),
         };
         await File.WriteAllBytesAsync(paths["policy"], EvidenceCanonicalJson.Serialize(policy));
         await File.WriteAllBytesAsync(paths["plan"], EvidenceCanonicalJson.Serialize(plan));
@@ -269,10 +260,10 @@ public sealed class EvidenceCliJsonInputTests
         }
     }
 
-    private sealed class FailingInputAccess(string targetPath) : IEvidenceInputFileAccess
+    private sealed class FailingInputAccess(string targetPath, Exception failure) : IEvidenceInputFileAccess
     {
         public Stream OpenRead(string path) => string.Equals(path, targetPath, StringComparison.Ordinal)
-            ? throw new UnauthorizedAccessException("json-secret-canary")
+            ? throw failure
             : File.OpenRead(path);
     }
 }
