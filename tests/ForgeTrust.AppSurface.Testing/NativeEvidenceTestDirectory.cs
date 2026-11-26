@@ -1,9 +1,10 @@
-namespace ForgeTrust.AppSurface.Aspire.Tests;
+namespace ForgeTrust.AppSurface.Testing;
 
 /// <summary>Deletes a test-owned directory, including Git's read-only objects, without following links.</summary>
-internal static class NativeEvidenceTestDirectory
+public static class NativeEvidenceTestDirectory
 {
-    internal static void Delete(string root)
+    /// <summary>Deletes the fixture tree at <paramref name="root"/>.</summary>
+    public static void Delete(string root)
     {
         var rootAttributes = File.GetAttributes(root);
         if (rootAttributes.HasFlag(FileAttributes.ReparsePoint))

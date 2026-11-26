@@ -6,10 +6,12 @@ using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Validation;
 using ForgeTrust.AppSurface.Testing;
+using ValidationProgram = ForgeTrust.AppSurface.Evidence.Validation.Program;
 
-namespace ForgeTrust.AppSurface.Aspire.Tests;
+namespace ForgeTrust.AppSurface.Cli.Tests;
 
-[Collection("Native evidence program")]
+// The native coverage collector runs this project and must observe the same local workflow paths as the primary run.
+[Collection("CoverageGate process state")]
 public sealed class LocalEvidenceWorkflowTests : IDisposable
 {
     private const string PolicyPath = ".github/evidence.policy.json";
@@ -212,14 +214,14 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         var eventFile = Path.Join(_root, "event.json");
         await File.WriteAllTextAsync(eventFile, JsonSerializer.Serialize(new { before = fixture.Head, after = head }));
         var collection = Path.Join(_root, "collected");
-        Assert.Equal(0, await Program.RunAsync(["--operation", "collect", "--repository", fixture.Root,
+        Assert.Equal(0, await ValidationProgram.RunAsync(["--operation", "collect", "--repository", fixture.Root,
             "--event-file", eventFile, "--event-name", "push", "--workflow-sha", head, "--output", collection]));
         var paths = EvidenceCanonicalJson.Deserialize<NormalizedDiffPath[]>(await File.ReadAllBytesAsync(Path.Join(collection, "changed-paths.json")));
         Assert.Equal("docs/guide.md", Assert.Single(paths).Path);
         using var state = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(collection, "source-state.json")));
         Assert.Equal(head, state.RootElement.GetProperty("headCommit").GetString());
         var planned = Path.Join(_root, "ci-plan");
-        Assert.Equal(0, await Program.RunAsync(["--operation", "plan", "--policy", TestPathUtils.PathUnder(fixture.Root, PolicyPath),
+        Assert.Equal(0, await ValidationProgram.RunAsync(["--operation", "plan", "--policy", TestPathUtils.PathUnder(fixture.Root, PolicyPath),
             "--changed-paths", Path.Join(collection, "changed-paths.json"), "--output", planned]));
         var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(planned, "evidence-plan.json")));
         Assert.Equal("no-evidence", plan.Profile.Id);
