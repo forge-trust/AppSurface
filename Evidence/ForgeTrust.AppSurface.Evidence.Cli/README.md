@@ -27,10 +27,12 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 | `init --sample` | Creates a marked, non-overwriting policy, host skeleton, and local README. `--force` may replace only previously marked starter files. |
 | `doctor` | Resolves policy and reports policy, diff, Docker, browser, and release-envelope prerequisites without starting anything. |
 | `explain` | Writes the resolved plan and a human-readable summary without running producers. |
-| `run` | Runs selected built-in `coverage` and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. It first deletes the earlier manifest, summary and the selected `test` producers' artifact directories, so a cancelled rerun cannot leave an old passing manifest behind. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
+| `run` | Runs selected built-in `coverage` and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. Once the new plan passes validation, the command deletes the earlier manifest, summary and the selected `test` producers' artifact directories before starting producers. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
 | `verify` | Recomputes binding and digest verification and checks every manifest-listed artifact on disk, without running any producer. See [Verifying evidence](#verifying-evidence). |
 
 Policy, plan, and manifest inputs use the shared [bounded JSON reader](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input). The CLI counts up to 20 MiB per input before parsing and rejects malformed or ambiguous documents. Invalid or unreadable policy input reports `ASEVD205`. Invalid or unreadable plan and manifest input reports `ASEVD209`. These errors omit JSON content and raw reader messages. Missing or invalid input paths report `ASEVD204` for policy and `ASEVD208` for plans and manifests.
+
+The CLI also checks generated plans and manifests against the same 20 MiB verification limit before writing them. A plan can be larger than its policy because it contains both the selected profile and the policy snapshot. `explain` and `run` report `ASEVD217` if the plan exceeds the limit. `run` rejects an oversized plan before retiring earlier output or starting producers. It reports the same code if the resulting manifest exceeds the limit. Shorten descriptive policy text, changed-path inputs, or diagnostics and rerun.
 
 ## Incomplete profiles are not complete evidence
 
@@ -313,7 +315,7 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <
 | Code | Meaning | Next action |
 | --- | --- | --- |
 | `ASEVD203` | The plan has no resolvable policy snapshot, or the plan and manifest do not bind. | Use the plan and manifest from one run; do not edit them. A plan written by a different CLI version can also fail here. |
-| `ASEVD208` | The plan or manifest file is missing. | Rerun `appsurface evidence run`. |
+| `ASEVD208` | A plan or manifest path is empty or invalid, or the file is missing. | Check that the paths point to files from the same run. If the files are missing, rerun `appsurface evidence run`. |
 | `ASEVD209` | The plan or manifest could not be read as supported JSON within the input limit. | Regenerate the input using the current supported schema. |
 | `ASEVD213` | A listed artifact is missing, linked, outside the artifact root, or has a different length or SHA-256. The message names the artifact, the producer and the status. | Rerun `appsurface evidence run` and verify the plan, manifest and artifacts from that one run. |
 

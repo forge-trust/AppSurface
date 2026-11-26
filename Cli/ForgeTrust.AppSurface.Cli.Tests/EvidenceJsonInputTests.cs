@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -248,6 +249,46 @@ public sealed class EvidenceJsonInputTests
         }
     }
 
+    [Theory]
+    [InlineData("FF")]
+    [InlineData("ED A0 80")]
+    [InlineData("5C 75 44 38 30 30")]
+    [InlineData("5C 75 44 43 30 30")]
+    public async Task Deserialize_RejectsInvalidAdditiveStringValueWithSafeJsonException(string encodedValue)
+    {
+        var value = Convert.FromHexString(encodedValue.Replace(" ", "", StringComparison.Ordinal));
+        var json = CreatePolicyWithAdditiveStringValue(value);
+
+        var spanFailure = Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidencePolicy>(json));
+        await using var stream = new ChunkedNonSeekableStream(json, maximumChunkBytes: 1);
+        var streamFailure = await Assert.ThrowsAsync<JsonException>(async () =>
+            await EvidenceCanonicalJson.DeserializeAsync<EvidencePolicy>(stream));
+
+        foreach (var failure in new[] { spanFailure, streamFailure })
+        {
+            Assert.Equal("Evidence JSON is malformed or does not match the supported contract.", failure.Message);
+            Assert.Null(failure.InnerException);
+        }
+    }
+
+    [Fact]
+    public async Task Deserialize_AcceptsSupplementaryUnicodeInAdditiveStringValues()
+    {
+        var canonicalBytes = EvidenceCanonicalJson.Serialize(CreatePolicy());
+        byte[] json =
+        [
+            .. canonicalBytes[..^1],
+            .. ",\"futureUnicode\":\"😀\",\"futureEscaped\":\"\\uD83D\\uDE00\"}"u8.ToArray(),
+        ];
+
+        var spanValue = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(json);
+        await using var stream = new ChunkedNonSeekableStream(json, maximumChunkBytes: 1);
+        var streamValue = await EvidenceCanonicalJson.DeserializeAsync<EvidencePolicy>(stream);
+
+        Assert.Equal(canonicalBytes, EvidenceCanonicalJson.Serialize(spanValue));
+        Assert.Equal(canonicalBytes, EvidenceCanonicalJson.Serialize(streamValue));
+    }
+
     [Fact]
     public void Deserialize_AcceptsValidUnicodePropertyNamesAndSurrogatePairs()
     {
@@ -340,7 +381,7 @@ public sealed class EvidenceJsonInputTests
     [InlineData("missing")]
     public void Deserialize_RejectsUnsupportedOrMissingManifestVersion(string versionJson)
     {
-        var manifest = CreateManifest();
+        var manifest = EvidenceManifestBuilder.Build(CreatePlan(), []);
         var json = Encoding.UTF8.GetString(EvidenceCanonicalJson.Serialize(manifest));
         json = versionJson == "missing"
             ? json.Replace("\"ContractVersion\":\"1.0\",", string.Empty, StringComparison.Ordinal)
@@ -372,7 +413,7 @@ public sealed class EvidenceJsonInputTests
     public void Deserialize_RetainsSupportedV10PlanAndManifestCanonicalSerialization()
     {
         var plan = CreatePlan();
-        var manifest = CreateManifest();
+        var manifest = EvidenceManifestBuilder.Build(plan, []);
         var planBytes = EvidenceCanonicalJson.Serialize(plan);
         var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
         var parsedPlan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(planBytes);
@@ -391,23 +432,30 @@ public sealed class EvidenceJsonInputTests
         return new EvidencePolicy("test-policy", "1", "coverage", [profile], []);
     }
 
-    private static EvidencePlan CreatePlan()
+    private static byte[] CreatePolicyWithAdditiveStringValue(byte[] encodedValue)
     {
-        var policy = CreatePolicy();
-        var draft = new EvidencePlan(
-            "1.0",
-            policy.Id,
-            EvidenceDigest.CanonicalSha256(policy),
-            EvidenceDigest.CanonicalSha256(Array.Empty<NormalizedDiffPath>()),
-            policy.Profiles[0],
-            [],
-            [],
-            string.Empty,
-            policy);
-        return draft with { PlanDigest = EvidenceDigest.CanonicalSha256(draft) };
+        var canonicalBytes = EvidenceCanonicalJson.Serialize(CreatePolicy());
+        return
+        [
+            .. canonicalBytes[..^1],
+            .. ",\"futureUnicode\":\""u8.ToArray(),
+            .. encodedValue,
+            .. "\"}"u8.ToArray(),
+        ];
     }
 
-    private static EvidenceManifest CreateManifest() => EvidenceManifestBuilder.Build(CreatePlan(), []);
+    private static EvidencePlan CreatePlan()
+    {
+        var docs = new EvidenceProfile("docs", EvidenceProfileScope.Targeted, [], [], []);
+        var conservative = new EvidenceProfile(
+            "contract", EvidenceProfileScope.Targeted, [],
+            [new EvidenceProducerDeclaration("contract", "contract", "1", [], ["contract/assertion@1"], [], 1)],
+            [new EvidenceObligation("contract", "contract", "Contract behavior changed.", ["contract"], "contract/assertion@1")]);
+        var policy = new EvidencePolicy(
+            "test-policy", "1", conservative.Id, [docs, conservative],
+            [new EvidencePolicyRule("docs", "docs/**", docs.Id)]);
+        return new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("docs/readme.md")]);
+    }
 
     private sealed class ChunkedNonSeekableStream(byte[] bytes, int maximumChunkBytes) : Stream
     {

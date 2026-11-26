@@ -183,8 +183,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             var resolution = await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken);
             var plan = resolution.Plan;
             TestEvidenceRunSupport.ValidateSelection(plan);
-            TestEvidenceRunSupport.RetireOutputs(OutputDirectory, plan);
-            await Workflow.WritePlanAsync(plan, OutputDirectory, cancellationToken);
+            await Workflow.WriteRunPlanAsync(plan, OutputDirectory, cancellationToken);
             var hasTestProducer = plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer);
             if (hasTestProducer)
             {

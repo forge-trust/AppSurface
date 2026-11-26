@@ -25,7 +25,7 @@ internal static class EvidenceJsonReader
         TValue? value;
         try
         {
-            ValidateUniquePropertyNames(utf8Json);
+            ValidateJsonTokens(utf8Json);
             value = JsonSerializer.Deserialize<TValue>(utf8Json, DeserializerOptions);
         }
         catch (JsonException)
@@ -139,7 +139,7 @@ internal static class EvidenceJsonReader
         }
     }
 
-    private static void ValidateUniquePropertyNames(ReadOnlySpan<byte> utf8Json)
+    private static void ValidateJsonTokens(ReadOnlySpan<byte> utf8Json)
     {
         var reader = new Utf8JsonReader(utf8Json, new JsonReaderOptions { MaxDepth = EvidenceCanonicalJson.MaximumDepth });
         var objectScopes = new Stack<HashSet<string>?>();
@@ -152,22 +152,16 @@ internal static class EvidenceJsonReader
                 case JsonTokenType.StartObject:
                     objectScopes.Push(null);
                     break;
+                case JsonTokenType.String:
+                    _ = GetValidatedString(ref reader);
+                    break;
                 case JsonTokenType.PropertyName:
                     {
                         var properties = objectScopes.Pop();
                         properties ??= reusableSets.Count > 0
                             ? reusableSets.Pop()
                             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        string propertyName;
-                        try
-                        {
-                            propertyName = reader.GetString()!;
-                        }
-                        catch (InvalidOperationException)
-                        {
-                            // GetString uses this exception for invalid UTF-8 and unpaired surrogate escapes.
-                            throw new JsonException("Evidence JSON contains an invalid property name.");
-                        }
+                        var propertyName = GetValidatedString(ref reader);
 
                         if (!properties.Add(propertyName))
                         {
@@ -189,6 +183,19 @@ internal static class EvidenceJsonReader
                         break;
                     }
             }
+        }
+    }
+
+    private static string GetValidatedString(ref Utf8JsonReader reader)
+    {
+        try
+        {
+            return reader.GetString()!;
+        }
+        catch (InvalidOperationException)
+        {
+            // GetString uses this exception for invalid UTF-8 and unpaired surrogate escapes.
+            throw new JsonException("Evidence JSON contains invalid string text.");
         }
     }
 

@@ -159,15 +159,39 @@ internal sealed class EvidenceCliWorkflow
     /// Writes the canonical plan and its human-readable summary to <paramref name="outputDirectory"/>.
     /// </summary>
     /// <remarks>Replaces <c>evidence-plan.json</c> and <c>evidence-summary.json</c> when they already exist.</remarks>
-    public async Task WritePlanAsync(EvidencePlan plan, string outputDirectory, CancellationToken cancellationToken)
+    /// <exception cref="EvidenceCliException">The generated plan exceeds the JSON input ceiling (<c>ASEVD217</c>).</exception>
+    public Task WritePlanAsync(EvidencePlan plan, string outputDirectory, CancellationToken cancellationToken) =>
+        WritePlanAsync(plan, outputDirectory, retirePreviousRun: false, cancellationToken);
+
+    /// <summary>
+    /// Validates the canonical plan size, retires earlier run output, and writes the new plan and summary.
+    /// </summary>
+    /// <remarks>Call before starting any producer. An oversized plan leaves the earlier run intact.</remarks>
+    /// <exception cref="EvidenceCliException">
+    /// The plan exceeds the JSON input ceiling (<c>ASEVD217</c>), or a linked artifact directory cannot be retired
+    /// (<c>ASEVD216</c>).
+    /// </exception>
+    public Task WriteRunPlanAsync(EvidencePlan plan, string outputDirectory, CancellationToken cancellationToken) =>
+        WritePlanAsync(plan, outputDirectory, retirePreviousRun: true, cancellationToken);
+
+    private static async Task WritePlanAsync(
+        EvidencePlan plan,
+        string outputDirectory,
+        bool retirePreviousRun,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        Directory.CreateDirectory(outputDirectory);
-        await WriteCanonicalAsync(Path.Join(outputDirectory, "evidence-plan.json"), plan, cancellationToken).ConfigureAwait(false);
-        await File.WriteAllTextAsync(
-            Path.Join(outputDirectory, "evidence-summary.json"),
-            JsonSerializer.Serialize(CreateSummary(plan), new JsonSerializerOptions { WriteIndented = true }),
-            new UTF8Encoding(false),
+        var json = SerializeBoundedOutput(plan, "plan");
+        if (retirePreviousRun)
+        {
+            TestEvidenceRunSupport.RetireOutputs(outputDirectory, plan);
+        }
+
+        await WriteOutputAsync(
+            outputDirectory,
+            Path.Join(outputDirectory, "evidence-plan.json"),
+            json,
+            () => CreateSummary(plan),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -175,15 +199,15 @@ internal sealed class EvidenceCliWorkflow
     /// Writes the canonical manifest and its human-readable summary to <paramref name="outputDirectory"/>.
     /// </summary>
     /// <remarks>Replaces <c>evidence-manifest.json</c> and <c>evidence-summary.json</c> when they already exist.</remarks>
+    /// <exception cref="EvidenceCliException">The generated manifest exceeds the JSON input ceiling (<c>ASEVD217</c>).</exception>
     public async Task WriteManifestAsync(EvidenceManifest manifest, string outputDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(manifest);
-        Directory.CreateDirectory(outputDirectory);
-        await WriteCanonicalAsync(Path.Join(outputDirectory, "evidence-manifest.json"), manifest, cancellationToken).ConfigureAwait(false);
-        await File.WriteAllTextAsync(
-            Path.Join(outputDirectory, "evidence-summary.json"),
-            JsonSerializer.Serialize(CreateSummary(manifest), new JsonSerializerOptions { WriteIndented = true }),
-            new UTF8Encoding(false),
+        await WriteOutputAsync(
+            outputDirectory,
+            Path.Join(outputDirectory, "evidence-manifest.json"),
+            SerializeBoundedOutput(manifest, "manifest"),
+            () => CreateSummary(manifest),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -191,7 +215,7 @@ internal sealed class EvidenceCliWorkflow
     /// Verifies that a manifest is canonical and is bound to the supplied plan without rerunning producers.
     /// </summary>
     /// <remarks>
-    /// Missing files produce <c>ASEVD208</c>, malformed canonical JSON produces <c>ASEVD209</c>, and a missing,
+    /// Missing files and invalid paths produce <c>ASEVD208</c>, malformed canonical JSON produces <c>ASEVD209</c>, and a missing,
     /// unresolvable, or non-binding policy snapshot produces <c>ASEVD203</c>.
     /// </remarks>
     public Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyAsync(
@@ -432,9 +456,34 @@ internal sealed class EvidenceCliWorkflow
             available ? null : "Install the consumer browser runtime or use its CI browser image.");
     }
 
-    private static async Task WriteCanonicalAsync<TValue>(string path, TValue value, CancellationToken cancellationToken)
+    private static async Task WriteOutputAsync(
+        string outputDirectory,
+        string canonicalPath,
+        byte[] canonicalJson,
+        Func<object> createSummary,
+        CancellationToken cancellationToken)
     {
-        await File.WriteAllBytesAsync(path, EvidenceCanonicalJson.Serialize(value), cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllBytesAsync(canonicalPath, canonicalJson, cancellationToken).ConfigureAwait(false);
+        await File.WriteAllTextAsync(
+            Path.Join(outputDirectory, "evidence-summary.json"),
+            JsonSerializer.Serialize(createSummary(), new JsonSerializerOptions { WriteIndented = true }),
+            new UTF8Encoding(false),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static byte[] SerializeBoundedOutput<TValue>(TValue value, string kind)
+    {
+        var json = EvidenceCanonicalJson.Serialize(value);
+        if (json.Length > EvidenceCanonicalJson.MaximumInputBytes)
+        {
+            throw new EvidenceCliException(
+                "ASEVD217",
+                $"The generated Evidence {kind} exceeds the {EvidenceCanonicalJson.MaximumInputBytes} byte verification limit.",
+                "Shorten descriptive policy text, changed-path inputs, or evidence diagnostics and rerun.");
+        }
+
+        return json;
     }
 
     private async Task<TValue> ReadJsonInputAsync<TValue>(

@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Cli;
@@ -375,19 +374,15 @@ public sealed class EvidenceJsonShapeTests
 
     private static JsonNode ResolveNode(JsonNode root, params string[] path)
     {
-        JsonNode? current = root;
+        var current = root;
         foreach (var segment in path)
         {
-            current = current switch
+            if (current is not JsonObject properties)
             {
-                JsonObject value => value[segment],
-                JsonArray value => value[int.Parse(segment, CultureInfo.InvariantCulture)],
-                _ => throw new InvalidOperationException($"Cannot traverse JSON path segment '{segment}'."),
-            };
-            if (current is null)
-            {
-                throw new InvalidOperationException($"JSON path segment '{segment}' is missing.");
+                throw new InvalidOperationException($"Cannot traverse JSON path segment '{segment}'.");
             }
+
+            current = properties[segment] ?? throw new InvalidOperationException($"JSON path segment '{segment}' is missing.");
         }
 
         return current;
