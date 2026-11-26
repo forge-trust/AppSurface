@@ -72,6 +72,133 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
     }
 
     [Fact]
+    public void RegistrationKeepsItsThemeEvidenceAfterTheSourceChanges()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var options = new AppSurfaceKeycloakOptions { LoginTheme = CreateOptions(source) };
+        var registration = options.CreateRegistrationSnapshot();
+        var theme = Assert.IsType<AppSurfaceKeycloakThemeRegistrationState>(registration.Theme);
+
+        File.Delete(TestPathUtils.PathUnder(source, "login", "theme.properties"));
+
+        Assert.Throws<AppSurfaceKeycloakException>(() => options.Validate());
+        Assert.Equal("login/theme.properties", Assert.Single(theme.Manifest.Files).RelativePath);
+        Assert.Equal(registration.Desired.Authority.AbsoluteUri, registration.Projection.Authority);
+    }
+
+    [Fact]
+    public void CreateSupervisedThemeRegistration_ExplicitArm64AndMatchingPinnedImage_ValidatesTheme()
+    {
+        using var directory = new TempDirectory();
+        var digest = new string('a', 64);
+        var source = CreateTheme(directory.Path, "application");
+        var theme = CreateOptions(source);
+        theme.Platform = "linux/arm64";
+        var options = new AppSurfaceKeycloakOptions
+        {
+            LoginTheme = theme,
+            SupervisedExecution = new AppSurfaceKeycloakSupervisedOptions
+            {
+                KeycloakImage = $"quay.io/keycloak/keycloak@sha256:{digest}",
+            },
+        };
+
+        options.Validate();
+        var registration = options.CreateSupervisedThemeRegistration(directory.Path);
+
+        Assert.NotNull(registration);
+        Assert.True(Path.IsPathFullyQualified(registration.SourceDirectory));
+        Assert.Equal("linux/arm64", registration.Registration.Platform);
+        Assert.Equal(theme.BaseImage.Value, registration.Registration.BaseImage);
+        Assert.Equal(["login/theme.properties"], registration.Manifest.Files.Select(file => file.RelativePath).ToArray());
+    }
+
+    [Fact]
+    public void CreateSupervisedThemeRegistration_RequiresExplicitArm64Platform()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var options = new AppSurfaceKeycloakOptions
+        {
+            LoginTheme = CreateOptions(source),
+            SupervisedExecution = new AppSurfaceKeycloakSupervisedOptions
+            {
+                KeycloakImage = $"quay.io/keycloak/keycloak@sha256:{new string('a', 64)}",
+            },
+        };
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => options.Validate());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidThemeConfiguration, exception.Code);
+        Assert.Contains(nameof(AppSurfaceKeycloakThemeOptions.Platform), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateSupervisedThemeRegistration_WhenPinnedImageDoesNotMatch_ThrowsConfigurationDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var theme = CreateOptions(source);
+        theme.Platform = "linux/arm64";
+        var options = new AppSurfaceKeycloakOptions
+        {
+            LoginTheme = theme,
+            SupervisedExecution = new AppSurfaceKeycloakSupervisedOptions
+            {
+                KeycloakImage = $"quay.io/keycloak/keycloak@sha256:{new string('b', 64)}",
+            },
+        };
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => options.CreateSupervisedThemeRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidThemeConfiguration, exception.Code);
+        Assert.Contains("must match the supervised Keycloak image", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateSupervisedThemeRegistration_WithoutSupervisedProfile_ThrowsConfigurationDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var theme = CreateOptions(source);
+        theme.Platform = "linux/arm64";
+        var options = new AppSurfaceKeycloakOptions { LoginTheme = theme };
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => options.CreateSupervisedThemeRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, exception.Code);
+    }
+
+    [Fact]
+    public void CreateSupervisedThemeRegistration_WhenSourceDirectoryIsASymbolicLink_RejectsSource()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "source");
+        var symbolicLink = Path.Join(directory.Path, "linked-source");
+        if (!TryCreateDirectorySymbolicLink(symbolicLink, source))
+        {
+            return;
+        }
+
+        var theme = CreateOptions(symbolicLink);
+        theme.Platform = "linux/arm64";
+        var options = new AppSurfaceKeycloakOptions
+        {
+            LoginTheme = theme,
+            SupervisedExecution = new AppSurfaceKeycloakSupervisedOptions
+            {
+                KeycloakImage = $"quay.io/keycloak/keycloak@sha256:{new string('a', 64)}",
+            },
+        };
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => options.CreateSupervisedThemeRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid, exception.Code);
+        Assert.Contains("symbolic link", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CreateRegistration_WhenSourceDirectoryIsBlank_ThrowsConfigurationDiagnostic()
     {
         using var directory = new TempDirectory();

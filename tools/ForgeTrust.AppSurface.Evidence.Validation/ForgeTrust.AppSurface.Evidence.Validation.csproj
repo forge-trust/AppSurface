@@ -7,6 +7,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../shared/NativeCoverageProducerInventory.cs" Link="Shared/NativeCoverageProducerInventory.cs" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj" />
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />

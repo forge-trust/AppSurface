@@ -19,6 +19,56 @@ public sealed class AppSurfaceKeycloakOptionsTests
         Assert.False(options.UsePersistentDataVolume);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("skoolit/identity")]
+    [InlineData("skoolit:identity")]
+    [InlineData("skoolit identity")]
+    [InlineData("skoolit-identity-ä")]
+    public void ValidateRejectsUnusableNamedVolumes(string volumeName)
+    {
+        var options = new AppSurfaceKeycloakOptions { PersistentVolumeName = volumeName };
+
+        var error = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, error.Code);
+        Assert.Contains(nameof(AppSurfaceKeycloakOptions.PersistentVolumeName), error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(128, true)]
+    [InlineData(129, false)]
+    public void ValidateBoundsNamedVolumeLength(int length, bool accepted)
+    {
+        var name = "fixture.keycloak_" + new string('7', length - "fixture.keycloak_".Length);
+        var options = new AppSurfaceKeycloakOptions { PersistentVolumeName = name };
+
+        if (accepted)
+        {
+            options.Validate();
+            Assert.Equal(name, options.PersistentVolumeName);
+        }
+        else
+        {
+            var error = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+            Assert.Contains(nameof(AppSurfaceKeycloakOptions.PersistentVolumeName), error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ValidateRejectsABlankAdditionalLocalEnvironment()
+    {
+        var options = new AppSurfaceKeycloakOptions();
+        options.AdditionalLocalEnvironmentNames.Add("TestingFixture");
+        options.AdditionalLocalEnvironmentNames.Add(" ");
+
+        var error = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, error.Code);
+        Assert.Contains(nameof(AppSurfaceKeycloakOptions.AdditionalLocalEnvironmentNames), error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RealmImportDirectory_DefaultUsesSafeResourceNameSegment()
     {
@@ -45,6 +95,15 @@ public sealed class AppSurfaceKeycloakOptionsTests
         var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath("/tmp/appsurface/realms", "/appsurface-dev");
 
         Assert.Equal(Path.Join("/tmp/appsurface/realms", "appsurface-dev-realm.json"), path);
+    }
+
+    [Fact]
+    public void RealmImportPaths_GetRealmImportFilePathPreservesRelativeDirectory()
+    {
+        var directory = TestPathUtils.RelativePath("imports", "local");
+        var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(directory, "appsurface-dev");
+
+        Assert.Equal(TestPathUtils.RelativePath("imports", "local", "appsurface-dev-realm.json"), path);
     }
 
     [Theory]
@@ -322,6 +381,22 @@ public sealed class AppSurfaceKeycloakOptionsTests
             projection.EnvironmentVariables.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.DoesNotContain(projection.EnvironmentVariables, pair => pair.Key.Contains("Password", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(projection.EnvironmentVariables, pair => pair.Value.Contains("local-only", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ProjectionPreservesAnExplicitApprovedIssuer()
+    {
+        var origin = new Uri("https://identity.example.test");
+        var options = new AppSurfaceKeycloakOptions
+        {
+            Authority = new Uri(origin, "/realms/" + AppSurfaceKeycloakDefaults.Realm)
+        };
+        options.ApprovedHttpsOrigins.Add(origin);
+
+        var projection = options.CreateConfigurationProjection();
+
+        Assert.Equal(options.Authority.AbsoluteUri, projection.Authority);
+        Assert.Equal(projection.Authority, projection.EnvironmentVariables["Authentication__Oidc__Authority"]);
     }
 
     [Fact]

@@ -8,6 +8,9 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Keycloak.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Keycloak.RealmReconcileWorker" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests" />
     <PackageReference Include="BouncyCastle.Cryptography" />
     <PackageReference Include="ZstdSharp.Port" />

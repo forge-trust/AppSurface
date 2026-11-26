@@ -11,7 +11,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" />
+    <ProjectReference Include="../../ForgeTrust.AppSurface.Auth.Keycloak/ForgeTrust.AppSurface.Auth.Keycloak.csproj" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests" />
   </ItemGroup>
 
 </Project>

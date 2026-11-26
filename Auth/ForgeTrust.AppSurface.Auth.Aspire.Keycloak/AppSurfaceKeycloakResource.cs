@@ -76,6 +76,9 @@ public sealed class AppSurfaceKeycloakResource
     /// </summary>
     public IResourceBuilder<KeycloakResource> Resource { get; }
 
+    /// <summary>Gets the explicit supervised lifetime helper, or null for the legacy local proof path.</summary>
+    public AppSurfaceKeycloakSupervisedRun? SupervisedRun { get; internal set; }
+
     /// <summary>
     /// Gets the secret-safe web configuration projection.
     /// </summary>
@@ -110,6 +113,7 @@ public sealed class AppSurfaceKeycloakResource
     /// or the package-owned worker cannot be resolved.</exception>
     public AppSurfaceKeycloakRealmReady RealmReady()
     {
+        if (SupervisedRun is not null) return SupervisedRun.RealmReady;
         if (_realmReady is not null)
         {
             return _realmReady;
@@ -153,6 +157,7 @@ public sealed class AppSurfaceKeycloakResource
         Action<AppSurfaceKeycloakLocalSeedOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(factory);
+        if (SupervisedRun is not null) throw AppSurfaceKeycloakLocalSeedPolicy.Invalid();
 
         lock (_localSeedsLock)
         {

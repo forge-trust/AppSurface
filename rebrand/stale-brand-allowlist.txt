@@ -22,3 +22,15 @@ docs/designs/issue-765-deterministic-retry-plans.md|runnable|2027-10-05|Historic
 docs/designs/issue-183-concept-preserving-version-switching.md|Runnable|2027-11-01|Historical external review artifact paths retained as approval provenance; not current product branding.
 docs/designs/issue-183-concept-preserving-version-switching.md|runnable|2027-11-01|Historical workspace paths and ordinary executable-fixture wording retained in the approved plan and review record.
 docs/designs/issue-183-office-hours-report.md|Runnable|2027-11-01|Historical external review artifact paths retained in the approved office-hours record; not current product branding.
+docs/plans/issue-888-keycloak-identity-readiness.md|Runnable|2027-11-24|Approved plan preserves the historical review artifact path.
+docs/plans/issue-888-keycloak-identity-readiness.md|runnable|2027-11-24|Approved plan preserves historical workspace paths and original wording.
+docs/plans/issue-888-maintenance-checkpoint-20261115.md|runnable|2027-11-24|Historical worktree path identifies the preserved maintenance checkpoint.
+tests/keycloak-identity-feasibility/evidence/client-custody-first-matrix-20261109/receipt.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.
+tests/keycloak-identity-feasibility/evidence/client-custody-first-matrix-20261109/host-crash/driver-receipt.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.
+tests/keycloak-identity-feasibility/evidence/client-custody-history-20261109/receipt.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.
+tests/keycloak-identity-feasibility/evidence/persistent-ownership-20261109/guard-retained-active.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.
+tests/keycloak-identity-feasibility/evidence/supervised-20261115/volume-incarnation/cleanup-verification.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.
+tests/keycloak-identity-feasibility/evidence/supervised-20261115/volume-incarnation/incarnation.280c5e7e5bc948c09931b616cb8e1a61.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.
+tests/keycloak-identity-feasibility/evidence/supervised-20261115/volume-incarnation/incarnation.3116b7ccfd2d413b9af6951af90343a3.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.
+tests/keycloak-identity-feasibility/evidence/supervised-20261115/volume-incarnation/incarnation.5374705462db471d90fcfc2d9766b1ea.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.
+tests/keycloak-identity-feasibility/evidence/supervised-20261115/volume-incarnation/incarnation.90e0ea835d8e4e54a42d5e01344bdccc.json|runnable|2027-11-24|Historical workspace path is retained verbatim in extraction or recovery evidence.

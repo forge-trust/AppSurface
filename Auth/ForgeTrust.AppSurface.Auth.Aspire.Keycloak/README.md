@@ -8,6 +8,29 @@ Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.
 
 Do not use this package for production Keycloak administration, tenant authority, user provisioning, social identity providers, confidential-client secret lifecycle, app-user mapping, token storage, or provider SDK abstractions. Use `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` for fake local personas and `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` when a web host already chose its OIDC provider.
 
+## Identity Credential Bindings
+
+The #888 candidate declaration APIs separate [immutable identity configuration](../../docs/identity-configuration.md)
+from typed execution bindings. `AppSurfaceKeycloakOptions.CreateDesiredConfiguration()` freezes client mode, exact
+issuer/callback/origin declarations, mappers, Google-provider declarations and explicit removals. Snapshot creation
+validates these fields without resolving credentials. The default remains a public client with loopback callbacks.
+
+`AppSurfaceKeycloakCredentialBindings.ClientSecret` declares the confidential client's separate secret
+`IResourceBuilder<ParameterResource>`. `IdentityProviderSecrets` maps exactly the declared enabled provider aliases
+to secret parameters. Each parameter must belong to the same AppHost and must differ from administrator parameters;
+a provider binding must also differ from the client binding. Missing, extra, nonsecret and cross-host bindings fail
+with `ASKEYC027` before value resolution. Public client mode has no client-secret binding. Neither options nor the
+[web configuration projection](AppSurfaceKeycloakConfigurationProjection.cs) contains credential values.
+
+Normal public registration and supported owned lifetime integration for these declarations remain pending the
+[lifecycle gate](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results). These candidate declarations do not make
+the current public registration overload a configured reconciler. The internal feasibility registration remains
+qualified separately; see [Approach B](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results).
+
+The pure [credential reference](../../docs/client-credential-reference.md) describes one captured run/client identity.
+Its reader has the documented macOS ARM64, expiry, filesystem and trusted-ancestor constraints. Do not replace it
+with a credential in ordinary configuration or infer another platform's support from portable assembly metadata.
+
 ## Five-Minute Real Login
 
 The focused repository proof uses a Keycloak AppHost and a paired web app:
@@ -47,6 +70,17 @@ keycloak.Configuration.ApplyTo(web)
 ```
 
 `AddAppSurfaceKeycloak(...)` generates a deterministic realm import, calls the official Aspire `AddKeycloak(...)` API, mounts the realm import directory with `WithRealmImport(...)`, and returns an `AppSurfaceKeycloakResource` wrapper whose `Resource` property exposes the underlying `IResourceBuilder<KeycloakResource>` for normal Aspire APIs.
+
+## Supervised identity-readiness candidate
+
+The local #888 candidate adds public PKCE and typed confidential-client modes with `SupervisedExecution` to the normal
+`AddAppSurfaceKeycloak` entry point. Its [registration and recovery guide](../../docs/supervised-keycloak-execution.md)
+explains copied container seed/web payloads, the explicit `SupervisedRun.RunAsync` lifetime, stable persistent ownership
+and verification-only recovery. Aspire exposes completion/diagnostic handles while the package supervises Docker
+execution. This candidate is qualified only by its recorded local proofs; the [AppHost-loss checkpoint](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results)
+records the heartbeat fence and launch uncertainty controls. Complete acceptance, API commitment, publication and
+downstream Skoolit adoption remain separate gates. The legacy host-project seed API
+below does not inherit this candidate's lifecycle claims.
 
 ## Ordered Local Seed Projects
 
@@ -92,6 +126,51 @@ the same wrapper. The resulting graph is intentionally linear:
 Keycloak healthy -> RealmReady -> identity-bootstrap -> candidate-fixture -> web
 ```
 
+### Realm-ready worker package payload
+
+The [package build](ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj) publishes the existing finite worker as a
+framework-dependent `net10.0` DLL, with no apphost, self-contained runtime or single-file bundling. Its project now references only the pure Keycloak library; the existing assembly name is retained for resolver compatibility. It packages the
+complete publish directory under `tools/net10.0/any/realm-ready/`, including dependency assemblies, satellite
+resources and runtime-specific subdirectories. The worker host must provide a compatible `Microsoft.NETCore.App` 10 runtime; see [.NET framework-dependent deployment](https://learn.microsoft.com/en-us/dotnet/core/deploying/).
+The `any` directory describes the portable payload layout, and does not establish support on every platform.
+
+The [build-transitive target](buildTransitive/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.targets) copies that tree
+to `$(OutDir)appsurface-keycloak-realm-ready/`, preserving relative paths. It runs after `CopyFilesToOutputDirectory`
+and fails with `ASKEYC022` before copying if the payload is empty or the worker DLL, dependency manifest or runtime
+configuration is missing. Packing also rejects those missing inputs. Preserve the entire directory when moving an
+AppHost output; copying only the worker DLL or the previous four-file payload can omit a dependency needed later.
+The resolver's three-file existence check is not a complete dependency integrity check. Runtime-host failures such
+as malformed configuration or an unavailable framework occur before worker entry and have .NET host diagnostics.
+Framework-dependent `dotnet publish` output carries the same recursive worker directory beside the AppHost.
+Keep it as an external directory when packaging an AppHost as a single file.
+
+`BuildRealmReadyWorker` restores the worker and publishes into a fresh configuration/TFM-specific intermediate
+directory. The parent pack build supplies the pure-library output first; the nested worker publish disables
+project-reference builds to reuse that matching output. The worker no longer has a reference back to its adapter. Use a normal build-enabled pack after source
+changes. A `--no-build` pack requires matching, previously built project-reference outputs.
+
+The [#888 closure history](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results) records the earlier
+adapter-referencing payload. The [Approach B integration checkpoint](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results)
+records the current Aspire-free worker, moved baseline verifier, and internal configured adapter seam. The public
+`RealmReady()` default remains the read-only public-client baseline. The internal seam validates typed same-resource
+administrator/client bindings and stages them only after ownership at `OnBeforeStart`; it is not a committed public
+configuration API. The default public registration's broader Run-policy/import migration remains an open gate.
+The checkpoint includes separate real-server default-readiness controls for the extracted and consumer-copied
+worker, alongside configured reconciliation/readback and required-seed lifecycle evidence. Both use empty runtime
+caches and isolated payloads; these local proofs do not establish published-package adoption or complete default
+registration migration.
+
+The worker's optional `APPSURFACE_KEYCLOAK_CA_CERTIFICATE_FILE` is a nonsecret path to the exact expected server
+certificate. The measured local self-signed profile pins SHA-256 with hostname and validity checks; without it,
+platform TLS validation applies. It grants no remote-admin authority or general trust bypass. Configured mode uses
+`--appsurface-keycloak-reconcile <desired.json> <private-bindings.json> <result.json>` internally; secret bytes stay
+out of argv/environment and the safe OIDC projection. Worker result paths/codes and private-file checks are internal
+and remain subject to the checkpoint's custody/platform/API proof limits. The later
+[owned-adapter checkpoint](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results) adds an internal same-daemon/
+volume lease, declared resource binding, shared capture and recovery-only experiment. Its constructor/registration
+remain effect-free; acquisition precedes private values and workloads. This macOS ARM64 stamped-volume profile
+requires trusted ancestors and does not establish the proposed public ownership, migration or recovery contract.
+
 ### Local-only policy and opt-out
 
 Seed registration is fail-closed. It is legal only for Aspire `Run` in `Development`, `Test`, or `Testing` by default,
@@ -127,6 +206,13 @@ The original `AddAppSurfaceKeycloak(name, configure)` overload remains the small
 proof and intentionally has no administrator parameter resources. Choose the explicit-parameter overload only when a
 consumer-owned local seed genuinely needs the Keycloak Admin API. Its password parameter must be typed as
 `secret: true`; a non-secret password parameter is rejected with `ASKEYC001` before the Keycloak resource is added.
+
+Both registration overloads are local Run-only APIs and accept `Development`, `Test`, or `Testing` by default.
+Registration now fails with `ASKEYC023` before writing the realm import or adding graph resources when Aspire is
+publishing or the environment is outside that allowlist. This is a policy change for hosts that previously registered
+the default proof in other operations or environments. Keep the call behind the host's Aspire Run-operation check;
+publish hosts should configure their external identity dependency separately. A genuinely local custom environment can
+be enabled with `options.AdditionalLocalEnvironmentNames.Add("LocalProof")`; that opt-in does not enable Publish.
 
 ### Do not confuse this with DevAuth personas
 
@@ -301,7 +387,7 @@ Diagnostics use `ASKEYC001+` codes and follow Problem/Cause/Fix/Docs wording. Co
 | `ASKEYC019` | The Linux/amd64 runtime proof was unavailable or timed out. | Run the named CI job; `not-run` is not release success. |
 | `ASKEYC020` | Disposable-realm readback did not select the expected login theme. | Reset only disposable proof data and rerun the matching tuple. |
 | `ASKEYC021` | A required login resource was missing, cross-origin, redirected, oversized, or hash-mismatched. | Repair the declared same-origin resource and rebuild the image. |
-| `ASKEYC022` | The finite package-owned realm-ready worker could not be resolved. | Restore the AppHost package and use the supported .NET SDK. |
+| `ASKEYC022` | The finite realm-ready worker cannot be resolved, or its required package files are missing before copying. | Restore the complete AppHost package and rebuild. See [worker payload requirements](#realm-ready-worker-package-payload); pre-entry .NET runtime-host errors have separate diagnostics. |
 | `ASKEYC023` | Local seed registration was attempted outside permitted local execution. | Use Aspire `Run` in an explicitly allowed local environment; publish is always denied. |
 | `ASKEYC024` | A local seed name, predecessor, project factory, or typed secret binding is invalid. | Use one correctly named finite project, name the immediate predecessor, and bind each required secret parameter once. |
 
@@ -337,3 +423,23 @@ The shared [Keycloak recipe package](../ForgeTrust.AppSurface.Auth.Keycloak/READ
 `VerifyObservedImage` accepts either a theme-only or security recipe observation when the immutable image identity, platform, exact named-theme inventory, and every expected theme member hash match this release tuple. This comparison establishes this tuple’s theme-file facts; it does not transfer the security recipe’s policy authority or turn a theme-only tuple into security release approval.
 
 Release evidence publication uses the same internal create-if-absent filesystem implementation as the [captured recipe SDK](../ForgeTrust.AppSurface.Auth.Keycloak/docs/api-and-contracts.md). Concurrent writers to one absent path produce exactly one complete winner; every later writer receives a build-contract diagnostic. Staging and destination must be on the same local filesystem with hard-link support on Unix. Existing evidence remains immutable.
+
+The [adversarial feasibility continuation](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results) records the later
+main-based dependency refresh, actual post-seed generic drift detection, and captured-file rejection at both
+configured worker and real web startup readers. Internal `WorkerBoundaryFailure` results report a safe boundary
+stage, exception type and elapsed seconds, with exit `70`; raw exception messages and captured bytes are excluded.
+This diagnostic protocol remains internal. No new public seed sandbox or runtime reconciliation controller is added.
+
+The later [neutral and pinned Skoolit configuration proof](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results)
+extends internal configured registration with optional typed provider-secret bindings. Registration snapshots and
+validates same-AppHost secret parameters without resolving them; ownership precedes private staging and worker
+execution. Public-client mode has no application-client capture. Confidential mode retains one protected capture
+shared by the worker and real web OIDC startup reader. Exact callbacks/origins and generic pre-readiness mapper,
+theme and provider ownership are explicit migration deltas for the Skoolit configuration fixture; this does not
+establish actual Skoolit application adoption, real Google login or deployed tunnel acceptance.
+
+The [real browser feasibility continuation](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results) adds opt-in
+owned Chromium login/logout acceptance for those isolated configuration fixtures. It retains empty-cache extracted
+runtime closure, independent stop-before-clean observation and the separate 30-second worker/stop bounds. It
+qualifies local browser behavior with a scoped certificate exception and locally routed public origins; real
+provider, deployed tunnel, actual consumer adoption and coordinated publication remain separate acceptance gates.

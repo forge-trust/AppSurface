@@ -56,6 +56,33 @@ public static class AppSurfaceKeycloakHostingExtensions
         return AddCore(builder, name, adminUsername, adminPassword, configure);
     }
 
+    /// <summary>Adds a configured supervised local Keycloak run with separately typed execution credentials.</summary>
+    /// <param name="builder">The local Run builder.</param>
+    /// <param name="name">The resource name.</param>
+    /// <param name="adminUsername">Same-builder administrator username parameter.</param>
+    /// <param name="adminPassword">Same-builder secret administrator password parameter.</param>
+    /// <param name="credentials">Client and enabled-provider typed secret bindings.</param>
+    /// <param name="configure">Identity options and explicit supervised execution profile.</param>
+    /// <returns>The normal wrapper with its supervised lifetime helper.</returns>
+    /// <remarks>No parameter is resolved and no directory, import, container or volume is created during registration.</remarks>
+    public static AppSurfaceKeycloakResource AddAppSurfaceKeycloak(this IDistributedApplicationBuilder builder, string name,
+        IResourceBuilder<ParameterResource> adminUsername, IResourceBuilder<ParameterResource> adminPassword,
+        AppSurfaceKeycloakCredentialBindings credentials, Action<AppSurfaceKeycloakOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(credentials);
+        ArgumentNullException.ThrowIfNull(configure);
+        var options = new AppSurfaceKeycloakOptions();
+        configure(options);
+        var registration = options.CreateRegistrationSnapshot();
+        var snapshot = registration.Options;
+        if (snapshot.SupervisedExecution is null) throw AppSurfaceKeycloakCredentialBindings.Invalid();
+        AppSurfaceKeycloakLocalSeedPolicy.EnsureRunOperation(builder);
+        AppSurfaceKeycloakLocalSeedPolicy.EnsureAllowedEnvironment(builder, new[] { "Development", "Test", "Testing" }.Concat(snapshot.AdditionalLocalEnvironmentNames));
+        var binding = credentials.CreateSnapshot(builder, registration.Desired, adminUsername, adminPassword);
+        return AppSurfaceKeycloakSupervisedRun.Register(builder, name, registration, binding);
+    }
+
     private static AppSurfaceKeycloakResource AddCore(
         IDistributedApplicationBuilder builder,
         string name,
@@ -70,13 +97,22 @@ public static class AppSurfaceKeycloakHostingExtensions
             RealmImportDirectory = AppSurfaceKeycloakRealmImportPaths.ResolveImportDirectory(AppContext.BaseDirectory, name),
         };
         configure?.Invoke(options);
-        var snapshot = options.CreateValidatedSnapshot();
-        var themeRegistration = snapshot.CreateThemeRegistration(AppContext.BaseDirectory);
+        var registration = options.CreateRegistrationSnapshot();
+        var snapshot = registration.Options;
+        AppSurfaceKeycloakLocalSeedPolicy.EnsureRunOperation(builder);
+        AppSurfaceKeycloakLocalSeedPolicy.EnsureAllowedEnvironment(
+            builder,
+            new[] { "Development", "Test", "Testing" }.Concat(snapshot.AdditionalLocalEnvironmentNames));
+        if (snapshot.SupervisedExecution is not null || snapshot.PersistentVolumeName is not null
+            || snapshot.ClientMode != global::ForgeTrust.AppSurface.Auth.Keycloak.KeycloakClientMode.Public
+            || snapshot.Mappers.Count != 0 || snapshot.IdentityProviders.Count != 0 || snapshot.RequireIdentitySeed)
+            throw AppSurfaceKeycloakCredentialBindings.Invalid();
+        var themeRegistration = registration.Theme;
 
         AppSurfaceKeycloakPortPreflight.ThrowIfOccupied(snapshot.KeycloakPort, nameof(snapshot.KeycloakPort));
         AppSurfaceKeycloakPortPreflight.ThrowIfOccupied(snapshot.WebProofPort, nameof(snapshot.WebProofPort));
 
-        var realmFile = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(snapshot);
+        var realmFile = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(registration);
         var keycloak = builder.AddKeycloak(name, snapshot.KeycloakPort, adminUsername, adminPassword)
             .WithRealmImport(snapshot.RealmImportDirectory);
         if (themeRegistration is not null)
@@ -94,11 +130,10 @@ public static class AppSurfaceKeycloakHostingExtensions
             keycloak = keycloak.WithDataVolume();
         }
 
-        var projection = snapshot.CreateConfigurationProjection();
         return new AppSurfaceKeycloakResource(
             keycloak,
-            projection,
-            new AppSurfaceKeycloakReadinessProbe(snapshot),
+            registration.Projection,
+            new AppSurfaceKeycloakReadinessProbe(registration),
             realmFile,
             themeRegistration?.Registration,
             new AppSurfaceKeycloakRealmReadyConfiguration(snapshot, realmFile, themeRegistration?.Registration));

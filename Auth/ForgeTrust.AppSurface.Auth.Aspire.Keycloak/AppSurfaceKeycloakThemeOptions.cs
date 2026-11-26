@@ -51,8 +51,8 @@ public sealed class AppSurfaceKeycloakThemeOptions
     /// Gets or sets the platform for exact-image evidence.
     /// </summary>
     /// <remarks>
-    /// Version one supports <c>linux/amd64</c> exact runtime proof. Other platforms can use deterministic source
-    /// validation, but must not claim the exact-image release proof.
+    /// Version one retains <c>linux/amd64</c> exact-image release qualification. <c>linux/arm64</c> theme activation
+    /// is available only through a supervised execution profile whose pinned Keycloak image matches this theme.
     /// </remarks>
     public string Platform { get; set; } = "linux/amd64";
 
@@ -101,7 +101,20 @@ public sealed class AppSurfaceKeycloakThemeOptions
     /// </summary>
     public void Validate() => _ = CreateRegistration(AppContext.BaseDirectory);
 
-    internal AppSurfaceKeycloakThemeRegistrationState CreateRegistration(string sourceBaseDirectory)
+    internal AppSurfaceKeycloakThemeRegistrationState CreateRegistration(string sourceBaseDirectory) =>
+        CreateRegistrationCore(sourceBaseDirectory, supervisedExecution: null);
+
+    internal AppSurfaceKeycloakThemeRegistrationState CreateSupervisedRegistration(
+        string sourceBaseDirectory,
+        AppSurfaceKeycloakSupervisedOptions supervisedExecution)
+    {
+        ArgumentNullException.ThrowIfNull(supervisedExecution);
+        return CreateRegistrationCore(sourceBaseDirectory, supervisedExecution);
+    }
+
+    private AppSurfaceKeycloakThemeRegistrationState CreateRegistrationCore(
+        string sourceBaseDirectory,
+        AppSurfaceKeycloakSupervisedOptions? supervisedExecution)
     {
         if (!ThemeNamePattern.IsMatch(Name))
         {
@@ -114,9 +127,25 @@ public sealed class AppSurfaceKeycloakThemeOptions
         }
 
         ArgumentNullException.ThrowIfNull(BaseImage);
-        if (!string.Equals(Platform, "linux/amd64", StringComparison.Ordinal))
+        var expectedPlatform = supervisedExecution is null ? "linux/amd64" : "linux/arm64";
+        if (!string.Equals(Platform, expectedPlatform, StringComparison.Ordinal))
         {
-            throw Invalid(nameof(Platform), "only linux/amd64 is eligible for the exact-image proof in version one.");
+            var detail = supervisedExecution is null
+                ? "only linux/amd64 is eligible for the exact-image proof in version one."
+                : "supervised theme activation requires Platform to be explicitly set to linux/arm64.";
+            throw Invalid(nameof(Platform), detail);
+        }
+
+        if (supervisedExecution is not null)
+        {
+            var themeImage = NormalizeImmutableImage(BaseImage.Value, nameof(BaseImage));
+            var supervisedImage = NormalizeImmutableImage(
+                supervisedExecution.KeycloakImage,
+                $"{nameof(AppSurfaceKeycloakOptions.SupervisedExecution)}.{nameof(AppSurfaceKeycloakSupervisedOptions.KeycloakImage)}");
+            if (!string.Equals(themeImage, supervisedImage, StringComparison.Ordinal))
+            {
+                throw Invalid(nameof(BaseImage), "the theme image must match the supervised Keycloak image by registry, repository, and SHA-256 digest.");
+            }
         }
 
         var sourceDirectory = ResolveDirectory(SourceDirectory, sourceBaseDirectory, nameof(SourceDirectory));
@@ -130,6 +159,40 @@ public sealed class AppSurfaceKeycloakThemeOptions
             templateBaselineDigest,
             developmentOnlyResourcePaths,
             new AppSurfaceKeycloakThemeRegistration(Name, BaseImage.Value, Platform, manifest.Digest, templateBaselineDigest));
+    }
+
+    private static string NormalizeImmutableImage(string? value, string optionName)
+    {
+        const string digestMarker = "@sha256:";
+        if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsWhiteSpace))
+        {
+            throw Invalid(optionName, "must be a fully-qualified immutable image reference with a SHA-256 digest.");
+        }
+
+        var digestIndex = value.IndexOf(digestMarker, StringComparison.Ordinal);
+        if (digestIndex <= 0 || value.IndexOf(digestMarker, digestIndex + digestMarker.Length, StringComparison.Ordinal) >= 0)
+        {
+            throw Invalid(optionName, "must be a fully-qualified immutable image reference with exactly one SHA-256 digest.");
+        }
+
+        var repositoryAndOptionalTag = value[..digestIndex];
+        var lastSlash = repositoryAndOptionalTag.LastIndexOf('/');
+        var lastColon = repositoryAndOptionalTag.LastIndexOf(':');
+        var parseValue = lastColon > lastSlash
+            ? value
+            : $"{repositoryAndOptionalTag}:appsurface{value[digestIndex..]}";
+
+        AppSurfaceKeycloakImageReference parsed;
+        try
+        {
+            parsed = AppSurfaceKeycloakImageReference.Parse(parseValue);
+        }
+        catch (AppSurfaceKeycloakException)
+        {
+            throw Invalid(optionName, "must be a valid fully-qualified immutable image reference with a SHA-256 digest.");
+        }
+
+        return $"{parsed.Registry}/{parsed.Image}@sha256:{parsed.Sha256}";
     }
 
     internal AppSurfaceKeycloakThemeOptions CreateSnapshot()

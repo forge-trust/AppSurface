@@ -28,8 +28,14 @@ Current production qualification passes all four retained recipe fixtures: neutr
 ## References
 
 - [Auth adoption ladder](../../start-here/auth-adoption-ladder.md)
+- [Local identity declarations](../../docs/identity-configuration.md) — immutable, nonsecret client, mapper, origin and Google-provider configuration and validation
+- [Run-scoped client credential reference](../../docs/client-credential-reference.md) — identity-bound reads for the qualified macOS ARM64 custody profile
+- [Sealed client credentials](../../docs/sealed-client-credential-reference.md) — candidate Linux ARM64 memory custody and supervised namespace constraints
 - [API and JSON contract](docs/api-and-contracts.md)
 - [Bounded engine guide](docs/engine.md)
+- [#888 Approach B adapter integration](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results) — current pure baseline/reconciliation runtime, internal binding and remaining acceptance gates
+- [#888 internal generic reconciliation worker](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results) — Aspire-free local worker proof, internal contracts and remaining integration gates
+- [#888 public capture from an extracted local payload](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results) — isolated distribution proof and explicit remaining adoption/runtime gates
 - [Diagnostics and recovery](docs/diagnostics.md)
 - [Migration matrix and decision guide](docs/migration.md)
 - [Native CI and host prerequisites](docs/host-prerequisites.md)
@@ -40,3 +46,23 @@ Current production qualification passes all four retained recipe fixtures: neutr
 - [Material retention and rebuild availability](docs/material-retention.md)
 - [Prepared cold-run and novice walkthrough record (unexecuted)](docs/cold-run.md)
 - [Contributing](../../CONTRIBUTING.md), [license terms](../../LICENSE), and [private security reporting](../../SECURITY.md)
+
+The internal [qualified shared-capture experiment](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results)
+lets the finite worker and host-owned web startup callback read one same-run captured client value. It uses native
+macOS ARM64 file identity/mode/no-follow/expiry checks and an owner-removable immutable flag. Trusted ancestors,
+extended ACL qualification and same-user/root limits remain explicit. The new
+[credential reference](../../docs/client-credential-reference.md) exposes only a descriptor and guarded reads;
+its qualified capture remains internal and is not a production credential store.
+
+The [neutral and pinned Skoolit configuration checkpoint](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results)
+documents internal user-attribute/session-note mapper sources, explicit approved HTTPS issuer/callback origins,
+a separate loopback administrator transport, optional login theme and typed private Google alias bindings. These
+now have a candidate [immutable declaration](../../docs/identity-configuration.md); normal adapter lifecycle integration
+and public API acceptance remain pending. Google configuration readback reports provider acceptance
+as unverified; masked secret readback cannot resolve an unknown write. Real provider login, downstream adoption
+and coordinated publication remain separate gates.
+
+The [real browser continuation](../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results) exercises the unchanged
+local candidate through Chromium, the existing OIDC handler and consumer-owned subject lookup. Browser tooling
+remains a copied test prerequisite outside the runtime package; the Aspire-free library acquires no browser or
+Aspire dependency. The recorded provider, custody, platform, public API and published-consumer qualifications remain.

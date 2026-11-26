@@ -1,15 +1,53 @@
 <Project>
 
-  <Target Name="CopyAppSurfaceKeycloakRealmReadyWorker" AfterTargets="CopyFilesToOutputDirectory">
+  <Target Name="ResolveAppSurfaceKeycloakRealmReadyWorker">
+    <PropertyGroup>
+      <_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory>$(MSBuildThisFileDirectory)..\tools\net10.0\any\realm-ready\</_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory>
+      <_AppSurfaceKeycloakRealmReadyWorkerAssemblyName>ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker</_AppSurfaceKeycloakRealmReadyWorkerAssemblyName>
+    </PropertyGroup>
+
     <ItemGroup>
-      <_AppSurfaceKeycloakRealmReadyWorker Include="$(MSBuildThisFileDirectory)..\tools\net10.0\any\realm-ready\*" />
+      <_AppSurfaceKeycloakRealmReadyWorker Include="$(_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory)**\*" />
     </ItemGroup>
 
+    <Error
+      Condition="'@(_AppSurfaceKeycloakRealmReadyWorker)' == ''"
+      Code="ASKEYC022"
+      Text="The installed AppSurface Keycloak package does not contain a realm-ready worker publish closure." />
+    <Error
+      Condition="!Exists('$(_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory)$(_AppSurfaceKeycloakRealmReadyWorkerAssemblyName).dll')"
+      Code="ASKEYC022"
+      Text="The installed AppSurface Keycloak package is missing the realm-ready worker assembly." />
+    <Error
+      Condition="!Exists('$(_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory)$(_AppSurfaceKeycloakRealmReadyWorkerAssemblyName).deps.json')"
+      Code="ASKEYC022"
+      Text="The installed AppSurface Keycloak package is missing the realm-ready worker dependency manifest." />
+    <Error
+      Condition="!Exists('$(_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory)$(_AppSurfaceKeycloakRealmReadyWorkerAssemblyName).runtimeconfig.json')"
+      Code="ASKEYC022"
+      Text="The installed AppSurface Keycloak package is missing the realm-ready worker runtime configuration." />
+
+  </Target>
+
+  <Target Name="CopyAppSurfaceKeycloakRealmReadyWorker"
+          DependsOnTargets="ResolveAppSurfaceKeycloakRealmReadyWorker"
+          AfterTargets="CopyFilesToOutputDirectory">
     <Copy
       SourceFiles="@(_AppSurfaceKeycloakRealmReadyWorker)"
-      DestinationFolder="$(OutDir)appsurface-keycloak-realm-ready\"
-      SkipUnchangedFiles="true"
-      Condition="'@(_AppSurfaceKeycloakRealmReadyWorker)' != ''" />
+      DestinationFiles="@(_AppSurfaceKeycloakRealmReadyWorker->'$(OutDir)appsurface-keycloak-realm-ready\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishAppSurfaceKeycloakRealmReadyWorker"
+          DependsOnTargets="ResolveAppSurfaceKeycloakRealmReadyWorker"
+          BeforeTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(_AppSurfaceKeycloakRealmReadyWorker)">
+        <RelativePath>appsurface-keycloak-realm-ready\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
   </Target>
 
 </Project>

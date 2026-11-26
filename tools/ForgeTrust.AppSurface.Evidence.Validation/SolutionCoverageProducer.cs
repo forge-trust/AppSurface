@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Coverage;
+using ForgeTrust.AppSurface.Coverage.NativeInventory;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -109,8 +110,9 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             {
                 stage = "native-fan-in";
                 var fanInOutput = Path.Join(output, "coverage-fanin");
-                var nativeDirs = Directory.GetDirectories(_settings.NativeCoverageDirectory!).Order(StringComparer.Ordinal).ToArray();
-                if (nativeDirs.Length != 3) throw new InvalidDataException("Exactly three native coverage captures are required.");
+                var expectedNativeCaptures = NativeCoverageProducerInventory.Create(_settings.IncludeKeycloakNativeCoverage).Count;
+                if (Directory.GetDirectories(_settings.NativeCoverageDirectory!).Length != expectedNativeCaptures)
+                    throw new InvalidDataException($"Native coverage requires {expectedNativeCaptures} captures for the selected inventory.");
                 var run = WorkflowRun();
                 if (run.Values.Any(string.IsNullOrWhiteSpace) || string.IsNullOrWhiteSpace(_settings.DiffBase))
                     throw new InvalidDataException("Native fan-in requires complete workflow provenance and a pinned diff base.");
@@ -126,6 +128,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 };
                 if (nativeContract == 3)
                     dogfoodArgs.AddRange(["--diff-policy-id", CoverageFanInPolicy.VisualBaselinePngDiffPolicyId]);
+                if (_settings.IncludeKeycloakNativeCoverage)
+                    dogfoodArgs.AddRange(["--include-keycloak-native", "true"]);
                 await ExecuteAsync("coverage-fanin", dogfoodArgs, root, proof, cancellationToken, _settings.DotnetPath).ConfigureAwait(false);
                 nativeProofHash = await ValidateNativeFanInAsync(fanInOutput, nativeContract, _settings.DiffBase!,
                     commit, tree, sdk, run, cancellationToken).ConfigureAwait(false);

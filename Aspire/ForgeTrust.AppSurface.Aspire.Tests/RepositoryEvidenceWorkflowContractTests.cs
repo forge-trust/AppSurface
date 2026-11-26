@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Testing;
 using YamlDotNet.RepresentationModel;
+using ForgeTrust.AppSurface.Coverage.NativeInventory;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
@@ -84,19 +85,50 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     [Fact]
     public void NativeCollectorFilterMatchesTheAdapterDeclaration()
     {
-        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var adapter = File.ReadAllLines(Path.Join(repository, "tools",
-            "ForgeTrust.AppSurface.Coverage.Dogfood", "Program.cs"));
-        var declaration = Assert.Single(adapter, line =>
-            line.TrimStart().StartsWith("internal const string NativeFilter = ", StringComparison.Ordinal));
-        var declaredFilter = JsonSerializer.Deserialize<string>(declaration[(declaration.IndexOf('=') + 1)..]
-            .Trim().TrimEnd(';'));
+        var declaredFilter = Assert.Single(NativeCoverageProducerInventory.Create(false)
+            .Select(producer => producer.Filter).Distinct(StringComparer.Ordinal));
         var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
-        var collector = FindStep(job["steps"].AsSequence(), "Run coverage security contracts")["run"].AsScalar();
-        var filter = Assert.Single(Regex.Matches(collector, "--filter\\s+\"([^\"]+)\"").Cast<Match>());
-
         Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
-        Assert.Equal(declaredFilter, filter.Groups[1].Value);
+        var step = FindStep(job["steps"].AsSequence(), "Run coverage security contracts");
+        Assert.Equal("pwsh", step["shell"].AsScalar());
+        var env = step["env"].AsMapping();
+        Assert.Equal("${{ matrix.filter }}", env["COVERAGE_TEST_FILTER"].AsScalar());
+        Assert.Equal("${{ matrix.testProject }}", env["COVERAGE_TEST_PROJECT"].AsScalar());
+        Assert.Contains("--filter \"$env:COVERAGE_TEST_FILTER\"", step["run"].AsScalar());
+        Assert.Contains("dotnet test \"$env:COVERAGE_TEST_PROJECT\"", step["run"].AsScalar());
+    }
+
+    [Fact]
+    public void NativeProducerInventoryIsClosedAndAddsExactlyTheTwoKeycloakArm64Lanes()
+    {
+        var baseline = NativeCoverageProducerInventory.Create(false);
+        var keycloak = NativeCoverageProducerInventory.Create(true);
+
+        Assert.Equal(3, baseline.Count);
+        Assert.Equal(["linux", "windows", "darwin"], baseline.Select(producer => producer.Id));
+        Assert.Equal(5, keycloak.Count);
+        Assert.Equal(["linux", "windows", "darwin", "darwin-arm64-keycloak", "linux-arm64-keycloak"],
+            keycloak.Select(producer => producer.Id));
+        Assert.All(keycloak.Where(producer => producer.Keycloak), producer =>
+        {
+            Assert.Equal("Arm64", producer.OsArchitecture);
+            Assert.Equal("Arm64", producer.ProcessArchitecture);
+            Assert.Equal(NativeCoverageProducerInventory.KeycloakTestProject, producer.TestProject);
+            Assert.NotEmpty(producer.Filter);
+        });
+
+        var serialized = JsonDocument.Parse(NativeCoverageProducerInventory.SerializeWorkflowInventory(true));
+        Assert.Equal(5, serialized.RootElement.GetProperty("cardinality").GetInt32());
+        var matrix = serialized.RootElement.GetProperty("matrix").GetProperty("include").EnumerateArray().ToArray();
+        Assert.Equal(keycloak.Count, matrix.Length);
+        for (var index = 0; index < keycloak.Count; index++)
+        {
+            Assert.Equal(keycloak[index].Id, matrix[index].GetProperty("producerId").GetString());
+            Assert.Equal(keycloak[index].Runner, matrix[index].GetProperty("runner").GetString());
+            Assert.Equal(keycloak[index].TestProject, matrix[index].GetProperty("testProject").GetString());
+            Assert.Equal(keycloak[index].Filter, matrix[index].GetProperty("filter").GetString());
+            Assert.Equal(keycloak[index].Keycloak, matrix[index].GetProperty("keycloak").GetBoolean());
+        }
     }
 
     [Fact]
@@ -206,6 +238,9 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var preflight = jobs["coverage-evidence-plan"].AsMapping();
         var preflightOutputs = preflight["outputs"].AsMapping();
         Assert.Equal("${{ steps.plan.outputs.requires_native_coverage }}", preflightOutputs["requires_native_coverage"].AsScalar());
+        Assert.Equal("${{ steps.plan.outputs.requires_keycloak_native_coverage }}", preflightOutputs["requires_keycloak_native_coverage"].AsScalar());
+        Assert.Equal("${{ steps.plan.outputs.native_coverage_matrix }}", preflightOutputs["native_coverage_matrix"].AsScalar());
+        Assert.Equal("${{ steps.plan.outputs.native_coverage_inventory }}", preflightOutputs["native_coverage_inventory"].AsScalar());
         Assert.Equal("${{ steps.plan.outputs.diff_base }}", preflightOutputs["diff_base"].AsScalar());
         Assert.Equal("${{ steps.plan.outputs.v3_diff_base }}", preflightOutputs["v3_diff_base"].AsScalar());
         var checkout = FindStep(preflight["steps"].AsSequence(), "Checkout exact event head with full history");
@@ -221,7 +256,12 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("--operation plan --scope coverage", preflightRun);
         Assert.Contains("selection.requiresCoverage", preflightRun);
         Assert.Contains("selection.requiresNativeCoverage", preflightRun);
+        Assert.Contains("selection.requiresKeycloakNativeCoverage", preflightRun);
         Assert.Contains("requires_native_coverage=$nativeRequired", preflightRun);
+        Assert.Contains("requires_keycloak_native_coverage=$keycloakNativeRequired", preflightRun);
+        Assert.Contains("$env:GITHUB_EVENT_NAME -eq 'pull_request' -and $keycloakNativeRequired -eq 'true'", preflightRun);
+        Assert.Contains("--operation', 'native-coverage-inventory", preflightRun);
+        Assert.Contains("$inventory.matrix | ConvertTo-Json", preflightRun);
         Assert.Contains("\"diff_base=$diffBase\"", preflightRun);
         Assert.Contains("$env:GITHUB_PULL_REQUEST_BASE_SHA", preflightRun);
         Assert.Contains("\"v3_diff_base=$v3DiffBase\"", preflightRun);
@@ -233,8 +273,13 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var coverageSecurity = jobs["coverage-security-platform"].AsMapping();
         Assert.Equal(["coverage-evidence-plan", "coverage-cli-candidate"], coverageSecurity["needs"].AsSequence().Select(node => node.AsScalar()));
         Assert.Contains("needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true'", coverageSecurity["if"].AsScalar());
-        Assert.Equal(["ubuntu-latest", "windows-latest", "macos-latest"],
-            coverageSecurity["strategy"].AsMapping()["matrix"].AsMapping()["os"].AsSequence().Select(os => os.AsScalar()));
+        Assert.Equal("${{ fromJSON(needs.coverage-evidence-plan.outputs.native_coverage_matrix) }}",
+            coverageSecurity["strategy"].AsMapping()["matrix"].AsScalar());
+        Assert.Contains("matrix.nativePlatform == 'Darwin'", coverageSecurity["timeout-minutes"].AsScalar());
+        Assert.Equal("${{ matrix.keycloak }}",
+            coverageSecurity["env"].AsMapping()["COVERAGE_KEYCLOAK_LANE"].AsScalar());
+        Assert.Equal("${{ matrix.producerId }}", coverageSecurity["env"].AsMapping()["COVERAGE_KEYCLOAK_PRODUCER"].AsScalar());
+        Assert.Equal("${{ matrix.runner }}", coverageSecurity["runs-on"].AsScalar());
         var securitySteps = coverageSecurity["steps"].AsSequence();
         var canonicalCheckout = FindStep(securitySteps, "Preserve committed bytes on Windows");
         Assert.Equal("${{ runner.os == 'Windows' }}", canonicalCheckout["if"].AsScalar());
@@ -244,6 +289,32 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Equal("pwsh", captureStep["shell"].AsScalar());
         var capture = captureStep["run"].AsScalar();
         Assert.Contains("'--operation', 'native'", capture);
+        Assert.Contains("'--include-keycloak-native', 'true'", capture);
+        Assert.Contains("'--native-producer', $producer, '--collection', $collection", capture);
+        Assert.Contains("'--report'", capture);
+        Assert.Contains("'--raw'", capture);
+        const string restoreCommand = "dotnet restore \"$env:COVERAGE_TEST_PROJECT\" --locked-mode";
+        var restoreSteps = securitySteps
+            .Where(step => step.AsMapping().Children.TryGetValue(new YamlScalarNode("run"), out var run)
+                && run.AsScalar() == restoreCommand)
+            .ToArray();
+        var restore = Assert.Single(restoreSteps).AsMapping();
+        Assert.Equal("Restore selected native coverage tests (locked)", restore["name"].AsScalar());
+        Assert.Equal("pwsh", restore["shell"].AsScalar());
+        Assert.Equal("${{ matrix.testProject }}", restore["env"].AsMapping()["COVERAGE_TEST_PROJECT"].AsScalar());
+        Assert.DoesNotContain(new YamlScalarNode("if"), restore.Children.Keys);
+        var sdkSelection = FindStep(securitySteps, "Select exact coverage SDK");
+        Assert.True(IndexOf(securitySteps, sdkSelection) < IndexOf(securitySteps, restore));
+        var bundle = FindStep(securitySteps, "Install pinned Aspire bundle for Keycloak coverage");
+        Assert.Contains("aspire.cli@13.6.5", bundle["run"].AsScalar());
+        Assert.True(IndexOf(securitySteps, restore) < IndexOf(securitySteps, bundle));
+        Assert.True(IndexOf(securitySteps, bundle) < IndexOf(securitySteps, captureStep));
+        Assert.Contains("if ($keycloakLane)", capture);
+        Assert.Contains("$env:COVERAGE_INCLUDE_KEYCLOAK -eq 'true'", capture);
+        Assert.Contains("coverage-keycloak-worker-build", coverageSecurity["env"].AsMapping()["AppSurfaceKeycloakWorkerBuildRoot"].AsScalar());
+        Assert.Contains("coverage-keycloak-packages", coverageSecurity["env"].AsMapping()["NUGET_PACKAGES"].AsScalar());
+        Assert.Contains("!matrix.keycloak", FindStep(securitySteps, "Run coverage security contracts")["if"].AsScalar());
+        Assert.Contains("!matrix.keycloak", FindStep(securitySteps, "Prepare generated docs stylesheet for coverage security tests")["if"].AsScalar());
         Assert.Contains("'--cli', $env:COVERAGE_CLI_PATH", capture);
         Assert.Contains("$contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }", capture);
         Assert.Contains("'--contract-version', $contractVersion", capture);
@@ -257,16 +328,18 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("darwin-rss.json", capture);
         Assert.Contains("if ($rss.Count -ne 1) { throw \"Native coverage capture omitted the macOS maximum RSS.\" }", capture);
         var captureOutput = captureStep["env"].AsMapping()["COVERAGE_DOGFOOD_OUTPUT"].AsScalar();
-        Assert.Equal("${{ runner.temp }}/coverage-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}", captureOutput);
+        Assert.Equal("${{ runner.temp }}/coverage-native-${{ matrix.producerId }}-${{ github.run_id }}-${{ github.run_attempt }}", captureOutput);
         var nativeUpload = FindStep(securitySteps, "Upload attested native coverage")["with"].AsMapping();
-        Assert.Equal("coverage-native-${{ matrix.os }}-${{ github.run_attempt }}", nativeUpload["name"].AsScalar());
+        Assert.Equal("coverage-native-${{ matrix.producerId }}-${{ github.run_attempt }}", nativeUpload["name"].AsScalar());
         Assert.Equal("${{ steps.capture-native-coverage.outputs.capture-path }}", nativeUpload["path"].AsScalar());
         var failureUpload = FindStep(securitySteps, "Upload failed native capture result");
         Assert.Equal("${{ !cancelled() && steps.capture-native-coverage.outcome == 'failure' }}", failureUpload["if"].AsScalar());
         var failureArtifact = failureUpload["with"].AsMapping();
-        Assert.Equal("coverage-capture-failure-${{ matrix.os }}-${{ github.run_attempt }}", failureArtifact["name"].AsScalar());
+        Assert.Equal("coverage-capture-failure-${{ matrix.producerId }}-${{ github.run_attempt }}", failureArtifact["name"].AsScalar());
         Assert.Equal(captureOutput + "/native-result.json\n" + captureOutput + ".time.log\n", failureArtifact["path"].AsScalar());
         Assert.Equal("ignore", failureArtifact["if-no-files-found"].AsScalar());
+        var diagnosticsArtifact = FindStep(securitySteps, "Upload coverage security diagnostics")["with"].AsMapping();
+        Assert.Equal("coverage-security-diagnostics-${{ matrix.producerId }}", diagnosticsArtifact["name"].AsScalar());
         Assert.Contains("capture-path=$env:COVERAGE_DOGFOOD_OUTPUT", capture);
         Assert.DoesNotContain("python", capture, StringComparison.OrdinalIgnoreCase);
 
@@ -315,8 +388,16 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.DoesNotContain("HEAD^1", command, StringComparison.Ordinal);
         var qualification = FindStep(steps, "Verify retained v3 fan-in qualification");
         Assert.True(IndexOf(steps, run) < IndexOf(steps, qualification));
+        Assert.Equal("${{ needs.coverage-evidence-plan.outputs.native_coverage_inventory }}",
+            qualification["env"].AsMapping()["COVERAGE_NATIVE_INVENTORY"].AsScalar());
         Assert.Contains("$fanin/shadow-proof.json", qualification["run"].AsScalar());
         Assert.Contains("darwin-rss.json", qualification["run"].AsScalar());
+        Assert.Contains("Expected exactly $expected_count", qualification["run"].AsScalar());
+        Assert.Contains(".producers[].id", qualification["run"].AsScalar());
+        Assert.Contains("$actual_producers\" == \"$expected_sorted", qualification["run"].AsScalar());
+        Assert.Contains(".host.platform == $platform", qualification["run"].AsScalar());
+        Assert.Contains(".host.osArchitecture == $os_arch", qualification["run"].AsScalar());
+        Assert.Contains(".host.processArchitecture == $process_arch", qualification["run"].AsScalar());
 
         foreach (var name in new[] { "Upload test-result diagnostics", "Upload coverage gate reports" })
             Assert.Contains("needs.coverage-evidence-plan.outputs.requires_coverage == 'true'", FindStep(steps, name)["if"].AsScalar());

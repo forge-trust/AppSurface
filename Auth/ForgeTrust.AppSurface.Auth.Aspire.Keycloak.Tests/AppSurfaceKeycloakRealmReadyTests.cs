@@ -10,7 +10,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     public async Task RealmReady_CachesOneExecutableGateWithSafeEnvironmentAndHealthyDependency()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var (keycloak, _) = AddWithAvailablePorts(builder, directory.Path);
 
         var first = keycloak.RealmReady();
@@ -49,7 +49,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
         var themeDirectory = TestPathUtils.PathUnder(directory.Path, "theme");
         Directory.CreateDirectory(TestPathUtils.PathUnder(themeDirectory, "login", "resources"));
         File.WriteAllText(TestPathUtils.PathUnder(themeDirectory, "login", "theme.properties"), "parent=keycloak\n");
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var (keycloak, _) = AddWithAvailablePorts(
             builder,
             directory.Path,
@@ -76,7 +76,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     [Fact]
     public void RealmReady_WhenTheWrapperWasNotCreatedByTheHostingExtension_FailsWithTheStableWorkerDiagnostic()
     {
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var resource = builder.AddKeycloak("external-keycloak", GetAvailablePort());
         var wrapper = new AppSurfaceKeycloakResource(
             resource,
@@ -265,7 +265,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     public async Task RealmReady_WhenCalledConcurrently_CachesOneWorkerResource()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var (keycloak, _) = AddWithAvailablePorts(builder, directory.Path);
 
         var workers = await Task.WhenAll(
@@ -273,6 +273,13 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
 
         Assert.All(workers, worker => Assert.Same(workers[0], worker));
     }
+
+    private static IDistributedApplicationBuilder CreateLocalBuilder() =>
+        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = ["--environment", "Development"],
+            DisableDashboard = true,
+        });
 
     private static (AppSurfaceKeycloakResource Resource, int KeycloakPort) AddWithAvailablePorts(
         IDistributedApplicationBuilder builder,

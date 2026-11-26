@@ -25,7 +25,11 @@ public sealed class AuthAspireKeycloakAppHostTests
         Environment.SetEnvironmentVariable(enableSeeds, "true");
         try
         {
-            var builder = DistributedApplication.CreateBuilder([]);
+            var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+            {
+                Args = ["--environment", "Development"],
+                DisableDashboard = true,
+            });
             var context = new AspireStartupContext(builder);
             var keycloak = new AuthAspireKeycloakComponent();
             var identityBootstrap = new AuthAspireKeycloakIdentityBootstrapComponent(keycloak);

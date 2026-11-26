@@ -26,6 +26,12 @@
     <BaseIntermediateOutputPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
   </PropertyGroup>
+  <!-- Native coverage keeps the nested worker's generated files outside the source checkout. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker' And '$(AppSurfaceKeycloakWorkerBuildRoot)' != ''">
+    <BaseOutputPath>$(AppSurfaceKeycloakWorkerBuildRoot)/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(AppSurfaceKeycloakWorkerBuildRoot)/obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
   </ItemGroup>

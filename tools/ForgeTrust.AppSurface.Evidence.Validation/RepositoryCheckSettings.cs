@@ -14,6 +14,9 @@ internal sealed record RepositoryCheckSettings(string RepositoryRoot, string Dot
     /// <summary>Native fan-in contract to require for both captures and acceptance. Defaults to v2 for explicit compatibility callers.</summary>
     internal int NativeCoverageContractVersion { get; init; } = 2;
 
+    /// <summary>Requires the two additional ARM64 captures selected by the repository's current Keycloak diff.</summary>
+    internal bool IncludeKeycloakNativeCoverage { get; init; }
+
     /// <summary>Optional same-run CI collection to verify and gate instead of collecting again. Never used for local patches.</summary>
     internal string? CoverageCollectionDirectory { get; init; }
 

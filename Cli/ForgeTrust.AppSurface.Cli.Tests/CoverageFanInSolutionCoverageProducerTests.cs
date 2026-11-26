@@ -812,6 +812,30 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     }
 
     [Fact]
+    public async Task ProduceAsync_RejectsBaselineOnlyCapturesWhenKeycloakIsSelected()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            var settings = fixture.NativeSettings(NativeV3DiffBase) with { NativeCoverageContractVersion = 3 };
+            fixture.CreateNativeCaptureDirectories(settings);
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(settings with { IncludeKeycloakNativeCoverage = true }, async (request, _) =>
+            {
+                commands.Add(request);
+                await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            await AssertFailedWithoutClaimsAsync(fixture, result, "native-fan-in");
+            Assert.Single(commands, command => command.Arguments.Contains("gate"));
+            Assert.DoesNotContain(commands, command => command.Arguments.Contains("fanin"));
+        });
+    }
+
+    [Fact]
     public async Task ProduceAsync_RejectsIncompleteNativeWorkflowProvenanceBeforeCapture()
     {
         using var fixture = new Fixture();
@@ -917,18 +941,23 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     }
 
     [Theory]
-    [InlineData("measured")]
-    [InlineData("both-not-applicable")]
-    [InlineData("mixed")]
-    [InlineData("exact-thresholds")]
-    [InlineData("repeating-ratio")]
-    [InlineData("primary-below-threshold")]
-    public async Task ProduceAsync_AcceptsVerifiedNativeV3ApplicabilityAndComposedThresholds(string scenario)
+    [InlineData("measured", false)]
+    [InlineData("measured", true)]
+    [InlineData("both-not-applicable", false)]
+    [InlineData("mixed", false)]
+    [InlineData("exact-thresholds", false)]
+    [InlineData("repeating-ratio", false)]
+    [InlineData("primary-below-threshold", false)]
+    public async Task ProduceAsync_AcceptsVerifiedNativeV3ApplicabilityAndComposedThresholds(string scenario, bool includeKeycloak)
     {
         using var fixture = new Fixture();
         await WithWorkflowAsync(async () =>
         {
-            var settings = fixture.NativeSettings(NativeV3DiffBase) with { NativeCoverageContractVersion = 3 };
+            var settings = fixture.NativeSettings(NativeV3DiffBase) with
+            {
+                NativeCoverageContractVersion = 3,
+                IncludeKeycloakNativeCoverage = includeKeycloak,
+            };
             fixture.CreateNativeCaptureDirectories(settings);
             var commands = new List<EvidenceCommandRequest>();
             var producer = fixture.CreateWithSettings(settings, async (request, _) =>
@@ -952,12 +981,16 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
 
             Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
             Assert.Equal(["coverage/solution-complete@1", "coverage/thresholds@1"], result.SatisfiedAssertionIds);
-            Assert.Equal(3, Directory.GetDirectories(settings.NativeCoverageDirectory!).Length);
+            Assert.Equal(includeKeycloak ? 5 : 3, Directory.GetDirectories(settings.NativeCoverageDirectory!).Length);
             Assert.Single(commands, command => command.Arguments.Contains("--solution"));
             var fanIn = Assert.Single(commands, command => command.Arguments.Contains("fanin"));
             Assert.Equal("3", ValueAfter(fanIn.Arguments, "--contract-version"));
             Assert.Equal(NativeV3DiffBase, ValueAfter(fanIn.Arguments, "--diff-base"));
             Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(fanIn.Arguments, "--diff-policy-id"));
+            if (includeKeycloak)
+                Assert.Equal("true", ValueAfter(fanIn.Arguments, "--include-keycloak-native"));
+            else
+                Assert.DoesNotContain("--include-keycloak-native", fanIn.Arguments);
 
             var fanInOutput = Path.Join(fixture.Output, "coverage-fanin");
             using var applicability = JsonDocument.Parse(await File.ReadAllBytesAsync(
@@ -1301,8 +1334,11 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
 
         public void CreateNativeCaptureDirectories(RepositoryCheckSettings settings)
         {
-            foreach (var platform in new[] { "linux", "windows", "darwin" })
-                Directory.CreateDirectory(TestPathUtils.PathUnder(settings.NativeCoverageDirectory!, platform));
+            string[] producers = settings.IncludeKeycloakNativeCoverage
+                ? ["linux", "windows", "darwin", "darwin-arm64-keycloak", "linux-arm64-keycloak"]
+                : ["linux", "windows", "darwin"];
+            foreach (var producer in producers)
+                Directory.CreateDirectory(TestPathUtils.PathUnder(settings.NativeCoverageDirectory!, producer));
         }
 
         public async Task WriteNativeV3ProofAsync(string output, string scenario)

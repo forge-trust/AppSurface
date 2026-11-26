@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
+using ForgeTrust.AppSurface.Coverage.NativeInventory;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
@@ -79,6 +80,17 @@ internal static class Program
             var options = Parse(args);
             if (options.TryGetValue("--operation", out var operation))
             {
+                if (operation == "native-coverage-inventory")
+                {
+                    var includeKeycloak = options.TryGetValue("--include-keycloak-native", out var include)
+                        && include == "true";
+                    if (options.Keys.Any(key => key is not ("--operation" or "--include-keycloak-native"))
+                        || options.ContainsKey("--include-keycloak-native") && !includeKeycloak)
+                        throw new ArgumentException("Native inventory accepts only its optional true Keycloak selector.");
+                    Console.WriteLine(System.Text.Encoding.UTF8.GetString(
+                        NativeCoverageProducerInventory.SerializeWorkflowInventory(includeKeycloak)));
+                    return 0;
+                }
                 if (operation is "local" or "local-plan") return await new LocalEvidenceWorkflow().RunAsync(options, cancellationToken);
                 if (operation == "collect-coverage") return await CollectCoverageAsync(options, cancellationToken, collectCoverage);
                 if (operation == "collect") return await CollectChangesAsync(options, cancellationToken);
@@ -167,7 +179,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
+        string[] allowed = ["--package", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings", "--include-keycloak-native"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)

@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.Auth.Keycloak;
+
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 /// <summary>
@@ -27,7 +29,7 @@ internal static class AppSurfaceKeycloakRealmImportPaths
             throw new ArgumentException("Root directory cannot be blank.", nameof(rootDirectory));
         }
 
-        return Path.Join(rootDirectory, ImportRootDirectoryName, GetFileNameSegment(resourceName, nameof(resourceName)));
+        return Path.Join(rootDirectory, ImportRootDirectoryName, RealmImportFilePathResolver.GetFileNameSegment(resourceName, nameof(resourceName)));
     }
 
     /// <summary>
@@ -37,28 +39,5 @@ internal static class AppSurfaceKeycloakRealmImportPaths
     /// <param name="realm">Realm id used in the generated file name.</param>
     /// <returns>The safe realm import file path.</returns>
     public static string GetRealmImportFilePath(string realmImportDirectory, string realm)
-    {
-        if (string.IsNullOrWhiteSpace(realmImportDirectory))
-        {
-            throw new ArgumentException("Realm import directory cannot be blank.", nameof(realmImportDirectory));
-        }
-
-        return Path.Join(realmImportDirectory, GetFileNameSegment($"{realm}-realm.json", nameof(realm)));
-    }
-
-    private static string GetFileNameSegment(string value, string parameterName)
-    {
-        var fileName = Path.GetFileName(value);
-        if (string.IsNullOrWhiteSpace(fileName)
-            || string.Equals(fileName, ".", StringComparison.Ordinal)
-            || string.Equals(fileName, "..", StringComparison.Ordinal)
-            || Path.IsPathRooted(fileName)
-            || fileName.Contains('/', StringComparison.Ordinal)
-            || fileName.Contains('\\', StringComparison.Ordinal))
-        {
-            throw new ArgumentException("Path segment must resolve to a relative file name.", parameterName);
-        }
-
-        return fileName;
-    }
+        => RealmImportFilePathResolver.Resolve(realmImportDirectory, realm);
 }

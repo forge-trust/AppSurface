@@ -539,7 +539,7 @@
       "forgetrust.appsurface.auth.aspire.keycloak.realmreadyworker": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Auth.Aspire.Keycloak": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Auth.Keycloak": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.auth.keycloak": {
