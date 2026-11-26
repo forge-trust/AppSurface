@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -430,9 +431,50 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ManagedOutput_RejectsUnverifiedZipBeforeReplacingPreviousProof(bool omitArtifact)
+    [InlineData(false, null, true)]
+    [InlineData(true, "cleanup_failed.", true)]
+    [InlineData(true, "Coverage gate failed.", false)]
+    public async Task ManagedOutput_UsesManifestToDecideWhetherFailedScratchCanBeRemoved(
+        bool cleanupCompleted, string? diagnostic, bool retainScratch)
+    {
+        var fixture = await CreateFixtureAsync();
+        await ChangeAsync(fixture, "src/feature.cs", "class Feature { }");
+        var options = Options(fixture, "local", "coverage");
+        options.Remove("--output");
+        var workflow = new LocalEvidenceWorkflow(workflow: async (runOptions, token) =>
+        {
+            await WriteCompleteProofAsync(runOptions, token);
+            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(runOptions["--plan"], token));
+            var manifestPath = TestPathUtils.PathUnder(runOptions["--output"], "evidence-manifest.json");
+            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath, token));
+            var results = manifest.ProducerResults.Select(result => result with
+            {
+                Outcome = EvidenceProducerOutcome.Failed,
+                SatisfiedAssertionIds = [],
+                Diagnostic = diagnostic,
+            }).ToArray();
+            var failedManifest = EvidenceManifestBuilder.Build(plan, results, metrics: manifest.Metrics with { CleanupCompleted = cleanupCompleted });
+            await File.WriteAllBytesAsync(manifestPath, EvidenceCanonicalJson.Serialize(failedManifest), token);
+            return 1;
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RunAsync(options, CancellationToken.None));
+
+        var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
+        var scratch = TestPathUtils.PathUnder(retained, ".scratch");
+        Assert.Equal(retainScratch, Directory.EnumerateDirectories(scratch, "evidence-workspace-*").Any());
+        var archived = ReadArchive(retained, "latest-failure.zip", "proof/evidence-manifest.json");
+        Assert.NotNull(archived);
+        var failed = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(Encoding.UTF8.GetBytes(archived));
+        Assert.Equal(cleanupCompleted, failed.Metrics.CleanupCompleted);
+        Assert.All(failed.ProducerResults, result => Assert.Equal(diagnostic, result.Diagnostic));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("[]")]
+    [InlineData("{ }")]
+    public async Task ManagedOutput_RejectsUnverifiedZipBeforeReplacingPreviousProof(string? changedArtifact)
     {
         var fixture = await CreateFixtureAsync();
         await ChangeAsync(fixture, "src/feature.cs", "class Feature { }");
@@ -457,10 +499,10 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         {
             ZipFile.ExtractToDirectory(latest, output);
             var artifact = TestPathUtils.PathUnder(output, "proof", "artifacts", "solution-coverage", "proof", "result.json");
-            if (omitArtifact)
+            if (changedArtifact is null)
                 File.Delete(artifact);
             else
-                File.WriteAllText(artifact, "[]");
+                File.WriteAllText(artifact, changedArtifact);
             return Task.FromResult<(EvidencePlan, EvidenceManifest)?>((plan, manifest));
         }));
 
@@ -492,6 +534,28 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         }
 
         Assert.False(Directory.Exists(TestPathUtils.PathUnder(missing, "TestResults")));
+    }
+
+    [Fact]
+    public async Task ManagedOutput_RejectsLinkedStorage()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var fixture = await CreateFixtureAsync();
+        var target = TestPathUtils.PathUnder(_root, "external-results");
+        Directory.CreateDirectory(target);
+        var results = TestPathUtils.PathUnder(fixture.Root, "TestResults");
+        Directory.CreateSymbolicLink(results, target);
+        var options = Options(fixture, "local");
+        options.Remove("--output");
+
+        var error = await Assert.ThrowsAsync<IOException>(() => new LocalEvidenceWorkflow().RunAsync(options, CancellationToken.None));
+
+        Assert.Contains(results, error.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(target));
     }
 
     [Fact]

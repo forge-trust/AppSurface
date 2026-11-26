@@ -22,7 +22,7 @@ another comparison or `--repository /absolute/checkout` from elsewhere. The defa
 archives for the most recent success, failure and cancellation (`latest.zip`, `latest-failure.zip`
 and `latest-cancelled.zip`). Planning uses the corresponding `latest-plan` names. An error before
 output exists leaves the previous archives available. Runs using the managed output are serialized
-per worktree by the SDK's file locking, which must remain enabled.
+per worktree by an exclusive `run.lock` using .NET file locking, which must remain enabled.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage
 diagnostics. Before replacing a successful archive, the validator independently checks its plan,
 manifest and bound files against the verified run. Extract an archive to verify it using the same
