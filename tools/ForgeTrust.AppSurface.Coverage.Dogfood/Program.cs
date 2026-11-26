@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Coverage;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 // This adapter supplies only AppSurface's checked-in policy and exact paths. All capture,
@@ -158,7 +159,7 @@ internal static class CoverageDogfood
                 var inputs = native is ReplayArguments replay
                     ? NativeCoverageCaptureInputs.FromReplay(replay.RawIndex, replay.Timings)
                     : collectionInputs!;
-                await Invoke("capture", new CoverageCaptureRequest(policy, root, Path.Join(output, "capture"), native.Platform.ToLowerInvariant(),
+                await Invoke("capture", new CoverageCaptureRequest(policy, root, EvidenceArtifactValidation.GetContainedPath(output, "capture"), native.Platform.ToLowerInvariant(),
                     TimingsPath: inputs.TimingsPath, RawCoveragePaths: inputs.RawCoveragePaths), "native");
                 stage = "native-proof";
                 if (contractVersion == 3)

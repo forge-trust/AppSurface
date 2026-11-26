@@ -159,7 +159,7 @@ public sealed class NativeEvidenceProgramTests
     public async Task LocalPlanRejectsPackedProofFeedBeforeWritingEvidence()
     {
         using var fixture = new NativeCaptureFixture();
-        var output = Path.Join(fixture.Root, "evidence");
+        var output = TestPathUtils.PathUnder(fixture.Root, "evidence");
         var result = await InvokeAsync(["--operation", "local-plan", "--output", output, "--feed", fixture.Root]);
 
         Assert.Equal(1, result.ExitCode);

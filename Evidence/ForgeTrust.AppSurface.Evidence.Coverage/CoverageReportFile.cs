@@ -48,6 +48,7 @@ internal sealed record CoverageReportFile(string RelativePath, long LengthBytes,
     /// <param name="relativePath">A report path already established by the caller's report inventory or layout.</param>
     /// <returns>The open report stream, owned by the caller.</returns>
     internal static FileStream OpenRead(string fullRunRoot, string relativePath) =>
-        CoverageRunArtifactReader.OpenRegularFile(fullRunRoot, Path.Join(fullRunRoot, CoverageDirectoryName),
-            Path.Join(fullRunRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        CoverageRunArtifactReader.OpenRegularFile(fullRunRoot,
+            EvidenceArtifactValidation.GetContainedPath(fullRunRoot, CoverageDirectoryName),
+            EvidenceArtifactValidation.GetContainedPath(fullRunRoot, relativePath));
 }

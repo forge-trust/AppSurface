@@ -790,6 +790,42 @@ public sealed class GeneratedPostgreSqlActivationCollection
 public sealed class DockerPrerequisiteDiagnosticTests
 {
     [Theory]
+    [InlineData("timeout", "docker-probe-timeout")]
+    [InlineData("process-failure", "docker-probe-process-failure")]
+    [InlineData("daemon-unavailable", "docker-daemon-unavailable")]
+    public async Task Fixture_probe_reports_the_closed_cause(string scenario, string expected)
+    {
+        var failure = await Assert.ThrowsAsync<PostgreSqlFixture.DockerPrerequisiteException>(() =>
+            PostgreSqlFixture.RequireDockerAsync(() => BoundedProcessRunner.RequireDockerAsync((_, _) =>
+                scenario switch
+                {
+                    "timeout" => Task.FromException<BoundedProcessResult>(new TimeoutException()),
+                    "process-failure" => Task.FromException<BoundedProcessResult>(new InvalidOperationException()),
+                    "daemon-unavailable" => Task.FromResult(new BoundedProcessResult(1, "", "daemon refusal", false, false)),
+                    _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+                })));
+
+        Assert.Equal(expected, failure.SafeCause);
+    }
+
+    [Fact]
+    public async Task Fixture_probe_accepts_a_successful_daemon_response()
+    {
+        await PostgreSqlFixture.RequireDockerAsync(() => BoundedProcessRunner.RequireDockerAsync((_, _) =>
+            Task.FromResult(new BoundedProcessResult(0, "27.0.0", "", false, false))));
+    }
+
+    [Fact]
+    public async Task Fixture_probe_propagates_unexpected_runner_fault_unchanged()
+    {
+        var original = new IOException("unexpected-fault");
+        var failure = await Assert.ThrowsAsync<IOException>(() => PostgreSqlFixture.RequireDockerAsync(() =>
+            BoundedProcessRunner.RequireDockerAsync((_, _) => Task.FromException<BoundedProcessResult>(original))));
+
+        Assert.Same(original, failure);
+    }
+
+    [Theory]
     [InlineData("TimeoutException", "docker-probe-timeout")]
     [InlineData("InvalidOperationException", "docker-probe-process-failure")]
     [InlineData("daemon-unavailable", "docker-daemon-unavailable")]

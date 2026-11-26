@@ -11,9 +11,9 @@ public sealed class EvidenceOrdinaryPublicationTests
     public void OrdinaryCaptureForwardsCancellationThroughTheNativeEnumerationCallChain()
     {
         using var directory = TestDirectory.Create();
-        var tree = Path.Join(directory.Path, "reports");
+        var tree = TestPathUtils.PathUnder(directory.Path, "reports");
         Directory.CreateDirectory(tree);
-        for (var index = 0; index < 3; index++) File.WriteAllText(Path.Join(tree, $"report-{index}.txt"), "report");
+        for (var index = 0; index < 3; index++) File.WriteAllText(TestPathUtils.PathUnder(tree, $"report-{index}.txt"), "report");
         using var cancellation = new CancellationTokenSource();
         var reads = 0;
         IEnumerable<string> WindowsNames()
@@ -54,9 +54,9 @@ public sealed class EvidenceOrdinaryPublicationTests
         inventory.EnableOrdinaryCapture();
         inventory.EnableOrdinaryCapture();
         var bytes = Encoding.UTF8.GetBytes("owned report");
-        var report = Path.Join(directory.Path, "report.txt");
+        var report = TestPathUtils.PathUnder(directory.Path, "report.txt");
         await File.WriteAllBytesAsync(report, bytes);
-        await File.WriteAllTextAsync(Path.Join(directory.Path, "foreign.txt"), "unregistered");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(directory.Path, "foreign.txt"), "unregistered");
         inventory.RecordFile(report);
 
         var captured = Assert.Single(inventory.CaptureOrdinary(CancellationToken.None));

@@ -35,7 +35,7 @@ internal static class EvidenceReuseOutput
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(defaultParent);
         var path = explicitPath is null
-            ? Path.GetFullPath(Path.Join(defaultParent, "runs", Guid.NewGuid().ToString("N")))
+            ? EvidenceArtifactValidation.GetContainedPath(defaultParent, "runs/" + Guid.NewGuid().ToString("N"))
             : Path.GetFullPath(explicitPath);
         var parentPath = Path.GetDirectoryName(path)
             ?? throw new ArgumentException("reuse.output_invalid: Output must name a new child directory, not a filesystem root.", nameof(explicitPath));

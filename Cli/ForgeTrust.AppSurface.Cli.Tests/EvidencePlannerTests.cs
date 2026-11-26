@@ -1099,7 +1099,7 @@ public sealed class EvidencePlannerTests
             Assert.Contains($"Next: {console}", EvidenceCliWorkflow.FormatSummary(manifest), StringComparison.Ordinal);
 
             await workflow.WriteManifestAsync(manifest, directory.Path, CancellationToken.None);
-            using var summary = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(directory.Path, "evidence-summary.json")));
+            using var summary = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(directory.Path, "evidence-summary.json")));
             Assert.Equal(json, summary.RootElement.GetProperty("next").GetString());
         }
     }
