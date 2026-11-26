@@ -10,6 +10,14 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed class PackageChecksProducer : IEvidenceProducer
 {
     private const string ProducerId = "package-checks";
+    private const string OutputDirectoryName = ProducerId;
+    private const string ReportDirectoryName = "artifacts";
+    private const string ArtifactManifestName = "package-artifact-manifest.json";
+    private const string ValidationReportName = "package-validation-report.md";
+    private const string Gate = "gate";
+    private const string Verify = "verify";
+    private const string VerifyPackages = "verify-packages";
+    private const string LogExtension = ".log";
     private const int MaxProofBytes = 2 * 1024 * 1024;
     private static readonly string[] AssertionIds =
     [
@@ -33,6 +41,24 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
     /// <inheritdoc />
     public string Id => ProducerId;
 
+    /// <summary>Selects package diagnostics from a slash-normalized path in the repository proof directory.</summary>
+    internal static bool RetainsLocalDiagnostic(string proofRelativePath)
+    {
+        const string prefix = OutputDirectoryName + "/";
+        if (!proofRelativePath.StartsWith(prefix, StringComparison.Ordinal))
+            return false;
+
+        var path = proofRelativePath[prefix.Length..];
+        if (path == Gate + LogExtension || path == Verify + LogExtension || path == VerifyPackages + LogExtension)
+            return true;
+
+        const string reportPrefix = ReportDirectoryName + "/";
+        if (!path.StartsWith(reportPrefix, StringComparison.Ordinal))
+            return false;
+        var report = path[reportPrefix.Length..];
+        return !report.Contains('/') && (report == ArtifactManifestName || report.EndsWith(".md", StringComparison.Ordinal));
+    }
+
     /// <summary>Runs the package gate, generated-documentation verification and isolated package validation.</summary>
     public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
     {
@@ -40,11 +66,11 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
         if (context.Producer.Id != ProducerId) return Failure("Package-checks declaration mismatch.");
 
         var output = Path.GetFullPath(_settings.OutputDirectory);
-        var packageOutput = Path.Join(output, "package-checks");
+        var packageOutput = PathUtils.PathUnder(output, OutputDirectoryName);
         var cache = _settings.PackageRestoreCache ?? PathUtils.PathUnder(packageOutput, "nuget-packages");
-        var artifacts = Path.Join(packageOutput, "artifacts");
-        var manifestPath = Path.Join(artifacts, "package-artifact-manifest.json");
-        var reportPath = Path.Join(artifacts, "package-validation-report.md");
+        var artifacts = PathUtils.PathUnder(packageOutput, ReportDirectoryName);
+        var manifestPath = PathUtils.PathUnder(artifacts, ArtifactManifestName);
+        var reportPath = PathUtils.PathUnder(artifacts, ValidationReportName);
         var version = "0.0.0-evidence." + Guid.NewGuid().ToString("N");
         var commands = new List<CommandEvidence>();
         var stage = "settings";
@@ -57,13 +83,13 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
             var environment = new Dictionary<string, string>(_settings.CommandEnvironment, StringComparer.Ordinal) { ["NUGET_PACKAGES"] = cache };
             var project = Path.Join(_settings.RepositoryRoot, "tools", "ForgeTrust.AppSurface.PackageIndex", "ForgeTrust.AppSurface.PackageIndex.csproj");
 
-            stage = "gate";
-            await RunAsync("gate", ["run", "--project", project, "--configuration", "Release",
-                "--property:RestoreConfigFile=" + Path.Join(_settings.RepositoryRoot, "NuGet.package-gate.config"), "--", "gate"], environment, commands, cancellationToken).ConfigureAwait(false);
-            stage = "verify";
-            await RunAsync("verify", ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", "verify"], environment, commands, cancellationToken).ConfigureAwait(false);
-            stage = "verify-packages";
-            await RunAsync("verify-packages", ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", "verify-packages",
+            stage = Gate;
+            await RunAsync(stage, ["run", "--project", project, "--configuration", "Release",
+                "--property:RestoreConfigFile=" + Path.Join(_settings.RepositoryRoot, "NuGet.package-gate.config"), "--", stage], environment, commands, cancellationToken).ConfigureAwait(false);
+            stage = Verify;
+            await RunAsync(stage, ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", stage], environment, commands, cancellationToken).ConfigureAwait(false);
+            stage = VerifyPackages;
+            await RunAsync(stage, ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", stage,
                 "--package-version", version, "--artifacts-output", artifacts, "--artifact-manifest", manifestPath, "--report", reportPath],
                 environment, commands, cancellationToken).ConfigureAwait(false);
 
@@ -74,8 +100,8 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
             await VerifyArchivesAsync(manifest, artifacts, cancellationToken).ConfigureAwait(false);
             if (context.Artifacts is null) return Failure("Package-checks producer has no artifact writer.");
 
-            await context.Artifacts.WriteAsync("package-manifest", "proof/package-artifact-manifest.json", manifest, cancellationToken).ConfigureAwait(false);
-            await context.Artifacts.WriteAsync("package-report", "proof/package-validation-report.md", report, cancellationToken).ConfigureAwait(false);
+            await context.Artifacts.WriteAsync("package-manifest", "proof/" + ArtifactManifestName, manifest, cancellationToken).ConfigureAwait(false);
+            await context.Artifacts.WriteAsync("package-report", "proof/" + ValidationReportName, report, cancellationToken).ConfigureAwait(false);
             var resultBytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
                 completed = true,
@@ -99,7 +125,7 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
                 artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
                     [("result", bytes), ("transcript", JsonSerializer.SerializeToUtf8Bytes(commands))]).ConfigureAwait(false);
             }
-            var commandDiagnostic = exception is EvidenceCommandException { Code: "cleanup_failed" } ? " cleanup_failed." : string.Empty;
+            var commandDiagnostic = LocalEvidenceRun.IsUnsettledCommand(exception) ? " Command cleanup could not be confirmed." : string.Empty;
             return Failure($"Package checks failed at {stage}." + commandDiagnostic + artifactDiagnostic);
         }
     }
@@ -112,7 +138,7 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
         var result = await _command(request, cancellationToken).ConfigureAwait(false);
         commands.Add(new CommandEvidence(name, result.ExitCode, result.ElapsedMilliseconds, result.OutputTruncated,
             HashText(result.StandardOutput), HashText(result.StandardError)));
-        await File.WriteAllTextAsync(Path.Join(_settings.OutputDirectory, "package-checks", name + ".log"),
+        await File.WriteAllTextAsync(PathUtils.PathUnder(_settings.OutputDirectory, OutputDirectoryName, name + LogExtension),
             result.StandardOutput + "\n" + result.StandardError, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.OutputTruncated) throw new InvalidOperationException("Package command did not complete successfully.");
     }

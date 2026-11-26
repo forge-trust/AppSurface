@@ -21,14 +21,16 @@ another comparison or `--repository /absolute/checkout` from elsewhere. The defa
 `Local evidence output:`. Each invocation validates in fresh scratch. The command keeps separate
 archives for the most recent success, failure and cancellation (`latest.zip`, `latest-failure.zip`
 and `latest-cancelled.zip`). Planning uses the corresponding `latest-plan` names. An error before
-output exists leaves the previous archives available. Runs using the managed output are serialized
+output exists leaves the previous archives available. An empty change inventory prints a summary and
+leaves the latest verified proof and plan available. Runs using the managed output are serialized
 per worktree by an exclusive `run.lock` using .NET file locking, which must remain enabled.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage
 diagnostics. Before replacing a successful archive, the validator independently checks its plan,
 manifest and bound files against the verified run. Extract an archive to verify it using the same
-relative layout. Scratch is removed
-after successful retention and known cleanup. When cleanup cannot be confirmed, the printed scratch
-path remains available for inspection. Remove that scratch once its processes have settled.
+relative layout. Scratch is removed after successful retention and known cleanup. The validator tracks
+unsettled subprocesses separately from the host cleanup recorded in the manifest. When cleanup cannot
+be confirmed, the printed scratch path remains available for inspection. Remove that scratch once
+its processes have settled.
 Scratch and the private `.scratch/package-restore/` cache stay outside package discovery.
 The cache keeps the package-gate build warm and its worktree restore metadata usable between runs. Installed-consumer and
 cold-cache proofs still have their own isolated restores and feeds.

@@ -48,6 +48,9 @@ public sealed class CoverageSolutionScriptTests
     public void BuildWorkflowBindsInstalledCandidateAndThreeNativeInputsToCurrentSourceAndRun()
     {
         var workflow = ReadWorkflow();
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var nativeSelection = File.ReadAllText(TestPathUtils.PathUnder(repository, "tools",
+            "ForgeTrust.AppSurface.Coverage.Dogfood", "native-test-selection.txt")).Trim();
         Assert.DoesNotContain("coverage_fanin.py", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("test_coverage_fanin.py", workflow, StringComparison.Ordinal);
         var yaml = new YamlStream();
@@ -71,7 +74,11 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("COVERAGE_RUN_SCOPE: ${{ github.repository }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ID: ${{ github.run_id }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests", workflow, StringComparison.Ordinal);
+        Assert.Contains("Load trusted native coverage test selection", workflow, StringComparison.Ordinal);
+        Assert.Contains("tools/ForgeTrust.AppSurface.Coverage.Dogfood/native-test-selection.txt", workflow, StringComparison.Ordinal);
+        Assert.Contains("NATIVE_COVERAGE_FILTER=$nativeCoverageFilter", workflow, StringComparison.Ordinal);
+        Assert.Contains("--filter \"$env:NATIVE_COVERAGE_FILTER\"", workflow, StringComparison.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(nativeSelection));
         Assert.Contains("COVERAGE_DOGFOOD_OUTPUT", workflow, StringComparison.Ordinal);
         Assert.Contains("/composed/coverage.cobertura.xml", workflow, StringComparison.Ordinal);
         Assert.Contains("steps.solution-coverage.outcome == 'success'", workflow, StringComparison.Ordinal);
@@ -281,8 +288,13 @@ public sealed class CoverageSolutionScriptTests
             ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("timeout-minutes")]).Value);
 
         var steps = (YamlSequenceNode)coverageJob.Children[new YamlScalarNode("steps")];
+        var selectionStep = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Load trusted native coverage test selection");
+        Assert.Equal("pwsh", ((YamlScalarNode)selectionStep.Children[new YamlScalarNode("shell")]).Value);
+        Assert.Contains("Get-Content -Raw -LiteralPath $selectionPath", ((YamlScalarNode)selectionStep.Children[new YamlScalarNode("run")]).Value, StringComparison.Ordinal);
         var runCoverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Run coverage security contracts");
+        Assert.True(steps.Children.IndexOf(selectionStep) < steps.Children.IndexOf(runCoverage));
         var runCommand = ((YamlScalarNode)runCoverage.Children[new YamlScalarNode("run")]).Value!;
         Assert.Equal(1, CountOccurrences(runCommand, "dotnet test "));
         Assert.DoesNotContain("\n", runCommand, StringComparison.Ordinal);
@@ -290,7 +302,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--configuration Release", runCommand, StringComparison.Ordinal);
         Assert.Contains("--no-restore", runCommand, StringComparison.Ordinal);
         Assert.Contains("/p:TailwindEnabled=false", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--filter \"$env:NATIVE_COVERAGE_FILTER\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--logger \"console;verbosity=detailed\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--results-directory \"${{ runner.temp }}/coverage-native-results\"", runCommand, StringComparison.Ordinal);
         Assert.Contains("--collect:\"XPlat Code Coverage\"", runCommand, StringComparison.Ordinal);

@@ -310,13 +310,25 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Split-Path -Parent $docsStylesheet)
           Set-Content -NoNewline -Path $docsStylesheet -Value ""
 
+      - name: Load trusted native coverage test selection
+        shell: pwsh
+        run: |
+          $selectionPath = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/native-test-selection.txt'
+          $nativeCoverageFilter = (Get-Content -Raw -LiteralPath $selectionPath).Trim()
+          if ([string]::IsNullOrWhiteSpace($nativeCoverageFilter) -or
+              $nativeCoverageFilter -notmatch '^FullyQualifiedName~[A-Za-z0-9_]+(?:\|FullyQualifiedName~[A-Za-z0-9_]+)*$') {
+            throw 'The trusted native coverage selection must be a non-empty, single-line test filter.'
+          }
+          "NATIVE_COVERAGE_FILTER=$nativeCoverageFilter" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
+
       - name: Run coverage security contracts
+        shell: pwsh
         run: >-
           dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
           --configuration Release
           --no-restore
           /p:TailwindEnabled=false
-          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests"
+          --filter "$env:NATIVE_COVERAGE_FILTER"
           --logger "console;verbosity=detailed"
           --results-directory "${{ runner.temp }}/coverage-native-results"
           --collect:"XPlat Code Coverage"

@@ -82,21 +82,32 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
-    public void NativeCollectorFilterMatchesTheAdapterDeclaration()
+    public void NativeCollectorAndAdapterUseTheCheckedInFilterSelection()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var adapter = File.ReadAllLines(Path.Join(repository, "tools",
+        var nativeSelection = File.ReadAllText(TestPathUtils.PathUnder(repository, "tools",
+            "ForgeTrust.AppSurface.Coverage.Dogfood", "native-test-selection.txt")).Trim();
+        var nativeSuites = FilterSuites(nativeSelection);
+        Assert.Contains("CoverageRunArtifactReaderTests", nativeSuites);
+        Assert.Contains("CoverageGateTests", nativeSuites);
+        Assert.Contains("CoverageFanIn", nativeSuites);
+        Assert.Contains("LocalEvidenceWorkflowTests", nativeSuites);
+        Assert.Contains("EvidenceRunTestProducerTests", nativeSuites);
+
+        var adapter = File.ReadAllText(TestPathUtils.PathUnder(repository, "tools",
             "ForgeTrust.AppSurface.Coverage.Dogfood", "Program.cs"));
-        var declaration = Assert.Single(adapter, line =>
-            line.TrimStart().StartsWith("internal const string NativeFilter = ", StringComparison.Ordinal));
-        var declaredFilter = JsonSerializer.Deserialize<string>(declaration[(declaration.IndexOf('=') + 1)..]
-            .Trim().TrimEnd(';'));
+        Assert.Contains("Path.Join(root, \"tools\", \"ForgeTrust.AppSurface.Coverage.Dogfood\", \"native-test-selection.txt\")", adapter, StringComparison.Ordinal);
+        Assert.Contains("File.ReadAllText(nativeSelectionPath).Trim()", adapter, StringComparison.Ordinal);
         var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
         var collector = FindStep(job["steps"].AsSequence(), "Run coverage security contracts")["run"].AsScalar();
-        var filter = Assert.Single(Regex.Matches(collector, "--filter\\s+\"([^\"]+)\"").Cast<Match>());
-
-        Assert.False(string.IsNullOrWhiteSpace(declaredFilter));
-        Assert.Equal(declaredFilter, filter.Groups[1].Value);
+        Assert.Contains("--filter \"$env:NATIVE_COVERAGE_FILTER\"", collector, StringComparison.Ordinal);
+        var selectionStep = FindStep(job["steps"].AsSequence(), "Load trusted native coverage test selection");
+        Assert.Equal("pwsh", selectionStep["shell"].AsScalar());
+        var selectionScript = selectionStep["run"].AsScalar();
+        Assert.Contains("Get-Content -Raw -LiteralPath $selectionPath", selectionScript, StringComparison.Ordinal);
+        Assert.Contains("$nativeCoverageFilter = (Get-Content -Raw", selectionScript, StringComparison.Ordinal);
+        Assert.Contains("NATIVE_COVERAGE_FILTER=$nativeCoverageFilter", selectionScript, StringComparison.Ordinal);
+        Assert.Contains("Out-File -FilePath $env:GITHUB_ENV", selectionScript, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -148,13 +159,23 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var condition = lifecycle["if"].AsScalar();
         Assert.Contains("steps.plan.outputs.has_producers == 'true'", condition);
         var testCommand = lifecycle["run"].AsScalar();
-        Assert.Contains("RepositoryGitChangesTests", testCommand);
-        Assert.Contains("RepositoryEvidenceWorkflowContractTests", testCommand);
-        Assert.Contains("LocalEvidenceWorkflowTests", testCommand);
-        Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", testCommand);
-        Assert.Contains("--filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests'", testCommand);
-        Assert.Contains("RepositoryEvidenceWorkflowTests", testCommand);
-        Assert.Contains("SolutionCoverageHandoffTests", testCommand);
+        var testCommands = Regex.Matches(testCommand,
+                "(?m)^\\s*dotnet test\\s+(?<project>[^\\s]+)[^\\r\\n]*?--filter\\s+'(?<filter>[^']+)'")
+            .Cast<Match>()
+            .ToArray();
+        Assert.Equal(2, testCommands.Length);
+        var aspireTests = Assert.Single(testCommands, match =>
+            match.Groups["project"].Value == "Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj");
+        var cliTests = Assert.Single(testCommands, match =>
+            match.Groups["project"].Value == "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj");
+        var aspireSuites = FilterSuites(aspireTests.Groups["filter"].Value);
+        var cliSuites = FilterSuites(cliTests.Groups["filter"].Value);
+        Assert.Contains("RepositoryGitChangesTests", aspireSuites);
+        Assert.Contains("RepositoryEvidenceWorkflowContractTests", aspireSuites);
+        Assert.Contains("SolutionCoverageHandoffTests", aspireSuites);
+        Assert.DoesNotContain("LocalEvidenceWorkflowTests", aspireSuites);
+        Assert.Contains("CoverageFanInSolutionCoverageProducerTests", cliSuites);
+        Assert.Contains("LocalEvidenceWorkflowTests", cliSuites);
 
         var producer = FindStep(steps, "Run selected evidence producers");
         Assert.Contains("steps.plan.outcome == 'success'", producer["if"].AsScalar());
@@ -509,10 +530,21 @@ public sealed class RepositoryEvidenceWorkflowContractTests
 
     private static YamlMappingNode LoadWorkflow(string repository, string name)
     {
-        using var reader = File.OpenText(Path.Join(repository, ".github", "workflows", name));
+        using var reader = File.OpenText(TestPathUtils.PathUnder(repository, ".github", "workflows", name));
         var yaml = new YamlStream();
         yaml.Load(reader);
         return (YamlMappingNode)yaml.Documents.Single().RootNode;
+    }
+
+    private static string[] FilterSuites(string filter)
+    {
+        const string prefix = "FullyQualifiedName~";
+        var clauses = filter.Split('|');
+        Assert.All(clauses, clause => Assert.StartsWith(prefix, clause, StringComparison.Ordinal));
+        Assert.All(clauses, clause => Assert.True(clause.Length > prefix.Length));
+        var suites = clauses.Select(clause => clause[prefix.Length..]).ToArray();
+        Assert.Equal(suites.Length, suites.Distinct(StringComparer.Ordinal).Count());
+        return suites;
     }
 
     private YamlMappingNode NativeJob => _workflow["jobs"].AsMapping()["native-evidence"].AsMapping();

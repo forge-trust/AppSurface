@@ -347,6 +347,8 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
             var packages = TestPathUtils.PathUnder(output, "package-checks", "artifacts");
             var nested = TestPathUtils.PathUnder(packages, "generated");
             Directory.CreateDirectory(nested);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, "package-checks", "verify.log"), "verify log", token);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, "package-checks", "verify-packages.log"), "package verification log", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(packages, "package-validation-report.md"), "package report", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(packages, "package-artifact-manifest.json"), "package manifest", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(packages, "candidate.nupkg"), "generated package", token);
@@ -377,9 +379,38 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         Assert.Equal("test report", ReadArchive(retained, "latest.zip", "proof/coverage/junit-tests.xml"));
         Assert.Equal("package report", ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/package-validation-report.md"));
         Assert.Equal("package manifest", ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/package-artifact-manifest.json"));
+        Assert.Equal("verify log", ReadArchive(retained, "latest.zip", "proof/package-checks/verify.log"));
+        Assert.Equal("package verification log", ReadArchive(retained, "latest.zip", "proof/package-checks/verify-packages.log"));
         Assert.Null(ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/candidate.nupkg"));
         Assert.Null(ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/generated/generated.md"));
         Assert.Empty(Directory.EnumerateDirectories(scratch, "evidence-workspace-*"));
+    }
+
+    [Fact]
+    public async Task ManagedOutput_EmptyInventoryPreservesLatestVerifiedProofAndPlan()
+    {
+        var fixture = await CreateFixtureAsync();
+        await ChangeAsync(fixture, "docs/guide.md", "local docs change");
+        var runOptions = Options(fixture, "local");
+        runOptions.Remove("--output");
+        var planOptions = new Dictionary<string, string>(runOptions) { ["--operation"] = "local-plan" };
+        var workflow = new LocalEvidenceWorkflow();
+        Assert.Equal(0, await workflow.RunAsync(runOptions, CancellationToken.None));
+        Assert.Equal(0, await workflow.RunAsync(planOptions, CancellationToken.None));
+        var root = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
+        var latest = TestPathUtils.PathUnder(root, "latest.zip");
+        var latestPlan = TestPathUtils.PathUnder(root, "latest-plan.zip");
+        Assert.NotNull(ReadArchive(root, "latest.zip", "proof/evidence-manifest.json"));
+        var previousProof = await File.ReadAllBytesAsync(latest);
+        var previousPlan = await File.ReadAllBytesAsync(latestPlan);
+
+        File.Delete(TestPathUtils.PathUnder(fixture.Root, "docs", "guide.md"));
+        Assert.Equal(0, await workflow.RunAsync(runOptions, CancellationToken.None));
+        Assert.Equal(0, await workflow.RunAsync(planOptions, CancellationToken.None));
+
+        Assert.Equal(previousProof, await File.ReadAllBytesAsync(latest));
+        Assert.Equal(previousPlan, await File.ReadAllBytesAsync(latestPlan));
+        Assert.Empty(Directory.EnumerateDirectories(TestPathUtils.PathUnder(root, ".scratch"), "evidence-workspace-*"));
     }
 
     [Theory]
@@ -409,9 +440,10 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
             _ => new InvalidOperationException("original failure"),
         };
         var scratch = TestPathUtils.PathUnder(retained, ".scratch");
-        var thrown = await Record.ExceptionAsync(() => LocalEvidenceOutput.RunAsync(_root, preflight ? "local-plan" : "local", (output, packageCache) =>
+        var thrown = await Record.ExceptionAsync(() => LocalEvidenceOutput.RunAsync(_root, preflight ? "local-plan" : "local", run =>
         {
-            Assert.Equal(TestPathUtils.PathUnder(scratch, "package-restore"), packageCache);
+            var output = run.OutputDirectory;
+            Assert.Equal(TestPathUtils.PathUnder(scratch, "package-restore"), run.PackageRestoreCache);
             if (!preflight)
                 Directory.CreateDirectory(output);
             if (phase is "missing-manifest" or "invalid-manifest")
@@ -421,7 +453,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
                 if (phase == "invalid-manifest")
                     File.WriteAllText(TestPathUtils.PathUnder(proof, "evidence-manifest.json"), "not a manifest");
             }
-            return Task.FromException<(EvidencePlan, EvidenceManifest)?>(failure);
+            return Task.FromException<LocalEvidenceRunResult?>(failure);
         }));
 
         Assert.Same(failure, thrown);
@@ -434,7 +466,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
 
     [Theory]
     [InlineData(false, null, true)]
-    [InlineData(true, "cleanup_failed.", true)]
+    [InlineData(true, "cleanup_failed.", false)]
     [InlineData(true, "Coverage gate failed.", false)]
     public async Task ManagedOutput_UsesManifestToDecideWhetherFailedScratchCanBeRemoved(
         bool cleanupCompleted, string? diagnostic, bool retainScratch)
@@ -472,6 +504,47 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         Assert.All(failed.ProducerResults, result => Assert.Equal(diagnostic, result.Diagnostic));
     }
 
+    [Fact]
+    public async Task ManagedOutput_RetainsProducerLogsAndScratchWhenTypedCleanupFails()
+    {
+        var fixture = await CreateFixtureAsync();
+        var policy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(
+            await File.ReadAllBytesAsync(TestPathUtils.PathUnder(fixture.Root, ".github", "evidence.policy.json")));
+        var profile = policy.Profiles.Single(profile => profile.Producers is [{ Id: "package-checks" }]);
+        var declaration = Assert.Single(profile.Producers);
+        var plan = new EvidencePlan("1", "policy", "digest", "diff", profile, [], [], "input");
+        var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
+        var scratch = TestPathUtils.PathUnder(retained, ".scratch");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => LocalEvidenceOutput.RunAsync(fixture.Root, "local", async run =>
+        {
+            var proof = TestPathUtils.PathUnder(run.OutputDirectory, "proof");
+            Directory.CreateDirectory(proof);
+            var settings = new RepositoryCheckSettings(fixture.Root, TestDotnetHost.Resolve(), proof)
+            {
+                PackageRestoreCache = run.PackageRestoreCache,
+            };
+            var writer = new EvidenceArtifactWriter(declaration, TestPathUtils.PathUnder(proof, "artifacts", declaration.Id));
+            var producer = new PackageChecksProducer(settings, (request, token) =>
+                run.ObserveCommandAsync((command, _) => command.Arguments[^1] == "gate"
+                    ? Task.FromResult(new EvidenceCommandResult(0, "producer stdout", "", 1))
+                    : Task.FromException<EvidenceCommandResult>(new EvidenceCommandException("cleanup_failed", "command still owns scratch")),
+                    request, token));
+            var result = await producer.ProduceAsync(new(plan, declaration, TimeProvider.System, writer), CancellationToken.None);
+            Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+            Assert.NotNull(result.Diagnostic);
+            Assert.DoesNotContain("cleanup_failed", result.Diagnostic, StringComparison.Ordinal);
+            var manifest = EvidenceManifestBuilder.Build(plan, [result with { Artifacts = writer.WrittenArtifacts }]);
+            Assert.True(manifest.Metrics.CleanupCompleted);
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(proof, "evidence-manifest.json"), EvidenceCanonicalJson.Serialize(manifest));
+            throw new InvalidOperationException("local evidence execution failed");
+        }));
+
+        Assert.Single(Directory.EnumerateDirectories(scratch, "evidence-workspace-*"));
+        Assert.Contains("producer stdout", ReadArchive(retained, "latest-failure.zip", "proof/package-checks/gate.log")!);
+        Assert.Null(ReadArchive(retained, "latest-failure.zip", "proof/package-checks/verify.log"));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("[]")]
@@ -497,15 +570,16 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         var plan = ReadPlan(extracted);
         var manifest = ReadManifest(extracted);
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => LocalEvidenceOutput.RunAsync(fixture.Root, "local", (output, _) =>
+        await Assert.ThrowsAsync<InvalidDataException>(() => LocalEvidenceOutput.RunAsync(fixture.Root, "local", run =>
         {
+            var output = run.OutputDirectory;
             ZipFile.ExtractToDirectory(latest, output);
             var artifact = TestPathUtils.PathUnder(output, "proof", "artifacts", "solution-coverage", "proof", "result.json");
             if (changedArtifact is null)
                 File.Delete(artifact);
             else
                 File.WriteAllText(artifact, changedArtifact);
-            return Task.FromResult<(EvidencePlan, EvidenceManifest)?>((plan, manifest));
+            return Task.FromResult<LocalEvidenceRunResult?>(new(plan, manifest));
         }));
 
         Assert.Equal(previous, await File.ReadAllBytesAsync(latest));

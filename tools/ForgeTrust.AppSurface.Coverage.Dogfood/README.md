@@ -22,6 +22,8 @@ AppSurface explicitly sets a 4,000,000-record operation budget: a measured repla
 
 The current scope is AppSurface dogfooding. Separate downstream consumers and their onboarding measurements were deferred by the user; successful fixture or dogfood execution must not be described as downstream adoption proof.
 
+The native coverage suites are listed in [native-test-selection.txt](native-test-selection.txt), which the build workflow and adapter both read.
+
 ## Installed library proof
 
 The adapter's `--package-proof --feed <candidate-feed> --version <exact> --output <fresh-root> --dotnet <absolute-host>` mode checks the public Coverage and private support candidate package identities, creates an isolated PackageReference application, restores first-party packages only from that candidate feed, and rejects Aspire/CliFx/Planner in the headless graph. It builds and publishes the application and executes capture/composition/acceptance/verification plus altered-output rejection from both layouts. Stage logs and a package-hash-bound proof remain in the explicit output root. It does not publish packages, delete outputs, establish downstream adoption, or replace full source/native gates. The [native validation workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/native-evidence-validation.yml) invokes this proof on all three OSes.

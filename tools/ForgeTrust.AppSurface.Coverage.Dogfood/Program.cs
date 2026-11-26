@@ -17,7 +17,6 @@ return args.Length > 0 && args[0] == "--package-proof"
 
 internal static class CoverageDogfood
 {
-    internal const string NativeFilter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests";
     private const string ReportProfileId = "coverlet-collector-cobertura-v1";
     private const string CollectorPackageVersion = "10.0.1";
     private const string ShadowProofFileName = "shadow-proof.json";
@@ -98,9 +97,13 @@ internal static class CoverageDogfood
                     : requestedDiffBase;
             }
             stage = "collector-policy";
+            var nativeSelectionPath = Path.Join(root, "tools", "ForgeTrust.AppSurface.Coverage.Dogfood", "native-test-selection.txt");
+            var nativeFilter = File.ReadAllText(nativeSelectionPath).Trim();
+            if (string.IsNullOrWhiteSpace(nativeFilter) || nativeFilter.Contains('\r') || nativeFilter.Contains('\n'))
+                throw new InvalidDataException("The trusted native test selection must contain one non-empty line.");
             var policy = new CoverageFanInPolicy(new(commit, tree, sdk.Trim(), configuration),
                 new("github-actions", Required("run-scope"), Required("run-id"), int.Parse(Required("attempt"), System.Globalization.CultureInfo.InvariantCulture)),
-                projects, new[] { "Linux", "Windows", "Darwin" }.Select(x => new CoverageSupplement(x.ToLowerInvariant(), x, NativeFilter, nativeProjects)).ToArray(),
+                projects, new[] { "Linux", "Windows", "Darwin" }.Select(x => new CoverageSupplement(x.ToLowerInvariant(), x, nativeFilter, nativeProjects)).ToArray(),
                 diffBase is not null
                     ? new(CoverageGateMode.AggregateAndPatch, DiffBase: diffBase) : new(CoverageGateMode.AggregateOnly),
                 Limits: new CoverageOperationLimits(TotalRecords: 4_000_000))

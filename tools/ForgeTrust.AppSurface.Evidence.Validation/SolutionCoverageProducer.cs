@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Coverage;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -12,8 +13,23 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed class SolutionCoverageProducer : IEvidenceProducer
 {
     private const string ProducerId = "solution-coverage";
+    private const string CoverageDirectoryName = "coverage";
+    private const string CoverageReportName = "coverage.cobertura.xml";
+    private const string TimingsName = "timings.json";
+    private const string GateReportName = "coverage-gate.json";
+    private const string LogExtension = ".log";
+    private const int LineThreshold = 95;
+    private const int BranchThreshold = 85;
+    private const decimal TolerancePercent = 0.5m;
+    private const string PatchLineMode = "codecov";
     private const long MaxJson = 2 * 1024 * 1024;
     private static readonly string[] Assertions = ["coverage/solution-complete@1", "coverage/thresholds@1"];
+    private static readonly HashSet<string> DiagnosticFiles =
+    [
+        CoverageReportName, TimingsName, GateReportName, "coverage-gate.md", "summary.txt",
+        "reportgenerator-summary.txt", "slow-test-diagnostics.json", "slow-test-diagnostics.md",
+        "coverage-patch-targets.json", "coverage-patch-targets.md",
+    ];
     private static readonly string[] ExclusiveProjects =
     [
         "ForgeTrust.AppSurface.Config.Tests.csproj", "ForgeTrust.AppSurface.Aspire.Tests.csproj",
@@ -36,6 +52,18 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     /// <inheritdoc />
     public string Id => ProducerId;
 
+    /// <summary>Selects coverage diagnostics from a slash-normalized path in the repository proof directory.</summary>
+    internal static bool RetainsLocalDiagnostic(string proofRelativePath)
+    {
+        if (!proofRelativePath.StartsWith(CoverageDirectoryName + "/", StringComparison.Ordinal))
+            return false;
+
+        var name = Path.GetFileName(proofRelativePath);
+        return name.EndsWith(LogExtension, StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("junit-", StringComparison.Ordinal)
+            || DiagnosticFiles.Contains(name);
+    }
+
     /// <summary>Runs collection, verifies the exact solution test inventory and timings, then evaluates coverage gates.</summary>
     public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
     {
@@ -44,7 +72,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         if (context.Artifacts is null) return Invalid("Solution coverage producer has no artifact writer.");
         var root = Path.GetFullPath(_settings.RepositoryRoot);
         var output = Path.GetFullPath(_settings.OutputDirectory);
-        var coverage = Path.Join(output, "coverage");
+        var coverage = PathUtils.PathUnder(output, CoverageDirectoryName);
         var proof = new List<CommandProof>();
         var stage = "settings";
         try
@@ -86,8 +114,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             }
             else
                 await CollectCoverageAsync(root, coverage, proof, cancellationToken).ConfigureAwait(false);
-            var report = Path.Join(coverage, "coverage.cobertura.xml");
-            var timings = Path.Join(coverage, "timings.json");
+            var report = PathUtils.PathUnder(coverage, CoverageReportName);
+            var timings = PathUtils.PathUnder(coverage, TimingsName);
             ValidateTimings(timings, expected);
             if (!File.Exists(report) || new FileInfo(report).Length == 0) throw new InvalidDataException("The merged solution coverage report is missing.");
 
@@ -95,7 +123,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
 
             stage = "aggregate-gate";
             var aggregateGate = Path.Join(coverage, "aggregate-gate");
-            var aggregateJson = Path.Join(aggregateGate, "coverage-gate.json");
+            var aggregateJson = PathUtils.PathUnder(aggregateGate, GateReportName);
             Directory.CreateDirectory(aggregateGate);
             var aggregateArgs = GateArgs(report, root, aggregateGate, null, null, patch: false,
                 installed: _settings.CoverageCliPath is not null);
@@ -131,11 +159,11 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                     commit, tree, sdk, run, cancellationToken).ConfigureAwait(false);
                 var primaryGateDir = Path.Join(coverage, "primary-gate");
                 Directory.CreateDirectory(primaryGateDir);
-                var primaryGate = Path.Join(primaryGateDir, "coverage-gate.json");
+                var primaryGate = PathUtils.PathUnder(primaryGateDir, GateReportName);
                 File.Copy(Path.Join(fanInOutput, "accepted", "primary-gate.json"), primaryGate, overwrite: false);
                 var patchGateDir = Path.Join(coverage, "patch-gate");
                 Directory.CreateDirectory(patchGateDir);
-                patchJson = Path.Join(patchGateDir, "coverage-gate.json");
+                patchJson = PathUtils.PathUnder(patchGateDir, GateReportName);
                 File.Copy(Path.Join(fanInOutput, "accepted", "composed-gate.json"), patchJson, overwrite: false);
                 ValidateGate(primaryGate, patch: false);
             }
@@ -143,7 +171,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             {
                 stage = "patch-gate";
                 var patchGate = Path.Join(coverage, "patch-gate");
-                patchJson = Path.Join(patchGate, "coverage-gate.json");
+                patchJson = PathUtils.PathUnder(patchGate, GateReportName);
                 Directory.CreateDirectory(patchGate);
                 await ExecuteAsync("patch-gate", GateArgs(report, root, patchGate, _settings.DiffBase, _settings.DiffFile,
                     patch: true, installed: _settings.CoverageCliPath is not null), root, proof, cancellationToken,
@@ -182,7 +210,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
                 [("transcript", JsonSerializer.SerializeToUtf8Bytes(proof)),
                     ("result", JsonSerializer.SerializeToUtf8Bytes(new { completed = false, stage, failure = exception.GetType().Name, commands = proof }))]).ConfigureAwait(false);
-            var commandDiagnostic = exception is EvidenceCommandException { Code: "cleanup_failed" } ? " cleanup_failed." : string.Empty;
+            var commandDiagnostic = LocalEvidenceRun.IsUnsettledCommand(exception) ? " Command cleanup could not be confirmed." : string.Empty;
             return Failed($"Solution coverage failed during {stage}." + commandDiagnostic + artifactDiagnostic);
         }
     }
@@ -201,7 +229,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             && (!Path.IsPathFullyQualified(coverageCli) || !File.Exists(coverageCli)))
             throw new ArgumentException("The installed coverage CLI must be an existing absolute executable.");
         var root = Path.GetFullPath(_settings.RepositoryRoot);
-        var coverage = Path.Join(Path.GetFullPath(_settings.OutputDirectory), "coverage");
+        var coverage = PathUtils.PathUnder(Path.GetFullPath(_settings.OutputDirectory), CoverageDirectoryName);
         if (!File.Exists(Path.Join(root, "ForgeTrust.AppSurface.slnx")) || ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx")).Count == 0
             || !Path.IsPathFullyQualified(_settings.DotnetPath) || !File.Exists(_settings.DotnetPath)
             || Directory.Exists(_settings.OutputDirectory) || File.Exists(_settings.OutputDirectory))
@@ -240,8 +268,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         runArgs.AddRange(["--logger", "console;verbosity=normal", "--test-results", "junit", "--slow-test-diagnostics", "--require-non-sandbox"]);
         await ExecuteAsync("coverage-run", runArgs, root, proof, cancellationToken,
             installedCli ?? _settings.DotnetPath).ConfigureAwait(false);
-        ValidateTimings(Path.Join(coverage, "timings.json"), ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx")));
-        var report = Path.Join(coverage, "coverage.cobertura.xml");
+        ValidateTimings(PathUtils.PathUnder(coverage, TimingsName), ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx")));
+        var report = PathUtils.PathUnder(coverage, CoverageReportName);
         if (!File.Exists(report) || new FileInfo(report).Length == 0)
             throw new InvalidDataException("The merged solution coverage report is missing.");
     }
@@ -252,7 +280,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         var result = await _command(new EvidenceCommandRequest(executable ?? _settings.DotnetPath, args, root, TimeSpan.FromMinutes(90))
         { MaximumOutputBytes = 16 * 1024 * 1024, Environment = _settings.CommandEnvironment }, ct).ConfigureAwait(false);
         proof.Add(new(name, result.ExitCode, result.ElapsedMilliseconds, result.OutputTruncated, Hash(result.StandardOutput), Hash(result.StandardError)));
-        await File.WriteAllTextAsync(Path.Join(_settings.OutputDirectory, "coverage", name + ".log"),
+        await File.WriteAllTextAsync(PathUtils.PathUnder(_settings.OutputDirectory, CoverageDirectoryName, name + LogExtension),
             result.StandardOutput + "\n" + result.StandardError, ct).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.OutputTruncated) throw new InvalidOperationException("A solution coverage command failed or exceeded its output bound.");
     }
@@ -305,17 +333,19 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     private static List<string> GateArgs(string report, string root, string output, string? diffBase, string? diffFile, bool patch, bool installed)
     {
         var args = installed ? new List<string> { "coverage", "gate" } : new List<string> { "run", "--project", Path.Join(root, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"), "--configuration", "Release", "--no-build", "--no-restore", "--", "coverage", "gate" };
+        var minLine = LineThreshold.ToString(CultureInfo.InvariantCulture);
+        var minBranch = BranchThreshold.ToString(CultureInfo.InvariantCulture);
         args.AddRange([
-            "--coverage", report, "--repository-root", root, "--output", output, "--min-line", patch ? "0" : "95", "--min-branch", patch ? "0" : "85", "--tolerance", "0.5", "--no-github-summary"]);
+            "--coverage", report, "--repository-root", root, "--output", output, "--min-line", patch ? "0" : minLine,
+            "--min-branch", patch ? "0" : minBranch, "--tolerance", TolerancePercent.ToString(CultureInfo.InvariantCulture), "--no-github-summary"]);
         if (!string.IsNullOrWhiteSpace(diffBase) && string.IsNullOrWhiteSpace(diffFile))
             args.AddRange(["--diff-base", diffBase, "--diff-label", diffBase]);
         if (!string.IsNullOrWhiteSpace(diffBase) || !string.IsNullOrWhiteSpace(diffFile))
-            args.AddRange(["--patch-line-mode", "codecov"]);
+            args.AddRange(["--patch-line-mode", PatchLineMode]);
         if (patch)
         {
             if (!string.IsNullOrWhiteSpace(diffFile)) args.AddRange(["--diff-file", diffFile, "--diff-label", "pinned local source snapshot"]);
-            else if (!string.IsNullOrWhiteSpace(diffBase)) { /* diff source already added above */ }
-            args.AddRange(["--min-patch-line", "95", "--min-patch-branch", "85"]);
+            args.AddRange(["--min-patch-line", minLine, "--min-patch-branch", minBranch]);
         }
         return args;
     }
@@ -439,18 +469,18 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     {
         using var document = ReadJson(path, MaxJson);
         var root = document.RootElement;
-        if (!root.GetProperty("passed").GetBoolean() || root.GetProperty("tolerancePercent").GetDecimal() != .5m)
+        if (!root.GetProperty("passed").GetBoolean() || root.GetProperty("tolerancePercent").GetDecimal() != TolerancePercent)
             throw new InvalidDataException("The coverage gate did not satisfy the declared policy.");
-        if (!patch && (root.GetProperty("thresholds").GetProperty("line").GetDecimal() != 95m
-            || root.GetProperty("thresholds").GetProperty("branch").GetDecimal() != 85m
-            || root.GetProperty("line").GetProperty("percent").GetDecimal() < 94.5m
-            || root.GetProperty("branch").GetProperty("percent").GetDecimal() < 84.5m))
+        if (!patch && (root.GetProperty("thresholds").GetProperty("line").GetDecimal() != LineThreshold
+            || root.GetProperty("thresholds").GetProperty("branch").GetDecimal() != BranchThreshold
+            || root.GetProperty("line").GetProperty("percent").GetDecimal() < LineThreshold - TolerancePercent
+            || root.GetProperty("branch").GetProperty("percent").GetDecimal() < BranchThreshold - TolerancePercent))
             throw new InvalidDataException("The aggregate coverage gate did not satisfy its thresholds.");
-        if (patch && (root.GetProperty("thresholds").GetProperty("patchLine").GetDecimal() != 95m
-            || root.GetProperty("thresholds").GetProperty("patchBranch").GetDecimal() != 85m
-            || root.GetProperty("patchLineMode").GetString() != "codecov"
-            || !PatchMetricPasses(root.GetProperty("patchLine"), 94.5m, typedPatch)
-            || !PatchMetricPasses(root.GetProperty("patchBranch"), 84.5m, typedPatch)))
+        if (patch && (root.GetProperty("thresholds").GetProperty("patchLine").GetDecimal() != LineThreshold
+            || root.GetProperty("thresholds").GetProperty("patchBranch").GetDecimal() != BranchThreshold
+            || root.GetProperty("patchLineMode").GetString() != PatchLineMode
+            || !PatchMetricPasses(root.GetProperty("patchLine"), LineThreshold - TolerancePercent, typedPatch)
+            || !PatchMetricPasses(root.GetProperty("patchBranch"), BranchThreshold - TolerancePercent, typedPatch)))
             throw new InvalidDataException("The patch coverage gate did not satisfy the declared policy.");
     }
 

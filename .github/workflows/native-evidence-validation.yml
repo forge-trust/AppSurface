@@ -179,11 +179,11 @@ jobs:
         run: |
           dotnet restore Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~EvidenceCoverageFanInProducerTests|FullyQualifiedName~EvidenceCoverageFanInCollectionTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests|FullyQualifiedName~RepositoryEvidenceWorkflowTests|FullyQualifiedName~RepositoryGitChangesTests|FullyQualifiedName~RepositoryEvidenceWorkflowContractTests|FullyQualifiedName~LocalEvidenceWorkflowTests|FullyQualifiedName~NativeEvidenceProgramTests|FullyQualifiedName~PackageChecksProducerTests|FullyQualifiedName~SolutionCoverageProducerTests|FullyQualifiedName~SolutionCoverageHandoffTests'
+          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~EvidenceCoverageFanInProducerTests|FullyQualifiedName~EvidenceCoverageFanInCollectionTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests|FullyQualifiedName~RepositoryEvidenceWorkflowTests|FullyQualifiedName~RepositoryGitChangesTests|FullyQualifiedName~RepositoryEvidenceWorkflowContractTests|FullyQualifiedName~NativeEvidenceProgramTests|FullyQualifiedName~PackageChecksProducerTests|FullyQualifiedName~SolutionCoverageProducerTests|FullyQualifiedName~SolutionCoverageHandoffTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests'
+          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests|FullyQualifiedName~LocalEvidenceWorkflowTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve evidence inputs, plan, proof, and artifacts
         id: upload
