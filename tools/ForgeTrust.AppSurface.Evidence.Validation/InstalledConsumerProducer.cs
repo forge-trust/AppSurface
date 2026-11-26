@@ -23,7 +23,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     ];
 
     private readonly ValidationSettings _settings;
-    private readonly EvidenceCommandRunner _runner;
+    private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _runCommand;
     private EvidenceWorkspace? _workspace;
     private int _disposed;
     private string? _settingsHash;
@@ -33,11 +33,12 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     private string _lastOutput = "";
     private string _lastError = "";
 
-    /// <summary>Creates an installed-consumer producer with immutable caller settings.</summary>
-    public InstalledConsumerProducer(ValidationSettings settings, EvidenceCommandRunner? runner = null)
+    /// <summary>Creates an installed-consumer producer with immutable settings and an optional command runner.</summary>
+    public InstalledConsumerProducer(ValidationSettings settings,
+        Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>>? runCommand = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _runner = runner ?? new EvidenceCommandRunner();
+        _runCommand = runCommand ?? new EvidenceCommandRunner().RunAsync;
     }
 
     /// <summary>Gets the stable producer identifier.</summary>
@@ -467,7 +468,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private async Task<EvidenceCommandResult> RunCheckedAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IReadOnlyDictionary<string, string> environment, Func<CancellationToken, ValueTask> budget, CancellationToken cancellationToken)
     {
-        var result = await _runner.RunAsync(new EvidenceCommandRequest(fileName, arguments, workingDirectory, TimeSpan.FromMinutes(20)) { Environment = environment, MaximumOutputBytes = 4 * 1024 * 1024, CheckBudget = budget }, cancellationToken).ConfigureAwait(false);
+        var result = await _runCommand(new EvidenceCommandRequest(fileName, arguments, workingDirectory, TimeSpan.FromMinutes(20)) { Environment = environment, MaximumOutputBytes = 4 * 1024 * 1024, CheckBudget = budget }, cancellationToken).ConfigureAwait(false);
         _commandSummaries.Add(new CommandSummary(
             Path.GetFileName(fileName),
             result.ExitCode,
@@ -489,12 +490,12 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     {
         try
         {
-            var result = await _runner.RunAsync(new EvidenceCommandRequest("git", args, directory, TimeSpan.FromMinutes(2)) { MaximumOutputBytes = 256 * 1024, CheckBudget = budget }, token).ConfigureAwait(false);
+            var result = await _runCommand(new EvidenceCommandRequest("git", args, directory, TimeSpan.FromMinutes(2)) { MaximumOutputBytes = 256 * 1024, CheckBudget = budget }, token).ConfigureAwait(false);
             ValidationProof.Require(!result.OutputTruncated, "complete git output");
             if (result.ExitCode != 0 && !allowMissing) throw new InvalidDataException("Required source identity command failed.");
             return result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
         }
-        catch (EvidenceCommandException) when (allowMissing)
+        catch (EvidenceCommandException exception) when (allowMissing && !LocalEvidenceRun.IsUnsettledCommand(exception))
         {
             return string.Empty;
         }

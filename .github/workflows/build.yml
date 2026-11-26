@@ -316,7 +316,8 @@ jobs:
           $selectionPath = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/native-test-selection.txt'
           $nativeCoverageFilter = (Get-Content -Raw -LiteralPath $selectionPath).Trim()
           if ([string]::IsNullOrWhiteSpace($nativeCoverageFilter) -or
-              $nativeCoverageFilter -notmatch '^FullyQualifiedName~[A-Za-z0-9_]+(?:\|FullyQualifiedName~[A-Za-z0-9_]+)*$') {
+              $nativeCoverageFilter.Contains([char]13) -or
+              $nativeCoverageFilter.Contains([char]10)) {
             throw 'The trusted native coverage selection must be a non-empty, single-line test filter.'
           }
           "NATIVE_COVERAGE_FILTER=$nativeCoverageFilter" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM

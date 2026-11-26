@@ -40,4 +40,25 @@ internal sealed class LocalEvidenceRun(string outputDirectory, string packageRes
 }
 
 /// <summary>The plan and, for an executed run, the verified manifest. Empty inventories return no result.</summary>
-internal sealed record LocalEvidenceRunResult(EvidencePlan Plan, EvidenceManifest? Manifest);
+/// <param name="Plan">The resolved plan used for this run.</param>
+/// <param name="Manifest">The verified manifest when the plan was executed.</param>
+/// <param name="ReplayInputs">The original policy and changed-path snapshots needed to replay verification.</param>
+internal sealed record LocalEvidenceRunResult(
+    EvidencePlan Plan, EvidenceManifest? Manifest, IReadOnlyList<LocalEvidenceReplayInput> ReplayInputs);
+
+/// <summary>Identifies the captured bytes of a required replay input at the archive root.</summary>
+/// <param name="RelativePath">The entry name relative to the archive root.</param>
+/// <param name="LengthBytes">The original input length in bytes.</param>
+/// <param name="Sha256">The SHA-256 digest of the original input.</param>
+internal sealed record LocalEvidenceReplayInput(string RelativePath, long LengthBytes, string Sha256)
+{
+    /// <summary>The root-relative name of the changed-path inventory supplied to the verifier.</summary>
+    internal const string ChangedPathsFileName = "changed-paths.json";
+
+    /// <summary>The root-relative name of the resolved local policy supplied to the verifier.</summary>
+    internal const string PolicyFileName = "local-policy.json";
+
+    /// <summary>Binds a replay input to the original bytes written by the local workflow.</summary>
+    internal static LocalEvidenceReplayInput Snapshot(string relativePath, ReadOnlySpan<byte> content) =>
+        new(relativePath, content.Length, EvidenceDigest.Sha256(content));
+}

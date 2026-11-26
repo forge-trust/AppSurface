@@ -111,6 +111,20 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
+    public void NativeCoverageSelectionValidatesTransportWithoutParsingVSTestSyntax()
+    {
+        var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
+        var selectionStep = FindStep(job["steps"].AsSequence(), "Load trusted native coverage test selection");
+        var selectionScript = selectionStep["run"].AsScalar();
+
+        // The workflow validates one-line transport and leaves VSTest filter syntax to dotnet test.
+        Assert.Contains("[string]::IsNullOrWhiteSpace($nativeCoverageFilter)", selectionScript, StringComparison.Ordinal);
+        Assert.Contains("$nativeCoverageFilter.Contains([char]13)", selectionScript, StringComparison.Ordinal);
+        Assert.Contains("$nativeCoverageFilter.Contains([char]10)", selectionScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("-notmatch", selectionScript, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ValidationBuildPrecedesEventBoundCollection()
     {
         var steps = NativeJob["steps"].AsSequence();

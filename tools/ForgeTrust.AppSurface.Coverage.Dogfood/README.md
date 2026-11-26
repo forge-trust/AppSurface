@@ -22,7 +22,7 @@ AppSurface explicitly sets a 4,000,000-record operation budget: a measured repla
 
 The current scope is AppSurface dogfooding. Separate downstream consumers and their onboarding measurements were deferred by the user; successful fixture or dogfood execution must not be described as downstream adoption proof.
 
-The native coverage suites are listed in [native-test-selection.txt](native-test-selection.txt), which the build workflow and adapter both read.
+The native coverage suites are listed in [native-test-selection.txt](native-test-selection.txt), which the build workflow and adapter both read. Both trim the file and require a nonblank, single-line value before passing it to VSTest, which owns filter-expression syntax and accepts namespace-qualified selectors.
 
 ## Installed library proof
 

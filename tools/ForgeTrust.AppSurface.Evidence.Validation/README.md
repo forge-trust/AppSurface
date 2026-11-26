@@ -25,9 +25,11 @@ output exists leaves the previous archives available. An empty change inventory 
 leaves the latest verified proof and plan available. Runs using the managed output are serialized
 per worktree by an exclusive `run.lock` using .NET file locking, which must remain enabled.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage
-diagnostics. Before replacing a successful archive, the validator independently checks its plan,
-manifest and bound files against the verified run. Extract an archive to verify it using the same
-relative layout. Scratch is removed after successful retention and known cleanup. The validator tracks
+diagnostics. Before replacing an archive for a completed run, the validator checks the original resolved
+policy, changed-path inventory, plan and any verified manifest and bound files. To replay verification,
+extract the archive and use `local-policy.json`, `changed-paths.json`, `plan/evidence-plan.json`,
+`proof/evidence-manifest.json`, and `proof/artifacts/` with the same scope that produced the proof.
+Scratch is removed after successful retention and known cleanup. The validator tracks
 unsettled subprocesses separately from the host cleanup recorded in the manifest. When cleanup cannot
 be confirmed, the printed scratch path remains available for inspection. Remove that scratch once
 its processes have settled.

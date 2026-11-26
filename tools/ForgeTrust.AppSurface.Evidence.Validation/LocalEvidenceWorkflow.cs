@@ -71,8 +71,9 @@ internal sealed class LocalEvidenceWorkflow
         Directory.CreateDirectory(output);
         if (localRun is null)
             Console.WriteLine("Local evidence output: " + output);
-        var paths = Path.Join(output, "changed-paths.json");
-        await File.WriteAllBytesAsync(paths, EvidenceCanonicalJson.Serialize(changes.Paths), cancellationToken);
+        var paths = PathUtils.PathUnder(output, LocalEvidenceReplayInput.ChangedPathsFileName);
+        var pathsBytes = EvidenceCanonicalJson.Serialize(changes.Paths);
+        await File.WriteAllBytesAsync(paths, pathsBytes, cancellationToken);
         await File.WriteAllTextAsync(Path.Join(output, "source-state.json"), JsonSerializer.Serialize(changes, Program.JsonOptions), cancellationToken);
         if (changes.Paths.Count == 0)
         {
@@ -85,8 +86,14 @@ internal sealed class LocalEvidenceWorkflow
         // plan and manifest. HEAD remains package metadata, not the complete local identity.
         var localPolicy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(await File.ReadAllBytesAsync(policy, cancellationToken));
         localPolicy = localPolicy with { Id = localPolicy.Id + "-local-" + changes.SourceDigest };
-        var resolvedPolicy = Path.Join(output, "local-policy.json");
-        await File.WriteAllBytesAsync(resolvedPolicy, EvidenceCanonicalJson.Serialize(localPolicy), cancellationToken);
+        var resolvedPolicy = PathUtils.PathUnder(output, LocalEvidenceReplayInput.PolicyFileName);
+        var policyBytes = EvidenceCanonicalJson.Serialize(localPolicy);
+        await File.WriteAllBytesAsync(resolvedPolicy, policyBytes, cancellationToken);
+        LocalEvidenceReplayInput[] replayInputs =
+        [
+            LocalEvidenceReplayInput.Snapshot(LocalEvidenceReplayInput.ChangedPathsFileName, pathsBytes),
+            LocalEvidenceReplayInput.Snapshot(LocalEvidenceReplayInput.PolicyFileName, policyBytes),
+        ];
 
         var common = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -99,7 +106,7 @@ internal sealed class LocalEvidenceWorkflow
         await RepositoryEvidenceWorkflow.RunAsync(common, cancellationToken);
         var planPath = Path.Join(output, "plan", "evidence-plan.json");
         var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(planPath, cancellationToken));
-        if (operation == "local-plan") return new(plan, null);
+        if (operation == "local-plan") return new(plan, null, replayInputs);
 
         // Pin the resolved base, not a moving branch name, when checking for edits during collection.
         await RequireUnchangedAsync(git, repository, changes, policy, policyDigest, cancellationToken);
@@ -167,7 +174,7 @@ internal sealed class LocalEvidenceWorkflow
         }
         await RepositoryEvidenceWorkflow.VerifyAsync(plan, manifest, Path.Join(proof, "artifacts"), cancellationToken);
         Console.WriteLine($"Local evidence gate passed: {manifest.ClaimKind}. This run covers the current OS; CI requires its native matrix.");
-        return new(plan, manifest);
+        return new(plan, manifest, replayInputs);
     }
 
     private static async Task RequireUnchangedAsync(RepositoryGitChanges git, string repository, RepositoryChangeSet original,

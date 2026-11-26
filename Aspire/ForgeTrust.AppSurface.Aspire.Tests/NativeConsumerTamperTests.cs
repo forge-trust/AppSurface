@@ -211,7 +211,7 @@ public sealed class NativeConsumerTamperTests
                     ExpectedRequiredTestFragments: ["AlphaDecisionTests", "BetaDecisionTests"],
                     Environment: new Dictionary<string, string> { ["NATIVE_CONSUMER_TEST"] = "tamper" }));
             EvidenceProducerResult result;
-            await using (var producer = new InstalledConsumerProducer(settings, runner))
+            await using (var producer = new InstalledConsumerProducer(settings, runner.RunAsync))
             {
                 result = await producer.ProduceAsync(context, CancellationToken.None);
                 Assert.True(mutationApplied, "The requested real journey mutation must occur before rejection. Last command output (bounded test diagnostic): " + diagnostics.Describe());
@@ -269,7 +269,7 @@ public sealed class NativeConsumerTamperTests
             var captureIndex = 0;
             var runner = new EvidenceCommandRunner(stream => diagnostics.Adapt(stream, captureIndex++ % 2 == 0));
 
-            await using (var producer = new InstalledConsumerProducer(settings, runner))
+            await using (var producer = new InstalledConsumerProducer(settings, runner.RunAsync))
             {
                 var result = await producer.ProduceAsync(context, CancellationToken.None);
 
@@ -322,7 +322,7 @@ public sealed class NativeConsumerTamperTests
                 return stream;
             });
 
-            await using (var producer = new InstalledConsumerProducer(settings, runner))
+            await using (var producer = new InstalledConsumerProducer(settings, runner.RunAsync))
             {
                 var result = await producer.ProduceAsync(context, CancellationToken.None);
 
@@ -431,7 +431,7 @@ public sealed class NativeConsumerTamperTests
                     }
                     return stream;
                 });
-                await using (var producer = new InstalledConsumerProducer(settings, runner))
+                await using (var producer = new InstalledConsumerProducer(settings, runner.RunAsync))
                 {
                     var result = await producer.ProduceAsync(context, CancellationToken.None);
                     Assert.True(captureFailed, "The tool installation must reach the real command capture boundary.");

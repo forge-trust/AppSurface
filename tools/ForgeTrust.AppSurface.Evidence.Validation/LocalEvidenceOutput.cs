@@ -41,6 +41,8 @@ internal static class LocalEvidenceOutput
         try
         {
             proof = await run(localRun);
+            if (localRun.CommandCleanupFailed)
+                throw new InvalidOperationException("Local evidence command cleanup could not be confirmed.");
         }
         catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
         {
@@ -111,8 +113,8 @@ internal static class LocalEvidenceOutput
             }
         }
 
-        if (proof is { Manifest: { } manifest })
-            VerifyArchivedProof(temporary, proof.Plan, manifest);
+        if (proof is not null)
+            VerifyArchivedProof(temporary, proof);
 
         var destination = PathUtils.PathUnder(root, name);
         RequirePlainPath(destination);
@@ -120,12 +122,17 @@ internal static class LocalEvidenceOutput
         Console.WriteLine("Local evidence output: " + destination);
     }
 
-    private static void VerifyArchivedProof(string path, EvidencePlan plan, EvidenceManifest manifest)
+    private static void VerifyArchivedProof(string path, LocalEvidenceRunResult proof)
     {
         using var archive = ZipFile.OpenRead(path);
-        var planBytes = EvidenceCanonicalJson.Serialize(plan);
-        var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
+        foreach (var input in proof.ReplayInputs)
+            VerifyEntry(archive, input.RelativePath, input.LengthBytes, input.Sha256);
+        var planBytes = EvidenceCanonicalJson.Serialize(proof.Plan);
         VerifyEntry(archive, "plan/evidence-plan.json", planBytes.LongLength, EvidenceDigest.Sha256(planBytes));
+        if (proof.Manifest is not { } manifest)
+            return;
+
+        var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
         VerifyEntry(archive, "proof/evidence-manifest.json", manifestBytes.LongLength, EvidenceDigest.Sha256(manifestBytes));
         foreach (var producer in manifest.ProducerResults)
         {
@@ -150,7 +157,8 @@ internal static class LocalEvidenceOutput
 
     private static readonly HashSet<string> EvidenceFiles =
     [
-        "changed-paths.json", "changed.patch", "local-policy.json", "source-state.json", "package-build.log",
+        LocalEvidenceReplayInput.ChangedPathsFileName, LocalEvidenceReplayInput.PolicyFileName,
+        "changed.patch", "source-state.json", "package-build.log",
         "evidence-summary.md", "proof/evidence-plan.json", "proof/evidence-manifest.json", "proof/evidence-summary.md",
         "proof/selection.json",
     ];

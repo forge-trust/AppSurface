@@ -25,8 +25,10 @@ internal static class RepositoryEvidenceWorkflow
     /// <param name="cancellationToken">Cancels execution and artifact verification.</param>
     /// <param name="verifyLocalSourceAsync">Optional in-process local source and policy digest check; required for patch overrides.</param>
     /// <param name="localRun">The optional managed local run whose command cleanup and package cache are tracked.</param>
+    /// <param name="runProducerCommand">Optional override for executing registered producers' commands.</param>
     internal static async Task<int> RunAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
-        Func<CancellationToken, Task>? verifyLocalSourceAsync = null, LocalEvidenceRun? localRun = null)
+        Func<CancellationToken, Task>? verifyLocalSourceAsync = null, LocalEvidenceRun? localRun = null,
+        Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>>? runProducerCommand = null)
     {
         var operation = Required(options, "--operation");
         if (operation is not ("plan" or "run" or "verify")) throw new ArgumentException("Operation must be plan, run or verify.");
@@ -120,11 +122,11 @@ internal static class RepositoryEvidenceWorkflow
         await File.WriteAllTextAsync(Path.Join(output, "evidence-summary.md"), Summary(plan), cancellationToken);
         if (operation == "plan") return 0;
 
-        Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>>? command = null;
+        var command = runProducerCommand;
         if (localRun is not null)
         {
-            var runner = new EvidenceCommandRunner();
-            command = (request, token) => localRun.ObserveCommandAsync(runner.RunAsync, request, token);
+            var runner = runProducerCommand ?? new EvidenceCommandRunner().RunAsync;
+            command = (request, token) => localRun.ObserveCommandAsync(runner, request, token);
         }
 
         await using var host = EvidenceHostBootstrap.Create(plan, registration =>
@@ -133,8 +135,8 @@ internal static class RepositoryEvidenceWorkflow
             {
                 IEvidenceProducer producer = declaration.Id switch
                 {
-                    "packed-storage" => new PackedStorageProducer(settings!),
-                    "installed-consumer" => new InstalledConsumerProducer(settings!),
+                    "packed-storage" => new PackedStorageProducer(settings!, command),
+                    "installed-consumer" => new InstalledConsumerProducer(settings!, command),
                     "solution-coverage" => new SolutionCoverageProducer(checks!, command),
                     "package-checks" => new PackageChecksProducer(checks!, command),
                     _ => throw new InvalidOperationException("Unsupported repository evidence producer."),
