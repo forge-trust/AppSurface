@@ -37,8 +37,8 @@ public sealed class EvidenceOrdinaryDeliveryContractTests
 
         if (captureReceipt)
         {
-            var failure = Assert.Throws<CoverageEvidenceInventoryException>(() =>
-                CoverageEvidenceInventory.Capture(fixture.Source, execution, fixture.Publications, CancellationToken.None));
+            var failure = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(() =>
+                CoverageEvidenceInventory.CaptureAsync(fixture.Source, execution, fixture.Publications, CancellationToken.None));
             Assert.Equal("inventory-required-file-missing", failure.Reason);
         }
         else

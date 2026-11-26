@@ -11,7 +11,7 @@ public sealed class EvidenceCoverageSidecarSnapshotTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void SidecarDigestBindsTheParsedBytesEvenWhenTheFileChangesAfterParsing(bool mutate)
+    public async Task SidecarDigestBindsTheParsedBytesEvenWhenTheFileChangesAfterParsing(bool mutate)
     {
         using var directory = TestDirectory.Create();
         var coverage = TestPathUtils.PathUnder(directory.Path, "coverage");
@@ -44,7 +44,7 @@ public sealed class EvidenceCoverageSidecarSnapshotTests
         var mutated = JsonSerializer.SerializeToUtf8Bytes(run with
         { ManifestBase = run.ManifestBase with { Outcome = "failure" } }, options);
 
-        CoverageEvidenceInventory Capture() => CoverageEvidenceInventory.Capture(directory.Path, execution,
+        Task<CoverageEvidenceInventory> CaptureAsync() => CoverageEvidenceInventory.CaptureAsync(directory.Path, execution,
             publications, CancellationToken.None, () =>
             {
                 if (mutate) File.WriteAllBytes(sidecar, mutated);
@@ -52,13 +52,13 @@ public sealed class EvidenceCoverageSidecarSnapshotTests
 
         if (mutate)
         {
-            var error = Assert.Throws<CoverageEvidenceInventoryException>(Capture);
+            var error = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(CaptureAsync);
             Assert.Equal("inventory-file-changed", error.Reason);
             Assert.Equal(mutated, File.ReadAllBytes(sidecar));
         }
         else
         {
-            var captured = Assert.Single(Capture().Files, file => file.RelativePath.EndsWith(CoverageArtifactSession.SidecarName, StringComparison.Ordinal));
+            var captured = Assert.Single((await CaptureAsync()).Files, file => file.RelativePath.EndsWith(CoverageArtifactSession.SidecarName, StringComparison.Ordinal));
             Assert.Equal(original.Length, captured.LengthBytes);
             Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(original)), captured.Sha256);
         }

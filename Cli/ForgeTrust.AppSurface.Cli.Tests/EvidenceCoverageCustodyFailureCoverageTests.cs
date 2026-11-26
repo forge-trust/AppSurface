@@ -41,7 +41,6 @@ public sealed class EvidenceCoverageCustodyFailureCoverageTests
 
             Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
             Assert.Equal(Declaration().AssertionIds, execution.Result.SatisfiedAssertionIds);
-            Assert.Null(execution.Inventory);
             Assert.Null(execution.Result.Artifacts);
             Assert.Equal("inventory-unavailable", execution.InventoryIneligibilityReason);
             Assert.Contains("Coverage gate passed", execution.Result.Diagnostic!, StringComparison.Ordinal);
@@ -84,7 +83,6 @@ public sealed class EvidenceCoverageCustodyFailureCoverageTests
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Equal(declaration.AssertionIds, execution.Result.SatisfiedAssertionIds);
-        Assert.Null(execution.Inventory);
         Assert.Null(execution.Result.Artifacts);
         Assert.Equal(reason, execution.InventoryIneligibilityReason);
         Assert.Empty(writer.WrittenArtifacts);
@@ -144,7 +142,6 @@ public sealed class EvidenceCoverageCustodyFailureCoverageTests
 
         Assert.Equal(EvidenceProducerOutcome.Failed, execution.Result.Outcome);
         Assert.Empty(execution.Result.SatisfiedAssertionIds);
-        Assert.Null(execution.Inventory);
         Assert.Null(execution.Result.Artifacts);
         Assert.Equal("inventory-result-not-passed", execution.InventoryIneligibilityReason);
         Assert.Contains("Original reports remain in the execution output", execution.Result.Diagnostic!, StringComparison.Ordinal);

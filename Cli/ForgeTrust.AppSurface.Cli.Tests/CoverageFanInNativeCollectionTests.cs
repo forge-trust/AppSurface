@@ -390,7 +390,10 @@ public sealed class CoverageFanInNativeCollectionTests
     {
         using var fixture = await Fixture.Create(fallback);
         await fixture.CapturePrimary();
-        var captured = await CoverageFanIn.CaptureAsync(fixture.NativeRequest());
+        var inputs = NativeCoverageCaptureInputs.FromCollection(Path.GetDirectoryName(fixture.Timings)!,
+            Fixture.Projects, checked((int)new CoverageOperationLimits().JsonBytes));
+        var request = fixture.NativeRequest() with { TimingsPath = inputs.TimingsPath, RawCoveragePaths = inputs.RawCoveragePaths };
+        var captured = await CoverageFanIn.CaptureAsync(request);
         AssertSuccess(captured);
         Assert.Equal(CoverageObservation.TrustedProducer, captured.Observation);
         Assert.Equal(Fixture.PayloadNames.Append("generation.json").Order(StringComparer.Ordinal).ToArray(),
@@ -682,6 +685,7 @@ public sealed class CoverageFanInNativeCollectionTests
                     exitCode = 0,
                     executionStatus = "completed",
                     coverageArtifactStatus = "produced",
+                    coverageFile = $"raw-{index}.xml",
                     invocationDirectory = $"projects/project-{index}/collector-results/invocation"
                 })
             }));

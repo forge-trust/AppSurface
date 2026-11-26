@@ -242,8 +242,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
 
     private async Task HandleConnectionAsync(long handlerId, NamedPipeServerStream pipe)
     {
-        var admitted = false;
-        var completed = false;
+        var ownsEnrollment = false;
         try
         {
             using var beginCancellation = CancellationTokenSource.CreateLinkedTokenSource(_pendingStop.Token);
@@ -268,7 +267,7 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
                 {
                     _admitted++;
                     _active++;
-                    admitted = true;
+                    ownsEnrollment = true;
                     _pendingPipes.Remove(handlerId);
                     childId = Guid.NewGuid();
                 }
@@ -288,21 +287,16 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
             if (!EvidenceOwnedChildWire.IsCompletion(complete, childId))
                 throw new IOException("Admitted child did not send its completion frame.");
 
-            lock (_gate)
-            {
-                _active--;
-                admitted = false;
-                completed = true;
-                UpdateSettlementLocked();
-            }
+            ownsEnrollment = false;
+            SettleEnrollment(completionConfirmed: true);
             await EvidenceOwnedChildWire.WriteFrameAsync(pipe,
                 EvidenceOwnedChildWire.FormatDone(childId), CancellationToken.None).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!admitted) { }
+        catch (OperationCanceledException) when (!ownsEnrollment) { }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException) { }
         finally
         {
-            if (admitted && !completed) MarkUnknown();
+            if (ownsEnrollment) SettleEnrollment(completionConfirmed: false);
             lock (_gate)
             {
                 _pendingPipes.Remove(handlerId);
@@ -318,12 +312,12 @@ internal sealed class EvidenceChildLifetimeSession : IAsyncDisposable
         return received.Length == expected.Length && CryptographicOperations.FixedTimeEquals(received, expected);
     }
 
-    private void MarkUnknown()
+    private void SettleEnrollment(bool completionConfirmed)
     {
         lock (_gate)
         {
-            _unknown = true;
-            if (_active > 0) _active--;
+            _active--;
+            _unknown |= !completionConfirmed;
             UpdateSettlementLocked();
         }
     }

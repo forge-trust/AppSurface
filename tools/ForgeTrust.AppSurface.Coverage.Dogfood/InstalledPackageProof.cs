@@ -38,12 +38,7 @@ internal static class InstalledPackageProof
                 sourceCommit = commit;
                 var firstPartyDependencies = document.Descendants().Where(x => x.Name.LocalName == "dependency"
                     && ((string?)x.Attribute("id"))?.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase) == true).ToArray();
-                var privateDependencyId = id switch
-                {
-                    "ForgeTrust.AppSurface.Coverage" => "ForgeTrust.AppSurface.Evidence.Coverage",
-                    "ForgeTrust.AppSurface.Evidence.Coverage" => "ForgeTrust.AppSurface.Evidence.Contracts",
-                    _ => null
-                };
+                var privateDependencyId = PrivatePackageEdges.RequiredDependency(id);
                 if (privateDependencyId is not null)
                 {
                     // A private edge is mandatory in every framework group, or in the ungrouped container.

@@ -238,6 +238,46 @@ internal sealed partial class CoverageRunOutputLease
         VerifyBinding();
     }
 
+    /// <summary>Opens an existing immediate child bound to this retained parent.</summary>
+    /// <param name="name">One portable path component.</param>
+    /// <param name="requirePrivate">Whether the existing child must have current-user private access.</param>
+    /// <returns>A caller-owned child lease, or null if the child is missing under the still-bound parent.</returns>
+    /// <exception cref="IOException">The path no longer resolves through the retained parent.</exception>
+    internal CoverageRunOutputLease? OpenArtifactChildDirectory(string name, bool requirePrivate)
+    {
+        ValidateArtifactComponent(name);
+        var parentHandle = _outputHandle ?? throw new ObjectDisposedException(nameof(CoverageRunOutputLease));
+        var child = AcquireArtifactDirectory(Path.Join(_outputPath, name), createMissing: false, requirePrivate);
+        if (child is null)
+        {
+            VerifyBinding();
+            return null;
+        }
+
+        try
+        {
+            // The child traversal retains the actual parent it opened, even if the pathname was rebound.
+            var sameParent = OperatingSystem.IsWindows()
+                ? GetWindowsIdentity(child._windowsHandles[^2]) == GetWindowsIdentity(parentHandle)
+                : GetUnixIdentity(child._unixHandles[^2]) == GetUnixIdentity(parentHandle);
+            if (!sameParent) throw new IOException("The artifact child is no longer under the retained parent.");
+            return child;
+        }
+        catch
+        {
+            child.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Opens a bound immediate child or creates a missing child with private access.</summary>
+    /// <param name="name">One portable path component.</param>
+    /// <param name="requirePrivate">Whether the existing child must have current-user private access.</param>
+    /// <returns>The caller-owned child directory lease.</returns>
+    /// <remarks>Existing children are never replaced or repaired. A competing creation can be refused.</remarks>
+    internal CoverageRunOutputLease OpenOrCreateArtifactChildDirectory(string name, bool requirePrivate)
+        => OpenArtifactChildDirectory(name, requirePrivate) ?? CreateArtifactDirectory(name);
+
     /// <summary>Creates a private immediate child and retains its complete no-follow path.</summary>
     /// <param name="name">One portable path component.</param>
     /// <param name="beforeCreate">Optional per-call race observation after preflight; native creation still requires a fresh destination.</param>
@@ -269,7 +309,7 @@ internal sealed partial class CoverageRunOutputLease
                 throw NativeIOException("Unable to restrict newly created private directory permissions.");
         }
         VerifyBinding();
-        return AcquireArtifactDirectory(Path.Join(_outputPath, name), createMissing: false, requirePrivate: true)
+        return OpenArtifactChildDirectory(name, requirePrivate: true)
             ?? throw new IOException("Created artifact directory disappeared.");
     }
 

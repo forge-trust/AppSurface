@@ -198,9 +198,9 @@ internal static class EvidenceReceiptPayload
 
         var artifacts = originResult.Artifacts ?? [];
         await VerifyArtifactsAsync(payload, artifacts, cancellationToken).ConfigureAwait(false);
-        if (producer.Kind.Equals("coverage", StringComparison.OrdinalIgnoreCase))
-            ValidateCoverageReceiptInventory(producer, artifacts,
-                Path.Combine(payload.ArtifactDirectoryPath, ReceiptDocuments.ArtifactsDirectoryName), cancellationToken);
+        if (producer.IsCoverageProducer())
+            await ValidateCoverageReceiptInventoryAsync(producer, artifacts,
+                Path.Combine(payload.ArtifactDirectoryPath, ReceiptDocuments.ArtifactsDirectoryName), cancellationToken).ConfigureAwait(false);
         return (origin with { Result = originResult }, completedAt);
     }
 
@@ -315,8 +315,8 @@ internal static class EvidenceReceiptPayload
             await VerifyArtifactBytesAsync(root, artifacts, requirePrivate: false,
                 "Source artifact inventory digest or size differs.", cancellationToken).ConfigureAwait(false);
         }
-        if (producer.Kind.Equals("coverage", StringComparison.OrdinalIgnoreCase))
-            ValidateCoverageReceiptInventory(producer, artifacts, sourceRoot, cancellationToken);
+        if (producer.IsCoverageProducer())
+            await ValidateCoverageReceiptInventoryAsync(producer, artifacts, sourceRoot, cancellationToken).ConfigureAwait(false);
         // Source roots may also contain invocation plans and original execution output. Only the
         // declared writer inventory is copied; the staged/retained receipt tree must be exact.
     }
@@ -413,13 +413,11 @@ internal static class EvidenceReceiptPayload
             throw new InvalidDataException("Receipt artifact tree exceeds its bounded entry count.");
     }
 
-    private static void ValidateCoverageReceiptInventory(EvidenceProducerDeclaration producer,
+    private static async Task ValidateCoverageReceiptInventoryAsync(EvidenceProducerDeclaration producer,
         IReadOnlyList<EvidenceArtifactResult> artifacts, string artifactRoot, CancellationToken cancellationToken)
     {
-        var slot = producer.ArtifactSlots.SingleOrDefault(item => item.LogicalName == CoverageEvidenceInventory.LogicalName);
-        if (slot is null || slot.RelativeRoot != "coverage" || slot.MaximumFiles is null
-            || slot.MaximumFiles > CoverageEvidenceInventory.MaximumFiles)
-            throw new CoverageEvidenceInventoryException("inventory-slot-ineligible");
+        var slot = CoverageEvidenceInventory.RequireSlotDeclaration(
+            producer.ArtifactSlots.SingleOrDefault(item => item.LogicalName == CoverageEvidenceInventory.LogicalName));
 
         var files = artifacts.Where(item => item.LogicalName == CoverageEvidenceInventory.LogicalName)
             .Select(item => new CoverageReportFile(item.RelativePath, item.LengthBytes, item.Sha256))
@@ -429,7 +427,7 @@ internal static class EvidenceReceiptPayload
             throw new CoverageEvidenceInventoryException("inventory-required-file-missing");
 
         var inventory = new CoverageEvidenceInventory(CoverageEvidenceInventory.CurrentVersion, files);
-        inventory.Validate(artifactRoot, cancellationToken);
+        await inventory.ValidateAsync(artifactRoot, cancellationToken).ConfigureAwait(false);
         var names = files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal);
         CoverageReportSet.ValidateStoredReceipt(Path.GetFullPath(artifactRoot), names, cancellationToken);
     }
@@ -457,7 +455,7 @@ internal static class EvidenceReceiptPayload
             for (var index = 0; index < components.Length - 1; index++)
             {
                 current = createNew
-                    ? GetOrCreateSubdirectory(current, components[index])
+                    ? current.OpenOrCreateArtifactChildDirectory(components[index], requirePrivate: true)
                     : OpenSubdirectory(current, components[index], requirePrivate);
                 owned.Add(current);
             }
@@ -516,17 +514,8 @@ internal static class EvidenceReceiptPayload
     }
 
     private static CoverageRunOutputLease OpenSubdirectory(CoverageRunOutputLease parent, string name, bool requirePrivate = true)
-    {
-        CoverageRunOutputLease.ValidateArtifactComponent(name);
-        return CoverageRunOutputLease.AcquireArtifactDirectory(Path.Combine(parent.ArtifactDirectoryPath, name), false, requirePrivate)
+        => parent.OpenArtifactChildDirectory(name, requirePrivate)
             ?? throw new DirectoryNotFoundException("Receipt payload directory is missing.");
-    }
-
-    private static CoverageRunOutputLease GetOrCreateSubdirectory(CoverageRunOutputLease parent, string name)
-    {
-        try { return OpenSubdirectory(parent, name); }
-        catch (DirectoryNotFoundException) { return parent.CreateArtifactDirectory(name); }
-    }
 
     private static void DisposeArtifactDirectories(IReadOnlyList<CoverageRunOutputLease> roots)
     {

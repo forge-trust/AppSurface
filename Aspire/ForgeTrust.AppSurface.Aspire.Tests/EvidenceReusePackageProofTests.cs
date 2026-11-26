@@ -22,13 +22,26 @@ public sealed class EvidenceReusePackageProofTests
     {
         using var fixture = new FeedFixture();
         var result = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
-        Assert.Equal(7, result.Count);
-        foreach (var package in result.Values)
+        Assert.Equal(7, result.Packages.Count);
+        foreach (var package in result.Packages.Values)
         {
             Assert.Equal(Commit, package.SourceCommit);
             Assert.Equal(Version, package.Version);
             Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(package.Archive))), package.Sha256);
             Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(package.Id))), package.AssemblySha256);
+        }
+
+        using var tool = ZipFile.OpenRead(result.Packages["ForgeTrust.AppSurface.Cli"].Archive);
+        Assert.Equal(
+            ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Coverage", "ForgeTrust.AppSurface.Evidence.Cli",
+                "ForgeTrust.AppSurface.Evidence.Contracts", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Evidence.Planner"],
+            result.ToolAssemblyHashes.Keys.Order(StringComparer.Ordinal));
+        foreach (var (id, sha256) in result.ToolAssemblyHashes)
+        {
+            var entry = tool.GetEntry($"tools/net10.0/any/{id}.dll");
+            Assert.NotNull(entry);
+            using var contents = entry.Open();
+            Assert.Equal(Convert.ToHexStringLower(await SHA256.HashDataAsync(contents)), sha256);
         }
     }
 
@@ -52,7 +65,7 @@ public sealed class EvidenceReusePackageProofTests
     {
         using var fixture = new FeedFixture(shape);
 
-        var packages = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
+        var (packages, _) = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
 
         Assert.Equal(7, packages.Count);
         Assert.Contains("ForgeTrust.AppSurface.Evidence.Coverage", packages.Keys);
@@ -63,7 +76,7 @@ public sealed class EvidenceReusePackageProofTests
     {
         using var fixture = new FeedFixture("unrelated-tool-family");
 
-        var packages = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
+        var (packages, _) = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
 
         Assert.Equal(7, packages.Count);
     }
@@ -74,7 +87,7 @@ public sealed class EvidenceReusePackageProofTests
     public async Task CoherentBundledBuildVersionMayDifferFromPackageVersionWhenCandidateDllHashesAgree(string versionShape)
     {
         using var fixture = new FeedFixture(versionShape);
-        var packages = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
+        var (packages, _) = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
         Assert.Equal(7, packages.Count);
     }
 
@@ -226,6 +239,63 @@ public sealed class EvidenceReusePackageProofTests
             }
             Assert.True(joined, "The proof task and its owned SDK probe must both be joined before the test exits.");
             // If joining fails, retain feed, output, and probe files for diagnosis.
+        }
+    }
+
+    [Fact]
+    public async Task ReportsPrimarySdkFailureWhenFailureReportCannotBeWritten()
+    {
+        var feed = new FeedFixture();
+        using var probe = new SdkCancellationProbeFixture(feed.Root);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        var scratch = Directory.CreateTempSubdirectory("packed-proof-report-write-failure-");
+        var output = TestPathUtils.PathUnder(scratch.FullName, "output");
+        var originalError = global::System.Console.Error;
+        using var error = new StringWriter();
+        global::System.Console.SetError(error);
+        var run = EvidenceReusePackageProof.RunAsync(feed.Root, Version, output,
+            probe.ExecutablePath, Commit, deadline.Token);
+        Process? process = null;
+
+        try
+        {
+            while ((process = TryGetProbeProcess(probe.ProbeRoot, probe.ExecutablePath)) is null)
+            {
+                // gstack-timing-ok: wait for the live probe to publish its PID before replacing the report path.
+                await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+            }
+
+            Assert.False(run.IsCompleted);
+            Assert.True(Directory.Exists(output));
+            var reportPath = TestPathUtils.PathUnder(output, "proof.json");
+            Directory.CreateDirectory(reportPath);
+            await File.WriteAllTextAsync(probe.StopPath, "stop", deadline.Token);
+
+            Assert.Equal(1, await run.WaitAsync(deadline.Token));
+            var diagnostics = error.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+            Assert.Collection(diagnostics,
+                original => Assert.StartsWith(
+                    "ASEVD917 Packed reuse proof failed at admission: Native validation contract failed: packed-reuse/pinned-sdk-",
+                    original, StringComparison.Ordinal),
+                secondary => Assert.Equal("ASEVD917 Could not write the packed reuse failure report 'proof.json'.", secondary));
+            Assert.True(process.HasExited);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(reportPath));
+        }
+        finally
+        {
+            global::System.Console.SetError(originalError);
+            try
+            {
+                await deadline.CancelAsync();
+                try { await run.WaitAsync(TimeSpan.FromSeconds(10)); }
+                catch (Exception) when (run.IsCompleted) { }
+                if (process is null || process.HasExited)
+                {
+                    feed.Dispose();
+                    scratch.Delete(recursive: true);
+                }
+            }
+            finally { process?.Dispose(); }
         }
     }
 
@@ -384,6 +454,7 @@ public sealed class EvidenceReusePackageProofTests
     [InlineData("missing-tool-components")]
     [InlineData("case-tool-component")]
     [InlineData("missing-required-tool-component")]
+    [InlineData("malformed-tool-component-key")]
     public async Task MalformedCandidateArchivesCannotCreateConsumerState(string defect)
     {
         using var fixture = new FeedFixture();
@@ -431,6 +502,10 @@ public sealed class EvidenceReusePackageProofTests
                         var value = libraries[component]!.DeepClone();
                         libraries.Remove(component);
                         libraries[component.ToLowerInvariant()] = value;
+                    }
+                    else if (defect == "malformed-tool-component-key")
+                    {
+                        libraries["ForgeTrust.AppSurface.Evidence.Readiness/extra/" + Version] = libraries[component]!.DeepClone();
                     }
                     else libraries.Remove(component);
                     contents = document.ToJsonString();
@@ -496,6 +571,12 @@ public sealed class EvidenceReusePackageProofTests
         writer.Write(contents);
     }
 
+    private static void ReplaceStageLogWithEmptyDirectory(string logPath)
+    {
+        File.Delete(logPath);
+        Directory.CreateDirectory(logPath);
+    }
+
     private static string FindSourceRepository()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
@@ -513,7 +594,7 @@ public sealed class EvidenceReusePackageProofTests
         {
             // These archives have an admitted graph and hashes, but deliberately lack tool-install metadata.
             // An actual SDK failure must become retained failed evidence, never a complete proof.
-            var admitted = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
+            var (admitted, _) = await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit);
             Assert.Equal(7, admitted.Count);
             using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 
@@ -547,7 +628,7 @@ public sealed class EvidenceReusePackageProofTests
         {
             await File.WriteAllBytesAsync(sdk, sdkBytes);
             Assert.True(File.Exists(sdk));
-            Assert.Equal(7, (await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit)).Count);
+            Assert.Equal(7, (await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit)).Packages.Count);
 
             var result = await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
                 sdk, Commit, CancellationToken.None);
@@ -576,7 +657,7 @@ public sealed class EvidenceReusePackageProofTests
         using var probe = new SdkCancellationProbeFixture(fixture.Root, "nonzero", secret);
         try
         {
-            Assert.Equal(7, (await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit)).Count);
+            Assert.Equal(7, (await EvidenceReusePackageAdmission.InspectFeedAsync(fixture.Root, Version, Commit)).Packages.Count);
 
             var result = await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
                 probe.ExecutablePath, Commit, CancellationToken.None);
@@ -598,6 +679,39 @@ public sealed class EvidenceReusePackageProofTests
             Assert.False(Directory.Exists(TestPathUtils.PathUnder(output, "cli-inputs")));
         }
         finally { Directory.Delete(scratch.FullName, recursive: true); }
+    }
+
+    [Fact]
+    public async Task NonzeroProbeExitIsReturnedWhenFinalStageLogCannotBeWritten()
+    {
+        using var fixture = new FeedFixture();
+        using var probe = new SdkCancellationProbeFixture(fixture.Root, "nonzero");
+        var logPath = TestPathUtils.PathUnder(fixture.Root, "sdk.log");
+        var start = PackedProofProcess.CreateStartInfo(probe.ExecutablePath, [], fixture.Root);
+
+        var result = await PackedProofProcess.RunAsync("sdk", start, fixture.Root, CancellationToken.None,
+            stageTimeout: TimeSpan.FromSeconds(30), recordExit: _ => ReplaceStageLogWithEmptyDirectory(logPath));
+
+        Assert.Equal(17, result.ExitCode);
+        Assert.Null(result.LogPath);
+        Assert.True(Directory.Exists(logPath));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(logPath));
+    }
+
+    [Fact]
+    public async Task ExcessiveProbeOutputPreservesItsFailureWhenFinalStageLogCannotBeWritten()
+    {
+        using var fixture = new FeedFixture();
+        using var probe = new SdkCancellationProbeFixture(fixture.Root, "excessive-stdout");
+        var logPath = TestPathUtils.PathUnder(fixture.Root, "sdk.log");
+        var start = PackedProofProcess.CreateStartInfo(probe.ExecutablePath, [], fixture.Root);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => PackedProofProcess.RunAsync("sdk", start,
+            fixture.Root, CancellationToken.None, stageTimeout: TimeSpan.FromSeconds(30),
+            recordExit: _ => ReplaceStageLogWithEmptyDirectory(logPath)));
+
+        Assert.True(Directory.Exists(logPath));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(logPath));
     }
 
     [Theory]

@@ -115,9 +115,9 @@ internal sealed class CoverageEvidenceProducer
         ArgumentNullException.ThrowIfNull(writers);
 
         static CoverageEvidenceProducerExecutionResult Finish(EvidenceProducerResult result)
-            => new(result, null, "inventory-result-not-passed");
+            => new(result, "inventory-result-not-passed");
 
-        if (!string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase))
+        if (!producer.IsCoverageProducer())
         {
             return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Unavailable, [], $"Producer kind '{producer.Kind}' requires an explicit consumer EvidenceHost registration."));
         }
@@ -178,17 +178,24 @@ internal sealed class CoverageEvidenceProducer
                 return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], "The existing AppSurface coverage workflow reported a failed test, merge, or artifact step."));
             }
 
-            return await CompletePostGateAsync(
-                producer,
-                outputDirectory,
-                finalReportRoot,
-                result,
-                producerDeadline,
-                receiptWriter,
-                cancellationToken,
-                executionCancellation.Token,
-                beforeCustodyForTests,
-                inventoryReason).ConfigureAwait(false);
+            var gate = result.Gate ?? throw new InvalidOperationException("A successful coverage run must produce a gate result.");
+            var ordinary = gate.Passed
+                ? new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, producer.AssertionIds, $"Coverage gate passed: {gate.MarkdownReportPath}")
+                : new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"Coverage gate did not meet its declared threshold. See {gate.MarkdownReportPath}.");
+            if (finalReportRoot is not null)
+            {
+                var delivery = await DeliverOrdinaryReportsAsync(ordinary, outputDirectory, finalReportRoot, result,
+                    executionCancellation.Token).ConfigureAwait(false);
+                ordinary = delivery.Result;
+                inventoryReason = delivery.IneligibilityReason ?? inventoryReason;
+            }
+
+            if (ordinary.Outcome != EvidenceProducerOutcome.Passed) return Finish(ordinary);
+            if (receiptWriter is null) return new(ordinary, inventoryReason);
+
+            var custody = await CaptureReceiptCustodyAsync(producer, outputDirectory, finalReportRoot, result,
+                receiptWriter, producerDeadline, beforeCustodyForTests, cancellationToken).ConfigureAwait(false);
+            return new(ordinary with { Artifacts = custody.Artifacts }, custody.IneligibilityReason ?? inventoryReason);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -226,99 +233,80 @@ internal sealed class CoverageEvidenceProducer
         }
     }
 
-    private async Task<CoverageEvidenceProducerExecutionResult> CompletePostGateAsync(
+    private static async Task<(EvidenceProducerResult Result, string? IneligibilityReason)> DeliverOrdinaryReportsAsync(
+        EvidenceProducerResult ordinary,
+        string outputDirectory,
+        string finalReportRoot,
+        CoverageEvidenceExecutionResult execution,
+        CancellationToken cancellationToken)
+    {
+        if (execution.OrdinaryPublications is not { } publications
+            || execution.OrdinaryPublicationIneligibilityReason is not null)
+        {
+            // Keep the original reports and gate result when the publication inventory is uncertain.
+            return (ordinary, execution.OrdinaryPublicationIneligibilityReason ?? "ordinary-publications-unavailable");
+        }
+
+        var promotion = await TryPreserveOrdinaryReportsAsync(outputDirectory, finalReportRoot, execution,
+            publications, cancellationToken).ConfigureAwait(false);
+        if (promotion.Complete)
+            return (ordinary with { Diagnostic = RebaseReportPath(ordinary.Diagnostic, outputDirectory, finalReportRoot) }, null);
+
+        return (ordinary with
+        {
+            Outcome = EvidenceProducerOutcome.Failed,
+            SatisfiedAssertionIds = [],
+            Artifacts = null,
+            Diagnostic = ordinary.Diagnostic + " Ordinary report promotion is unavailable ("
+                + promotion.Reason + "). Original reports remain in the execution output.",
+        }, promotion.Reason);
+    }
+
+    private async Task<(IReadOnlyList<EvidenceArtifactResult>? Artifacts, string? IneligibilityReason)> CaptureReceiptCustodyAsync(
         EvidenceProducerDeclaration producer,
         string outputDirectory,
         string? finalReportRoot,
         CoverageEvidenceExecutionResult execution,
+        EvidenceArtifactWriter receiptWriter,
         CoverageProducerDeadline producerDeadline,
-        EvidenceArtifactWriter? receiptWriter,
-        CancellationToken callerCancellationToken,
-        CancellationToken executionCancellationToken,
         Action? beforeCustodyForTests,
-        string? inventoryReason)
+        CancellationToken callerCancellationToken)
     {
-        CoverageEvidenceInventory? inventory = null;
-        var gateResult = execution.Gate ?? throw new InvalidOperationException("A successful coverage run must produce a gate result.");
-        var ordinary = gateResult.Passed
-            ? new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, producer.AssertionIds, $"Coverage gate passed: {gateResult.MarkdownReportPath}")
-            : new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"Coverage gate did not meet its declared threshold. See {gateResult.MarkdownReportPath}.");
-        if (finalReportRoot is not null)
+        // Use the remaining producer budget after ordinary delivery. Its expiry only affects receipt eligibility.
+        var custodyBudget = producerDeadline.Remaining;
+        using var custodyDeadline = new CancellationTokenSource(custodyBudget, _clock);
+        if (custodyBudget == TimeSpan.Zero) custodyDeadline.Cancel();
+        using var custodyCancellation = CancellationTokenSource.CreateLinkedTokenSource(callerCancellationToken, custodyDeadline.Token);
+        var custodyToken = custodyCancellation.Token;
+        try
         {
-            if (execution.OrdinaryPublications is { } ordinaryPublications
-                && execution.OrdinaryPublicationIneligibilityReason is null)
-            {
-                var promotion = await TryPreserveOrdinaryReportsAsync(outputDirectory, finalReportRoot, execution,
-                    ordinaryPublications, executionCancellationToken).ConfigureAwait(false);
-                if (promotion.Complete)
-                    ordinary = ordinary with { Diagnostic = RebaseReportPath(ordinary.Diagnostic, outputDirectory, finalReportRoot) };
-                else
-                {
-                    inventoryReason = promotion.Reason;
-                    ordinary = ordinary with
-                    {
-                        Outcome = EvidenceProducerOutcome.Failed,
-                        SatisfiedAssertionIds = [],
-                        Artifacts = null,
-                        Diagnostic = ordinary.Diagnostic + " Ordinary report promotion is unavailable ("
-                            + promotion.Reason + "). Original reports remain in the execution output.",
-                    };
-                }
-            }
-            else
-            {
-                // Optional capture uncertainty cannot rewrite the actual collection/gate result. Keep the
-                // original reports and their actionable diagnostic; no receipt or artifact subset is admitted.
-                inventoryReason = execution.OrdinaryPublicationIneligibilityReason ?? "ordinary-publications-unavailable";
-            }
-        }
-        if (receiptWriter is not null && ordinary.Outcome == EvidenceProducerOutcome.Passed)
-        {
-            // Ordinary delivery has already completed. Optional custody consumes only the original remaining
-            // producer budget, using its own cancellation source so expiration cannot replace that fresh result.
-            var custodyBudget = producerDeadline.Remaining;
-            using var custodyDeadline = new CancellationTokenSource(custodyBudget, _clock);
-            if (custodyBudget == TimeSpan.Zero) custodyDeadline.Cancel();
-            using var custodyCancellation = CancellationTokenSource.CreateLinkedTokenSource(callerCancellationToken, custodyDeadline.Token);
-            try
-            {
-                beforeCustodyForTests?.Invoke();
-                var publications = execution.OrdinaryPublications
-                    ?? throw new CoverageEvidenceInventoryException(execution.OrdinaryPublicationIneligibilityReason ?? "inventory-unavailable");
-                inventory = CoverageEvidenceInventory.Capture(outputDirectory, execution, publications, custodyCancellation.Token);
-                var slot = producer.ArtifactSlots.SingleOrDefault(slot => slot.LogicalName == CoverageEvidenceInventory.LogicalName)
-                    ?? throw new CoverageEvidenceInventoryException("inventory-slot-missing");
-                inventory.ValidateSlot(receiptWriter, slot);
-                IReadOnlyList<EvidenceArtifactResult> artifacts;
-                if (finalReportRoot is not null)
-                {
-                    // Required reports already exist here. Atomic, non-overwriting delivery adds only missing
-                    // optional metadata; rejected custody can never overwrite or poison an ordinary report.
-                    await PromoteReportsAsync(outputDirectory, finalReportRoot, execution, inventory.Files,
-                        custodyCancellation.Token).ConfigureAwait(false);
-                    artifacts = inventory.AdoptDelivered(receiptWriter, slot, finalReportRoot, custodyCancellation.Token);
-                }
-                else
-                    artifacts = await inventory.WriteAsync(receiptWriter, slot, outputDirectory, custodyCancellation.Token).ConfigureAwait(false);
-                ordinary = ordinary with { Artifacts = artifacts };
-            }
-            catch (OperationCanceledException) when (!callerCancellationToken.IsCancellationRequested && custodyDeadline.IsCancellationRequested)
-            {
-                inventory = null;
-                inventoryReason = "inventory-deadline";
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
-            {
-                inventory = null;
-                inventoryReason = exception is CoverageEvidenceInventoryException failure
-                    ? failure.Reason : "inventory-custody-unavailable";
-            }
-        }
+            beforeCustodyForTests?.Invoke();
+            var publications = execution.OrdinaryPublications
+                ?? throw new CoverageEvidenceInventoryException(execution.OrdinaryPublicationIneligibilityReason ?? "inventory-unavailable");
+            var inventory = await CoverageEvidenceInventory.CaptureAsync(outputDirectory, execution, publications, custodyToken)
+                .ConfigureAwait(false);
+            var slot = producer.ArtifactSlots.SingleOrDefault(slot => slot.LogicalName == CoverageEvidenceInventory.LogicalName)
+                ?? throw new CoverageEvidenceInventoryException("inventory-slot-missing");
+            inventory.ValidateSlot(receiptWriter, slot);
+            if (finalReportRoot is null)
+                return (await inventory.WriteAsync(receiptWriter, slot, outputDirectory, custodyToken).ConfigureAwait(false), null);
 
-        return ordinary.Outcome == EvidenceProducerOutcome.Passed
-            ? new(ordinary, inventory, inventoryReason)
-            : new(ordinary, null, "inventory-result-not-passed");
+            // Required reports already exist here. Atomic, non-overwriting delivery adds only missing optional metadata.
+            await PromoteReportsAsync(outputDirectory, finalReportRoot, execution, inventory.Files, custodyToken).ConfigureAwait(false);
+            var artifacts = await inventory.AdoptDeliveredAsync(receiptWriter, slot, finalReportRoot, custodyToken)
+                .ConfigureAwait(false);
+            return (artifacts, null);
+        }
+        catch (OperationCanceledException) when (!callerCancellationToken.IsCancellationRequested && custodyDeadline.IsCancellationRequested)
+        {
+            return (null, "inventory-deadline");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
+        {
+            return (null, exception is CoverageEvidenceInventoryException failure
+                ? failure.Reason : "inventory-custody-unavailable");
+        }
     }
 
     /// <summary>Builds the coverage engine request for the resolved built-in settings.</summary>
@@ -537,10 +525,7 @@ internal sealed class CoverageEvidenceProducer
         {
             foreach (var component in components)
             {
-                CoverageRunOutputLease.ValidateArtifactComponent(component);
-                var childPath = Path.Join(current.ArtifactDirectoryPath, component);
-                var child = CoverageRunOutputLease.AcquireArtifactDirectory(childPath, createMissing: false, requirePrivate: false)
-                    ?? current.CreateArtifactDirectory(component);
+                var child = current.OpenOrCreateArtifactChildDirectory(component, requirePrivate: false);
                 if (ownsCurrent) current.Dispose();
                 current = child;
                 ownsCurrent = true;
@@ -565,7 +550,5 @@ internal sealed class CoverageEvidenceProducer
 
 /// <summary>Internal coordinator result: ordinary coverage outcome plus complete optional receipt eligibility.</summary>
 /// <param name="Result">Fresh outcome, preserving Passed even when optional custody is unavailable.</param>
-/// <param name="Inventory">Complete versioned set; null means no receipt may be published.</param>
 /// <param name="InventoryIneligibilityReason">Bounded reason code, containing no raw paths or exception messages.</param>
-internal sealed record CoverageEvidenceProducerExecutionResult(EvidenceProducerResult Result,
-    CoverageEvidenceInventory? Inventory, string? InventoryIneligibilityReason);
+internal sealed record CoverageEvidenceProducerExecutionResult(EvidenceProducerResult Result, string? InventoryIneligibilityReason);

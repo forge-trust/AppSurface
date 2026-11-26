@@ -30,14 +30,22 @@ internal static class ValidationProof
     {
         var specification = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
         Require(specification.Length <= 1024 * 1024, "bounded package specification");
-        using var contents = specification.Open();
-        using var reader = XmlReader.Create(contents, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
-        var metadata = XDocument.Load(reader).Root!.Elements().Single(e => e.Name.LocalName == "metadata");
+        var metadata = ReadPackageMetadata(specification);
         string Value(string name) => metadata.Elements().Single(e => e.Name.LocalName == name).Value;
         Require(Value("id") == "ForgeTrust.AppSurface.Cli", "candidate package ID");
         Require(Value("version") == settings.PackageVersion, "candidate package version");
         var repository = metadata.Elements().Single(e => e.Name.LocalName == "repository");
         Require((string?)repository.Attribute("commit") == settings.ExpectedSourceCommit, "candidate source commit");
+    }
+
+    /// <summary>Reads the single direct metadata element of a package specification with DTD processing disabled.</summary>
+    /// <param name="specification">The NuSpec entry after the caller has applied its size limit.</param>
+    /// <returns>The package metadata used for identity and dependency validation.</returns>
+    internal static XElement ReadPackageMetadata(ZipArchiveEntry specification)
+    {
+        using var contents = specification.Open();
+        using var reader = XmlReader.Create(contents, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+        return XDocument.Load(reader).Root!.Elements().Single(element => element.Name.LocalName == "metadata");
     }
 
     /// <summary>Reads the CLI JSON data envelope while rejecting a non-object response.</summary>

@@ -14,6 +14,8 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// </remarks>
 internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<CoverageReportFile> Files)
 {
+    private const string SlotRoot = "coverage";
+
     /// <summary>The supported closed-inventory format.</summary>
     internal const int CurrentVersion = 1;
     /// <summary>The existing producer-wide uncompressed artifact limit, shared with the bounded writer.</summary>
@@ -35,7 +37,7 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     /// Legacy declarations are never modified implicitly. See the
     /// <see href="../../guides/evidence-reuse.md#coverage-report-custody">coverage report custody contract</see>.
     /// </remarks>
-    internal static EvidenceArtifactSlot CreateSlot() => new(LogicalName, "coverage", "application/octet-stream", false, MaximumBytes)
+    internal static EvidenceArtifactSlot CreateSlot() => new(LogicalName, SlotRoot, "application/octet-stream", false, MaximumBytes)
     { MaximumFiles = MaximumFiles };
 
     /// <summary>Captures required run/gate reports and every retained publication in the managed session.</summary>
@@ -52,7 +54,7 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     /// report delivery remains independent of this receipt-only limit. Project schema numbers must be integral,
     /// representable 32-bit values equal to the supported version; malformed numbers refuse receipt capture
     /// without replacing the actual fresh collection and gate outcome.</remarks>
-    internal static CoverageEvidenceInventory Capture(string outputRoot, CoverageEvidenceExecutionResult result,
+    internal static async Task<CoverageEvidenceInventory> CaptureAsync(string outputRoot, CoverageEvidenceExecutionResult result,
         IReadOnlyList<CoverageArtifactInventoryEntry> publications, CancellationToken token, Action? afterSidecarParsed = null)
     {
         if (!result.Run.Success || result.Gate is null || !result.Gate.Passed)
@@ -79,15 +81,18 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
                 paths.Add(new(manifestPath, bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes))));
             }
         var inventory = new CoverageEvidenceInventory(CurrentVersion, paths.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray());
-        inventory.Validate(root, token);
+        await inventory.ValidateAsync(root, token).ConfigureAwait(false);
         var names = inventory.Files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal);
         CoverageReportSet.ValidateReceiptCapture(root, names, result, token);
         return inventory;
     }
 
     /// <summary>Validates the entire closed set and its original bytes before any destination is written.</summary>
-    /// <remarks>Never trim or normalize receipt paths. Case collisions are rejected on every platform.</remarks>
-    internal void Validate(string outputRoot, CancellationToken token = default)
+    /// <param name="outputRoot">Run root containing the recorded report paths.</param>
+    /// <param name="token">Cancels inventory validation and the bounded reads of each report.</param>
+    /// <remarks>Reads exactly the declared length of each report and probes for one extra byte.
+    /// Never trim or normalize receipt paths. Case collisions are rejected on every platform.</remarks>
+    internal async Task ValidateAsync(string outputRoot, CancellationToken token = default)
     {
         if (Version != CurrentVersion) throw new CoverageEvidenceInventoryException("inventory-version-unsupported");
         if (Files.Count is 0 or > MaximumFiles) throw new CoverageEvidenceInventoryException("inventory-file-limit");
@@ -114,8 +119,10 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
             throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
         foreach (var file in Files)
         {
+            token.ThrowIfCancellationRequested();
             using var input = Open(outputRoot, file.RelativePath);
-            if (input.Length != file.LengthBytes || Hash(input, token) != file.Sha256)
+            var (status, digest) = await EvidenceArtifactStream.HashAsync(input, file.LengthBytes, token).ConfigureAwait(false);
+            if (status != EvidenceArtifactLengthStatus.Exact || digest != file.Sha256)
                 throw new CoverageEvidenceInventoryException("inventory-file-changed");
         }
     }
@@ -130,7 +137,7 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
         EvidenceArtifactSlot slot, string outputRoot, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        Validate(outputRoot, cancellationToken);
+        await ValidateAsync(outputRoot, cancellationToken).ConfigureAwait(false);
         ValidateSlot(writer, slot);
         var results = new List<EvidenceArtifactResult>(Files.Count);
         foreach (var file in Files)
@@ -144,14 +151,26 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
         return results;
     }
 
+    /// <summary>Requires the declared multi-file slot for coverage receipt custody.</summary>
+    /// <param name="slot">The slot selected by the caller, if declared.</param>
+    /// <returns>The verified declaration.</returns>
+    /// <exception cref="CoverageEvidenceInventoryException">The slot is absent or does not support coverage receipt custody.</exception>
+    internal static EvidenceArtifactSlot RequireSlotDeclaration(EvidenceArtifactSlot? slot)
+    {
+        if (slot is null || slot.LogicalName != LogicalName || slot.RelativeRoot != SlotRoot
+            || slot.MaximumFiles is null || slot.MaximumFiles > MaximumFiles)
+            throw new CoverageEvidenceInventoryException("inventory-slot-ineligible");
+        return slot;
+    }
+
     /// <summary>Checks complete custody bounds before any optional file is copied or registered.</summary>
     /// <param name="writer">Fresh bounded custody writer.</param>
     /// <param name="slot">Explicit report slot with sufficient count and aggregate byte capacity.</param>
     /// <exception cref="CoverageEvidenceInventoryException">The complete set cannot fit the declared custody slot.</exception>
     internal void ValidateSlot(EvidenceArtifactWriter writer, EvidenceArtifactSlot slot)
     {
-        if (slot.LogicalName != LogicalName || slot.RelativeRoot != "coverage" || slot.MaximumFiles is null
-            || slot.MaximumFiles > MaximumFiles || slot.MaximumFiles < Files.Count || slot.MaximumBytes < Files.Sum(file => file.LengthBytes)
+        RequireSlotDeclaration(slot);
+        if (slot.MaximumFiles < Files.Count || slot.MaximumBytes < Files.Sum(file => file.LengthBytes)
             || writer.WrittenArtifacts.Count != 0)
             throw new CoverageEvidenceInventoryException("inventory-slot-ineligible");
     }
@@ -164,12 +183,12 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     /// <returns>Complete bounded metadata after native no-follow validation of every report.</returns>
     /// <remarks>All slot and aggregate bounds are checked before registration. The coordinator must still verify
     /// the writer and final source bytes during receipt admission. This operation writes no report bytes.</remarks>
-    internal IReadOnlyList<EvidenceArtifactResult> AdoptDelivered(EvidenceArtifactWriter writer,
+    internal async Task<IReadOnlyList<EvidenceArtifactResult>> AdoptDeliveredAsync(EvidenceArtifactWriter writer,
         EvidenceArtifactSlot slot, string outputRoot, CancellationToken token)
     {
         if (Path.GetFullPath(outputRoot) != writer.RootPath)
             throw new CoverageEvidenceInventoryException("inventory-custody-root-mismatch");
-        Validate(outputRoot, token);
+        await ValidateAsync(outputRoot, token).ConfigureAwait(false);
         ValidateSlot(writer, slot);
         var results = Files.Select(file => new EvidenceArtifactResult(slot.LogicalName, file.RelativePath,
             slot.MediaType, file.LengthBytes, file.Sha256)).ToArray();
@@ -185,19 +204,6 @@ internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<Cove
     {
         CoverageReportFile.ValidatePath(relative);
         return CoverageReportFile.OpenRead(Path.GetFullPath(root), relative);
-    }
-
-    private static string Hash(Stream stream, CancellationToken token)
-    {
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = new byte[64 * 1024];
-        int read;
-        while ((read = stream.Read(buffer)) > 0)
-        {
-            token.ThrowIfCancellationRequested();
-            hash.AppendData(buffer, 0, read);
-        }
-        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 }
 

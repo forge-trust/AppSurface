@@ -360,6 +360,62 @@ public sealed class EvidencePreparedRunTests
         }
     }
 
+    [Fact]
+    public async Task DisposalClaimsHandoffBeforeFactoryCancellation_ShouldNeverAdmitTheReturnedScope()
+    {
+        using var fixture = new Fixture();
+        var producer = new Producer("a");
+        var owner = new Owner();
+        var plan = fixture.Plan(fixture.Declaration("a", "a.txt", "db-a"));
+        var prepared = await fixture.PrepareAsync(plan, producer);
+        var factoryEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returnScope = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var disposalClaimed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var signalFactoryCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readinessCalls = 0;
+        Task? disposal = null;
+        var run = prepared.RunAsync(async (ids, token) =>
+        {
+            factoryEntered.SetResult();
+            await returnScope.Task;
+            Assert.False(token.IsCancellationRequested);
+            return new EvidenceHostResourceScope(ids.Select(id => (IEvidenceResourceReadiness)
+                new CountingReadiness(id, () => Interlocked.Increment(ref readinessCalls))).ToArray(), owner);
+        });
+
+        try
+        {
+            await factoryEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            disposal = prepared.DisposeAsync(() =>
+            {
+                disposalClaimed.SetResult();
+                return signalFactoryCancellation.Task;
+            }).AsTask();
+            await disposalClaimed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            returnScope.SetResult();
+            var manifest = await run.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, readinessCalls);
+            Assert.Equal(0, producer.Runs);
+            Assert.Equal(EvidenceProducerOutcome.Cancelled, Assert.Single(manifest.ProducerResults).Outcome);
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+
+            signalFactoryCancellation.SetResult();
+            await disposal.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(1, producer.Disposals);
+            Assert.Equal(1, owner.Disposals);
+            await using var retry = await fixture.PrepareAsync(plan, new Producer("a"));
+            Assert.Equal(EvidenceReuseStatus.Miss, Assert.Single(retry.Decisions).Status);
+        }
+        finally
+        {
+            returnScope.TrySetResult();
+            signalFactoryCancellation.TrySetResult();
+            await run.WaitAsync(TimeSpan.FromSeconds(10));
+            await (disposal ?? prepared.DisposeAsync().AsTask()).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

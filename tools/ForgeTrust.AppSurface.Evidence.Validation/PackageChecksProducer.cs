@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -40,7 +41,7 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
 
         var output = Path.GetFullPath(_settings.OutputDirectory);
         var packageOutput = Path.Join(output, "package-checks");
-        var cache = Path.Join(packageOutput, "nuget-packages");
+        var cache = _settings.PackageRestoreCache ?? PathUtils.PathUnder(packageOutput, "nuget-packages");
         var artifacts = Path.Join(packageOutput, "artifacts");
         var manifestPath = Path.Join(artifacts, "package-artifact-manifest.json");
         var reportPath = Path.Join(artifacts, "package-validation-report.md");
@@ -98,7 +99,8 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
                 artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
                     [("result", bytes), ("transcript", JsonSerializer.SerializeToUtf8Bytes(commands))]).ConfigureAwait(false);
             }
-            return Failure($"Package checks failed at {stage}." + artifactDiagnostic);
+            var commandDiagnostic = exception is EvidenceCommandException { Code: "cleanup_failed" } ? " cleanup_failed." : string.Empty;
+            return Failure($"Package checks failed at {stage}." + commandDiagnostic + artifactDiagnostic);
         }
     }
 

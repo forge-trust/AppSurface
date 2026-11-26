@@ -598,6 +598,28 @@ public sealed class EvidenceReuseContractTests
         Assert.False(EvidenceArtifactValidation.AreValid(producer, [a, a with { RelativePath = "reports/A" }]));
     }
 
+    [Fact]
+    public void Version11IncompleteProducerMayOmitRequiredArtifacts()
+    {
+        var profile = ReusePlan().Profile;
+        var slot = new EvidenceArtifactSlot("report", "reports", "text/plain", true, 10);
+        var producer = profile.Producers[0] with { ArtifactSlots = [slot] };
+        profile = profile with { Producers = [producer] };
+        var plan = CreatePlan(profile, "1.1");
+        var unavailable = new EvidenceProducerResult("p", EvidenceProducerOutcome.Unavailable, []);
+        var oversized = new EvidenceArtifactResult("report", "reports/result.txt", slot.MediaType, slot.MaximumBytes + 1, new string('a', 64));
+
+        var incomplete = EvidenceManifestBuilder.Build(plan, [unavailable]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, incomplete.ExecutionVerdict);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, incomplete));
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, incomplete));
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(plan, [unavailable with { Artifacts = [oversized] }]).ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(plan, [new("p", EvidenceProducerOutcome.Passed, ["assert"])]).ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(plan, [ValidReusedResult()]).ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(CreatePlan(profile, "1.0"), [unavailable]).ExecutionVerdict);
+    }
+
     [Theory]
     [InlineData("preparation")]
     [InlineData("wait")]

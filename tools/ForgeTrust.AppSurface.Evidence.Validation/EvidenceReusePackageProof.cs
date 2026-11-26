@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -6,7 +5,10 @@ using System.Text;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using static ForgeTrust.AppSurface.Evidence.Validation.PackedCandidatePackages;
+using AdmittedFeed = ForgeTrust.AppSurface.Evidence.Validation.EvidenceReusePackageAdmission.AdmittedFeed;
 using PackageProof = ForgeTrust.AppSurface.Evidence.Validation.EvidenceReusePackageAdmission.PackageProof;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
@@ -17,14 +19,12 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 /// normal developer caches and checkout outputs are not provenance. Only nested synthetic-local executions remove
 /// GITHUB_ACTIONS. The proof process and normal CI admission remain unchanged. No container runtime is required.
 /// Stage logs start with a diagnostic marker before launch and are replaced by captured output only after joining
-/// the process. A starting marker is not settlement or acceptance evidence. Logs and proof.json survive failure.
+/// the process. A starting marker is not settlement or acceptance evidence. Failures are reported even if
+/// proof.json cannot be written.
 /// No caller-owned files, feeds, or shared processes are removed.
 /// </remarks>
 internal static class EvidenceReusePackageProof
 {
-    private const string Prefix = EvidenceReusePackageAdmission.Prefix;
-    private const string ToolId = EvidenceReusePackageAdmission.ToolId;
-    private const string SupportId = EvidenceReusePackageAdmission.SupportId;
     private const string PinnedSdkConfigurationResource = Prefix + "Evidence.Validation.PinnedSdk.global.json";
     private const string ContractScope = EvidenceReusePackageAdmission.ContractScope;
     private const string ToolBundleVersionContract = EvidenceReusePackageAdmission.ToolBundleVersionContract;
@@ -34,12 +34,10 @@ internal static class EvidenceReusePackageProof
     private static readonly EvidenceCoverageGateRequirements CliProofGate = new(95, 85, TolerancePercent: 0);
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    private static IReadOnlyList<string> BundledToolPackageIds => EvidenceReusePackageAdmission.BundledToolPackageIds;
     /// <summary>Gets the exact package identities restored by the independent prepared host.</summary>
     private static IReadOnlyList<string> PreparedHostPackageIds { get; } = Array.AsReadOnly(new[]
     {
-        Prefix + "Evidence.Aspire", Prefix + "Evidence.Contracts", Prefix + "Evidence.Planner",
-        Prefix + "Evidence.Readiness", SupportId, Prefix + "Coverage"
+        AspireId, ContractsId, PlannerId, ReadinessId, SupportId, CoverageId
     });
 
     /// <summary>Runs the bounded packed CLI/host journey, returning zero only after every recorded assertion passes.</summary>
@@ -63,14 +61,15 @@ internal static class EvidenceReusePackageProof
         using var outputClaim = admission.OutputClaim;
         output = admission.Output;
         dotnet = admission.Dotnet;
-        var packages = admission.Packages;
+        var packages = admission.Feed.Packages;
         var stages = new List<StageResult>();
         var stage = "admission";
+        var reportPath = PathUtils.PathUnder(output, "proof.json");
         try
         {
             var runner = new ProofRunner(output, dotnet, stages);
             var pinnedSdkVersion = await WritePinnedSdkConfigurationAsync(output, cancellationToken).ConfigureAwait(false);
-            var sdk = await runner.RunAsync("sdk", dotnet, ["--version"], output, false, cancellationToken).ConfigureAwait(false);
+            var sdk = await runner.RunAsync("sdk", dotnet, ["--version"], output, cancellationToken).ConfigureAwait(false);
             var sdkVersion = sdk.StandardOutput.Trim();
             Require(sdkVersion == pinnedSdkVersion, $"pinned-sdk-{pinnedSdkVersion}");
             var config = Path.Join(output, "NuGet.Config");
@@ -80,19 +79,19 @@ internal static class EvidenceReusePackageProof
             stage = "tool-install";
             var toolRoot = Path.Join(output, "installed-tool");
             await runner.RunAsync(stage, dotnet, ["tool", "install", ToolId, "--tool-path", toolRoot, "--version", version,
-                "--configfile", config, "--no-cache"], output, false, cancellationToken).ConfigureAwait(false);
+                "--configfile", config, "--no-cache"], output, cancellationToken).ConfigureAwait(false);
             var toolArchive = Directory.GetFiles(Path.Join(toolRoot, ".store"), "*.nupkg", SearchOption.AllDirectories)
-                .Where(path => Path.GetFileName(path).Equals($"{ToolId}.{version}.nupkg", StringComparison.OrdinalIgnoreCase)).Single();
+                .Where(path => Path.GetFileName(path).Equals(Tool.ArchiveName(version), StringComparison.OrdinalIgnoreCase)).Single();
             Require(await HashAsync(toolArchive, cancellationToken).ConfigureAwait(false) == packages[ToolId].Sha256, "installed-tool-archive-sha");
             var toolDll = Directory.GetFiles(Path.Join(toolRoot, ".store"), ToolId + ".dll", SearchOption.AllDirectories).Single();
-            var toolAssemblies = await VerifyToolAssembliesAsync(Path.GetDirectoryName(toolDll)!, packages, cancellationToken).ConfigureAwait(false);
+            var toolAssemblies = await VerifyToolAssembliesAsync(Path.GetDirectoryName(toolDll)!, admission.Feed.ToolAssemblyHashes, cancellationToken).ConfigureAwait(false);
             var command = Path.Join(toolRoot, OperatingSystem.IsWindows() ? "appsurface.exe" : "appsurface");
             Require(File.Exists(command), "installed-tool-shim");
             stage = "host";
             var host = await ProveHostAsync(output, version, packages, runner, cancellationToken).ConfigureAwait(false);
             stage = "cli";
             var cli = await ProveCliAsync(output, command, config, version, runner, cancellationToken).ConfigureAwait(false);
-            await File.WriteAllBytesAsync(Path.Join(output, "proof.json"), JsonSerializer.SerializeToUtf8Bytes(new
+            await File.WriteAllBytesAsync(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
             {
                 schemaVersion = 1,
                 passed = true,
@@ -115,16 +114,23 @@ internal static class EvidenceReusePackageProof
         catch (Exception exception) when (IsProofFailure(exception))
         {
             var contract = GetContractFailure(exception);
-            await File.WriteAllBytesAsync(Path.Join(output, "proof.json"), JsonSerializer.SerializeToUtf8Bytes(new
-            {
-                schemaVersion = 1,
-                passed = false,
-                stage,
-                failureType = exception.GetType().Name,
-                contract,
-                stages
-            }, JsonOptions), CancellationToken.None).ConfigureAwait(false);
             WriteFailure(stage, contract ?? exception.GetType().Name);
+            try
+            {
+                await File.WriteAllBytesAsync(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    schemaVersion = 1,
+                    passed = false,
+                    stage,
+                    failureType = exception.GetType().Name,
+                    contract,
+                    stages
+                }, JsonOptions), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception reportException) when (reportException is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine("ASEVD917 Could not write the packed reuse failure report 'proof.json'.");
+            }
             return RejectedProofExitCode;
         }
     }
@@ -136,7 +142,7 @@ internal static class EvidenceReusePackageProof
     {
         try
         {
-            var packages = await EvidenceReusePackageAdmission.InspectFeedAsync(feed, version, expectedSourceCommit, cancellationToken).ConfigureAwait(false);
+            var admittedFeed = await EvidenceReusePackageAdmission.InspectFeedAsync(feed, version, expectedSourceCommit, cancellationToken).ConfigureAwait(false);
             var repository = ResolveExistingPath(FindRepository());
             var feedRoot = ResolveExistingPath(feed);
             output = Path.GetFullPath(output);
@@ -158,7 +164,7 @@ internal static class EvidenceReusePackageProof
             {
                 Require(!PathEntryExists(output), "fresh-output-and-sdk");
                 Directory.CreateDirectory(output);
-                return (0, new AdmittedProof(packages, repository, output, dotnet, outputClaim), null);
+                return (0, new AdmittedProof(admittedFeed, repository, output, dotnet, outputClaim), null);
             }
             catch
             {
@@ -243,74 +249,80 @@ internal static class EvidenceReusePackageProof
     private static async Task<object> ProveNegativeAdmissionAsync(IReadOnlyDictionary<string, PackageProof> packages,
         string version, string commit, string output, string dotnet, CancellationToken token)
     {
+        NegativeAdmissionCase[] cases =
+        [
+            new("tool-graph-version", ToolId, ToolId + ".deps.json", ToolBundleVersionContract, SkewToolSupportVersion),
+            new("host-private-edge", AspireId, ".nuspec", PrivateDependencyContract,
+                value => value.Replace($"[{version}]", "[0.0.0-mismatch]", StringComparison.Ordinal)),
+        ];
         var results = new List<object>();
-        foreach (var (kind, expectedContract) in new[]
+        foreach (var scenario in cases)
         {
-            ("tool-graph-version", ToolBundleVersionContract),
-            ("host-private-edge", PrivateDependencyContract),
-        })
-        {
-            var root = Path.Join(output, "negative-" + kind);
-            var feed = Path.Join(root, "feed");
+            var root = PathUtils.PathUnder(output, "negative-" + scenario.Kind);
+            var feed = PathUtils.PathUnder(root, "feed");
             Directory.CreateDirectory(feed);
             foreach (var package in packages.Values)
             {
-                var destination = Path.Join(feed, Path.GetFileName(package.Archive));
-                if (package.Id == (kind == "tool-graph-version" ? ToolId : Prefix + "Evidence.Aspire"))
-                {
-                    using var source = ZipFile.OpenRead(package.Archive);
-                    using var target = ZipFile.Open(destination, ZipArchiveMode.Create);
-                    foreach (var entry in source.Entries)
-                    {
-                        var created = target.CreateEntry(entry.FullName);
-                        using var input = entry.Open();
-                        using var written = created.Open();
-                        if ((kind == "tool-graph-version" && entry.FullName.EndsWith(ToolId + ".deps.json", StringComparison.Ordinal))
-                            || (kind == "host-private-edge" && entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal)))
-                        {
-                            using var text = new StreamReader(input);
-                            var value = await text.ReadToEndAsync(token).ConfigureAwait(false);
-                            var original = value;
-                            if (kind == "tool-graph-version")
-                            {
-                                using var deps = JsonDocument.Parse(value);
-                                var supportLibrary = deps.RootElement.GetProperty("libraries").EnumerateObject()
-                                    .Single(library => library.Name.StartsWith(SupportId + "/", StringComparison.Ordinal)).Name;
-                                value = value.Replace(supportLibrary, SupportId + "/0.0.0-mismatch", StringComparison.Ordinal);
-                            }
-                            else value = value.Replace($"[{version}]", "[0.0.0-mismatch]", StringComparison.Ordinal);
-                            Require(value != original, "negative-archive-mutation-applied");
-                            await written.WriteAsync(Encoding.UTF8.GetBytes(value), token).ConfigureAwait(false);
-                        }
-                        else await input.CopyToAsync(written, token).ConfigureAwait(false);
-                    }
-                }
-                else File.Copy(package.Archive, destination);
+                var destination = PathUtils.PathUnder(feed, Path.GetFileName(package.Archive));
+                if (package.Id == scenario.PackageId)
+                    await RewriteNegativeArchiveAsync(package.Archive, destination, scenario, token).ConfigureAwait(false);
+                else
+                    File.Copy(package.Archive, destination);
             }
-            var rejectedOutput = Path.Join(root, "must-not-exist");
-            var expectedFailure = ValidationProof.ContractFailurePrefix + ContractScope + expectedContract;
+
+            var rejectedOutput = PathUtils.PathUnder(root, "must-not-exist");
+            var expectedFailure = ValidationProof.ContractFailurePrefix + ContractScope + scenario.ExpectedContract;
             var (exitCode, admission, contract) = await TryAdmitAsync(feed, version, rejectedOutput, dotnet, commit, token).ConfigureAwait(false);
             using var unexpectedClaim = admission?.OutputClaim;
             var outputCreated = PathEntryExists(rejectedOutput);
             Require(!outputCreated, "negative-admission-before-output");
             Require(exitCode == RejectedProofExitCode && contract == expectedFailure, "negative-admission-unexpected-outcome");
-            results.Add(new { kind, exitCode, outputCreated, contract });
+            results.Add(new { kind = scenario.Kind, exitCode, outputCreated, contract });
         }
         return results;
     }
 
-    private static async Task<IReadOnlyList<AssemblyProof>> VerifyToolAssembliesAsync(string root,
-        IReadOnlyDictionary<string, PackageProof> packages, CancellationToken token)
+    private static async Task RewriteNegativeArchiveAsync(string archive, string destination,
+        NegativeAdmissionCase scenario, CancellationToken token)
     {
-        using var archive = ZipFile.OpenRead(packages[ToolId].Archive);
-        var results = new List<AssemblyProof>();
-        foreach (var id in BundledToolPackageIds)
+        using var source = ZipFile.OpenRead(archive);
+        using var target = ZipFile.Open(destination, ZipArchiveMode.Create);
+        foreach (var entry in source.Entries)
         {
-            var entry = archive.Entries.Single(item => item.FullName.StartsWith("tools/", StringComparison.Ordinal) && Path.GetFileName(item.FullName) == id + ".dll");
-            var actual = Path.Join(root, id + ".dll");
-            var expected = await EvidenceReusePackageAdmission.HashEntryAsync(entry, token).ConfigureAwait(false);
+            var created = target.CreateEntry(entry.FullName);
+            using var input = entry.Open();
+            using var written = created.Open();
+            if (!entry.FullName.EndsWith(scenario.EntrySuffix, StringComparison.Ordinal))
+            {
+                await input.CopyToAsync(written, token).ConfigureAwait(false);
+                continue;
+            }
+
+            using var text = new StreamReader(input);
+            var original = await text.ReadToEndAsync(token).ConfigureAwait(false);
+            var mutated = scenario.Mutate(original);
+            Require(mutated != original, "negative-archive-mutation-applied");
+            await written.WriteAsync(Encoding.UTF8.GetBytes(mutated), token).ConfigureAwait(false);
+        }
+    }
+
+    private static string SkewToolSupportVersion(string value)
+    {
+        using var deps = JsonDocument.Parse(value);
+        var supportLibrary = deps.RootElement.GetProperty("libraries").EnumerateObject()
+            .Single(library => library.Name.StartsWith(SupportId + "/", StringComparison.Ordinal)).Name;
+        return value.Replace(supportLibrary, SupportId + "/0.0.0-mismatch", StringComparison.Ordinal);
+    }
+
+    private static async Task<IReadOnlyList<AssemblyProof>> VerifyToolAssembliesAsync(string root,
+        IReadOnlyDictionary<string, string> assemblyHashes, CancellationToken token)
+    {
+        var results = new List<AssemblyProof>(assemblyHashes.Count);
+        foreach (var id in EvidenceReusePackageAdmission.BundledToolPackageIds)
+        {
+            var actual = PathUtils.PathUnder(root, id + ".dll");
+            var expected = assemblyHashes[id];
             Require(await HashAsync(actual, token).ConfigureAwait(false) == expected, "installed-tool-bundled-dll-sha");
-            if (packages.TryGetValue(id, out var library)) Require(expected == library.AssemblySha256, "tool-and-library-same-candidate-bytes");
             results.Add(new(id, actual, expected));
         }
         return results;
@@ -326,14 +338,14 @@ internal static class EvidenceReusePackageProof
         var projectTemplate = await File.ReadAllTextAsync(Path.Join(fixture, "PackedHost.csproj.template"), token).ConfigureAwait(false);
         await File.WriteAllTextAsync(project, projectTemplate.Replace("CANDIDATE_VERSION", version, StringComparison.Ordinal), token).ConfigureAwait(false);
         File.Copy(Path.Join(fixture, "Program.cs"), Path.Join(app, "Program.cs"));
-        await runner.RunAsync("host-restore", runner.Dotnet, ["restore", project, "--configfile", Path.Join(output, "NuGet.Config"), "--use-lock-file"], output, false, token).ConfigureAwait(false);
+        await runner.RunAsync("host-restore", runner.Dotnet, ["restore", project, "--configfile", Path.Join(output, "NuGet.Config"), "--use-lock-file"], output, token).ConfigureAwait(false);
         await VerifyAssetsAsync(Path.Join(app, "obj", "project.assets.json"), packages, runner.Packages, token).ConfigureAwait(false);
-        await runner.RunAsync("host-build", runner.Dotnet, ["build", project, "--no-restore", "-c", "Release", "--disable-build-servers", "-p:UseSharedCompilation=false", "-nodeReuse:false", "-warnaserror"], output, false, token).ConfigureAwait(false);
+        await runner.RunAsync("host-build", runner.Dotnet, ["build", project, "--no-restore", "-c", "Release", "--disable-build-servers", "-p:UseSharedCompilation=false", "-nodeReuse:false", "-warnaserror"], output, token).ConfigureAwait(false);
         var buildRoot = Path.Join(app, "bin", "Release", "net10.0");
         var built = await RunHostVariantAsync(buildRoot, "host-built", "host-run").ConfigureAwait(false);
         var published = Path.Join(output, "host-published");
         await runner.RunAsync("host-publish", runner.Dotnet, ["publish", project, "--no-restore", "-c", "Release", "-o", published,
-            "--self-contained", "false", "-p:PublishTrimmed=false", "-p:PublishSingleFile=false", "--disable-build-servers", "-p:UseSharedCompilation=false", "-nodeReuse:false", "-warnaserror"], output, false, token).ConfigureAwait(false);
+            "--self-contained", "false", "-p:PublishTrimmed=false", "-p:PublishSingleFile=false", "--disable-build-servers", "-p:UseSharedCompilation=false", "-nodeReuse:false", "-warnaserror"], output, token).ConfigureAwait(false);
         var publish = await RunHostVariantAsync(published, "host-published", "host-published-run").ConfigureAwait(false);
         return new { built, publish };
 
@@ -341,8 +353,8 @@ internal static class EvidenceReusePackageProof
         {
             var proofRoot = Path.Join(output, fixtureStage + "-proof");
             await PrepareGitAsync(proofRoot, runner, fixtureStage, token).ConfigureAwait(false);
-            await runner.RunAsync(runStage, runner.Dotnet, [Path.Join(assemblyRoot, "PackedHost.dll"), proofRoot, .. PreparedHostPackageIds],
-                output, true, token, stageTimeout: HostRunTimeout).ConfigureAwait(false);
+            await runner.RunSyntheticLocalAsync(runStage, runner.Dotnet, [Path.Join(assemblyRoot, "PackedHost.dll"), proofRoot, .. PreparedHostPackageIds],
+                output, token, stageTimeout: HostRunTimeout).ConfigureAwait(false);
             return await VerifyHostRunAsync(assemblyRoot, proofRoot, packages, token).ConfigureAwait(false);
         }
     }
@@ -378,9 +390,8 @@ internal static class EvidenceReusePackageProof
     private static IReadOnlyList<PackageProof> VerifyPackageClosure(JsonElement libraries,
         IReadOnlyDictionary<string, PackageProof> packages, string closureDiagnostic, string packageDiagnostic)
     {
-        var family = libraries.EnumerateObject()
-            .Where(library => library.Name.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase))
-            .Select(library => (Library: library, Id: library.Name.Split('/')[0]))
+        var family = PackedDependencyLibrary.Read(libraries)
+            .Where(library => library.Id.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase))
             .ToArray();
         Require(family.Length == PreparedHostPackageIds.Count
             && new HashSet<string>(family.Select(library => library.Id), StringComparer.Ordinal).SetEquals(PreparedHostPackageIds),
@@ -389,10 +400,9 @@ internal static class EvidenceReusePackageProof
         var verifiedPackages = new List<PackageProof>(family.Length);
         foreach (var library in family)
         {
-            var type = library.Library.Value.GetProperty("type").GetString();
+            var type = library.Entry.Value.GetProperty("type").GetString();
             var package = packages.GetValueOrDefault(library.Id);
-            Require(type == "package" && package is not null && library.Id == package.Id
-                && library.Library.Name == package.Id + "/" + package.Version, packageDiagnostic);
+            Require(type == "package" && package is not null && library.Matches(package.Id, package.Version), packageDiagnostic);
             verifiedPackages.Add(package!);
         }
         return verifiedPackages;
@@ -424,18 +434,18 @@ internal static class EvidenceReusePackageProof
             var root = Path.Join(output, "cli-" + mode);
             var arguments = new List<string> { "evidence", "run", "--policy", "evidence.policy.json", "--solution", "Consumer.slnx", "--path", "Consumer.Alpha/AlphaDecision.cs", "--reuse", "--receipt-store", Path.Join(output, "cli-receipts"), "--output", root };
             if (mode == "audit") arguments.Add("--verify-reuse");
-            await runner.RunAsync("cli-" + mode, command, arguments, fixture.Repository, true, token).ConfigureAwait(false);
+            await runner.RunSyntheticLocalAsync("cli-" + mode, command, arguments, fixture.Repository, token).ConfigureAwait(false);
             var run = await ValidateCliRunAsync(root, mode, output, token).ConfigureAwait(false);
             if (mode == "fresh") originSha = run.CoverageSha;
             if (mode == "warm") Require(run.CoverageSha == originSha, "warm-original-report-byte-identity");
             if (mode == "warm")
-                await runner.RunAsync("restored-coverage-reader", command,
+                await runner.RunSyntheticLocalAsync("restored-coverage-reader", command,
                     ["coverage", "gate", "--coverage", Path.Join(root, "coverage", "coverage.cobertura.xml"),
                         "--min-line", CliProofGate.MinLinePercent.ToString(CultureInfo.InvariantCulture),
                         "--min-branch", CliProofGate.MinBranchPercent.ToString(CultureInfo.InvariantCulture),
                         "--tolerance", CliProofGate.TolerancePercent.ToString(CultureInfo.InvariantCulture),
                         "--output", Path.Join(output, "restored-reader-reports")],
-                    fixture.Repository, true, token).ConfigureAwait(false);
+                    fixture.Repository, token).ConfigureAwait(false);
             Require(ValidationProof.Equal(fixture.InputHashes, await FixtureInputsAsync(fixture.Repository, token).ConfigureAwait(false)), "locked-complete-inputs-unchanged");
             results.Add(run.Proof);
         }
@@ -452,28 +462,10 @@ internal static class EvidenceReusePackageProof
         var testsProject = Path.Join(repository, "Consumer.Alpha.Tests", "Consumer.Alpha.Tests.csproj");
         var testsDocument = XDocument.Load(testsProject);
         testsDocument.Root!.Add(new XElement("ItemGroup", new XElement("PackageReference",
-            new XAttribute("Include", Prefix + "Evidence.Contracts"), new XAttribute("VersionOverride", "[" + version + "]"))));
+            new XAttribute("Include", ContractsId), new XAttribute("VersionOverride", "[" + version + "]"))));
         testsDocument.Save(testsProject);
-        await File.WriteAllTextAsync(Path.Join(repository, "Consumer.Alpha.Tests", "OwnedChildTests.cs"), """
-            using ForgeTrust.AppSurface.Evidence.Contracts;
-            using Xunit;
-            public sealed class OwnedChildTests
-            {
-                [Fact]
-                public async Task CandidateHelperEnrollsAndJoinsActualChildWork()
-                {
-                    Assert.True(new[] { "APPSURFACE_EVIDENCE_CHILD_PIPE", "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID", "APPSURFACE_EVIDENCE_CHILD_NONCE" }
-                        .All(name => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name))), "An invocation-private channel must be present.");
-                    var completed = 0;
-                    await EvidenceOwnedChild.RunAsync(async _ =>
-                    {
-                        await Task.Yield();
-                        Interlocked.Increment(ref completed);
-                    }, CancellationToken.None);
-                    Assert.Equal(1, completed);
-                }
-            }
-            """, token).ConfigureAwait(false);
+        File.Copy(PathUtils.PathUnder(AppContext.BaseDirectory, "fixtures", "packed-cli", "OwnedChildTests.cs"),
+            PathUtils.PathUnder(repository, "Consumer.Alpha.Tests", "OwnedChildTests.cs"));
         await File.WriteAllTextAsync(Path.Join(repository, ".gitignore"), "**/bin/\n**/obj/\n", token).ConfigureAwait(false);
         var producerDeclaration = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["coverage/complete@1"],
             [new EvidenceArtifactSlot("coverage-reports", "coverage", "application/octet-stream", false, 256L * 1024 * 1024) { MaximumFiles = 128 }],
@@ -486,7 +478,7 @@ internal static class EvidenceReusePackageProof
             [new EvidenceObligation("coverage", "coverage", "Packed consumer coverage", ["coverage"], "coverage/complete@1")]);
         var policy = new EvidencePolicy("packed-coverage", "1", "local", [profile], [new EvidencePolicyRule("all", "**", "local")]);
         await File.WriteAllBytesAsync(Path.Join(repository, "evidence.policy.json"), EvidenceCanonicalJson.Serialize(policy), token).ConfigureAwait(false);
-        await runner.RunAsync("fixture-lock", runner.Dotnet, ["restore", Path.Join(repository, "Consumer.slnx"), "--configfile", Path.Join(repository, "NuGet.Config"), "--use-lock-file", "--force-evaluate"], repository, false, token).ConfigureAwait(false);
+        await runner.RunAsync("fixture-lock", runner.Dotnet, ["restore", Path.Join(repository, "Consumer.slnx"), "--configfile", Path.Join(repository, "NuGet.Config"), "--use-lock-file", "--force-evaluate"], repository, token).ConfigureAwait(false);
         await File.WriteAllTextAsync(Path.Join(repository, "Directory.Build.props"), "<Project><PropertyGroup><RestoreLockedMode>true</RestoreLockedMode></PropertyGroup></Project>", token).ConfigureAwait(false);
         await GitInitAsync(repository, runner, "cli", token).ConfigureAwait(false);
         var inputHashes = await FixtureInputsAsync(repository, token).ConfigureAwait(false);
@@ -578,19 +570,15 @@ internal static class EvidenceReusePackageProof
 
     private static async Task GitInitAsync(string root, ProofRunner runner, string stage, CancellationToken token)
     {
-        await runner.RunAsync(stage + "-git-init", "git", ["init", "-q"], root, false, token).ConfigureAwait(false);
-        await runner.RunAsync(stage + "-git-add", "git", ["-c", "core.hooksPath=" + Path.Join(root, "no-hooks"), "add", "."], root, false, token).ConfigureAwait(false);
+        await runner.RunAsync(stage + "-git-init", "git", ["init", "-q"], root, token).ConfigureAwait(false);
+        await runner.RunAsync(stage + "-git-add", "git", ["-c", "core.hooksPath=" + Path.Join(root, "no-hooks"), "add", "."], root, token).ConfigureAwait(false);
     }
 
     private static async Task<SortedDictionary<string, string>> FixtureInputsAsync(string root, CancellationToken token)
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
-            if (relative.Split('/').Any(part => part is ".git" or "obj" or "bin")) continue;
-            result.Add(relative, await HashAsync(file, token).ConfigureAwait(false));
-        }
+        foreach (var (file, relative) in EnumerateFixtureFiles(root))
+            result.Add(relative.Replace('\\', '/'), await HashAsync(file, token).ConfigureAwait(false));
         return result;
     }
 
@@ -598,13 +586,21 @@ internal static class EvidenceReusePackageProof
     {
         Require(Directory.Exists(source), "bundled-closed-fixture");
         Directory.CreateDirectory(target);
-        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        foreach (var (file, relative) in EnumerateFixtureFiles(source))
         {
-            var relative = Path.GetRelativePath(source, file);
-            if (relative.Split(Path.DirectorySeparatorChar).Any(part => part is "bin" or "obj" or ".git")) continue;
-            var destination = Path.Join(target, relative);
+            var destination = PathUtils.PathUnder(target, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             File.Copy(file, destination);
+        }
+    }
+
+    private static IEnumerable<(string File, string RelativePath)> EnumerateFixtureFiles(string root)
+    {
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(root, file);
+            if (relative.Split(Path.DirectorySeparatorChar).Any(part => part is "bin" or "obj" or ".git")) continue;
+            yield return (file, relative);
         }
     }
 
@@ -629,37 +625,38 @@ internal static class EvidenceReusePackageProof
     private static async Task<string> HashAsync(string path, CancellationToken token)
     { await using var input = File.OpenRead(path); return Convert.ToHexStringLower(await SHA256.HashDataAsync(input, token).ConfigureAwait(false)); }
     /// <summary>Carries the verified candidate and exclusive output claim into the consumer proof.</summary>
-    private sealed record AdmittedProof(IReadOnlyDictionary<string, PackageProof> Packages, string Repository,
+    private sealed record AdmittedProof(AdmittedFeed Feed, string Repository,
         string Output, string Dotnet, FileStream OutputClaim);
+    private sealed record NegativeAdmissionCase(string Kind, string PackageId, string EntrySuffix, string ExpectedContract,
+        Func<string, string> Mutate);
     private sealed record AssemblyProof(string Name, string Path, string Sha256);
-    private sealed record StageResult(string Stage, int ExitCode, long ElapsedMilliseconds, bool SyntheticLocal);
-    private sealed record ProcessResult(int ExitCode, string StandardOutput);
+    private sealed record StageResult(string Stage, int ExitCode, long ElapsedMilliseconds, bool SyntheticLocal,
+        string? InterruptedWhile);
 
     private sealed class ProofRunner(string root, string dotnet, List<StageResult> stages)
     {
         internal string Dotnet { get; } = dotnet;
-        internal string Packages { get; } = Path.Join(root, "packages");
-        internal async Task<ProcessResult> RunAsync(string stage, string executable, IReadOnlyList<string> arguments,
-            string workingDirectory, bool syntheticLocal, CancellationToken cancellationToken, TimeSpan? stageTimeout = null)
+        internal string Packages { get; } = PathUtils.PathUnder(root, "packages");
+        internal Task<PackedProofProcess.Result> RunAsync(string stage, string executable, IReadOnlyList<string> arguments,
+            string workingDirectory, CancellationToken cancellationToken)
+            => RunStageAsync(stage, executable, arguments, workingDirectory, cancellationToken, syntheticLocal: false);
+
+        internal Task<PackedProofProcess.Result> RunSyntheticLocalAsync(string stage, string executable, IReadOnlyList<string> arguments,
+            string workingDirectory, CancellationToken cancellationToken, TimeSpan? stageTimeout = null)
+            => RunStageAsync(stage, executable, arguments, workingDirectory, cancellationToken, syntheticLocal: true, stageTimeout: stageTimeout);
+
+        private async Task<PackedProofProcess.Result> RunStageAsync(string stage, string executable, IReadOnlyList<string> arguments,
+            string workingDirectory, CancellationToken cancellationToken, bool syntheticLocal, TimeSpan? stageTimeout = null)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(stageTimeout ?? TimeSpan.FromMinutes(5));
-            using var process = new Process
-            {
-                StartInfo = new(executable)
-                { WorkingDirectory = workingDirectory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true }
-            };
-            foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-            var environment = process.StartInfo.Environment;
+            var start = PackedProofProcess.CreateStartInfo(executable, arguments, workingDirectory);
+            var environment = start.Environment;
             environment["NUGET_PACKAGES"] = Packages;
-            environment["NUGET_HTTP_CACHE_PATH"] = Path.Join(root, "http-cache");
-            environment["NUGET_SCRATCH"] = Path.Join(root, "nuget-scratch");
-            environment["DOTNET_CLI_HOME"] = Path.Join(root, "cli-home");
-            environment["APPSURFACE_ARTIFACT_HOME"] = Path.Join(root, "coverage-artifact-home");
+            environment["NUGET_HTTP_CACHE_PATH"] = PathUtils.PathUnder(root, "http-cache");
+            environment["NUGET_SCRATCH"] = PathUtils.PathUnder(root, "nuget-scratch");
+            environment["DOTNET_CLI_HOME"] = PathUtils.PathUnder(root, "cli-home");
+            environment["APPSURFACE_ARTIFACT_HOME"] = PathUtils.PathUnder(root, "coverage-artifact-home");
             environment["DOTNET_ROOT"] = Path.GetDirectoryName(Dotnet)!;
             environment["PATH"] = Path.GetDirectoryName(Dotnet) + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
-            environment["MSBUILDDISABLENODEREUSE"] = "1";
-            environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
             foreach (var key in new[] { "APPSURFACE_EVIDENCE_CHILD_PIPE", "APPSURFACE_EVIDENCE_CHILD_EXECUTION_ID", "APPSURFACE_EVIDENCE_CHILD_NONCE" }) environment.Remove(key);
             var gitOverrides = new HashSet<string>([
                 "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
@@ -671,82 +668,11 @@ internal static class EvidenceReusePackageProof
                 || key.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase)
                 || key.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase)).ToArray()) environment.Remove(key);
             if (syntheticLocal) environment.Remove("GITHUB_ACTIONS");
-            await File.WriteAllTextAsync(Path.Join(root, stage + ".log"), JsonSerializer.Serialize(new
-            {
-                stage,
-                state = "starting",
-                startedAtUtc = DateTimeOffset.UtcNow
-            }), timeout.Token).ConfigureAwait(false);
-            var stopwatch = Stopwatch.StartNew();
-            try
-            {
-                process.Start();
-            }
-            catch
-            {
-                // A rejected launch has no active stage; preserve the existing failure-proof contract.
-                File.Delete(Path.Join(root, stage + ".log"));
-                throw;
-            }
-            var outputCapture = new StringBuilder();
-            var errorCapture = new StringBuilder();
-            using var drainCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
-            var stdout = DrainAsync(process.StandardOutput, outputCapture, drainCancellation.Token);
-            var stderr = DrainAsync(process.StandardError, errorCapture, drainCancellation.Token);
-            string output = "", error = "";
-            try
-            {
-                var processExit = process.WaitForExitAsync(timeout.Token);
-                while (!processExit.IsCompleted)
-                {
-                    if (stdout.IsFaulted || stdout.IsCanceled) await stdout.ConfigureAwait(false);
-                    if (stderr.IsFaulted || stderr.IsCanceled) await stderr.ConfigureAwait(false);
-                    var pending = new List<Task> { processExit };
-                    if (!stdout.IsCompleted) pending.Add(stdout);
-                    if (!stderr.IsCompleted) pending.Add(stderr);
-                    await Task.WhenAny(pending).ConfigureAwait(false);
-                }
-                await processExit.ConfigureAwait(false);
-                output = await stdout.ConfigureAwait(false);
-                error = await stderr.ConfigureAwait(false);
-            }
-            catch
-            {
-                drainCancellation.Cancel();
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-                try { await Task.WhenAll(stdout, stderr).ConfigureAwait(false); }
-                catch (Exception) { }
-                throw;
-            }
-            finally
-            {
-                // No invocation channel values or raw environment are rendered. Only the closed public fixture executes here.
-                output = outputCapture.ToString();
-                error = errorCapture.ToString();
-                if (process.HasExited) stages.Add(new(stage, process.ExitCode, stopwatch.ElapsedMilliseconds, syntheticLocal));
-                var log = output + error;
-                foreach (var pair in process.StartInfo.Environment.Where(pair => pair.Key.Contains("TOKEN", StringComparison.OrdinalIgnoreCase)
-                    || pair.Key.Contains("SECRET", StringComparison.OrdinalIgnoreCase) || pair.Key.Contains("PASSWORD", StringComparison.OrdinalIgnoreCase)))
-                    if (!string.IsNullOrEmpty(pair.Value)) log = log.Replace(pair.Value, "[redacted]", StringComparison.Ordinal);
-                await File.WriteAllTextAsync(Path.Join(root, stage + ".log"), log, CancellationToken.None).ConfigureAwait(false);
-            }
-            Require(process.ExitCode == 0, "stage-" + stage);
-            return new(process.ExitCode, output);
-        }
-
-        private static async Task<string> DrainAsync(StreamReader reader, StringBuilder result, CancellationToken token)
-        {
-            var buffer = new char[4096];
-            int count;
-            while ((count = await reader.ReadAsync(buffer, token).ConfigureAwait(false)) > 0)
-            {
-                if (result.Length + count > 4 * 1024 * 1024) throw new InvalidDataException("Bounded proof output exceeded.");
-                result.Append(buffer, 0, count);
-            }
-            return result.ToString();
+            var result = await PackedProofProcess.RunAsync(stage, start, root, cancellationToken,
+                stageTimeout ?? TimeSpan.FromMinutes(5), exit =>
+                    stages.Add(new(stage, exit.ExitCode, exit.ElapsedMilliseconds, syntheticLocal, exit.InterruptedWhile))).ConfigureAwait(false);
+            Require(result.ExitCode == 0, "stage-" + stage);
+            return result;
         }
     }
-
-
 }

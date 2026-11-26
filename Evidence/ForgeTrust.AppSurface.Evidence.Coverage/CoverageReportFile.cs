@@ -1,4 +1,5 @@
 using System.Text;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
@@ -35,13 +36,9 @@ internal sealed record CoverageReportFile(string RelativePath, long LengthBytes,
         if (parts.Length > 32) throw new CoverageEvidenceInventoryException("inventory-path-invalid");
         foreach (var part in parts)
         {
-            var stem = part.Split('.')[0];
-            if (part.Length == 0 || part is "." or ".." || part != part.Trim() || part.EndsWith('.')
+            if (part.Length == 0 || part is "." or ".." || part != part.Trim()
                 || part.IndexOfAny([':', '*', '?', '"', '<', '>', '|']) >= 0
-                || stem.Equals("CON", StringComparison.OrdinalIgnoreCase) || stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
-                || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase) || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase)
-                || (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase) || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
-                    && stem[3] is (>= '1' and <= '9') or '¹' or '²' or '³'))
+                || EvidenceArtifactValidation.IsReservedSegment(part))
                 throw new CoverageEvidenceInventoryException("inventory-path-noncanonical");
         }
     }

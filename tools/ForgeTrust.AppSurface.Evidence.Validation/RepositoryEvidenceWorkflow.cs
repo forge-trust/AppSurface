@@ -24,8 +24,9 @@ internal static class RepositoryEvidenceWorkflow
     /// <param name="options">Validated command options and trusted plan inputs.</param>
     /// <param name="cancellationToken">Cancels execution and artifact verification.</param>
     /// <param name="verifyLocalSourceAsync">Optional in-process local source and policy digest check; required for patch overrides.</param>
+    /// <param name="packageRestoreCache">Optional private worktree cache used for the managed local package-gate build.</param>
     internal static async Task<int> RunAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
-        Func<CancellationToken, Task>? verifyLocalSourceAsync = null)
+        Func<CancellationToken, Task>? verifyLocalSourceAsync = null, string? packageRestoreCache = null)
     {
         var operation = Required(options, "--operation");
         if (operation is not ("plan" or "run" or "verify")) throw new ArgumentException("Operation must be plan, run or verify.");
@@ -96,6 +97,7 @@ internal static class RepositoryEvidenceWorkflow
             {
                 NativeCoverageContractVersion = nativeCoverageContractVersion,
                 VerifyLocalSourceAsync = verifyLocalSourceAsync,
+                PackageRestoreCache = packageRestoreCache,
                 CoverageCollectionDirectory = options.GetValueOrDefault("--coverage-collection"),
                 CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
             };

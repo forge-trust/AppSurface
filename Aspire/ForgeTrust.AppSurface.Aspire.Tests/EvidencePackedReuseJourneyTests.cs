@@ -1,8 +1,8 @@
-using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Evidence.Validation;
 using ForgeTrust.AppSurface.Testing;
 using Xunit.Abstractions;
 using ValidationProgram = ForgeTrust.AppSurface.Evidence.Validation.Program;
@@ -113,32 +113,19 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
         var scratch = CreateScratchDirectory(repository, Environment.GetEnvironmentVariable(DiagnosticsParentVariable));
         var feed = TestPathUtils.PathUnder(scratch, "feed");
         var proofRoot = TestPathUtils.PathUnder(scratch, "proof");
-        Directory.CreateDirectory(feed);
         var dotnet = ResolveDotnet();
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(15));
         var passed = false;
         try
         {
-            var commit = (await RunAsync("git", ["rev-parse", "HEAD"], repository, scratch, "source", deadline.Token)).Trim();
+            var git = PackedProofProcess.CreateStartInfo("git", ["rev-parse", "HEAD"], repository);
+            var source = await PackedProofProcess.RunAsync("source", git, scratch, deadline.Token);
+            Assert.True(source.ExitCode == 0, $"Source lookup failed. Retained logs: {scratch}");
+            var commit = source.StandardOutput.Trim();
             var version = "0.0.0-packed-test." + Guid.NewGuid().ToString("N");
-            foreach (var project in new[]
-            {
-                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
-                "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj",
-                "Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj",
-                "Evidence/ForgeTrust.AppSurface.Evidence.Readiness/ForgeTrust.AppSurface.Evidence.Readiness.csproj",
-                "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj",
-                "Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj",
-                "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj",
-                "Evidence/ForgeTrust.AppSurface.Evidence.Cli/ForgeTrust.AppSurface.Evidence.Cli.csproj"
-            })
-            {
-                await RunAsync(dotnet,
-                    ["pack", TestPathUtils.PathUnder(repository, project), "-c", "Release", "--output", feed,
-                        "--disable-build-servers", "-p:UseSharedCompilation=false", "-nodeReuse:false",
-                        "-p:PackageVersion=" + version, "-p:RepositoryCommit=" + commit, "-p:SourceRevisionId=" + commit],
-                    repository, scratch, "pack-" + Path.GetFileNameWithoutExtension(project), deadline.Token);
-            }
+            // The test project's reference graph already restored the package projects.
+            await PackedCandidateFeed.PrepareAsync(new(repository, dotnet, feed, version, commit,
+                PackedCandidateFeed.Mode.Reuse, LogDirectory: scratch, NoRestore: true), deadline.Token);
 
             var consumerLog = TestPathUtils.PathUnder(scratch, "consumer-proof.log");
             await File.WriteAllTextAsync(consumerLog, JsonSerializer.Serialize(new
@@ -164,6 +151,10 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
             Assert.True(proof.GetProperty("passed").GetBoolean());
             Assert.Equal(commit, proof.GetProperty("expectedSourceCommit").GetString());
             Assert.Equal(8, proof.GetProperty("packages").GetArrayLength());
+            Assert.Equal(["host-run", "host-published-run", "cli-fresh", "cli-warm", "restored-coverage-reader", "cli-audit"],
+                proof.GetProperty("stages").EnumerateArray()
+                    .Where(stage => stage.GetProperty("SyntheticLocal").GetBoolean())
+                    .Select(stage => stage.GetProperty("Stage").GetString()));
             var negatives = proof.GetProperty("negatives").EnumerateArray().ToArray();
             Assert.Equal(["tool-graph-version", "host-private-edge"],
                 negatives.Select(item => item.GetProperty("kind").GetString()));
@@ -271,50 +262,5 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
         if (directory.ResolveLinkTarget(returnFinalTarget: true) is { } target)
             return PhysicalDirectory(new DirectoryInfo(target.FullName));
         return TestPathUtils.PathUnder(PhysicalDirectory(parent), directory.Name);
-    }
-
-    private static async Task<string> RunAsync(string executable, IReadOnlyList<string> arguments,
-        string workingDirectory, string logs, string stage, CancellationToken cancellationToken)
-    {
-        using var process = new Process
-        {
-            StartInfo = new(executable)
-            {
-                WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            }
-        };
-        foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-        process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
-        process.StartInfo.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
-        await File.WriteAllTextAsync(TestPathUtils.PathUnder(logs, stage + ".log"), JsonSerializer.Serialize(new
-        {
-            stage,
-            state = "starting",
-            startedAtUtc = DateTimeOffset.UtcNow
-        }), cancellationToken);
-        process.Start();
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken);
-        }
-        catch
-        {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(CancellationToken.None);
-            throw;
-        }
-        finally
-        {
-            await File.WriteAllTextAsync(TestPathUtils.PathUnder(logs, stage + ".log"), await stdout + await stderr,
-                CancellationToken.None);
-        }
-        var standardOutput = await stdout;
-        Assert.True(process.ExitCode == 0, $"{stage} exited {process.ExitCode}; retained logs: {logs}");
-        return standardOutput;
     }
 }

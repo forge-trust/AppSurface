@@ -1,7 +1,7 @@
 using System.Reflection;
 
 /// <summary>Reads the ordered test policy embedded in the Dogfood assembly.</summary>
-/// <remarks>The same filter parser serves workflow collection and attestation.</remarks>
+/// <remarks>The same filter parser serves workflow collection, attestation, and native lifecycle validation.</remarks>
 internal static class NativeCoverageTestInventory
 {
     private const string ResourcePrefix = "ForgeTrust.AppSurface.Coverage.Dogfood.native-coverage-test-";
@@ -31,23 +31,27 @@ internal static class NativeCoverageTestInventory
     }
 
     /// <summary>Builds a test filter from the embedded selector inventory.</summary>
-    /// <param name="sharedCliOnly">Whether to include only selectors shared with native lifecycle validation.</param>
+    /// <param name="lane">The native coverage, shared CLI, or native lifecycle CLI filter.</param>
     /// <returns>The selected filter terms joined in checked-in policy order.</returns>
+    /// <exception cref="ArgumentException">The filter name is unsupported.</exception>
     /// <exception cref="InvalidOperationException">The selector inventory resource is missing.</exception>
     /// <exception cref="InvalidDataException">The selection is empty or the inventory contains an invalid entry.</exception>
-    internal static string ReadFilter(bool sharedCliOnly = false)
+    internal static string ReadFilter(string lane = "native")
     {
+        if (lane is not ("native" or "shared-cli" or "lifecycle-cli"))
+            throw new ArgumentException("Unknown native test filter.", nameof(lane));
+
         using var reader = OpenInventory("selectors");
         var selectors = new List<string>();
         string? line;
         while ((line = reader.ReadLine()) is not null)
         {
             var entry = line.Split('\t', 2);
-            if (entry.Length != 2 || entry[0] is not ("native" or "shared-cli") ||
+            if (entry.Length != 2 || entry[0] is not ("native" or "shared-cli" or "lifecycle-cli") ||
                 !entry[1].StartsWith("FullyQualifiedName~", StringComparison.Ordinal))
                 throw new InvalidDataException("The native coverage selector inventory contains an invalid entry.");
 
-            if (!sharedCliOnly || entry[0] == "shared-cli")
+            if (entry[0] == lane || entry[0] == "shared-cli")
                 selectors.Add(entry[1]);
         }
 

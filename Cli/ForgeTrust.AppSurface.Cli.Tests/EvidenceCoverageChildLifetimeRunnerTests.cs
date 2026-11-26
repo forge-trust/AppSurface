@@ -232,7 +232,12 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         }
         if (!cooperative) Assert.Equal("reuse.child_lifetime_required", result.InventoryIneligibilityReason);
         else if (!withSession) Assert.Equal("reuse.child_lifetime_session_required", result.InventoryIneligibilityReason);
-        else Assert.NotNull(result.Inventory);
+        else
+        {
+            Assert.Null(result.InventoryIneligibilityReason);
+            Assert.NotEmpty(result.Result.Artifacts!);
+            Assert.True(await custody.VerifyWrittenArtifactsAsync());
+        }
         var previouslyRecorded = runner.Requests.Count;
         var legacy = await adapter.RunAsync(Declaration(), solution, Path.Join(directory.Path, "legacy-run"), null,
             CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
@@ -273,7 +278,6 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
             CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer, session);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
-        Assert.Null(execution.Inventory);
         Assert.Null(execution.Result.Artifacts);
         Assert.Equal("inventory-slot-ineligible", execution.InventoryIneligibilityReason);
         Assert.Empty(writer.WrittenArtifacts);

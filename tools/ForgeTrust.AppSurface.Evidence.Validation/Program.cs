@@ -39,6 +39,8 @@ internal static class Program
                 [--repository <checkout>] [--output <fresh-directory>] [--dotnet <absolute-host>]
                 [--policy <policy.json>] [--scope all|native|coverage|packages]
                 Local includes committed, staged, unstaged and untracked changes; only selected producers run.
+                Default local results are compact archives under TestResults/repository-evidence/local in the worktree.
+                Use --output with a fresh directory for complete unpacked results.
 
                 CI diff: --operation collect --repository <checkout> --event-file <event.json>
                 --event-name pull_request|push|workflow_dispatch --workflow-sha <sha> --output <fresh-directory>
@@ -64,6 +66,10 @@ internal static class Program
                 --version <exact-version> --source-commit <sha> --dotnet <absolute-host> --output <fresh-directory>
                 This installs the candidate main tool and an independent package-only prepared-host consumer.
 
+                Candidate feed preparation: --operation pack-candidate-feed --mode neutral|reuse|extend-neutral
+                --repository <checkout> --output <feed> --version <exact-version> --source-commit <sha>
+                --dotnet <absolute-host> [--package <existing-candidate-cli.nupkg>]
+
                 Native coverage capture: --operation capture-native --repository <checkout>
                 --report <normalized.xml> --raw-report <collector.xml>
                 --output <fresh-capture> --dotnet <absolute-host>
@@ -85,6 +91,8 @@ internal static class Program
                 throw new ArgumentException("--feed requires --operation reuse-package-proof.");
             if (options.TryGetValue("--operation", out var operation))
             {
+                if (operation == "pack-candidate-feed")
+                    return await PackCandidateFeedAsync(options, cancellationToken);
                 if (operation == "reuse-package-proof")
                 {
                     string[] allowed = ["--operation", "--feed", "--version", "--source-commit", "--dotnet", "--output"];
@@ -191,6 +199,43 @@ internal static class Program
 
     private static string Required(IReadOnlyDictionary<string, string> options, string key) =>
         options.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException("Missing required validation option: " + key);
+
+    private static async Task<int> PackCandidateFeedAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken)
+    {
+        string[] allowed = ["--operation", "--mode", "--repository", "--output", "--version", "--source-commit", "--dotnet", "--package"];
+        if (options.Keys.Except(allowed, StringComparer.Ordinal).Any()) throw new ArgumentException("Unsupported candidate feed option.");
+        var mode = Required(options, "--mode") switch
+        {
+            "neutral" => PackedCandidateFeed.Mode.Neutral,
+            "reuse" => PackedCandidateFeed.Mode.Reuse,
+            "extend-neutral" => PackedCandidateFeed.Mode.ExtendNeutral,
+            _ => throw new ArgumentException("Invalid candidate feed mode."),
+        };
+        var dotnet = Path.GetFullPath(Required(options, "--dotnet"));
+        if (!File.Exists(dotnet)) throw new ArgumentException("The selected dotnet host does not exist.");
+        var output = Path.GetFullPath(Required(options, "--output"));
+        try
+        {
+            await PackedCandidateFeed.PrepareAsync(new(
+                Path.GetFullPath(Required(options, "--repository")), dotnet, output, Required(options, "--version"),
+                Required(options, "--source-commit"), mode, options.GetValueOrDefault("--package")), cancellationToken);
+        }
+        catch (PackedCandidateFeed.PreparationException exception)
+        {
+            Console.Error.WriteLine("Candidate feed preparation failed. " + exception.Message);
+            if (exception.LogPath is { } logPath)
+            {
+                try { Console.Error.WriteLine(await File.ReadAllTextAsync(logPath, cancellationToken)); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine("Could not read the retained pack log.");
+                }
+            }
+            return 1;
+        }
+        Console.WriteLine("Candidate feed prepared: " + output);
+        return 0;
+    }
 
     private static async Task<int> CollectCoverageAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
         Func<RepositoryCheckSettings, CancellationToken, Task>? collectCoverage)

@@ -7,6 +7,91 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageDogfoodDiagnosticsTests
 {
     [Fact]
+    public void CollectionInputsSelectExactProjectsAndPreserveOriginalReportBytes()
+    {
+        using var temp = TestDirectory.Create();
+        var collection = TestPathUtils.PathUnder(temp.Path, "collection");
+        Directory.CreateDirectory(collection);
+        const string alpha = "projects/alpha/coverage.cobertura.xml";
+        const string beta = "projects/beta/coverage.cobertura.xml";
+        var alphaPath = TestPathUtils.PathUnder(collection, alpha);
+        var betaPath = TestPathUtils.PathUnder(collection, beta);
+        Directory.CreateDirectory(Path.GetDirectoryName(alphaPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(betaPath)!);
+        byte[] alphaBytes = [0, 1, 2, 255];
+        byte[] betaBytes = [7, 8, 9];
+        File.WriteAllBytes(alphaPath, alphaBytes);
+        File.WriteAllBytes(betaPath, betaBytes);
+        var timings = TestPathUtils.PathUnder(collection, "timings.json");
+        File.WriteAllText(timings, $$"""{"projects":[{"project":"A.Tests","coverageFile":"{{alpha}}"},{"project":"B.Tests","coverageFile":"{{beta}}"}]}""");
+
+        var inputs = NativeCoverageCaptureInputs.FromCollection(collection, ["A.Tests", "B.Tests"], 4096);
+
+        Assert.Equal(timings, inputs.TimingsPath);
+        Assert.Equal(2, inputs.RawCoveragePaths.Count);
+        Assert.Equal(alphaPath, inputs.RawCoveragePaths["A.Tests"]);
+        Assert.Equal(betaPath, inputs.RawCoveragePaths["B.Tests"]);
+        Assert.Equal(alphaBytes, File.ReadAllBytes(inputs.RawCoveragePaths["A.Tests"]));
+        Assert.Equal(betaBytes, File.ReadAllBytes(inputs.RawCoveragePaths["B.Tests"]));
+    }
+
+    [Theory]
+    [InlineData("{\"projects\":[{\"project\":\"A.Tests\",\"coverageFile\":\"a.xml\"},{\"project\":\"A.Tests\",\"coverageFile\":\"b.xml\"}]}")]
+    [InlineData("{\"projects\":[{\"project\":\"A.Tests\",\"coverageFile\":\"a.xml\"}]}")]
+    [InlineData("{\"projects\":[{\"project\":\"A.Tests\",\"coverageFile\":\"a.xml\"},{\"project\":\"B.Tests\",\"coverageFile\":\"b.xml\"},{\"project\":\"Extra.Tests\",\"coverageFile\":\"extra.xml\"}]}")]
+    [InlineData("{\"projects\":[{\"project\":\"A.Tests\",\"coverageFile\":\"a.xml\"},{\"project\":\"b.tests\",\"coverageFile\":\"b.xml\"}]}")]
+    [InlineData("""{"projects":[{"project":"A.Tests","coverageFile":"a.xml"},{"project":"B.Tests"}]}""")]
+    public void CollectionInputsRejectDuplicateMissingExtraAndCaseChangedProjects(string json)
+    {
+        using var temp = TestDirectory.Create();
+        var collection = TestPathUtils.PathUnder(temp.Path, "collection");
+        Directory.CreateDirectory(collection);
+        File.WriteAllText(TestPathUtils.PathUnder(collection, "timings.json"), json);
+
+        Assert.Throws<InvalidDataException>(() => NativeCoverageCaptureInputs.FromCollection(
+            collection, ["A.Tests", "B.Tests"], 4096));
+    }
+
+    [Fact]
+    public void CollectionInputsRejectTimingsExceedingTheConfiguredLimit()
+    {
+        using var temp = TestDirectory.Create();
+        var collection = TestPathUtils.PathUnder(temp.Path, "collection");
+        Directory.CreateDirectory(collection);
+        File.WriteAllText(TestPathUtils.PathUnder(collection, "timings.json"), "{\"projects\":[]}");
+
+        Assert.Throws<InvalidDataException>(() => NativeCoverageCaptureInputs.FromCollection(collection, ["A.Tests"], 2));
+    }
+
+    [Fact]
+    public void CollectionInputsRejectEscapingCoveragePaths()
+    {
+        using var temp = TestDirectory.Create();
+        var collection = TestPathUtils.PathUnder(temp.Path, "collection");
+        Directory.CreateDirectory(collection);
+        File.WriteAllText(TestPathUtils.PathUnder(collection, "timings.json"),
+            "{\"projects\":[{\"project\":\"A.Tests\",\"coverageFile\":\"../outside.xml\"}]}");
+
+        Assert.ThrowsAny<ArgumentException>(() => NativeCoverageCaptureInputs.FromCollection(
+            collection, ["A.Tests"], 4096));
+    }
+
+    [Fact]
+    public void ReplayInputsRetainExplicitIndexAndTimingsPaths()
+    {
+        using var temp = TestDirectory.Create();
+        var index = TestPathUtils.PathUnder(temp.Path, "raw-index.json");
+        var timings = TestPathUtils.PathUnder(temp.Path, "timings.json");
+        File.WriteAllText(index, "{\"A.Tests\":\"report.xml\"}");
+        File.WriteAllText(timings, "{}");
+
+        var inputs = NativeCoverageCaptureInputs.FromReplay(index, timings);
+
+        Assert.Equal(timings, inputs.TimingsPath);
+        Assert.Equal("report.xml", inputs.RawCoveragePaths["A.Tests"]);
+    }
+
+    [Fact]
     public void NativeProjectsMatchTheOrderedEmbeddedProjectInventory()
     {
         var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
@@ -25,6 +110,7 @@ public sealed class CoverageDogfoodDiagnosticsTests
     [Theory]
     [InlineData("native")]
     [InlineData("shared-cli")]
+    [InlineData("lifecycle-cli")]
     public async Task PrintTestFilterWritesTheOrderedSelectionToStandardOutput(string lane)
     {
         var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
@@ -32,7 +118,7 @@ public sealed class CoverageDogfoodDiagnosticsTests
             ".github", "workflows", "native-coverage-test-selectors.txt");
         var selectors = File.ReadAllLines(selectorPath)
             .Select(line => line.Split('\t', 2))
-            .Where(entry => lane == "native" || entry[0] == lane)
+            .Where(entry => entry[0] == lane || entry[0] == "shared-cli")
             .Select(entry => entry[1]);
 
         var (assembly, _) = FindDogfoodAssembly(repositoryRoot);
@@ -77,6 +163,78 @@ public sealed class CoverageDogfoodDiagnosticsTests
         Assert.Contains($"ASCOV311 Dogfood failed at options ({expectedReason}).", error);
         Assert.Contains(expectedRecovery, error);
         Assert.DoesNotContain("private-", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("fanin", null)]
+    [InlineData("native", "--raw-index")]
+    [InlineData("native", "--timings")]
+    public async Task CollectionRootRejectsFanInAndConflictingReplayInputs(string operation, string? conflictingOption)
+    {
+        using var temp = TestDirectory.Create();
+        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
+        var (dogfoodAssembly, configuration) = FindDogfoodAssembly(repositoryRoot);
+        var output = TestPathUtils.PathUnder(temp.Path, "result");
+        var arguments = new List<string>
+        {
+            dogfoodAssembly, "--operation", operation, "--repository", repositoryRoot,
+            "--cli", TestPathUtils.PathUnder(repositoryRoot, "appsurface"), "--output", output,
+            "--configuration", configuration, "--contract-version", "2",
+            "--collection-root", TestPathUtils.PathUnder(temp.Path, "collection")
+        };
+        if (conflictingOption is not null)
+            arguments.AddRange([conflictingOption, TestPathUtils.PathUnder(temp.Path, "replay.json")]);
+
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var request = new CoverageRunProcessRequest("dotnet", arguments, repositoryRoot, null, null, CoverageRunProcessLease.Detached());
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, deadline.Token);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.False(Directory.Exists(output));
+        Assert.Contains("ASCOV311 Dogfood failed at options (ArgumentException).", result.StandardError);
+    }
+
+    [Theory]
+    [InlineData("native", true, "--native-platform")]
+    [InlineData("native", false, "--native-platform")]
+    [InlineData("native", false, "--raw-index")]
+    [InlineData("native", false, "--timings")]
+    [InlineData("fanin", false, "--primary")]
+    [InlineData("fanin", false, "--timings")]
+    [InlineData("fanin", false, "--native-inputs")]
+    public async Task MissingOperationArgumentsFailBeforeReadingSourceOrCreatingOutput(string operation,
+        bool useCollection, string omittedOption)
+    {
+        using var temp = TestDirectory.Create();
+        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
+        var (assembly, configuration) = FindDogfoodAssembly(repositoryRoot);
+        var output = TestPathUtils.PathUnder(temp.Path, "result");
+        // A missing checkout distinguishes option rejection from a source-inventory failure.
+        var arguments = new List<string>
+        {
+            assembly, "--operation", operation, "--repository", TestPathUtils.PathUnder(temp.Path, "missing-source"),
+            "--cli", TestPathUtils.PathUnder(temp.Path, "appsurface"), "--output", output,
+            "--configuration", configuration, "--run-scope", "tests", "--run-id", "missing-option", "--attempt", "1"
+        };
+        string[] modeOptions = operation switch
+        {
+            "fanin" => ["--primary", "--timings", "--native-inputs"],
+            _ when useCollection => ["--native-platform", "--collection-root"],
+            _ => ["--native-platform", "--raw-index", "--timings"]
+        };
+        foreach (var option in modeOptions.Where(option => option != omittedOption))
+        {
+            arguments.Add(option);
+            arguments.Add(option == "--native-platform" ? "Linux" : TestPathUtils.PathUnder(temp.Path, option[2..]));
+        }
+
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var request = new CoverageRunProcessRequest("dotnet", arguments, repositoryRoot, null, null, CoverageRunProcessLease.Detached());
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, deadline.Token);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("ASCOV311 Dogfood failed at options (ArgumentException).", result.StandardError);
+        Assert.False(Directory.Exists(output));
     }
 
     private static (string Assembly, string Configuration) FindDogfoodAssembly(string repositoryRoot)

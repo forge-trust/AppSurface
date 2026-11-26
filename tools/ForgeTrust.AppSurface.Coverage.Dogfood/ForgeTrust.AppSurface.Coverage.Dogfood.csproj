@@ -7,6 +7,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PrivatePackageEdges.cs" Link="PrivatePackageEdges.cs" />
     <ProjectReference Include="../../Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj" />
     <EmbeddedResource Include="../../.github/workflows/native-coverage-test-projects.txt">
       <LogicalName>ForgeTrust.AppSurface.Coverage.Dogfood.native-coverage-test-projects.txt</LogicalName>

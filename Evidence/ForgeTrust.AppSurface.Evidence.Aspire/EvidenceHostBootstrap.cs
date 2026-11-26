@@ -252,7 +252,6 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
     private readonly SemaphoreSlim _execution = new(1, 1);
     private readonly List<Task> _producerExecutions = [];
     private readonly List<Task> _readinessExecutions = [];
-    private IReadOnlyDictionary<string, EvidenceResourceResult>? _preparedReadiness;
     private bool _cleaned;
     private string? _cleanupFailure;
     private Task<string?>? _preparedRegistrationCleanup;
@@ -366,7 +365,7 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
                 }
 
                 State = EvidenceHostState.Producing;
-                var results = await ProduceAsync(cancellationToken).ConfigureAwait(false);
+                var results = await ProduceAsync(readiness.PreparedResultsById, cancellationToken).ConfigureAwait(false);
                 return await CollectAndCleanAsync(results, resourceResults, observationOnly, envelopeStatus, execution).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -522,7 +521,8 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
         }
     }
 
-    private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(
+        IReadOnlyDictionary<string, EvidenceResourceResult>? preparedReadiness, CancellationToken cancellationToken)
     {
         var results = new List<EvidenceProducerResult>();
         var preparedExecution = _preparedExecution;
@@ -534,8 +534,8 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
                 continue;
             }
 
-            if (_preparedReadiness is not null && ProducerResourceClosure(declaration).Any(id =>
-                !_preparedReadiness.TryGetValue(id, out var resource) || resource.Outcome != EvidenceResourceOutcome.Ready))
+            if (preparedReadiness is not null && ProducerResourceClosure(declaration).Any(id =>
+                !preparedReadiness.TryGetValue(id, out var resource) || resource.Outcome != EvidenceResourceOutcome.Ready))
             {
                 results.Add(new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Unavailable, [], "reuse.resource_unavailable: A resource required by this fresh producer did not become ready. Fix its readiness failure and retry."));
                 continue;
@@ -727,27 +727,16 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
 
     private async Task<string?> DisposePreparedRegistrationsAsync()
     {
-        var disposedOwners = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        var producers = await EvidenceOwnerDisposal.DisposeAsync(
-            _registration.Producers.Values.Reverse(), disposedOwners).ConfigureAwait(false);
-        var failure = producers.FirstNonFatalFailure;
-        var fatal = producers.FirstFatalFailure;
-        if (_preparedExecution?.ResourceScope is { } resourceScope)
-        {
-            try { await resourceScope.DisposeAsync(disposedOwners).ConfigureAwait(false); }
-            catch (Exception exception) when (IsNonFatalException(exception)) { failure ??= exception; }
-            catch (Exception exception) { fatal ??= exception; }
-        }
-        else
-        {
-            var resources = await EvidenceOwnerDisposal.DisposeAsync(
-                _registration.Resources.Values.Reverse(), disposedOwners).ConfigureAwait(false);
-            failure ??= resources.FirstNonFatalFailure;
-            fatal ??= resources.FirstFatalFailure;
-        }
+        var scope = _preparedExecution?.ResourceScope;
+        var owners = _registration.Producers.Values.Reverse().Cast<object>();
+        if (scope is null) owners = owners.Concat(_registration.Resources.Values.Reverse());
 
-        if (fatal is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
-        return failure is null ? null : $"reuse.cleanup_failed: Owned cleanup failed with {failure.GetType().Name}; execution settlement is unknown.";
+        var disposal = await EvidenceOwnerDisposal.DisposePreparedAsync(owners, scope).ConfigureAwait(false);
+        if (disposal.FirstFatalFailure is { } fatal)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
+        return disposal.FirstNonFatalFailure is { } failure
+            ? $"reuse.cleanup_failed: Owned cleanup failed with {failure.GetType().Name}; execution settlement is unknown."
+            : null;
     }
 
     private static Exception? FirstFatalCallbackFailure(IEnumerable<Task> callbackTasks)
@@ -866,8 +855,7 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
             results.Add(resource.Id, result);
         }
 
-        _preparedReadiness = results;
-        return new ResourceReadiness(results.Values.ToArray(), null);
+        return new ResourceReadiness(results.Values.ToArray(), FailureResults: null, PreparedResultsById: results);
     }
 
     private IReadOnlySet<string> ProducerResourceClosure(EvidenceProducerDeclaration producer) =>
@@ -880,7 +868,8 @@ public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
 
     private sealed record ResourceReadiness(
         IReadOnlyList<EvidenceResourceResult> ResourceResults,
-        IReadOnlyList<EvidenceProducerResult>? FailureResults);
+        IReadOnlyList<EvidenceProducerResult>? FailureResults,
+        IReadOnlyDictionary<string, EvidenceResourceResult>? PreparedResultsById = null);
 }
 
 /// <summary>

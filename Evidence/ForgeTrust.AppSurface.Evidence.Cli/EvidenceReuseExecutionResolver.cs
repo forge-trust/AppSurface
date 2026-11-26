@@ -17,6 +17,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
     string? sdkExecutableForTests = null)
 {
     private const string CoverageImplementationIdentity = "appsurface-coverage-evidence-adapter-v1";
+    private const string ConsumerHostRequired = "reuse.consumer_host_required";
     private readonly string _sdkExecutable = sdkExecutableForTests is null ? "dotnet"
         : Path.IsPathFullyQualified(sdkExecutableForTests) ? sdkExecutableForTests
         : throw new ArgumentException("The SDK query test executable must have a fully qualified path.", nameof(sdkExecutableForTests));
@@ -42,9 +43,8 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         if (plan.Profile.Resources.Count > 0)
         {
             var manifest = EvidenceCliWorkflow.BuildResourceBackedRefusal(plan, observationOnly);
-            var decisions = plan.Profile.Producers.Select(producer => new EvidenceReuseSummaryDecision(producer.Id,
-                "Ineligible", "reuse.consumer_host_required",
-                "The CLI does not prepare consumer-owned resources or custom producer registrations.", null, null, null, "not-published")).ToArray();
+            var decisions = DescribeResourceBackedRefusal(plan,
+                "The CLI does not prepare consumer-owned resources or custom producer registrations.");
             return new EvidenceReuseRunResult(manifest, decisions);
         }
 
@@ -57,7 +57,6 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 storeRoot, waitTimeout, new(outputDirectory, CoverageTextWriters.Create(output, error), verifyReuse),
                 cancellationToken).ConfigureAwait(false);
             session = prepared.Session;
-            foreach (var adapter in prepared.Adapters.Values) adapter.SetSession(session);
             cancellationToken.ThrowIfCancellationRequested();
 
             var results = new List<EvidenceProducerResult>(plan.Profile.Producers.Count);
@@ -77,8 +76,9 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 {
                     var adapter = prepared.Adapters[producer.Id];
                     Directory.CreateDirectory(adapter.RunOutput.ExecutionRoot);
-                    results.Add(await adapter.ProduceAsync(new EvidenceProducerContext(plan, producer, TimeProvider.System,
-                        session.GetWriter(producer)), cancellationToken).ConfigureAwait(false));
+                    var context = new EvidenceProducerContext(plan, producer, TimeProvider.System, session.GetWriter(producer));
+                    results.Add(await adapter.ProduceFreshAsync(context, session.GetChildLifetime(producer.Id), cancellationToken)
+                        .ConfigureAwait(false));
                 }
             }
 
@@ -132,15 +132,20 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         var invocationDirectory = Directory.GetCurrentDirectory();
         var repositoryRoot = FindRepositoryRoot(invocationDirectory);
         if (plan.Profile.Resources.Count > 0)
-            return plan.Profile.Producers.Select(producer => new EvidenceReuseSummaryDecision(producer.Id,
-                "Ineligible", "reuse.consumer_host_required",
-                "The CLI cannot prepare consumer-owned resources or registrations. Use EvidenceHostBootstrap.PrepareAsync in the consumer host.",
-                null, null, null, "not-published")).ToArray();
+            return DescribeResourceBackedRefusal(plan,
+                "The CLI cannot prepare consumer-owned resources or registrations. Use EvidenceHostBootstrap.PrepareAsync in the consumer host.");
         var prepared = await PrepareAsync(plan, diffSnapshot, solutionPath, invocationDirectory, repositoryRoot, storeRoot,
             waitTimeout, run: null, cancellationToken).ConfigureAwait(false);
         await using var session = prepared.Session;
         return ToSummaryDecisions(session.Decisions, prepared.PreparationDiagnostics);
     }
+
+    private static IReadOnlyList<EvidenceReuseSummaryDecision> DescribeResourceBackedRefusal(EvidencePlan plan, string diagnostic)
+        => ToSummaryDecisions(plan.Profile.Producers.Select(producer =>
+            new EvidenceProducerReuseDecision(producer.Id, EvidenceProducerReuseStatus.Ineligible, ConsumerHostRequired, diagnostic)
+            {
+                Publication = EvidenceReceiptPublication.NotPublished,
+            }));
 
     /// <summary>Prepares the same producer identities and diagnostic prerequisites for run and explain.</summary>
     /// <remarks>Only a run has output roots, progress writers, or an audit mode. Explain can inspect receipt
@@ -170,7 +175,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             var sdkVersion = RequiresCoverageIdentity(producer) ? initialSdkVersion : null;
             var adapter = new CoverageProducerAdapter(producer.Id, coverageProducer, fullSolutionPath, runOutput,
                 sdkVersion, _sdkExecutable, repositoryRoot);
-            var isCoverageProducer = IsCoverageProducer(producer);
+            var isCoverageProducer = producer.IsCoverageProducer();
             var implementationIdentity = isCoverageProducer
                 ? CoverageImplementationIdentity
                 : "appsurface-cli-consumer-host-required-v1";
@@ -203,7 +208,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         bool isCoverageProducer, bool hasSolutionIdentity, string? sdkVersion)
     {
         if (!isCoverageProducer)
-            return ("reuse.consumer_host_required",
+            return (ConsumerHostRequired,
                 "The CLI does not register custom producers. Use EvidenceHostBootstrap.PrepareAsync in the consumer host.");
         if (!hasSolutionIdentity)
             return ("reuse.solution_required",
@@ -218,17 +223,17 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
     /// <remarks>Only unkeyed ineligible decisions can use a preparation diagnostic. Keyed decisions retain the
     /// coordinator's reason because they already passed identity construction.</remarks>
     /// <param name="decisions">Coordinator decisions for this invocation.</param>
-    /// <param name="preparationDiagnostics">CLI diagnostic overrides for producers with unmet prerequisites.</param>
+    /// <param name="preparationDiagnostics">Optional CLI diagnostic overrides for producers with unmet prerequisites.</param>
     /// <returns>Summary rows in coordinator decision order.</returns>
     internal static IReadOnlyList<EvidenceReuseSummaryDecision> ToSummaryDecisions(
-        IReadOnlyList<EvidenceProducerReuseDecision> decisions,
-        IReadOnlyDictionary<string, (string Reason, string Diagnostic)> preparationDiagnostics) => decisions
+        IEnumerable<EvidenceProducerReuseDecision> decisions,
+        IReadOnlyDictionary<string, (string Reason, string Diagnostic)>? preparationDiagnostics = null) => decisions
         .Select(decision =>
         {
             var reason = decision.Reason;
             var diagnostic = decision.Diagnostic;
             if (decision is { Status: EvidenceProducerReuseStatus.Ineligible, ProducerKey: null }
-                && preparationDiagnostics.TryGetValue(decision.ProducerId, out var preparationDiagnostic))
+                && preparationDiagnostics?.TryGetValue(decision.ProducerId, out var preparationDiagnostic) == true)
             {
                 (reason, diagnostic) = preparationDiagnostic;
             }
@@ -247,7 +252,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
     internal static IReadOnlyDictionary<string, string> CreateToolIdentity(
         EvidenceProducerDeclaration producer, string repositoryRoot, string? solutionPath, string sdkVersion)
     {
-        if (!IsCoverageProducer(producer))
+        if (!producer.IsCoverageProducer())
             return new Dictionary<string, string>(StringComparer.Ordinal);
         var settings = new CoverageEvidenceRunSettings(producer.CoverageExecution);
         var solutionIdentity = "missing";
@@ -304,15 +309,12 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
     }
 
     private static bool RequiresCoverageIdentity(EvidenceProducerDeclaration producer) =>
-        IsCoverageProducer(producer)
+        producer.IsCoverageProducer()
         && producer.Inputs is not null
         && producer.CoverageExecution is { CooperativeChildLifetime: true };
 
-    private static bool IsCoverageProducer(EvidenceProducerDeclaration producer)
-        => string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase);
-
     private static string? ResolveCoverageSolutionPath(EvidencePlan plan, string? solutionPath, string invocationDirectory)
-        => !string.IsNullOrWhiteSpace(solutionPath) && plan.Profile.Producers.Any(IsCoverageProducer)
+        => !string.IsNullOrWhiteSpace(solutionPath) && plan.Profile.Producers.Any(static producer => producer.IsCoverageProducer())
             ? Path.GetFullPath(solutionPath, invocationDirectory)
             : null;
 
@@ -405,7 +407,6 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         string? initialSdkVersion, string sdkExecutable,
         string repositoryRoot) : IEvidenceProducer, IEvidenceProducerKeyMaterial, IEvidenceProducerReceiptEligibility
     {
-        private EvidenceProducerReuseSession? _session;
         private string? _receiptIneligibilityReason;
         public string Id { get; } = id;
         public string? ReceiptIneligibilityReason => Volatile.Read(ref _receiptIneligibilityReason);
@@ -414,12 +415,20 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
         internal ProducerRunOutput RunOutput => runOutput
             ?? throw new InvalidOperationException("Read-only explain cannot allocate producer output.");
 
-        internal void SetSession(EvidenceProducerReuseSession session) => _session = session;
+        ValueTask<EvidenceProducerResult> IEvidenceProducer.ProduceAsync(
+            EvidenceProducerContext context, CancellationToken cancellationToken)
+            => ProduceFreshAsync(context, childLifetime: null, cancellationToken);
 
-        public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        /// <summary>Executes fresh coverage with the per-producer child lifetime supplied after admission, when available.</summary>
+        /// <param name="context">Producer declaration and invocation-owned artifact writer.</param>
+        /// <param name="childLifetime">The admitted child lifetime, or null for fresh execution without receipt custody.</param>
+        /// <param name="cancellationToken">Cancels the fresh producer run.</param>
+        /// <returns>The fresh producer result with elapsed time.</returns>
+        internal async ValueTask<EvidenceProducerResult> ProduceFreshAsync(EvidenceProducerContext context,
+            EvidenceChildLifetimeSession? childLifetime, CancellationToken cancellationToken)
         {
             var output = RunOutput;
-            if (!IsCoverageProducer(context.Producer))
+            if (!context.Producer.IsCoverageProducer())
                 return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Unavailable, [],
                     "This producer requires an explicit consumer EvidenceHost registration; the CLI does not infer custom producer registrations.");
             if (solutionPath is null)
@@ -427,7 +436,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             var elapsed = Stopwatch.StartNew();
             var execution = await producer.RunWithInventoryAsync(context.Producer, solutionPath, output.ExecutionRoot,
                 output.DiffSnapshot, output.Writers, cancellationToken, context.Artifacts,
-                GetLifetime(), output.ArtifactRoot).ConfigureAwait(false);
+                childLifetime, output.ArtifactRoot).ConfigureAwait(false);
             Volatile.Write(ref _receiptIneligibilityReason, execution.InventoryIneligibilityReason);
             return execution.Result with { ElapsedMilliseconds = elapsed.ElapsedMilliseconds };
         }
@@ -436,7 +445,7 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             EvidenceProducerKeyMaterialContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!IsCoverageProducer(context.Producer))
+            if (!context.Producer.IsCoverageProducer())
                 throw new InvalidOperationException("reuse.consumer_host_required");
             if (solutionPath is null)
                 throw new InvalidOperationException("reuse.solution_required");
@@ -463,8 +472,6 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
                 ["contractsBinary"] = AssemblyDigest(typeof(EvidenceOwnedChild).Assembly),
             };
         }
-
-        internal EvidenceChildLifetimeSession? GetLifetime() => _session?.GetChildLifetime(Id);
     }
 }
 

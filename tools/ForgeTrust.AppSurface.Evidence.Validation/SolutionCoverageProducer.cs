@@ -182,7 +182,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
                 [("transcript", JsonSerializer.SerializeToUtf8Bytes(proof)),
                     ("result", JsonSerializer.SerializeToUtf8Bytes(new { completed = false, stage, failure = exception.GetType().Name, commands = proof }))]).ConfigureAwait(false);
-            return Failed($"Solution coverage failed during {stage}." + artifactDiagnostic);
+            var commandDiagnostic = exception is EvidenceCommandException { Code: "cleanup_failed" } ? " cleanup_failed." : string.Empty;
+            return Failed($"Solution coverage failed during {stage}." + commandDiagnostic + artifactDiagnostic);
         }
     }
 

@@ -294,7 +294,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("$filter = & dotnet $dogfood --print-test-filter native", runCommand, StringComparison.Ordinal);
         Assert.Contains("'--test-argument', '--filter', '--test-argument', $filter", runCommand, StringComparison.Ordinal);
         Assert.Contains("'--logger', 'console;verbosity=detailed'", runCommand, StringComparison.Ordinal);
-        Assert.Contains("'--output', \"${{ runner.temp }}/coverage-native-results\", '--test-results', 'junit', '--artifact-retention', 'full'", runCommand, StringComparison.Ordinal);
+        Assert.Contains("'--test-results', 'junit', '--artifact-retention', 'full'", runCommand, StringComparison.Ordinal);
         Assert.Contains("'--test-argument', '--blame-hang', '--test-argument', '--blame-hang-timeout', '--test-argument', '2m'", runCommand, StringComparison.Ordinal);
         Assert.Contains("'--test-argument', '--blame-hang-dump-type', '--test-argument', 'mini'", runCommand, StringComparison.Ordinal);
         Assert.Contains("if ($LASTEXITCODE -ne 0) { throw \"Native coverage collection failed\" }", runCommand, StringComparison.Ordinal);
@@ -307,7 +307,12 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("\"--collect:XPlat Code Coverage\"", coverageDriver, StringComparison.Ordinal);
         Assert.Contains("arguments.Add(\"DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura\")", coverageDriver, StringComparison.Ordinal);
         Assert.Contains("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude={request.ExcludeFilter}", coverageDriver, StringComparison.Ordinal);
-        Assert.Contains("'--test-argument', '--blame-hang-timeout', '--test-argument', '2m'", runCommand, StringComparison.Ordinal);
+
+        var collectorEnvironment = (YamlMappingNode)runCoverage.Children[new YamlScalarNode("env")];
+        Assert.Equal("${{ runner.temp }}/packed-reuse-diagnostics",
+            ((YamlScalarNode)collectorEnvironment.Children[new YamlScalarNode("APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS")]).Value);
+        Assert.Contains("New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS",
+            runCommand, StringComparison.Ordinal);
 
         var uploadDiagnostics = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload coverage security diagnostics");

@@ -613,12 +613,35 @@ public sealed class EvidenceProducerReuseSessionTests
                 },
             });
         var firstKey = audit.Decisions[0].ProducerKey!;
+        var secondKey = audit.Decisions[1].ProducerKey!;
 
         Assert.False(await audit.BeginExecutionAsync(CancellationToken.None));
-        var firstState = await fixture.ReadStateAsync(firstKey);
-        Assert.Null(firstState?.InFlightExecutionId);
-        Assert.Equal(audit.ExecutionId, firstState?.AuditIntentExecutionId);
-        Assert.NotNull(firstState?.PayloadDirectoryName);
+        Assert.True(audit.IsUnavailable);
+        var firstState = Assert.IsType<EvidenceReceiptState>(await fixture.ReadStateAsync(firstKey));
+        var secondState = Assert.IsType<EvidenceReceiptState>(await fixture.ReadStateAsync(secondKey));
+        Assert.Null(firstState.InFlightExecutionId);
+        Assert.Equal(audit.ExecutionId, firstState.AuditIntentExecutionId);
+        Assert.False(firstState.AuditMismatch);
+        Assert.NotNull(firstState.PayloadDirectoryName);
+        Assert.Null(secondState.InFlightExecutionId);
+        Assert.Null(secondState.AuditIntentExecutionId);
+        Assert.NotNull(secondState.PayloadDirectoryName);
+
+        Assert.All(audit.Decisions, decision => Assert.Equal("reuse.authority_unavailable", decision.Reason));
+        var refused = EvidenceManifestBuilder.Build(fixture.Plan,
+            audit.Decisions.Select(decision => new EvidenceProducerResult(
+                decision.ProducerId, EvidenceProducerOutcome.Unavailable, [], decision.Diagnostic)).ToArray(),
+            metrics: new EvidenceExecutionMetrics { CleanupCompleted = true });
+        var completed = await audit.CompleteAsync(refused, CancellationToken.None);
+
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, completed.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, completed.ClaimKind);
+        Assert.False(completed.Metrics.CleanupCompleted);
+        Assert.All(completed.ProducerResults, result => Assert.Equal(EvidenceProducerOutcome.Unavailable, result.Outcome));
+        Assert.Equal(refused.ProducerResults.Select(result => result.Diagnostic),
+            completed.ProducerResults.Select(result => result.Diagnostic));
+        Assert.Equal(firstState, await fixture.ReadStateAsync(firstKey));
+        Assert.Equal(secondState, await fixture.ReadStateAsync(secondKey));
         Assert.All(fixture.Producers, producer => Assert.Equal(1, producer.ExecutionCount));
 
         await audit.DisposeAsync();

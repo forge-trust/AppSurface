@@ -77,6 +77,84 @@ public sealed class NativeEvidenceProgramTests
         Assert.Contains("--native-coverage-contract-version 2|3 (default 2)", result.StandardOutput, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true, "A valid candidate package version is required.")]
+    [InlineData(false, "A full source commit is required.")]
+    public async Task PackCandidateFeed_RejectsInvalidIdentityBeforeCreatingOutput(bool invalidVersion, string diagnostic)
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-identity-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            var result = await InvokeAsync(["--operation", "pack-candidate-feed", "--mode", "reuse",
+                "--repository", root, "--output", feed, "--version", invalidVersion ? "bad/version" : "1.0.0",
+                "--source-commit", invalidVersion ? new string('a', 40) : new string('z', 40),
+                "--dotnet", TestDotnetHost.Resolve()]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Candidate feed preparation failed. " + diagnostic, result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(feed));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_ExtendNeutralRejectsMissingCliArchiveWithoutMutation()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            Directory.CreateDirectory(feed);
+
+            var result = await InvokeAsync(["--operation", "pack-candidate-feed", "--mode", "extend-neutral",
+                "--repository", root, "--output", feed, "--version", "1.0.0", "--source-commit", new string('a', 40),
+                "--dotnet", TestDotnetHost.Resolve()]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.StartsWith("Candidate feed preparation failed.", result.StandardError, StringComparison.Ordinal);
+            Assert.Contains("Missing or nonregular neutral archive for 'ForgeTrust.AppSurface.Cli'.",
+                result.StandardError, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(feed));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_ExtendNeutralPreservesExistingSelectedArchiveAndFeedFiles()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            Directory.CreateDirectory(feed);
+            var sentinelFiles = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ForgeTrust.AppSurface.Cli.1.0.0.nupkg"] = "caller-owned CLI archive",
+                ["ForgeTrust.AppSurface.Evidence.Contracts.1.0.0.nupkg"] = "caller-owned contracts archive",
+                ["ForgeTrust.AppSurface.Evidence.Coverage.1.0.0.nupkg"] = "caller-owned evidence coverage archive",
+                ["ForgeTrust.AppSurface.Coverage.1.0.0.nupkg"] = "caller-owned coverage archive",
+                ["ForgeTrust.AppSurface.Evidence.Planner.1.0.0.nupkg"] = "caller-owned planner archive",
+            };
+            foreach (var (archiveName, contents) in sentinelFiles)
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(feed, archiveName), contents);
+
+            var result = await InvokeAsync(["--operation", "pack-candidate-feed", "--mode", "extend-neutral",
+                "--repository", root, "--output", feed, "--version", "1.0.0", "--source-commit", new string('a', 40),
+                "--dotnet", TestDotnetHost.Resolve()]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.StartsWith("Candidate feed preparation failed.", result.StandardError, StringComparison.Ordinal);
+            Assert.Contains("The feed already contains 'ForgeTrust.AppSurface.Evidence.Planner'.",
+                result.StandardError, StringComparison.Ordinal);
+            Assert.Equal(sentinelFiles.Keys.Order(StringComparer.Ordinal),
+                Directory.EnumerateFiles(feed).Select(path => Path.GetFileName(path)!).Order(StringComparer.Ordinal));
+            foreach (var (archiveName, contents) in sentinelFiles)
+                Assert.Equal(contents, await File.ReadAllTextAsync(TestPathUtils.PathUnder(feed, archiveName)));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Fact]
     public async Task LocalPlanRejectsPackedProofFeedBeforeWritingEvidence()
     {

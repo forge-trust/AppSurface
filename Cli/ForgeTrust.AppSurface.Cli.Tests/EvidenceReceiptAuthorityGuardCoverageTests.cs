@@ -103,6 +103,7 @@ public sealed class EvidenceReceiptAuthorityGuardCoverageTests
         var originalIndex = fixture.IndexBytes();
 
         Assert.Throws<InvalidOperationException>(() => fixture.Lease.SettleExecution("different-execution"));
+        fixture.Lease.SettleExecutionIfOwned("different-execution");
 
         Assert.Equal(originalState, fixture.Lease.ReadState());
         Assert.Equal(originalIndex, fixture.IndexBytes());

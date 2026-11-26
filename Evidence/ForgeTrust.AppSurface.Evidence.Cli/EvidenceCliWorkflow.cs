@@ -244,7 +244,7 @@ internal sealed class EvidenceCliWorkflow
             {
                 var usesCoverageCustody = useDefaultRoot && artifact.LogicalName == CoverageEvidenceInventory.LogicalName
                     && verified.Plan.Profile.Producers.Any(declaration => declaration.Id == producer.ProducerId
-                        && string.Equals(declaration.Kind, "coverage", StringComparison.OrdinalIgnoreCase));
+                        && declaration.IsCoverageProducer());
                 var status = usesCoverageCustody
                     ? await CheckCoverageCustodyAsync(outputDirectory, verified.Plan, producer.ProducerId, artifact, cancellationToken).ConfigureAwait(false)
                     : await EvidenceArtifactFileValidation.CheckAsync(root, producer.ProducerId, artifact, cancellationToken).ConfigureAwait(false);

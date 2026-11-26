@@ -796,23 +796,35 @@ public sealed class EvidencePlannerTests
     }
 
     [Theory]
-    [InlineData(0, "ASEVD130")]
-    [InlineData(33, "ASEVD130")]
-    public void Planner_ShouldRejectOutOfRangeCoverageExecutionParallelism(int parallelism, string code)
+    [InlineData("coverage", 0, "ASEVD130")]
+    [InlineData("coverage", 33, "ASEVD130")]
+    [InlineData("Coverage", 33, null)]
+    public void Planner_ShouldValidateCoverageParallelismOnlyForTheExactKind(string kind, int parallelism, string? code)
     {
         var validProfile = CreateCoverageProfile(EvidenceProfileScope.Targeted);
         var policy = CreatePolicy() with
         {
             Profiles =
             [
+                CreateNoEvidenceProfile(),
                 validProfile with
                 {
-                    Producers = [validProfile.Producers[0] with { CoverageExecution = new EvidenceCoverageExecutionOptions(Parallelism: parallelism) }],
+                    Producers =
+                    [
+                        validProfile.Producers[0] with
+                        {
+                            Kind = kind,
+                            CoverageExecution = new EvidenceCoverageExecutionOptions(Parallelism: parallelism),
+                        },
+                    ],
                 },
             ],
         };
 
-        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(policy), code);
+        if (code is null)
+            EvidencePlanner.ValidatePolicy(policy);
+        else
+            AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(policy), code);
     }
 
     [Fact]
