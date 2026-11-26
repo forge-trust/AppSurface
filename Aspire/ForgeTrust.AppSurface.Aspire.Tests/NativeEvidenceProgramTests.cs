@@ -210,6 +210,30 @@ public sealed class NativeEvidenceProgramTests
         Assert.False(File.Exists(TestPathUtils.PathUnder(output, "native-validation-receipt.json")));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LocalExecution_WithPendingCleanupMarker_PrintsRecoveryInstructions(bool withOutput)
+    {
+        using var fixture = new NativeCaptureFixture();
+        var marker = TestPathUtils.PathUnder(fixture.Repository, ".git", "appsurface-local-evidence", "run.pending-cleanup");
+        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        const string priorOutput = "synthetic prior output";
+        await File.WriteAllTextAsync(marker, priorOutput);
+        var output = TestPathUtils.PathUnder(fixture.Root, "caller-raw-output");
+        var args = new List<string> { "--operation", "local", "--repository", fixture.Repository };
+        if (withOutput) args.AddRange(["--output", output]);
+
+        var result = await InvokeAsync(args.ToArray());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(marker, result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("remove the cleanup marker", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("processes have stopped", result.StandardError, StringComparison.Ordinal);
+        Assert.Equal(priorOutput, await File.ReadAllTextAsync(marker));
+        Assert.False(Path.Exists(output));
+    }
+
     [Fact]
     public async Task CaptureNative_UsesRealCheckoutAndWritesBoundIdentityReceipt()
     {

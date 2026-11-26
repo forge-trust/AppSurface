@@ -44,15 +44,17 @@ internal sealed class LocalEvidenceWorkflow
         var repository = Path.GetFullPath(options.GetValueOrDefault("--repository", Directory.GetCurrentDirectory()));
         var explicitOutput = options.TryGetValue("--output", out var output) ? Path.GetFullPath(output) : null;
         cancellationToken.ThrowIfCancellationRequested();
-        string? gitDirectory = null;
-        if (operation == "local" || explicitOutput is null)
+        if (operation == "local-plan" && explicitOutput is not null)
         {
-            if (!Path.Exists(PathUtils.PathUnder(repository, ".git")))
-                throw new ArgumentException("Local evidence requires a Git worktree root.");
-            gitDirectory = await RepositoryGitChanges.ReadIdentityAsync(repository, cancellationToken, "rev-parse", "--absolute-git-dir");
-            if (!Path.IsPathFullyQualified(gitDirectory))
-                throw new ArgumentException("Local evidence requires an absolute worktree Git directory.");
+            await RunFreshAsync(options, repository, operation, new LocalEvidenceRun(explicitOutput, null), cancellationToken);
+            return 0;
         }
+
+        if (!Path.Exists(PathUtils.PathUnder(repository, ".git")))
+            throw new ArgumentException("Local evidence requires a Git worktree root.");
+        var gitDirectory = await RepositoryGitChanges.ReadIdentityAsync(repository, cancellationToken, "rev-parse", "--absolute-git-dir");
+        if (!Path.IsPathFullyQualified(gitDirectory))
+            throw new ArgumentException("Local evidence requires an absolute worktree Git directory.");
         return await LocalEvidenceOutput.RunAsync(repository, operation, gitDirectory,
             run => RunFreshAsync(options, repository, operation, run, cancellationToken), explicitOutput);
     }

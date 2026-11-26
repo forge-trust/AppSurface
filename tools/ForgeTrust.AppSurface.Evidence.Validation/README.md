@@ -34,9 +34,10 @@ Scratch is removed after successful retention and known cleanup. The validator t
 subprocess cleanup and the EvidenceHost cleanup result. Each `local` execution creates
 `appsurface-local-evidence/run.pending-cleanup` beside the lock before starting and clears it after
 confirmed cleanup. If cleanup is unconfirmed or the validator exits abruptly, the marker blocks
-another `local` execution in that worktree, including one using `--output`. The marker contains
-the prior run's output path. After the validator exits, `local-plan` remains available while the
-marker is present. Use the existing validator build with `--no-build --no-restore` during recovery
+another `local` execution in that worktree, including one using `--output`. A blocked retry prints
+the marker path and recovery steps. The marker contains the prior run's output path. After the
+validator exits, `local-plan` remains available while the marker is present. Use the existing
+validator build with `--no-build --no-restore` during recovery
 so the .NET invocation skips building the driver. Confirm that the prior validation processes have
 stopped before removing the marker and retrying. Keep any retained scratch you need for inspection.
 Scratch and the private `.scratch/package-restore/` cache stay outside package discovery.

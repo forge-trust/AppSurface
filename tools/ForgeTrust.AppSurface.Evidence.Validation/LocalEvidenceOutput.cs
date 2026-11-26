@@ -18,25 +18,18 @@ internal static class LocalEvidenceOutput
         MaxRecursionDepth = 64,
     };
 
-    /// <summary>Guards local execution and publishes compact archives for managed output.</summary>
+    /// <summary>Runs local execution or managed planning under the worktree lease.</summary>
     /// <remarks>Both execution modes share the worktree lease and pending cleanup marker. Planning may run during recovery.</remarks>
     /// <param name="repository">The worktree root that owns validation state.</param>
-    /// <param name="operation">The local execution or planning operation.</param>
-    /// <param name="gitDirectory">The per-worktree Git metadata directory, required for any operation that uses the lease.</param>
+    /// <param name="operation">The local execution or managed planning operation.</param>
+    /// <param name="gitDirectory">The per-worktree Git metadata directory that holds the lease.</param>
     /// <param name="run">The callback that creates the current plan or completes validation.</param>
     /// <param name="explicitOutput">An optional caller-owned fresh output path that bypasses archive retention.</param>
     /// <returns>Zero after successful execution or planning.</returns>
-    internal static async Task<int> RunAsync(string repository, string operation, string? gitDirectory,
+    internal static async Task<int> RunAsync(string repository, string operation, string gitDirectory,
         Func<LocalEvidenceRun, Task<LocalEvidenceRunResult?>> run, string? explicitOutput = null)
     {
         var planOnly = operation == "local-plan";
-        if (planOnly && explicitOutput is not null)
-        {
-            await run(new LocalEvidenceRun(explicitOutput, null));
-            return 0;
-        }
-
-        ArgumentNullException.ThrowIfNull(gitDirectory);
         var control = RequireDirectory(PathUtils.PathUnder(gitDirectory, "appsurface-local-evidence"));
         var lockPath = PathUtils.PathUnder(control, "run.lock");
         RequirePlainPath(lockPath);
@@ -114,9 +107,13 @@ internal static class LocalEvidenceOutput
     private static void RequireSettledWorktree(string pendingCleanup)
     {
         RequirePlainPath(pendingCleanup);
-        if (Path.Exists(pendingCleanup))
-            throw new InvalidOperationException("Local evidence execution is blocked because a previous run may still have active commands. " +
-                "After confirming its processes have stopped, remove the cleanup marker and retry: " + pendingCleanup);
+        if (!Path.Exists(pendingCleanup))
+            return;
+
+        var message = "Local evidence execution is blocked because a previous run may still have active commands. " +
+            $"After confirming its processes have stopped, remove the cleanup marker at {pendingCleanup} and retry.";
+        Console.Error.WriteLine(message);
+        throw new InvalidOperationException(message);
     }
 
     private static async Task<LocalEvidenceRunResult?> RunWithRetryGuardAsync(LocalEvidenceRun localRun, string? pendingCleanup,
