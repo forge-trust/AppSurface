@@ -28,6 +28,14 @@ An `EvidencePolicy` resolves into an immutable `EvidencePlan`. A run records dec
 
 `EvidenceClaimKind.TargetedComplete` is eligible for a pull-request gate; `ReleaseComplete` is eligible only for a release gate and requires `ValidatedNotAttested` envelope status. `ObservationOnly` is deliberately informative, never gate-eligible. `NoEvidenceRequired` is valid only when the selected profile declares no resources, producers, or obligations.
 
+### Bounded JSON input
+
+Use `EvidenceCanonicalJson.DeserializeAsync<T>(Stream, maximumBytes, cancellationToken)` at a file or stream boundary. It counts bytes as they arrive and rejects input as soon as it reads a byte beyond the limit. The default ceiling is 20 MiB per document. A caller may lower it, including to zero, and retains ownership of the stream. `Deserialize<T>(ReadOnlySpan<byte>)` applies the same ceiling to bytes already in memory. Its explicit-limit overload lets callers use a smaller ceiling.
+
+The reader rejects duplicate and case-colliding property names, malformed JSON, unknown and numeric enum values, missing required constructor members, and null items in typed Evidence contract collections. The maximum nesting depth is 64. Typed plans and manifests must declare version `1.0`, including when they appear in a caller-owned wrapper or collection. Known enum names remain case-insensitive. Optional defaults, explicitly nullable fields, and unknown additive properties remain accepted. Canonical serialization preserves the existing bytes for supported contracts.
+
+Expect `JsonException` for malformed or unsupported JSON, `InvalidDataException` for a size limit or supported stream read failure, and `ArgumentOutOfRangeException` for a limit outside the supported range. Diagnostics from the reader omit the input. Cancellation propagates to the caller. Counted reads enforce the input limit even when stream length is unavailable. The reader validates the document's structure. Authenticating its source remains the caller's responsibility.
+
 ## Streaming artifact writes
 
 Use [`EvidenceArtifactWriter.WriteAsync`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs) with a `Stream` when a producer has an artifact that may be large or is supplied by a non-seekable process stream. The writer copies in bounded chunks, computes the lower-case SHA-256 digest as bytes arrive, and enforces both the slot's `MaximumBytes` and the shared 256 MiB producer budget before accepting each chunk. The input stream remains owned by the caller and is read to end; the writer exposes only `EvidenceArtifactResult` metadata.

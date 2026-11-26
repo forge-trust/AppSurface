@@ -30,6 +30,8 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 | `run` | Runs selected built-in `coverage` and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. It first deletes the earlier manifest, summary and the selected `test` producers' artifact directories, so a cancelled rerun cannot leave an old passing manifest behind. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
 | `verify` | Recomputes binding and digest verification and checks every manifest-listed artifact on disk, without running any producer. See [Verifying evidence](#verifying-evidence). |
 
+Policy, plan, and manifest inputs use the shared [bounded JSON reader](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input). The CLI counts up to 20 MiB per input before parsing and rejects malformed or ambiguous documents. Invalid or unreadable policy input reports `ASEVD205`. Invalid or unreadable plan and manifest input reports `ASEVD209`. These errors omit JSON content and raw reader messages. Missing or invalid input paths report `ASEVD204` for policy and `ASEVD208` for plans and manifests.
+
 ## Incomplete profiles are not complete evidence
 
 An intentionally selected `no-evidence` profile may close a gate. A skipped test project, unavailable browser, missing Docker runtime, or unsupported producer cannot. A filtered test suite cannot close a coverage assertion; it can close the [`test` assertion](#test-producer-preview) of a producer that names its filter in the plan. `run` returns a failing command and a manifest with `ClaimKind.None` for those cases, preserving the diagnostic and next action in `evidence-summary.json`.
@@ -312,7 +314,7 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <
 | --- | --- | --- |
 | `ASEVD203` | The plan has no resolvable policy snapshot, or the plan and manifest do not bind. | Use the plan and manifest from one run; do not edit them. A plan written by a different CLI version can also fail here. |
 | `ASEVD208` | The plan or manifest file is missing. | Rerun `appsurface evidence run`. |
-| `ASEVD209` | The plan or manifest is not canonical JSON. | Regenerate it; do not reformat generated files. |
+| `ASEVD209` | The plan or manifest could not be read as supported JSON within the input limit. | Regenerate the input using the current supported schema. |
 | `ASEVD213` | A listed artifact is missing, linked, outside the artifact root, or has a different length or SHA-256. The message names the artifact, the producer and the status. | Rerun `appsurface evidence run` and verify the plan, manifest and artifacts from that one run. |
 
 **`verify` proves integrity, not that the gate passed.** It exits 0 for an intact manifest whose claim is `None`. A gate must also read the manifest's `ClaimKind` and `Eligibility`.
