@@ -9,6 +9,8 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 /// <summary>Owns the default local validation scratch and publishes bounded-history results in the worktree.</summary>
 internal static class LocalEvidenceOutput
 {
+    private const string PendingCleanupFileName = "run.pending-cleanup";
+
     private static readonly EnumerationOptions OutputFiles = new()
     {
         RecurseSubdirectories = true,
@@ -16,33 +18,63 @@ internal static class LocalEvidenceOutput
         MaxRecursionDepth = 64,
     };
 
-    /// <summary>Runs against fresh scratch and replaces the matching compact archive when evidence was produced.</summary>
-    /// <remarks>Explicit output paths bypass this lifecycle. The package-gate build cache remains separate from scratch.</remarks>
-    internal static async Task<int> RunAsync(string repository, string operation,
-        Func<LocalEvidenceRun, Task<LocalEvidenceRunResult?>> run)
+    /// <summary>Guards local execution and publishes compact archives for managed output.</summary>
+    /// <remarks>Both execution modes share the worktree lease and pending cleanup marker. Planning may run during recovery.</remarks>
+    /// <param name="repository">The worktree root that owns validation state.</param>
+    /// <param name="operation">The local execution or planning operation.</param>
+    /// <param name="gitDirectory">The per-worktree Git metadata directory, required for any operation that uses the lease.</param>
+    /// <param name="run">The callback that creates the current plan or completes validation.</param>
+    /// <param name="explicitOutput">An optional caller-owned fresh output path that bypasses archive retention.</param>
+    /// <returns>Zero after successful execution or planning.</returns>
+    internal static async Task<int> RunAsync(string repository, string operation, string? gitDirectory,
+        Func<LocalEvidenceRun, Task<LocalEvidenceRunResult?>> run, string? explicitOutput = null)
     {
-        var results = RequireDirectory(PathUtils.PathUnder(repository, "TestResults"));
-        var evidence = RequireDirectory(PathUtils.PathUnder(results, "repository-evidence"));
-        var root = RequireDirectory(PathUtils.PathUnder(evidence, "local"));
-        var lockPath = PathUtils.PathUnder(root, "run.lock");
+        var planOnly = operation == "local-plan";
+        if (planOnly && explicitOutput is not null)
+        {
+            await run(new LocalEvidenceRun(explicitOutput, null));
+            return 0;
+        }
+
+        ArgumentNullException.ThrowIfNull(gitDirectory);
+        var control = RequireDirectory(PathUtils.PathUnder(gitDirectory, "appsurface-local-evidence"));
+        var lockPath = PathUtils.PathUnder(control, "run.lock");
         RequirePlainPath(lockPath);
         using var lease = Acquire(lockPath);
 
+        var pendingCleanup = planOnly ? null : PathUtils.PathUnder(control, PendingCleanupFileName);
+        if (pendingCleanup is not null)
+            RequireSettledWorktree(pendingCleanup);
+
+        if (explicitOutput is not null)
+        {
+            await RunWithRetryGuardAsync(new LocalEvidenceRun(explicitOutput, null), pendingCleanup, run);
+            return 0;
+        }
+
+        var results = RequireDirectory(PathUtils.PathUnder(repository, "TestResults"));
+        var evidence = RequireDirectory(PathUtils.PathUnder(results, "repository-evidence"));
+        var root = RequireDirectory(PathUtils.PathUnder(evidence, "local"));
+        await RunManagedAsync(root, planOnly ? "latest-plan" : "latest", pendingCleanup, run);
+        return 0;
+    }
+
+    private static async Task RunManagedAsync(string root, string archive, string? pendingCleanup,
+        Func<LocalEvidenceRun, Task<LocalEvidenceRunResult?>> run)
+    {
         // Package discovery excludes hidden ancestors, not every ignored Git path.
         var scratch = RequireDirectory(PathUtils.PathUnder(root, ".scratch"));
         var packageCache = PathUtils.PathUnder(scratch, "package-restore");
-        RequirePlainPath(packageCache);
+        if (pendingCleanup is not null)
+            RequirePlainPath(packageCache);
         var workspace = EvidenceWorkspace.Create(scratch, new(MinimumFreeBytes: 0));
         var output = workspace.GetPath("run");
         var localRun = new LocalEvidenceRun(output, packageCache);
-        var archive = operation == "local-plan" ? "latest-plan" : "latest";
         Console.WriteLine("Local evidence scratch: " + output);
         LocalEvidenceRunResult? proof;
         try
         {
-            proof = await run(localRun);
-            if (localRun.CommandCleanupFailed)
-                throw new InvalidOperationException("Local evidence command cleanup could not be confirmed.");
+            proof = await RunWithRetryGuardAsync(localRun, pendingCleanup, run);
         }
         catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
         {
@@ -77,12 +109,61 @@ internal static class LocalEvidenceOutput
         if (proof is not null)
             Publish(workspace, output, root, archive + ".zip", "Validation completed.", proof);
         await workspace.DisposeAsync();
-        return 0;
     }
+
+    private static void RequireSettledWorktree(string pendingCleanup)
+    {
+        RequirePlainPath(pendingCleanup);
+        if (Path.Exists(pendingCleanup))
+            throw new InvalidOperationException("Local evidence execution is blocked because a previous run may still have active commands. " +
+                "After confirming its processes have stopped, remove the cleanup marker and retry: " + pendingCleanup);
+    }
+
+    private static async Task<LocalEvidenceRunResult?> RunWithRetryGuardAsync(LocalEvidenceRun localRun, string? pendingCleanup,
+        Func<LocalEvidenceRun, Task<LocalEvidenceRunResult?>> run)
+    {
+        if (pendingCleanup is null)
+            return await run(localRun);
+
+        // Arm the guard before starting work so abrupt validator exit also blocks an unsafe retry.
+        using (var stream = new FileStream(pendingCleanup, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        using (var writer = new StreamWriter(stream))
+            writer.WriteLine(localRun.OutputDirectory);
+
+        LocalEvidenceRunResult? proof;
+        try
+        {
+            proof = await run(localRun);
+            if (localRun.CleanupUnconfirmed)
+                throw new InvalidOperationException("Local evidence command cleanup could not be confirmed.");
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
+        {
+            if (CleanupUnconfirmed(localRun, failure))
+            {
+                Console.Error.WriteLine("Local evidence cleanup marker retained: " + pendingCleanup);
+            }
+            else
+            {
+                try { File.Delete(pendingCleanup); }
+                catch (Exception markerFailure) when (markerFailure is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine("Could not clear the local evidence cleanup marker: " + markerFailure.Message);
+                }
+            }
+            throw;
+        }
+
+        File.Delete(pendingCleanup);
+        return proof;
+    }
+
+    private static bool CleanupUnconfirmed(LocalEvidenceRun run, Exception failure) =>
+        run.CleanupUnconfirmed || failure is EvidenceCommandException { CleanupUnconfirmed: true };
 
     private static bool CanCleanFailedRun(LocalEvidenceRun run, Exception failure)
     {
-        if (run.CommandCleanupFailed || LocalEvidenceRun.IsUnsettledCommand(failure))
+        if (CleanupUnconfirmed(run, failure))
             return false;
         var proof = PathUtils.PathUnder(run.OutputDirectory, "proof");
         if (!Directory.Exists(proof))

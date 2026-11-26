@@ -24,7 +24,7 @@ internal static class RepositoryEvidenceWorkflow
     /// <param name="options">Validated command options and trusted plan inputs.</param>
     /// <param name="cancellationToken">Cancels execution and artifact verification.</param>
     /// <param name="verifyLocalSourceAsync">Optional in-process local source and policy digest check; required for patch overrides.</param>
-    /// <param name="localRun">The optional managed local run whose command cleanup and package cache are tracked.</param>
+    /// <param name="localRun">The optional local run whose command and host cleanup are tracked.</param>
     /// <param name="runProducerCommand">Optional override for executing registered producers' commands.</param>
     internal static async Task<int> RunAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
         Func<CancellationToken, Task>? verifyLocalSourceAsync = null, LocalEvidenceRun? localRun = null,
@@ -144,7 +144,10 @@ internal static class RepositoryEvidenceWorkflow
                 registration.AddProducer(producer);
             }
         }, new EvidenceHostOptions(ArtifactDirectory: Path.Join(output, "artifacts")));
+        cancellationToken.ThrowIfCancellationRequested();
+        localRun?.BeginHostExecution();
         var result = await host.RunAsync(cancellationToken: cancellationToken);
+        localRun?.RecordHostCleanup(result.Metrics.CleanupCompleted);
         await File.WriteAllBytesAsync(Path.Join(output, "evidence-manifest.json"), EvidenceCanonicalJson.Serialize(result), CancellationToken.None);
         await File.AppendAllTextAsync(Path.Join(output, "evidence-summary.md"), $"\nClaim: `{result.ClaimKind}`; cleanup: `{result.Metrics.CleanupCompleted}`.\n", CancellationToken.None);
         foreach (var producer in result.ProducerResults) Console.WriteLine($"{producer.ProducerId}: {producer.Outcome} {producer.Diagnostic}");

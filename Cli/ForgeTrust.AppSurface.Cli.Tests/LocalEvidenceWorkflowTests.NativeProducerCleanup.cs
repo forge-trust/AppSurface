@@ -9,6 +9,22 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed partial class LocalEvidenceWorkflowTests
 {
+    [Fact]
+    public async Task NativeProducerCleanup_CanRetryDeletingOwnedScratchAfterADisposalError()
+    {
+        var owner = new NativeProducerWorkspace();
+        var workspace = owner.Create(_root, new EvidenceWorkspaceOptions(MinimumFreeBytes: 0));
+        var moved = TestPathUtils.PathUnder(_root, "moved-workspace");
+        Directory.Move(workspace.RootPath, moved);
+
+        await Assert.ThrowsAsync<IOException>(() => owner.ReleaseIfSettledAsync().AsTask());
+        Assert.True(Directory.Exists(moved));
+        Directory.Move(moved, workspace.RootPath);
+
+        await owner.DisposeAsync();
+        Assert.False(Directory.Exists(workspace.RootPath));
+    }
+
     [Theory]
     [InlineData("installed-consumer", false)]
     [InlineData("installed-consumer", true)]

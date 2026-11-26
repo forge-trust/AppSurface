@@ -210,7 +210,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
                 [("transcript", JsonSerializer.SerializeToUtf8Bytes(proof)),
                     ("result", JsonSerializer.SerializeToUtf8Bytes(new { completed = false, stage, failure = exception.GetType().Name, commands = proof }))]).ConfigureAwait(false);
-            var commandDiagnostic = LocalEvidenceRun.IsUnsettledCommand(exception) ? " Command cleanup could not be confirmed." : string.Empty;
+            var commandDiagnostic = exception is EvidenceCommandException { CleanupUnconfirmed: true }
+                ? " Command cleanup could not be confirmed." : string.Empty;
             return Failed($"Solution coverage failed during {stage}." + commandDiagnostic + artifactDiagnostic);
         }
     }

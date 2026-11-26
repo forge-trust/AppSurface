@@ -125,7 +125,8 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
                 artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
                     [("result", bytes), ("transcript", JsonSerializer.SerializeToUtf8Bytes(commands))]).ConfigureAwait(false);
             }
-            var commandDiagnostic = LocalEvidenceRun.IsUnsettledCommand(exception) ? " Command cleanup could not be confirmed." : string.Empty;
+            var commandDiagnostic = exception is EvidenceCommandException { CleanupUnconfirmed: true }
+                ? " Command cleanup could not be confirmed." : string.Empty;
             return Failure($"Package checks failed at {stage}." + commandDiagnostic + artifactDiagnostic);
         }
     }

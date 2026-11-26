@@ -3,20 +3,26 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
-/// <summary>Tracks the managed run's paths and whether a producer still might own its scratch.</summary>
-/// <remarks>Explicit-output runs do not use this state. Host cleanup is reported separately by the manifest.</remarks>
-internal sealed class LocalEvidenceRun(string outputDirectory, string packageRestoreCache)
+/// <summary>Tracks the local run's paths and whether its commands and host have confirmed cleanup.</summary>
+internal sealed class LocalEvidenceRun(string outputDirectory, string? packageRestoreCache)
 {
     private int _commandCleanupFailed;
+    private bool _hostCleanupUnconfirmed;
 
     /// <summary>Gets the fresh directory for this run's unpacked results.</summary>
     internal string OutputDirectory { get; } = outputDirectory;
 
-    /// <summary>Gets the private package-gate restore cache shared by this worktree's managed runs.</summary>
-    internal string PackageRestoreCache { get; } = packageRestoreCache;
+    /// <summary>Gets the private package-gate restore cache for managed runs, or null for explicit output.</summary>
+    internal string? PackageRestoreCache { get; } = packageRestoreCache;
 
-    /// <summary>Gets whether a command reported that it could not finish cleanup.</summary>
-    internal bool CommandCleanupFailed => Volatile.Read(ref _commandCleanupFailed) != 0;
+    /// <summary>Gets whether a command reported incomplete cleanup or the started host has yet to confirm cleanup.</summary>
+    internal bool CleanupUnconfirmed => Volatile.Read(ref _commandCleanupFailed) != 0 || _hostCleanupUnconfirmed;
+
+    /// <summary>Marks host work as potentially active until its cleanup result is available.</summary>
+    internal void BeginHostExecution() => _hostCleanupUnconfirmed = true;
+
+    /// <summary>Records the host's cleanup result before manifest publication can fail.</summary>
+    internal void RecordHostCleanup(bool completed) => _hostCleanupUnconfirmed = !completed;
 
     /// <summary>Records command cleanup failure before a producer translates the exception into a diagnostic.</summary>
     internal async Task<EvidenceCommandResult> ObserveCommandAsync(
@@ -27,16 +33,12 @@ internal sealed class LocalEvidenceRun(string outputDirectory, string packageRes
         {
             return await command(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (EvidenceCommandException exception) when (IsUnsettledCommand(exception))
+        catch (EvidenceCommandException exception) when (exception.CleanupUnconfirmed)
         {
             Interlocked.Exchange(ref _commandCleanupFailed, 1);
             throw;
         }
     }
-
-    /// <summary>Recognizes the command runner's typed cleanup failure.</summary>
-    internal static bool IsUnsettledCommand(Exception exception) =>
-        exception is EvidenceCommandException { Code: "cleanup_failed" };
 }
 
 /// <summary>The plan and, for an executed run, the verified manifest. Empty inventories return no result.</summary>

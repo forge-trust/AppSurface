@@ -42,26 +42,26 @@ internal sealed class LocalEvidenceWorkflow
         var operation = options.GetValueOrDefault("--operation");
         if (operation is not ("local" or "local-plan")) throw new ArgumentException("Expected local or local-plan.");
         var repository = Path.GetFullPath(options.GetValueOrDefault("--repository", Directory.GetCurrentDirectory()));
-        if (options.TryGetValue("--output", out var explicitOutput))
-        {
-            await RunFreshAsync(options, repository, operation, Path.GetFullPath(explicitOutput), null, cancellationToken);
-            return 0;
-        }
-
+        var explicitOutput = options.TryGetValue("--output", out var output) ? Path.GetFullPath(output) : null;
         cancellationToken.ThrowIfCancellationRequested();
-        if (!Path.Exists(PathUtils.PathUnder(repository, ".git"))
-            || await RepositoryGitChanges.ReadIdentityAsync(repository, cancellationToken, "rev-parse", "--is-inside-work-tree") != "true")
+        string? gitDirectory = null;
+        if (operation == "local" || explicitOutput is null)
         {
-            throw new ArgumentException("Managed local evidence requires a Git worktree root.");
+            if (!Path.Exists(PathUtils.PathUnder(repository, ".git")))
+                throw new ArgumentException("Local evidence requires a Git worktree root.");
+            gitDirectory = await RepositoryGitChanges.ReadIdentityAsync(repository, cancellationToken, "rev-parse", "--absolute-git-dir");
+            if (!Path.IsPathFullyQualified(gitDirectory))
+                throw new ArgumentException("Local evidence requires an absolute worktree Git directory.");
         }
-        return await LocalEvidenceOutput.RunAsync(repository, operation,
-            run => RunFreshAsync(options, repository, operation, run.OutputDirectory, run, cancellationToken));
+        return await LocalEvidenceOutput.RunAsync(repository, operation, gitDirectory,
+            run => RunFreshAsync(options, repository, operation, run, cancellationToken), explicitOutput);
     }
 
     private async Task<LocalEvidenceRunResult?> RunFreshAsync(
         IReadOnlyDictionary<string, string> options, string repository, string operation,
-        string output, LocalEvidenceRun? localRun, CancellationToken cancellationToken)
+        LocalEvidenceRun localRun, CancellationToken cancellationToken)
     {
+        var output = localRun.OutputDirectory;
         var policy = Path.GetFullPath(options.GetValueOrDefault("--policy", PathUtils.PathUnder(repository, ".github", "evidence.policy.json")));
         var baseRevision = options.GetValueOrDefault("--base", "origin/main");
         if (Path.Exists(output)) throw new ArgumentException("Evidence output must be fresh.");
@@ -69,7 +69,7 @@ internal sealed class LocalEvidenceWorkflow
         var changes = await git.CollectLocalAsync(repository, baseRevision, cancellationToken);
         var policyDigest = EvidenceDigest.Sha256(await File.ReadAllBytesAsync(policy, cancellationToken));
         Directory.CreateDirectory(output);
-        if (localRun is null)
+        if (options.ContainsKey("--output"))
             Console.WriteLine("Local evidence output: " + output);
         var paths = PathUtils.PathUnder(output, LocalEvidenceReplayInput.ChangedPathsFileName);
         var pathsBytes = EvidenceCanonicalJson.Serialize(changes.Paths);

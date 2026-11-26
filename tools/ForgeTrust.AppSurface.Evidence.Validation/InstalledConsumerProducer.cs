@@ -490,7 +490,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             if (result.ExitCode != 0 && !allowMissing) throw new InvalidDataException("Required source identity command failed.");
             return result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
         }
-        catch (EvidenceCommandException exception) when (allowMissing && !LocalEvidenceRun.IsUnsettledCommand(exception))
+        catch (EvidenceCommandException exception) when (allowMissing && !exception.CleanupUnconfirmed)
         {
             return string.Empty;
         }

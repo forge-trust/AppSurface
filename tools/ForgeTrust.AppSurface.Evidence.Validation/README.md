@@ -10,7 +10,7 @@ Run the same checked-in [evidence policy](https://github.com/forge-trust/AppSurf
 
 ```bash
 dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local-plan
-dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local
+dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release --no-build --no-restore -- --operation local
 ```
 
 `local-plan` explains the selected profile, producers and obligations without packing or running tests.
@@ -22,17 +22,23 @@ another comparison or `--repository /absolute/checkout` from elsewhere. The defa
 archives for the most recent success, failure and cancellation (`latest.zip`, `latest-failure.zip`
 and `latest-cancelled.zip`). Planning uses the corresponding `latest-plan` names. An error before
 output exists leaves the previous archives available. An empty change inventory prints a summary and
-leaves the latest verified proof and plan available. Runs using the managed output are serialized
-per worktree by an exclusive `run.lock` using .NET file locking, which must remain enabled.
+leaves the latest verified proof and plan available. Local execution with either output mode and
+managed planning are serialized by an exclusive `appsurface-local-evidence/run.lock` in the
+worktree's Git metadata directory. Keep .NET file locking enabled.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage
 diagnostics. Before replacing an archive for a completed run, the validator checks the original resolved
 policy, changed-path inventory, plan and any verified manifest and bound files. To replay verification,
 extract the archive and use `local-policy.json`, `changed-paths.json`, `plan/evidence-plan.json`,
 `proof/evidence-manifest.json`, and `proof/artifacts/` with the same scope that produced the proof.
 Scratch is removed after successful retention and known cleanup. The validator tracks
-unsettled subprocesses separately from the host cleanup recorded in the manifest. When cleanup cannot
-be confirmed, the printed scratch path remains available for inspection. Remove that scratch once
-its processes have settled.
+subprocess cleanup and the EvidenceHost cleanup result. Each `local` execution creates
+`appsurface-local-evidence/run.pending-cleanup` beside the lock before starting and clears it after
+confirmed cleanup. If cleanup is unconfirmed or the validator exits abruptly, the marker blocks
+another `local` execution in that worktree, including one using `--output`. The marker contains
+the prior run's output path. After the validator exits, `local-plan` remains available while the
+marker is present. Use the existing validator build with `--no-build --no-restore` during recovery
+so the .NET invocation skips building the driver. Confirm that the prior validation processes have
+stopped before removing the marker and retrying. Keep any retained scratch you need for inspection.
 Scratch and the private `.scratch/package-restore/` cache stay outside package discovery.
 The cache keeps the package-gate build warm and its worktree restore metadata usable between runs. Installed-consumer and
 cold-cache proofs still have their own isolated restores and feeds.

@@ -446,7 +446,7 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
             _ => new InvalidOperationException("original failure"),
         };
         var scratch = TestPathUtils.PathUnder(retained, ".scratch");
-        var thrown = await Record.ExceptionAsync(() => LocalEvidenceOutput.RunAsync(_root, preflight ? "local-plan" : "local", run =>
+        var thrown = await Record.ExceptionAsync(() => LocalEvidenceOutput.RunAsync(_root, preflight ? "local-plan" : "local", _root, run =>
         {
             var output = run.OutputDirectory;
             Assert.Equal(TestPathUtils.PathUnder(scratch, "package-restore"), run.PackageRestoreCache);
@@ -522,7 +522,7 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
         var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
         var scratch = TestPathUtils.PathUnder(retained, ".scratch");
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => LocalEvidenceOutput.RunAsync(fixture.Root, "local", async run =>
+        await Assert.ThrowsAsync<InvalidOperationException>(() => LocalEvidenceOutput.RunAsync(fixture.Root, "local", TestPathUtils.PathUnder(fixture.Root, ".git"), async run =>
         {
             var proof = TestPathUtils.PathUnder(run.OutputDirectory, "proof");
             Directory.CreateDirectory(proof);
@@ -561,7 +561,7 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
         Assert.Equal("installed-consumer", Assert.Single(plan.Profile.Producers).Id);
         var head = (await GitAsync(_repo, "rev-parse", "HEAD")).Trim();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => LocalEvidenceOutput.RunAsync(_root, "local", async run =>
+        await Assert.ThrowsAsync<InvalidOperationException>(() => LocalEvidenceOutput.RunAsync(_root, "local", _root, async run =>
         {
             Directory.CreateDirectory(run.OutputDirectory);
             var changedPaths = TestPathUtils.PathUnder(run.OutputDirectory, "changed-paths.json");
@@ -611,7 +611,7 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
     [Fact]
     public async Task ManagedOutput_RejectsCompletionWhenTheRunHandledAnUnsettledCommand()
     {
-        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => LocalEvidenceOutput.RunAsync(_root, "local", async run =>
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => LocalEvidenceOutput.RunAsync(_root, "local", _root, async run =>
         {
             Directory.CreateDirectory(run.OutputDirectory);
             var request = new EvidenceCommandRequest("dotnet", ["--version"], run.OutputDirectory, TimeSpan.FromSeconds(1));
@@ -658,7 +658,7 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
         var replayInputs = new[] { "changed-paths.json", "local-policy.json" }.Select(name =>
             LocalEvidenceReplayInput.Snapshot(name, File.ReadAllBytes(TestPathUtils.PathUnder(extracted, name)))).ToArray();
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => LocalEvidenceOutput.RunAsync(fixture.Root, "local", run =>
+        await Assert.ThrowsAsync<InvalidDataException>(() => LocalEvidenceOutput.RunAsync(fixture.Root, "local", TestPathUtils.PathUnder(fixture.Root, ".git"), run =>
         {
             var output = run.OutputDirectory;
             ZipFile.ExtractToDirectory(latest, output);
@@ -728,6 +728,9 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
         var fixture = await CreateFixtureAsync();
         var linked = new Fixture(TestPathUtils.PathUnder(_root, "linked"), fixture.Head);
         await GitAsync(fixture.Root, "worktree", "add", "--detach", "--quiet", linked.Root, fixture.Head);
+        var primaryMarker = PendingCleanupMarker(TestPathUtils.PathUnder(fixture.Root, ".git"));
+        Directory.CreateDirectory(Path.GetDirectoryName(primaryMarker)!);
+        await File.WriteAllTextAsync(primaryMarker, "Primary worktree needs cleanup.");
         await ChangeAsync(linked, "docs/guide.md", "linked worktree change");
         var options = Options(linked, "local");
         options.Remove("--output");
@@ -738,6 +741,7 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
         var retained = TestPathUtils.PathUnder(linked.Root, "TestResults", "repository-evidence", "local");
         Assert.NotNull(ReadArchive(retained, "latest.zip", "proof/evidence-manifest.json"));
         Assert.False(Directory.Exists(TestPathUtils.PathUnder(fixture.Root, "TestResults")));
+        Assert.True(File.Exists(primaryMarker));
     }
 
     [Fact]

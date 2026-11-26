@@ -43,7 +43,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
         }
         finally
         {
-            if (!_scratch.CleanupUnconfirmed) await DisposeAsync().ConfigureAwait(false);
+            await _scratch.ReleaseIfSettledAsync().ConfigureAwait(false);
         }
     }
 

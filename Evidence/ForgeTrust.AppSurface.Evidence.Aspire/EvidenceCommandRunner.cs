@@ -6,6 +6,9 @@ namespace ForgeTrust.AppSurface.Evidence.Aspire;
 /// <summary>Identifies a bounded command execution failure without exposing command inputs or environment values.</summary>
 public sealed class EvidenceCommandException : Exception
 {
+    /// <summary>The stable code used when command shutdown or output capture could not be confirmed.</summary>
+    public const string CleanupFailedCode = "cleanup_failed";
+
     /// <summary>Creates a command exception with a stable, secret-safe code.</summary>
     public EvidenceCommandException(string code, string message, Exception? innerException = null)
         : base(message, innerException)
@@ -15,6 +18,9 @@ public sealed class EvidenceCommandException : Exception
 
     /// <summary>Gets the stable failure classification.</summary>
     public string Code { get; }
+
+    /// <summary>Gets whether the caller should preserve resources the command might still use.</summary>
+    public bool CleanupUnconfirmed => Code == CleanupFailedCode;
 }
 
 /// <summary>Describes one explicit, bounded command invocation.</summary>
@@ -276,7 +282,7 @@ public sealed class EvidenceCommandRunner
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
         {
-            throw new EvidenceCommandException("cleanup_failed", "The evidence command process tree could not be terminated.");
+            throw new EvidenceCommandException(EvidenceCommandException.CleanupFailedCode, "The evidence command process tree could not be terminated.");
         }
 
         try
@@ -285,7 +291,7 @@ public sealed class EvidenceCommandRunner
         }
         catch (TimeoutException)
         {
-            throw new EvidenceCommandException("cleanup_failed", "The evidence command process did not exit after termination.");
+            throw new EvidenceCommandException(EvidenceCommandException.CleanupFailedCode, "The evidence command process did not exit after termination.");
         }
 
         await ObserveCaptureAsync(stdout).ConfigureAwait(false);
@@ -298,7 +304,7 @@ public sealed class EvidenceCommandRunner
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
         catch (IOException) { }
-        catch (TimeoutException) { throw new EvidenceCommandException("cleanup_failed", "The evidence command output capture did not stop within its cleanup deadline."); }
+        catch (TimeoutException) { throw new EvidenceCommandException(EvidenceCommandException.CleanupFailedCode, "The evidence command output capture did not stop within its cleanup deadline."); }
     }
 
     private static async Task ObserveBoundedAsync(Task task)
