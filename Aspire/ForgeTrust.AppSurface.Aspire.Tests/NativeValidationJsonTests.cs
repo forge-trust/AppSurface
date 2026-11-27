@@ -65,6 +65,7 @@ public sealed class NativeValidationJsonTests
             NativeValidationReceiptCodec.Deserialize(Encoding.UTF8.GetBytes(unknownEntry.ToJsonString())));
         Assert.Throws<JsonException>(() =>
             NativeValidationReceiptCodec.Deserialize(Encoding.UTF8.GetBytes(missingEntry.ToJsonString())));
+        // The canonical manifest reader rejects a native receipt before verification.
         Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidenceManifest>(bytes));
     }
 

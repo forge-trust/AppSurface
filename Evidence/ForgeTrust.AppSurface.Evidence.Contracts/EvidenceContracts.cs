@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
@@ -534,6 +533,9 @@ public sealed record EvidencePlan(
     string PlanDigest,
     EvidencePolicy? PolicySnapshot = null)
 {
+    /// <summary>Gets the baseline version for plans and manifests that do not use version 1.1 features.</summary>
+    public static string CurrentContractVersion => EvidenceContractVersions.V10;
+
     /// <summary>Maximum size of a captured patch shared by planning, coverage, and receipt preparation.</summary>
     internal const int MaximumCapturedPatchBytes = 20 * 1024 * 1024;
 
@@ -1422,165 +1424,6 @@ public static class EvidenceArtifactValidation
     }
 
     private static bool IsSha256(string? value) => value is { Length: 64 } && value.All(static character => char.IsAsciiHexDigit(character));
-}
-
-/// <summary>
-/// Serializes contract objects deterministically for evidence identity and verification.
-/// </summary>
-public static class EvidenceCanonicalJson
-{
-    /// <summary>
-    /// Serializes a value as canonical UTF-8 JSON with ordinal object-property order.
-    /// </summary>
-    /// <typeparam name="TValue">Value type to serialize.</typeparam>
-    /// <param name="value">Value to serialize.</param>
-    /// <returns>Canonical UTF-8 JSON bytes.</returns>
-    /// <remarks>Enum serialization preserves the generic <see cref="JsonStringEnumConverter"/> behavior for contract and consumer-defined enums.</remarks>
-    public static byte[] Serialize<TValue>(TValue value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-
-        using var document = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions));
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            WriteElement(document.RootElement, writer);
-        }
-
-        return stream.ToArray();
-    }
-
-    /// <summary>
-    /// Deserializes a JSON document using the compatible contract serializer behavior.
-    /// </summary>
-    /// <typeparam name="TValue">Value type to deserialize.</typeparam>
-    /// <param name="utf8Json">JSON bytes.</param>
-    /// <returns>The deserialized value.</returns>
-    /// <remarks>
-    /// Generic values, including evidence policies, preserve <see cref="JsonStringEnumConverter"/> behavior.
-    /// Reads of <see cref="EvidencePlan"/> and <see cref="EvidenceManifest"/> require defined named enum tokens;
-    /// numeric enum tokens and numeric strings are rejected. Those contracts must use version 1.0 or 1.1,
-    /// and an explicit manifest reuse count must match its producer results.
-    /// </remarks>
-    public static TValue Deserialize<TValue>(ReadOnlySpan<byte> utf8Json)
-    {
-        var serializerOptions = typeof(TValue) == typeof(EvidencePlan) || typeof(TValue) == typeof(EvidenceManifest)
-            ? StrictContractReaderOptions
-            : SerializerOptions;
-        var value = JsonSerializer.Deserialize<TValue>(utf8Json, serializerOptions);
-        if (value is EvidencePlan plan && !EvidenceContractVersions.IsSupported(plan.ContractVersion)
-            || value is EvidenceManifest manifest && !EvidenceContractVersions.IsSupported(manifest.ContractVersion))
-        {
-            throw new JsonException("Unsupported evidence contract version.");
-        }
-
-        if (value is EvidenceManifest result)
-        {
-            using var document = JsonDocument.Parse(utf8Json.ToArray());
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                if (string.Equals(property.Name, nameof(EvidenceManifest.ReuseCount), StringComparison.OrdinalIgnoreCase)
-                    && (property.Value.ValueKind != JsonValueKind.Number || !property.Value.TryGetInt32(out var count) || count != result.ReuseCount))
-                {
-                    throw new JsonException("ReuseCount does not match the producer results.");
-                }
-            }
-        }
-
-        return value ?? throw new InvalidOperationException($"Evidence JSON did not contain a {typeof(TValue).Name} value.");
-    }
-
-    private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions(strictContractEnums: false);
-
-    private static readonly JsonSerializerOptions StrictContractReaderOptions = CreateSerializerOptions(strictContractEnums: true);
-
-    private static JsonSerializerOptions CreateSerializerOptions(bool strictContractEnums)
-    {
-        var options = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            WriteIndented = false,
-        };
-
-        if (strictContractEnums)
-        {
-            options.Converters.Add(new NamedEnumConverter<EvidenceProfileScope>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceExecutionVerdict>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceClaimKind>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceClaimEligibility>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceEnvelopeStatus>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceProducerOutcome>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceResourceOutcome>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceCoverageTestResultFormat>());
-        }
-
-        // Preserve the original generic enum behavior for serialization, policy reads, and other consumers.
-        options.Converters.Add(new JsonStringEnumConverter());
-        return options;
-    }
-
-    // Used only by the EvidencePlan and EvidenceManifest reader options. The generic fallback remains
-    // JsonStringEnumConverter so consumer enums and legacy policy input keep their existing semantics.
-    private sealed class NamedEnumConverter<TEnum> : JsonConverter<TEnum> where TEnum : struct, Enum
-    {
-        public override TEnum Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            var text = reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
-            if (text is not null
-                && Enum.GetNames<TEnum>().FirstOrDefault(candidate => string.Equals(candidate, text, StringComparison.OrdinalIgnoreCase)) is { } name)
-            {
-                return Enum.Parse<TEnum>(name);
-            }
-
-            throw new JsonException($"Expected a named {typeof(TEnum).Name} value.");
-        }
-
-        public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options)
-            => throw new NotSupportedException("The strict contract reader converter does not support serialization.");
-    }
-
-    private static void WriteElement(JsonElement element, Utf8JsonWriter writer)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                writer.WriteStartObject();
-                foreach (var property in element.EnumerateObject().OrderBy(static property => property.Name, StringComparer.Ordinal))
-                {
-                    writer.WritePropertyName(property.Name);
-                    WriteElement(property.Value, writer);
-                }
-
-                writer.WriteEndObject();
-                break;
-            case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (var item in element.EnumerateArray())
-                {
-                    WriteElement(item, writer);
-                }
-
-                writer.WriteEndArray();
-                break;
-            case JsonValueKind.String:
-                writer.WriteStringValue(element.GetString());
-                break;
-            case JsonValueKind.Number:
-                writer.WriteRawValue(element.GetRawText(), skipInputValidation: true);
-                break;
-            case JsonValueKind.True:
-                writer.WriteBooleanValue(true);
-                break;
-            case JsonValueKind.False:
-                writer.WriteBooleanValue(false);
-                break;
-            case JsonValueKind.Null:
-                writer.WriteNullValue();
-                break;
-            default:
-                throw new InvalidOperationException($"Unsupported JSON token {element.ValueKind}.");
-        }
-    }
 }
 
 /// <summary>

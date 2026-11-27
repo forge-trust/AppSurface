@@ -264,7 +264,6 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             var plan = resolution.Plan;
             EvidenceReuseCommandOptions.ValidateContext(Reuse, plan);
             TestEvidenceRunSupport.ValidateSelection(plan);
-
             var hasTestProducer = plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer);
             var testReports = new List<string>();
             string outputDirectory;
@@ -280,12 +279,15 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             {
                 throw new CommandException($"ASEVD217: A fresh Evidence output root could not be claimed ({exception.GetType().Name}). Choose a new --output path or repair access to TestResults/evidence/runs. Code: reuse.output_unavailable.");
             }
-            if (!Reuse)
+            if (Reuse)
             {
-                TestEvidenceRunSupport.RetireOutputs(outputDirectory, plan);
+                await Workflow.WritePlanAsync(plan, outputDirectory, cancellationToken);
+            }
+            else
+            {
+                await Workflow.WriteRunPlanAsync(plan, outputDirectory, cancellationToken);
             }
 
-            await Workflow.WritePlanAsync(plan, outputDirectory, cancellationToken);
             if (hasTestProducer)
             {
                 await console.Output.WriteLineAsync(TestEvidenceRunSupport.PreviewLine);
