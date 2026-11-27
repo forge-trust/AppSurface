@@ -5,13 +5,13 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using ForgeTrust.AppSurface.Auth.Keycloak;
 using ForgeTrust.AppSurface.Core;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Hosting;
 using static ForgeTrust.AppSurface.Auth.Aspire.Keycloak.AppSurfaceKeycloakDiagnosticCodes;
 using static ForgeTrust.AppSurface.Auth.Aspire.Keycloak.AppSurfaceKeycloakSupervisedOptions;
 using static ForgeTrust.AppSurface.Auth.Aspire.Keycloak.SupervisedKeycloakOwnership;
 using static ForgeTrust.AppSurface.Auth.Aspire.Keycloak.SupervisedKeycloakRunLayout;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -29,6 +29,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
     private readonly AppSurfaceKeycloakSupervisedOptions _execution;
     private readonly AppSurfaceKeycloakCredentialSnapshot _bindings;
     private readonly AppSurfaceKeycloakThemeRegistrationState? _theme;
+    private readonly string _transportOrigin;
     private readonly List<(AppSurfaceKeycloakSupervisedWorkload Workload, bool Web, IResourceBuilder<ExecutableResource> Handle)> _workloads = [];
     private readonly TaskCompletionSource<string> _failure = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _work = new();
@@ -59,6 +60,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
         _bindings = bindings;
         _docker = docker ?? new(_execution.DockerEndpoint);
         _theme = registration.Theme;
+        _transportOrigin = registration.TransportOrigin.OriginalString;
         _httpClient = httpClient;
         OwnerId = Guid.NewGuid().ToString("N");
         RunDirectory = PathUtils.PathUnder(_execution.RunRoot, OwnerId);
@@ -407,7 +409,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
             if (confidential && !File.Exists(ClientReference.HostPath(RunDirectory))) throw SafeException();
             var serverMounts = new List<OwnedMount> { Mount(ServerPrivate), Mount(Public) };
             if (ownership.Active.VolumeName is { } volume) serverMounts.Add(new(volume, "/opt/keycloak/data", true, true));
-            var transport = $"https://localhost:{_options.KeycloakPort}";
+            var transport = _transportOrigin;
             var frontend = _options.Authority?.GetLeftPart(UriPartial.Authority) ?? transport;
             var serverCertificate = _useHistoricalServerUser ? HistoricalCertificate : PublicCertificate;
             var serverArgs = new List<string>
@@ -432,7 +434,12 @@ public sealed class AppSurfaceKeycloakSupervisedRun
                 using var http = Http();
                 while (true)
                 {
-                    try { using var reply = await http.GetAsync($"https://localhost:{_options.KeycloakPort}/realms/master/.well-known/openid-configuration", ready.Token); if (reply.IsSuccessStatusCode) break; }
+                    try
+                    {
+                        using var reply = await http.GetAsync(
+                            transport + "/realms/master/.well-known/openid-configuration", ready.Token);
+                        if (reply.IsSuccessStatusCode) break;
+                    }
                     catch (HttpRequestException) { }
                     await Task.Delay(200, ready.Token);
                 }
@@ -480,7 +487,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
             var observed = await _docker.ContainerAsync(container.Name, container.Id, OwnerId, deadline.Token) ?? throw SafeException();
             if (!observed.Running)
             {
-                var exit = observed.Snapshot.GetProperty("State").GetProperty("ExitCode").GetInt32();
+                var exit = observed.ExitCode ?? throw SafeException();
                 await Publish(handle, false, exit);
                 if (exit != 0) throw SafeException();
                 return;

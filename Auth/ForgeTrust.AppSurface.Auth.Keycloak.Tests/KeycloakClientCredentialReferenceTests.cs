@@ -1,6 +1,6 @@
-using ForgeTrust.AppSurface.Testing;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 

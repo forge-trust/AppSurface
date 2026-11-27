@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.Auth.Keycloak;
+
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 /// <summary>
@@ -8,7 +10,7 @@ public static class AppSurfaceKeycloakDiagnosticCodes
     /// <summary>
     /// The configured realm, client, user, path, URI, or port option is invalid.
     /// </summary>
-    public const string InvalidOptions = "ASKEYC001";
+    public const string InvalidOptions = KeycloakBaselineDiagnosticCodes.InvalidOptions;
 
     /// <summary>
     /// A fixed local port is already occupied before the AppHost graph starts.
@@ -18,22 +20,22 @@ public static class AppSurfaceKeycloakDiagnosticCodes
     /// <summary>
     /// Keycloak OpenID metadata could not be reached before the bounded timeout.
     /// </summary>
-    public const string MetadataUnavailable = "ASKEYC003";
+    public const string MetadataUnavailable = KeycloakBaselineDiagnosticCodes.MetadataUnavailable;
 
     /// <summary>
     /// Keycloak OpenID metadata was reachable but did not match the expected realm.
     /// </summary>
-    public const string MetadataInvalid = "ASKEYC004";
+    public const string MetadataInvalid = KeycloakBaselineDiagnosticCodes.MetadataInvalid;
 
     /// <summary>
     /// Generated realm import evidence is missing expected client, redirect, or user data.
     /// </summary>
-    public const string RealmEvidenceInvalid = "ASKEYC005";
+    public const string RealmEvidenceInvalid = KeycloakBaselineDiagnosticCodes.RealmEvidenceInvalid;
 
     /// <summary>
     /// The Keycloak authorization endpoint rejected the configured public client or redirect URI.
     /// </summary>
-    public const string AuthorizationChallengeInvalid = "ASKEYC006";
+    public const string AuthorizationChallengeInvalid = KeycloakBaselineDiagnosticCodes.AuthorizationChallengeInvalid;
 
     /// <summary>
     /// Login-theme configuration or its immutable image reference is invalid.

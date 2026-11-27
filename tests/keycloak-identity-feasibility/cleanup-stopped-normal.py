@@ -10,10 +10,13 @@ import shutil
 import subprocess
 import time
 
+from replay_environment import docker_endpoint
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--receipt',type=Path,required=True)
     p.add_argument('--evidence',type=Path,required=True)
+    p.add_argument('--docker-endpoint', help='Qualified local Docker Unix endpoint for older receipts')
     a=p.parse_args();os.umask(0o077)
     r=json.loads(a.receipt.read_text());root=Path(r['root']);volume=r['volume']
     if root.parent!=Path('/private/tmp') or root.resolve()!=root or root.is_symlink() or not root.name.startswith('i888-normal-run-') or root.stat().st_uid!=os.getuid():
@@ -26,7 +29,7 @@ def main():
     elif not volume.startswith('appsurface-issue888-normal-') or len(volume.removeprefix('appsurface-issue888-normal-'))!=32:
         raise ValueError('unqualified fixture volume')
     started=time.monotonic();deadline=started+30
-    docker=['docker','--host','unix:///Users/andrew/.docker/run/docker.sock']
+    docker=['docker','--host',docker_endpoint(a.docker_endpoint, r.get('dockerEndpoint'))]
     def command(*args):
         remaining=deadline-time.monotonic()
         if remaining<=0:raise TimeoutError('fixture cleanup deadline')

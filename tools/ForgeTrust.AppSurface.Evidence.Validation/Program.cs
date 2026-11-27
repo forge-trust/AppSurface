@@ -1,9 +1,9 @@
 using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Coverage.NativeInventory;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
-using ForgeTrust.AppSurface.Coverage.NativeInventory;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 

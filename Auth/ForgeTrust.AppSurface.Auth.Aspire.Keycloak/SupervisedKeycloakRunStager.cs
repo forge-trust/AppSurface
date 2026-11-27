@@ -97,7 +97,7 @@ internal sealed class SupervisedKeycloakRunStager(
             }
         }
         WritePrivate(WorkerBindings, new KeycloakWorkerBindings(
-            $"https://localhost:{options.KeycloakPort}/", user, password,
+            registration.TransportOrigin.OriginalString + "/", user, password,
             ClientSecret: null, CaptureRoot: null, CaptureRunId: null, BrokerSecrets: providers.ToImmutable())
         {
             ClientCredentialReferenceFile = client is null ? null : ClientReference.ContainerPath,
@@ -131,15 +131,16 @@ internal sealed class SupervisedKeycloakRunStager(
         IReadOnlyDictionary<string, string> publicInputs, IEnumerable<string> secrets)
     {
         var options = registration.Options;
+        var transport = registration.TransportOrigin;
         var config = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["Authority"] = desired.Authority,
-            ["AdminAuthority"] = $"https://localhost:{options.KeycloakPort}/realms/{desired.Realm}",
+            ["AdminAuthority"] = $"{transport.OriginalString}/realms/{desired.Realm}",
             ["ClientId"] = desired.ClientId,
             ["Realm"] = desired.Realm,
             ["ExpectedRunId"] = ownerId,
-            ["KeycloakHost"] = "localhost",
-            ["KeycloakPort"] = options.KeycloakPort,
+            ["KeycloakHost"] = transport.Host,
+            ["KeycloakPort"] = transport.Port,
             ["CertificatePath"] = PublicCertificate.ContainerPath,
             ["ClientMode"] = options.ClientMode.ToString(),
             ["ReferencePath"] = referencePath,

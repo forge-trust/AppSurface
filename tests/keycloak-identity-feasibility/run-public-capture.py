@@ -14,6 +14,8 @@ import time
 import uuid
 import zipfile
 
+from replay_environment import docker_endpoint
+
 SDK = 'mcr.microsoft.com/dotnet/sdk@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b'
 WORKER = 'ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker'
 PURE = 'ForgeTrust.AppSurface.Auth.Keycloak'
@@ -44,21 +46,29 @@ def main():
     parser.add_argument('--package', type=Path, required=True)
     parser.add_argument('--evidence-root', type=Path, required=True)
     parser.add_argument('--phase', choices=['pilot', 'all'], default='all')
+    parser.add_argument('--docker-endpoint', help='Qualified local Docker Unix endpoint')
     args = parser.parse_args()
+    endpoint = docker_endpoint(args.docker_endpoint)
     os.umask(0o077)
     repository = Path(__file__).resolve().parents[2]
+    host_caches = {Path.home() / '.nuget'}
+    if configured_cache := os.environ.get('NUGET_PACKAGES'):
+        host_caches.add(Path(configured_cache).expanduser())
+    host_cache_paths = {(str(cache) + '/').encode() for cache in host_caches}
+    host_cache_paths.update((str(cache.resolve()) + '/').encode() for cache in host_caches)
     args.evidence_root.mkdir(parents=True, exist_ok=True)
     evidence = Path(tempfile.mkdtemp(prefix='public-capture-', dir=args.evidence_root)).resolve()
     isolated = Path(tempfile.mkdtemp(prefix='issue888-public-capture-', dir='/private/tmp')).resolve()
     owner = (evidence / 'owner.lock').open('x+b')
     fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
     active = evidence / 'active.json'
-    docker = ['docker', '--host', 'unix:///Users/andrew/.docker/run/docker.sock']
+    docker = ['docker', '--host', endpoint]
     containers, checks, cases = [], [], []
     run_id = uuid.uuid4().hex
     fault, cleaned, shutdown = None, False, None
     daemon, package_hash, manifest = None, None, {}
     sources = ['tests/keycloak-identity-feasibility/run-public-capture.py',
+               'tests/keycloak-identity-feasibility/replay_environment.py',
                'tests/keycloak-identity-feasibility/public-capture/PublicCaptureProbe.cs']
     source_hashes = {path: digest(repository / path) for path in sources}
     fixture_source = repository / 'tests/keycloak-identity-feasibility/public-capture/fixtures'
@@ -180,7 +190,8 @@ def main():
                 check(role + ':missing-pure-cause', 'FileNotFoundException' in logs and PURE + ', Version=' in logs)
             return
         trace = (work / 'host.trace').read_bytes()
-        check(role + ':trace-no-checkout', str(repository).encode() not in trace and b'/Users/andrew/.nuget/' not in trace)
+        check(role + ':trace-no-checkout', str(repository).encode() not in trace
+              and not any(cache in trace for cache in host_cache_paths))
         shutil.copyfile(work / 'host.trace', evidence / (role + '.trace'))
         outcome = json.loads((work / 'result.json').read_text())
         (evidence / (role + '-result.json')).write_text(json.dumps(outcome, indent=2) + '\n')
@@ -311,7 +322,21 @@ def main():
                         command(docker + ['stop', '--time', '3', identifier], remaining())
                     state = json.loads(command(docker + ['inspect', identifier], remaining()))[0]['State']
                     check(record['role'] + ':stopped-before-clean', state['Running'] is False)
-                observer = 'import fcntl,sys,pathlib;assert pathlib.Path(sys.argv[2]).is_file();f=open(sys.argv[1],"r+b");\ntry: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB);sys.exit(99)\nexcept BlockingIOError: print("held-and-active")'
+                observer = """
+import fcntl
+from pathlib import Path
+import sys
+
+if not Path(sys.argv[2]).is_file():
+    sys.exit(98)
+with open(sys.argv[1], "r+b") as lock:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("held-and-active")
+    else:
+        sys.exit(99)
+"""
                 check('independent-preclean-lease-and-marker', command(['python3', '-c', observer, str(evidence / 'owner.lock'), str(active)], remaining()) == 'held-and-active')
                 shutdown = round(time.monotonic() - started, 6)
                 check('stop-under-30-seconds', shutdown < 30)
@@ -329,7 +354,8 @@ def main():
         owner.close()
     receipt = {'schema': 1, 'status': 'subset-passed' if fault is None and cleaned else 'failed', 'phase': args.phase,
                'packageSha256': package_hash, 'sdkImage': SDK, 'sourceHashes': source_hashes, 'fixtureHashes': fixture_hashes, 'fixtureStorageHashes': fixture_storage_hashes,
-               'payloadFiles': len(manifest), 'daemon': daemon, 'cases': cases, 'assertions': checks, 'failure': fault,
+               'payloadFiles': len(manifest), 'daemon': daemon, 'dockerEndpoint': endpoint,
+               'cases': cases, 'assertions': checks, 'failure': fault,
                'shutdownSeconds': shutdown, 'cleaned': cleaned, 'privateRootRemoved': not isolated.exists(),
                'retainedLockFile': (evidence / 'owner.lock').exists(), 'isolatedRoot': str(isolated),
                'noClaim': ['Approach B generic realm reconciliation', 'materialization/image build or inspection',

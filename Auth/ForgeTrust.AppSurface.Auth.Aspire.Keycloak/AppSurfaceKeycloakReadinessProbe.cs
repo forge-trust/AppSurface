@@ -41,25 +41,6 @@ public sealed class AppSurfaceKeycloakReadinessProbe
     }
 
     /// <summary>
-    /// Creates a readiness probe with explicit nonsecret realm-evidence expectations for the finite AppHost worker.
-    /// </summary>
-    /// <param name="options">The reconstructed safe proof options.</param>
-    /// <param name="loginThemeName">The expected theme name, if a local theme was configured.</param>
-    /// <param name="seededUserNames">The expected local user names without their passwords, subjects, or claims.</param>
-    /// <remarks>
-    /// This overload exists so the package-owned executable can prove generated realm evidence without receiving any
-    /// seeded-user credentials. It is internal because consumers register the gate through
-    /// <see cref="AppSurfaceKeycloakResource.RealmReady"/> rather than starting probes themselves.
-    /// </remarks>
-    internal AppSurfaceKeycloakReadinessProbe(
-        AppSurfaceKeycloakOptions options,
-        string? loginThemeName,
-        IReadOnlyList<string> seededUserNames)
-        : this(options, DefaultHttpClient, File.ReadAllText, loginThemeName, seededUserNames)
-    {
-    }
-
-    /// <summary>
     /// Creates a readiness probe with injectable HTTP and realm-file readers for deterministic tests.
     /// </summary>
     /// <param name="options">The proof options to verify.</param>

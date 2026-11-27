@@ -337,8 +337,10 @@ public sealed class AppSurfaceKeycloakSupervisedLeaseTests
     {
         internal string Path { get; } = TestPathUtils.PathUnder("/private/tmp", "issue888-supervised-" + Guid.NewGuid().ToString("N"));
 
-        internal PrivateFolder() => Directory.CreateDirectory(Path,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        internal PrivateFolder()
+        {
+            Directory.CreateDirectory(Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
 
         public void Dispose()
         {

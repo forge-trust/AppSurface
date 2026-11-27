@@ -16,6 +16,8 @@ import time
 import urllib.request
 import uuid
 
+from replay_environment import docker_endpoint, dotnet_host, verify_empty_cache, verify_prepared_closure
+
 _readback_spec = importlib.util.spec_from_file_location('managed_seed_readback', Path(__file__).with_name('managed-seed-readback.py'))
 readback = importlib.util.module_from_spec(_readback_spec)
 _readback_spec.loader.exec_module(readback)
@@ -43,6 +45,8 @@ def main():
     driver_started = time.monotonic()
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--preparation',type=Path,required=True);p.add_argument('--evidence',type=Path,required=True)
+    p.add_argument('--sdk', type=Path, help='Pinned SDK root, required for older preparation receipts')
+    p.add_argument('--docker-endpoint', help='Qualified local Docker Unix endpoint')
     mode = p.add_mutually_exclusive_group()
     mode.add_argument('--pilot',action='store_true')
     mode.add_argument('--post-seed', choices=['post-seed-clean', 'drift-client', 'drift-mapper', 'drift-broker'])
@@ -52,6 +56,8 @@ def main():
     legacy = a.acceptance in ('legacy', 'legacy-uid1000')
     a.evidence.mkdir(parents=True,exist_ok=False)
     prepared=json.loads(a.preparation.read_text());closure=Path(prepared['root'])
+    dotnet = dotnet_host(a.sdk, prepared.get('sdk'))
+    endpoint = docker_endpoint(a.docker_endpoint)
     neutral = a.acceptance in ('neutral', 'cold') or legacy
     realm = 'appsurface-dev' if neutral else 'skoolit' if a.acceptance else 'sample'
     client_id = 'appsurface-web' if neutral else 'skoolit-web' if a.acceptance else 'sample-web'
@@ -61,8 +67,7 @@ def main():
     leases=root/'leases';leases.mkdir()
     nuget=root/'nuget';nuget.mkdir()
     volume='appsurface-issue888-normal-'+uuid.uuid4().hex
-    docker=['docker','--host','unix:///Users/andrew/.docker/run/docker.sock']
-    dotnet='/Users/andrew/.dotnet/appsurface-sdk-10.0.402/dotnet'
+    docker=['docker','--host',endpoint]
     values=[secrets.token_urlsafe(32) for _ in range(4)]
     cases=[];checks=[];fault=None
     children = []
@@ -72,9 +77,8 @@ def main():
     legacy_project = moved_project = None
     kinds = ['host', 'payload', 'browser', 'dcp', 'dashboard'] if a.acceptance else ['host', 'payload']
     for kind in kinds:
-        for name,expected in prepared[kind+'Manifest'].items():
-            assert hashlib.sha256((closure/kind/name).read_bytes()).hexdigest()==expected, 'prepared closure changed'
-    assert not any(nuget.iterdir())
+        verify_prepared_closure(closure/kind, prepared[kind+'Manifest'])
+    verify_empty_cache(nuget)
     def check(name,value):
         checks.append({'name':name,'passed':bool(value)})
         if not value:raise AssertionError(name)
@@ -102,8 +106,8 @@ def main():
             inputs['ThemeDirectory'] = str(theme)
         (case/'input.json').write_text(json.dumps(inputs))
         base_env = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME') if key in os.environ}
-        env=dict(base_env,DOTNET_ROOT=str(Path(dotnet).parent),DOTNET_ENVIRONMENT='Testing',NUGET_PACKAGES=str(nuget),NUGET_HTTP_CACHE_PATH=str(root/'http'),NUGET_SCRATCH=str(root/'scratch'),
-            DOCKER_HOST='unix:///Users/andrew/.docker/run/docker.sock',ASPIRE_ALLOW_UNSECURED_TRANSPORT='true',DOTNET_GENERATE_ASPNET_CERTIFICATE='false',DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1',
+        env=dict(base_env,DOTNET_ROOT=str(dotnet.parent),DOTNET_ENVIRONMENT='Testing',NUGET_PACKAGES=str(nuget),NUGET_HTTP_CACHE_PATH=str(root/'http'),NUGET_SCRATCH=str(root/'scratch'),
+            DOCKER_HOST=endpoint,ASPIRE_ALLOW_UNSECURED_TRANSPORT='true',DOTNET_GENERATE_ASPNET_CERTIFICATE='false',DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1',
             DcpPublisher__CliPath=str(closure/'dcp/dcp'),DcpPublisher__ExtensionsPath=str(closure/'dcp'))
         if a.acceptance:
             env.update(DOTNET_HOST_TRACE='1', DOTNET_HOST_TRACEFILE=str(case/'host.trace'))
@@ -499,7 +503,13 @@ def main():
                     rc,ri,rp,rl=launch(recovery,expected);finish(rc,ri,rp,rl,0 if recovery=='recover-correct' else 33)
         check('runtime-cache-empty',not any(nuget.iterdir()))
         for kind in kinds:
-            check('unchanged-'+kind+'-closure',all(hashlib.sha256((closure/kind/name).read_bytes()).hexdigest()==expected for name,expected in prepared[kind+'Manifest'].items()))
+            assertion = 'unchanged-' + kind + '-closure'
+            try:
+                verify_prepared_closure(closure/kind, prepared[kind+'Manifest'])
+            except (OSError, ValueError):
+                checks.append({'name': assertion, 'passed': False})
+                raise
+            check(assertion, True)
     except Exception as error:fault=type(error).__name__+': '+str(error)[:140]
     finally:
         for case, inputs, proc, log in children:
@@ -522,7 +532,7 @@ def main():
                     'case': case.name, 'exit': proc.poll(), 'seconds': time.monotonic()-stop_started,
                     'result': json.loads(result_path.read_text()) if result_path.is_file() else None,
                 })
-    receipt={'schema':1,'passed':fault is None,'fault':fault,'cases':cases,'assertions':checks,'root':str(root),'volume':volume,'daemon':daemon,'preparationSha256':hashlib.sha256(a.preparation.read_bytes()).hexdigest()}
+    receipt={'schema':1,'passed':fault is None,'fault':fault,'cases':cases,'assertions':checks,'root':str(root),'volume':volume,'daemon':daemon,'dockerEndpoint':endpoint,'preparationSha256':hashlib.sha256(a.preparation.read_bytes()).hexdigest()}
     if a.acceptance:
         receipt.update(fixture=a.acceptance,driverDirectory=str(Path(__file__).resolve().parent),
                        preparationPath=str(a.preparation.resolve()),closurePath=str(closure),phaseTimes=phase_times)

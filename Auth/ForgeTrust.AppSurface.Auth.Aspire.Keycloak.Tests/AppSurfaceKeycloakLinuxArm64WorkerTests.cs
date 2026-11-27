@@ -38,9 +38,10 @@ public sealed class AppSurfaceKeycloakLinuxArm64WorkerTests
     }
 
     [Theory]
-    [LinuxArm64InlineData(false)]
-    [LinuxArm64InlineData(true)]
-    public async Task RealWorkerCreatesSealedMemfdAndConfiguredWorkerReadsSameRunCustody(bool fenced)
+    [LinuxArm64InlineData(false, false)]
+    [LinuxArm64InlineData(true, false)]
+    [LinuxArm64InlineData(true, true)]
+    public async Task RealWorkerCreatesSealedMemfdAndConfiguredWorkerReadsSameRunCustody(bool fenced, bool referenceFromFile)
     {
         using var files = new TestFiles();
         var input = files.Write("anchor-input.json", JsonSerializer.Serialize(new
@@ -95,7 +96,10 @@ public sealed class AppSurfaceKeycloakLinuxArm64WorkerTests
             desiredNode["confidential"] = true;
             var desired = files.Write("desired.json", desiredNode.ToJsonString());
             var bindingsNode = JsonNode.Parse(BindingsJson)!.AsObject();
-            bindingsNode["clientCredentialReference"] = JsonNode.Parse(referenceJson);
+            if (referenceFromFile)
+                bindingsNode["clientCredentialReferenceFile"] = ready;
+            else
+                bindingsNode["clientCredentialReference"] = JsonNode.Parse(referenceJson);
             bindingsNode["expectedCaptureRunId"] = RunId;
             var bindings = files.Write("bindings.json", bindingsNode.ToJsonString(), UnixFileMode.UserRead);
             var output = files.FilePath("worker-result.json");

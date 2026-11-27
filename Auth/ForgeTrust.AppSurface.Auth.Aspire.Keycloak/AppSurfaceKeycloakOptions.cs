@@ -1,6 +1,6 @@
+using System.Collections.Immutable;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Collections.Immutable;
 using ForgeTrust.AppSurface.Auth.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
@@ -420,4 +420,9 @@ internal sealed record AppSurfaceKeycloakRegistrationSnapshot(
     AppSurfaceKeycloakOptions Options,
     KeycloakDesiredConfiguration Desired,
     AppSurfaceKeycloakConfigurationProjection Projection,
-    AppSurfaceKeycloakThemeRegistrationState? Theme);
+    AppSurfaceKeycloakThemeRegistrationState? Theme)
+{
+    /// <summary>Gets the validated loopback transport origin with its explicit port in the original URI text.</summary>
+    internal Uri TransportOrigin => Desired.TransportOrigin
+        ?? throw new InvalidOperationException("The Keycloak registration is missing its transport origin.");
+}

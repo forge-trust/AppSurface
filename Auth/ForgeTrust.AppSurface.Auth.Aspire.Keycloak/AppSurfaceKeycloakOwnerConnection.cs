@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
+using ForgeTrust.AppSurface.Auth.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -40,7 +40,7 @@ internal sealed class AppSurfaceKeycloakOwnerConnection : IDisposable
     {
         if (port is < 1024 or > 65535 || !Guid.TryParseExact(ownerId, "N", out _)) throw new ArgumentException("Invalid owner connection.");
         connect ??= static (client, port, token) => client.ConnectAsync(IPAddress.Loopback, port, token);
-        var frame = Encoding.ASCII.GetBytes(ownerId + "\n");
+        var frame = KeycloakWorkerProtocol.EncodeOwnerHeartbeatFrame(ownerId);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(8));
         while (true)
@@ -85,7 +85,8 @@ internal sealed class AppSurfaceKeycloakOwnerConnection : IDisposable
         await stream.WriteAsync(frame, ct);
         var reply = new byte[1];
         await stream.ReadExactlyAsync(reply, ct);
-        if (reply[0] != (byte)'R') throw new IOException("Owner acknowledgement unavailable.");
+        if (reply[0] != KeycloakWorkerProtocol.OwnerHeartbeatAcknowledgement)
+            throw new IOException("Owner acknowledgement unavailable.");
     }
 
     /// <summary>Observes completion under the caller's existing stop deadline.</summary>

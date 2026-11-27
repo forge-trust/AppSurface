@@ -66,6 +66,7 @@ public sealed class AppSurfaceKeycloakSupervisedDockerTests
 
     [Theory]
     [InlineData("daemon")]
+    [InlineData("image")]
     [InlineData("volume")]
     [InlineData("attachments")]
     [InlineData("container")]
@@ -85,6 +86,7 @@ public sealed class AppSurfaceKeycloakSupervisedDockerTests
             switch (operation)
             {
                 case "daemon": await docker.DaemonAsync(cancellation.Token); break;
+                case "image": await docker.ImageIdAsync("registry.example.test/runtime:fixture", cancellation.Token); break;
                 case "volume": await docker.VolumeAsync("wanted", cancellation.Token); break;
                 case "attachments": await docker.AttachmentsAsync("wanted", cancellation.Token); break;
                 case "container": await docker.ContainerAsync("keycloak", Id, "run-1", cancellation.Token); break;
@@ -130,6 +132,39 @@ public sealed class AppSurfaceKeycloakSupervisedDockerTests
             var error = await Assert.ThrowsAsync<IOException>(() => Docker((_, _) => Task.FromResult(value)).DaemonAsync(default));
             Assert.Equal("Docker inventory could not be verified.", error.Message);
         }
+    }
+
+    [Fact]
+    public async Task ImageInventoryReturnsTheExactIdentifierForTheConfiguredReference()
+    {
+        const string reference = "registry.example.test/runtime:fixture";
+        const string imageId = "sha256:fixture-runtime";
+        var calls = new List<string[]>();
+        var docker = Docker((_, args) =>
+        {
+            calls.Add(args);
+            return Task.FromResult(JsonSerializer.Serialize(new[] { new { Id = imageId } }));
+        });
+
+        Assert.Equal(imageId, await docker.ImageIdAsync(reference, default));
+        Assert.Equal(new[] { "image", "inspect", reference }, Assert.Single(calls));
+    }
+
+    [Theory]
+    [InlineData("not-json")]
+    [InlineData("[]")]
+    [InlineData("[{}]")]
+    [InlineData("[{\"Id\":null}]")]
+    [InlineData("[{\"Id\":\"  \"}]")]
+    [InlineData("[{\"Id\":\"sha256:one\\nsha256:two\"}]")]
+    [InlineData("[{\"Id\":\"sha256:one\",\"Id\":\"sha256:two\"}]")]
+    [InlineData("[{\"Id\":\"sha256:one\"},{\"Id\":\"sha256:two\"}]")]
+    public async Task ImageInventoryRejectsMalformedOrAmbiguousIdentity(string response)
+    {
+        var error = await Assert.ThrowsAsync<IOException>(
+            () => Docker((_, _) => Task.FromResult(response)).ImageIdAsync("registry.example.test/runtime:fixture", default));
+
+        Assert.Equal("Docker inventory could not be verified.", error.Message);
     }
 
     [Fact]
@@ -224,7 +259,7 @@ public sealed class AppSurfaceKeycloakSupervisedDockerTests
     }
 
     [Fact]
-    public async Task ContainerVerifiesNameIdRunLabelAndDetachedSnapshot()
+    public async Task ContainerVerifiesNameIdRunLabelAndReturnsTypedObservation()
     {
         var calls = new List<string[]>();
         var docker = Docker((_, args) =>
@@ -238,8 +273,11 @@ public sealed class AppSurfaceKeycloakSupervisedDockerTests
         Assert.Equal(Id, result.Id);
         Assert.Equal("keycloak", result.Name);
         Assert.Equal("quay.io/keycloak/keycloak:latest", result.Image);
+        Assert.Equal("", result.PidMode);
+        Assert.Equal("bridge", result.NetworkMode);
+        Assert.Null(result.ExitCode);
+        Assert.Null(result.Profile);
         Assert.Equal(new[] { "ps", "-aq", "--no-trunc", "--filter", "name=^/keycloak$" }, calls[0]);
-        Assert.Equal("/keycloak", result.Snapshot.GetProperty("Name").GetString());
 
         var byIdCalls = new List<string[]>();
         var byIdDocker = Docker((_, args) =>
@@ -255,6 +293,36 @@ public sealed class AppSurfaceKeycloakSupervisedDockerTests
         await Assert.ThrowsAsync<IOException>(() => Docker((_, _) => Task.FromResult(Id + "\n" + OtherId)).ContainerAsync("keycloak", null, "run-1", default));
         await Assert.ThrowsAsync<IOException>(() => Docker((_, _) => Task.FromResult("")).ContainerAsync("bad name", null, "run-1", default));
         await Assert.ThrowsAsync<IOException>(() => Docker((_, _) => Task.FromResult("short")).ContainerAsync("keycloak", null, "run-1", default));
+    }
+
+    [Fact]
+    public async Task ContainerReadsTypedExitCodeAndRequiresProofDetailsOnlyForOwnership()
+    {
+        var exitJson = ContainerJson(Id, "keycloak", "run-1")
+            .Replace("\"Status\":\"exited\"", "\"Status\":\"exited\",\"ExitCode\":19", StringComparison.Ordinal);
+        var calls = 0;
+        var observed = await Docker((_, _) => Task.FromResult(++calls == 1 ? Id : exitJson))
+            .ContainerAsync("keycloak", null, "run-1", default);
+        Assert.NotNull(observed);
+        Assert.Equal(19, observed.ExitCode);
+
+        foreach (var json in new[]
+        {
+            ContainerJson(Id, "keycloak", "run-1"),
+            ContainerJson(Id, "keycloak", "run-1").Replace("\"Status\":\"exited\"", "\"Status\":\"exited\",\"ExitCode\":null", StringComparison.Ordinal),
+            ContainerJson(Id, "keycloak", "run-1").Replace("\"Status\":\"exited\"", "\"Status\":\"exited\",\"ExitCode\":\"19\"", StringComparison.Ordinal)
+        })
+        {
+            calls = 0;
+            var liveness = await Docker((_, _) => Task.FromResult(++calls == 1 ? Id : json))
+                .ContainerAsync("keycloak", null, "run-1", default);
+            Assert.NotNull(liveness);
+            Assert.Null(liveness.ExitCode);
+
+            calls = 0;
+            await Assert.ThrowsAsync<IOException>(() => Docker((_, _) => Task.FromResult(++calls == 1 ? Id : json))
+                .ContainerAsync("keycloak", null, "run-1", default, requireProfile: true));
+        }
     }
 
     [Fact]

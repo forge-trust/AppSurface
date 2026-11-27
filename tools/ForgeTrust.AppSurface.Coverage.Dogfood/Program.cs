@@ -75,10 +75,11 @@ internal static class CoverageDogfood
             var projects = solution.Descendants("Project").Select(x => x.Attribute("Path")?.Value)
                 .Where(x => x is not null && (x.EndsWith(".Tests.csproj", StringComparison.Ordinal) || x.EndsWith(".IntegrationTests.csproj", StringComparison.Ordinal)))
                 .Select(x => x!.Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
-            var supplements = NativeCoverageProducerInventory.Create(includeKeycloak)
+            var producerInventory = NativeCoverageProducerInventory.Create(includeKeycloak);
+            var supplements = producerInventory
                 .Select(producer => new CoverageSupplement(producer.Id, producer.NativePlatform, producer.Filter, [producer.TestProject]))
                 .ToList();
-            var native = operationName == "native" ? SelectNativeProducer(supplements, options) : null;
+            var native = operationName == "native" ? SelectNativeProducer(producerInventory, options) : null;
             var measurements = new InvocationMeasurements();
             string gitVersion = "not-checked-v2";
             string commit;
@@ -118,8 +119,11 @@ internal static class CoverageDogfood
                 DiffPolicyId = diffPolicyId
             };
             if (contractVersion == 3)
-                await ValidateCollectorVersionsAsync(root, (native?.TestProjects ?? projects).Distinct(StringComparer.Ordinal)
+            {
+                var collectorProjects = native is null ? projects : new[] { native.TestProject };
+                await ValidateCollectorVersionsAsync(root, collectorProjects.Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal).ToArray(), configuration, measurements);
+            }
             var policyElement = ToVersionedPolicyElement(policy, contractVersion);
             stage = "pinned-patch";
             var expectedPatchSha256 = contractVersion == 3 && policy.Gate.Mode == CoverageGateMode.AggregateAndPatch
@@ -358,23 +362,23 @@ internal static class CoverageDogfood
         return JsonSerializer.SerializeToElement(projection, projection.GetType(), Json);
     }
 
-    private static CoverageSupplement SelectNativeProducer(IReadOnlyList<CoverageSupplement> supplements,
+    private static NativeCoverageProducer SelectNativeProducer(IReadOnlyList<NativeCoverageProducer> producers,
         IReadOnlyDictionary<string, string> options)
     {
         var platform = options.GetValueOrDefault("native-platform");
         if (platform is not ("Linux" or "Windows" or "Darwin"))
             throw new ArgumentException("Select Linux, Windows or Darwin for native coverage.");
         var producerId = options.GetValueOrDefault("native-producer") ?? platform.ToLowerInvariant();
-        var producer = supplements.SingleOrDefault(supplement => supplement.Id == producerId && supplement.Platform == platform)
+        var producer = producers.SingleOrDefault(candidate => candidate.Id == producerId && candidate.NativePlatform == platform)
             ?? throw new ArgumentException("Native producer and platform are not in the selected coverage inventory.");
-        var armLane = NativeCoverageProducerInventory.Create(includeKeycloak: true)
-            .Single(producer => producer.Id == producerId).Keycloak;
+        var keycloakProducer = producer.Keycloak;
         var hasCollection = options.TryGetValue("collection", out var collection);
-        if (armLane != hasCollection || hasCollection && (string.IsNullOrWhiteSpace(collection)
+        if (keycloakProducer != hasCollection || hasCollection && (string.IsNullOrWhiteSpace(collection)
                 || options.ContainsKey("report") || options.ContainsKey("raw")))
             throw new ArgumentException("ARM64 Keycloak captures require fresh observed collection with no external reports.");
-        if (armLane && (CurrentPlatform() != platform || RuntimeInformation.OSArchitecture != Architecture.Arm64
-                || RuntimeInformation.ProcessArchitecture != Architecture.Arm64))
+        if (keycloakProducer && (CurrentPlatform() != producer.NativePlatform
+                || RuntimeInformation.OSArchitecture.ToString() != producer.OsArchitecture
+                || RuntimeInformation.ProcessArchitecture.ToString() != producer.ProcessArchitecture))
             throw new ArgumentException("The Keycloak native producer requires an ARM64 host and ARM64 .NET process.");
         return producer;
     }

@@ -53,6 +53,8 @@ public sealed class AppSurfaceKeycloakSupervisedRecoveryTests
     [InlineData("incomplete-roster")]
     [InlineData("wrong-run-root")]
     [InlineData("volume-missing")]
+    [InlineData("volume-unrecorded")]
+    [InlineData("staging-incomplete")]
     public async Task RecoveryRejectsStaleOrUnsafeRecordsWithoutWorkloadsOrClear(string condition)
     {
         if (!OperatingSystem.IsMacOS() || RuntimeInformation.ProcessArchitecture != Architecture.Arm64) return;
@@ -79,7 +81,7 @@ public sealed class AppSurfaceKeycloakSupervisedRecoveryTests
                 OwnerId = condition == "owner-mismatch" ? Guid.NewGuid().ToString("N") : owner,
                 DaemonId = daemon,
                 VolumeName = volume,
-                Volume = new
+                Volume = condition == "volume-unrecorded" ? null : new
                 {
                     Name = volume,
                     CreatedAt = "created",
@@ -104,7 +106,7 @@ public sealed class AppSurfaceKeycloakSupervisedRecoveryTests
                     "incomplete-roster" => new object?[] { null },
                     _ => Array.Empty<object?>()
                 },
-                StagingComplete = true,
+                StagingComplete = condition != "staging-incomplete",
                 OwnerFenceEstablished = false,
                 LaunchUncertain = condition == "launch-uncertain"
             };
@@ -153,6 +155,7 @@ public sealed class AppSurfaceKeycloakSupervisedRecoveryTests
     [InlineData("foreign-attachment")]
     [InlineData("observer-nonzero")]
     [InlineData("observer-empty-metadata")]
+    [InlineData("observer-absent-before-remove")]
     [InlineData("changed-volume-during-observation")]
     [InlineData("marker-changed-before-clear")]
     public async Task RecoveryReadsOnlyPhysicalVolumeMetadataBeforeClearingTheExactStoppedOwner(string variant)
@@ -273,6 +276,7 @@ public sealed class AppSurfaceKeycloakSupervisedRecoveryTests
                         return Task.FromResult(variant == "observer-nonzero" ? "1" : "0");
                     case "logs":
                         if (variant == "observer-empty-metadata") return Task.FromResult("null");
+                        if (variant == "observer-absent-before-remove") observedName = null;
                         return Task.FromResult(JsonSerializer.Serialize(new
                         {
                             DeviceMajor = 1,
@@ -322,8 +326,9 @@ public sealed class AppSurfaceKeycloakSupervisedRecoveryTests
             Assert.Equal(variant == "verified", recovered);
             Assert.Single(actions, verb => verb == "create");
             Assert.Single(actions, verb => verb == "start");
-            var observerRetained = variant is "observer-nonzero" or "observer-empty-metadata" or "changed-volume-during-observation";
-            if (observerRetained) Assert.DoesNotContain("rm", actions);
+            var observerIntentRetained = variant is "observer-nonzero" or "observer-empty-metadata"
+                or "observer-absent-before-remove" or "changed-volume-during-observation";
+            if (observerIntentRetained) Assert.DoesNotContain("rm", actions);
             else
             {
                 Assert.Single(actions, verb => verb == "rm");
@@ -332,7 +337,7 @@ public sealed class AppSurfaceKeycloakSupervisedRecoveryTests
             Assert.DoesNotContain("stop", actions);
             using var after = await SupervisedVolumeLease.Acquire(options.LeaseRoot, daemon, volume);
             if (recovered) Assert.False(after.HasActive);
-            else if (observerRetained)
+            else if (observerIntentRetained)
             {
                 using var current = JsonDocument.Parse(after.ReadActive());
                 var retained = Assert.Single(current.RootElement.GetProperty("Containers").EnumerateArray());

@@ -51,7 +51,7 @@ adapter graph or qualify real Keycloak reconciliation with the new anchor.
 The [preparation tool](../tests/keycloak-identity-feasibility/prepare-worker-anchor.py) generates a project outside
 the checkout with one reference to the extracted pure DLL, cleared package feeds and fresh private caches. It
 preserves every relative path in the adapter's recursive worker closure and rejects a different pure DLL or any
-fixture output that would replace candidate bytes. The [runtime driver](../tests/keycloak-identity-feasibility/run-sealed-memory.py)
+fixture output that would replace candidate bytes. Preparation and execution use the same [worker archive reader](../tests/keycloak-identity-feasibility/worker_payload.py), which rejects invalid and duplicate worker paths. Keep it alongside the Python drivers when copying them. The [runtime driver](../tests/keycloak-identity-feasibility/run-sealed-memory.py)
 uses read-only copied payloads, disabled networking and an empty read-only NuGet cache. Its worker/web readers are
 small public-`Read()` fixtures; their role names do not imply actual reconciliation or web/OIDC acceptance.
 

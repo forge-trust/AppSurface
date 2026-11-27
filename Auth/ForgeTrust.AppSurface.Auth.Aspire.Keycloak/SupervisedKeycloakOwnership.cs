@@ -77,8 +77,7 @@ internal sealed class SupervisedKeycloakOwnership(
         bool historicalServerUser, IReadOnlyList<string> arguments, CancellationToken ct,
         IReadOnlyDictionary<string, string>? environment = null, IReadOnlyList<string>? privateValues = null)
     {
-        using var imageDocument = JsonDocument.Parse(await docker.RunAsync(ct, "image", "inspect", image));
-        var imageId = imageDocument.RootElement[0].GetProperty("Id").GetString()!;
+        var imageId = await docker.ImageIdAsync(image, ct);
         var init = role is AnchorRole or VolumeObservationRole or VolumeInitializationRole;
         var server = role == ServerRole;
         var intent = new OwnedContainer(role, name, null, image, imageId, anchorId, init, server, mounts, ports)
@@ -143,45 +142,20 @@ internal sealed class SupervisedKeycloakOwnership(
             [WorkerAssembly.ContainerPath, KeycloakWorkerProtocol.InitializeVolume, SupervisedKeycloakContainerProfile.UserId()], ct);
         var id = container.Id!;
         if (await docker.RunAsync(ct, "wait", id) != "0") throw failure();
-        await VerifyContainerAsync(Active, container, true, ct);
-        await docker.RunAsync(ct, "rm", id);
+        if (!await RemoveVerifiedStoppedContainerAsync(Active, container, ct)) throw failure();
     }
 
-    /// <summary>Checks a container against the exact daemon, recorded owner, and Docker profile.</summary>
+    /// <summary>Checks the exact daemon and owner, delegates profile matching, and optionally verifies stopped state.</summary>
     /// <returns>The verified snapshot, or null when the owned container is conclusively absent.</returns>
+    /// <remarks>The required typed profile proof is obtained here before matching. The profile contains all recorded
+    /// execution settings, while this method retains daemon identity checks and stopped-state verification.</remarks>
     internal async Task<SupervisedObservedContainer?> VerifyContainerAsync(ActiveRecord owner, OwnedContainer expected, bool stopped, CancellationToken ct)
     {
         if (await docker.DaemonAsync(ct) != owner.DaemonId) throw failure();
-        var observed = await docker.ContainerAsync(expected.Name, expected.Id, owner.OwnerId, ct);
+        var observed = await docker.ContainerAsync(expected.Name, expected.Id, owner.OwnerId, ct, requireProfile: true);
         if (observed is null) return null;
-        var profile = new SupervisedKeycloakContainerProfile(expected);
-        var snapshot = observed.Snapshot;
-        var host = snapshot.GetProperty("HostConfig");
-        if (!profile.HasValidRole || observed.Image != expected.Image || observed.ImageId != expected.ImageId || observed.Privileged
-            || observed.Init != expected.Init || observed.RestartPolicy != SupervisedKeycloakContainerProfile.RestartPolicy
-            || observed.ReadonlyRoot != profile.ReadOnlyRoot || observed.User != profile.User
-            || !profile.MatchesNamespace(observed) || !profile.MatchesCapabilities(host)
-            || !host.GetProperty("SecurityOpt").EnumerateArray().Select(x => x.GetString()).SequenceEqual([SupervisedKeycloakContainerProfile.SecurityOption])
-            || host.GetProperty("PidsLimit").GetInt64() != SupervisedKeycloakContainerProfile.ProcessLimit
-            || host.GetProperty("Memory").GetInt64() != profile.MemoryMiB * 1024L * 1024
-            || host.GetProperty("Devices").GetArrayLength() != 0)
-            throw failure();
-        var actualMounts = snapshot.GetProperty("Mounts").EnumerateArray().ToArray();
-        if (actualMounts.Length != expected.Mounts.Length) throw failure();
-        foreach (var m in actualMounts)
-        {
-            var declared = expected.Mounts.SingleOrDefault(x => x.Target == m.GetProperty("Destination").GetString()) ?? throw failure();
-            if (m.GetProperty("Type").GetString() != (declared.Volume ? "volume" : "bind") || m.GetProperty("RW").GetBoolean() != declared.Writable
-                || !MountSourceMatches(declared, m.GetProperty(declared.Volume ? "Name" : "Source").GetString())) throw failure();
-        }
-        if (!host.TryGetProperty("PortBindings", out var ports) || ports.ValueKind is not (JsonValueKind.Object or JsonValueKind.Null)) throw failure();
-        if (expected.Ports.Length == 0 && ports.ValueKind == JsonValueKind.Object && ports.EnumerateObject().Any()) throw failure();
-        foreach (var port in expected.Ports)
-        {
-            if (!ports.TryGetProperty(port + "/tcp", out var binding) || binding.GetArrayLength() != 1 || binding[0].GetProperty("HostIp").GetString() != SupervisedKeycloakContainerProfile.PublishedHost
-                || binding[0].GetProperty("HostPort").GetString() != port.ToString(System.Globalization.CultureInfo.InvariantCulture)) throw failure();
-        }
-        if (expected.Ports.Length != 0 && ports.EnumerateObject().Count() != expected.Ports.Length) throw failure();
+        var proof = observed.Profile ?? throw failure();
+        if (!new SupervisedKeycloakContainerProfile(expected).Matches(observed, proof)) throw failure();
         if (stopped)
         {
             RequireStopped(observed);
@@ -221,20 +195,21 @@ internal sealed class SupervisedKeycloakOwnership(
             throw new IOException("Owned stopped state could not be verified.");
     }
 
-    private static bool MountSourceMatches(OwnedMount declared, string? observed) =>
-        observed == declared.Source
-        // Docker Desktop can report a translated VM path for the read-only live theme mount.
-        || !declared.Volume && !declared.Writable && declared.Target.StartsWith("/opt/keycloak/themes/", StringComparison.Ordinal)
-            && observed == "/host_mnt" + declared.Source;
-
     /// <summary>Removes only exact owned containers after reverifying stopped state, in reverse launch order.</summary>
     internal async Task RemoveStoppedAsync(ActiveRecord owner, CancellationToken ct)
     {
         foreach (var container in owner.Containers.Reverse())
-        {
-            var observed = await VerifyContainerAsync(owner, container, true, ct);
-            if (observed is not null) await docker.RunAsync(ct, "rm", observed.Id);
-        }
+            await RemoveVerifiedStoppedContainerAsync(owner, container, ct);
+    }
+
+    /// <summary>Removes a verified stopped container by its observed identifier.</summary>
+    /// <returns>True after acknowledged removal, or false when the container is conclusively absent.</returns>
+    private async Task<bool> RemoveVerifiedStoppedContainerAsync(ActiveRecord owner, OwnedContainer container, CancellationToken ct)
+    {
+        var observed = await VerifyContainerAsync(owner, container, stopped: true, ct);
+        if (observed is null) return false;
+        await docker.RunAsync(ct, "rm", observed.Id);
+        return true;
     }
 
     /// <summary>Observes the physical volume using a read-only helper and optionally reads the root and pinned H2 database owners.</summary>
@@ -254,8 +229,7 @@ internal sealed class SupervisedKeycloakOwnership(
         var stamp = selectServerUser ? data?.Incarnation : JsonSerializer.Deserialize<KeycloakVolumeIncarnation>(text);
         if (stamp is null) throw failure();
         if (await docker.VolumeAsync(volume.Name, ct) != volume) throw failure();
-        await VerifyContainerAsync(Active, observer, true, ct);
-        await docker.RunAsync(ct, "rm", id);
+        if (!await RemoveVerifiedStoppedContainerAsync(Active, observer, ct)) throw failure();
 
         // Retain an uncertain observer's durable intent. Restore the original record only after stopped proof and removal.
         if (recoveryMarker is not null)

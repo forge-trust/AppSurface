@@ -26,7 +26,7 @@ public sealed class AppSurfaceKeycloakOwnerConnectionTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var owner = Guid.NewGuid().ToString("N");
+        const string owner = "0123456789AbCdEf0123456789aBcDeF";
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var losses = 0;
         var attempts = 0;

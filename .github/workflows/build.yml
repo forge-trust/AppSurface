@@ -227,11 +227,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.coverage-evidence-plan.outputs.native_coverage_matrix) }}
     env:
-      NUGET_PACKAGES: ${{ matrix.keycloak && format('{0}/coverage-keycloak-packages', runner.temp) || format('{0}/.nuget/packages', github.workspace) }}
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
       BUILD_CONFIGURATION: Release
       COVERAGE_GATE_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.diff_base }}
       COVERAGE_V3_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.v3_diff_base }}
-      AppSurfaceKeycloakWorkerBuildRoot: ${{ matrix.keycloak && format('{0}/coverage-keycloak-worker-build', runner.temp) || '' }}
       COVERAGE_KEYCLOAK_LANE: ${{ matrix.keycloak }}
       COVERAGE_INCLUDE_KEYCLOAK: ${{ needs.coverage-evidence-plan.outputs.requires_keycloak_native_coverage }}
       COVERAGE_KEYCLOAK_PRODUCER: ${{ matrix.producerId }}
@@ -241,6 +240,17 @@ jobs:
       COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}
 
     steps:
+      - name: Configure Keycloak coverage directories
+        if: ${{ matrix.keycloak }}
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'coverage-keycloak-packages'
+          $workerBuildRoot = Join-Path $env:RUNNER_TEMP 'coverage-keycloak-worker-build'
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value @(
+            "NUGET_PACKAGES=$packages"
+            "AppSurfaceKeycloakWorkerBuildRoot=$workerBuildRoot"
+          )
+
       - name: Preserve committed bytes on Windows
         if: ${{ runner.os == 'Windows' }}
         shell: pwsh

@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using ForgeTrust.AppSurface.Auth.Keycloak;
 using static ForgeTrust.AppSurface.Auth.Aspire.Keycloak.SupervisedKeycloakOwnership;
 
@@ -70,8 +69,23 @@ internal readonly record struct SupervisedKeycloakContainerProfile(OwnedContaine
         return command.ToArray();
     }
 
+    /// <summary>Checks the observed container and typed Docker proof against this recorded execution profile.</summary>
+    internal bool Matches(SupervisedObservedContainer observed, SupervisedContainerProfileProof proof)
+    {
+        if (!HasValidRole || observed.Image != Container.Image || observed.ImageId != Container.ImageId || observed.Privileged
+            || observed.Init != Container.Init || observed.RestartPolicy != RestartPolicy
+            || observed.ReadonlyRoot != ReadOnlyRoot || observed.User != User
+            || !MatchesNamespace(observed) || !MatchesCapabilities(proof)
+            || !proof.SecurityOptions.SequenceEqual([SecurityOption])
+            || proof.ProcessLimit != ProcessLimit || proof.MemoryBytes != MemoryMiB * 1024L * 1024
+            || proof.DeviceCount != 0)
+            return false;
+
+        return MatchesMounts(proof.Mounts) && MatchesPublishedPorts(proof.PortBindings);
+    }
+
     /// <summary>Checks observed namespace settings against the persisted topology.</summary>
-    internal bool MatchesNamespace(SupervisedObservedContainer observed)
+    private bool MatchesNamespace(SupervisedObservedContainer observed)
     {
         if (Container.AnchorId is { } anchor)
         {
@@ -85,15 +99,49 @@ internal readonly record struct SupervisedKeycloakContainerProfile(OwnedContaine
     }
 
     /// <summary>Checks the observed dropped capabilities and the initialization-only additions.</summary>
-    internal bool MatchesCapabilities(JsonElement host)
+    private bool MatchesCapabilities(SupervisedContainerProfileProof observed)
     {
-        var added = host.GetProperty("CapAdd");
-        if (!host.GetProperty("CapDrop").EnumerateArray().Select(value => value.GetString()).SequenceEqual([DroppedCapabilities]))
+        var added = observed.CapAdd;
+        if (!observed.CapDrop.SequenceEqual([DroppedCapabilities]))
             return false;
         return VolumeHelper && Container.Role == VolumeInitializationRole
-            ? added.EnumerateArray().Select(value => value.GetString()).Order().SequenceEqual(InitializationCapabilities.Select(value => "CAP_" + value))
-            : added.ValueKind != JsonValueKind.Array || added.GetArrayLength() == 0;
+            ? added is not null
+                && added.Order().SequenceEqual(InitializationCapabilities.Select(value => "CAP_" + value))
+            : added is null || added.Length == 0;
     }
+
+    private bool MatchesMounts(SupervisedObservedMount[] actualMounts)
+    {
+        if (actualMounts.Length != Container.Mounts.Length) return false;
+        foreach (var mount in actualMounts)
+        {
+            var declared = Container.Mounts.SingleOrDefault(value => value.Target == mount.Destination);
+            if (declared is null || mount.Type != (declared.Volume ? "volume" : "bind")
+                || mount.Writable != declared.Writable
+                || !MountSourceMatches(declared, declared.Volume ? mount.Name : mount.Source))
+                return false;
+        }
+        return true;
+    }
+
+    private bool MatchesPublishedPorts(SupervisedObservedPortBinding[] ports)
+    {
+        if (ports.Length != Container.Ports.Length) return false;
+        foreach (var port in Container.Ports)
+        {
+            var binding = ports.LastOrDefault(value => value.Name == port + "/tcp");
+            if (binding?.Mappings is not { Length: 1 } mappings || mappings[0].HostIp != PublishedHost
+                || mappings[0].HostPort != port.ToString(CultureInfo.InvariantCulture))
+                return false;
+        }
+        return true;
+    }
+
+    private static bool MountSourceMatches(OwnedMount declared, string? observed) =>
+        observed == declared.Source
+        // Docker Desktop can report a translated VM path for the read-only live theme mount.
+        || !declared.Volume && !declared.Writable && declared.Target.StartsWith("/opt/keycloak/themes/", StringComparison.Ordinal)
+            && observed == "/host_mnt" + declared.Source;
 
     internal static string UserId() => getuid().ToString(CultureInfo.InvariantCulture);
 

@@ -148,30 +148,6 @@ public sealed class QualifiedLeaseDirectoryTests
     }
 
     [Fact]
-    public void AbsoluteProcessRecordRequiresPrivateRegularFileAndBoundedContent()
-    {
-        if (!Supported()) return;
-        using var folder = new PrivateFolder();
-        var record = TestPathUtils.PathUnder(folder.Path, "process.json");
-        File.WriteAllText(record, "{\"pid\":1}");
-        File.SetUnixFileMode(record, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-
-        Assert.Equal("{\"pid\":1}", System.Text.Encoding.UTF8.GetString(QualifiedLeaseDirectory.ReadAbsoluteRecord(record)));
-
-        File.WriteAllText(record, "x");
-        Assert.Equal("InvalidProcessRecord", Assert.Throws<QualifiedOwnershipFailure>(
-            () => QualifiedLeaseDirectory.ReadAbsoluteRecord(record)).Kind);
-
-        File.WriteAllText(record, new string('x', 4097));
-        Assert.Equal("InvalidProcessRecord", Assert.Throws<QualifiedOwnershipFailure>(
-            () => QualifiedLeaseDirectory.ReadAbsoluteRecord(record)).Kind);
-
-        var link = TestPathUtils.PathUnder(folder.Path, "process-link.json");
-        File.CreateSymbolicLink(link, record);
-        Assert.Throws<QualifiedOwnershipFailure>(() => QualifiedLeaseDirectory.ReadAbsoluteRecord(link));
-    }
-
-    [Fact]
     public void NativeLeaseRejectsUnsafeRootAndMissingRecordsWithoutFollowingLinks()
     {
         if (!Supported()) return;

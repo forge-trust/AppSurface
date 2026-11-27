@@ -66,7 +66,8 @@ public sealed class AppSurfaceKeycloakSupervisedApiTests
     [InlineData(false, false, false, 0, "dead", false)]
     public void DefiniteStoppedObservationRejectsUncertainStates(bool running, bool paused, bool restarting, int pid, string status, bool accepted)
     {
-        var snapshot = new SupervisedObservedContainer("id", "name", "image", "imageid", "", "", true, running, paused, restarting, pid, status, "no", false, true, "user", default);
+        var snapshot = new SupervisedObservedContainer("id", "name", "image", "imageid", "", "", true,
+            running, paused, restarting, pid, status, "no", false, true, "user", null, null);
         if (accepted) SupervisedKeycloakOwnership.RequireStopped(snapshot);
         else Assert.Throws<IOException>(() => SupervisedKeycloakOwnership.RequireStopped(snapshot));
     }

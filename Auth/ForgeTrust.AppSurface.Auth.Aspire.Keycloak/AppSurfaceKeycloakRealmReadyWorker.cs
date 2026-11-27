@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using ForgeTrust.AppSurface.Auth.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -64,7 +65,7 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
 
         return new AppSurfaceKeycloakRealmReadyWorkerInvocation(
             workingDirectory,
-            ["exec", "--runtimeconfig", workerRuntimeConfigPath, "--depsfile", workerDepsFilePath, workerAssemblyPath, "--appsurface-keycloak-realm-ready"]);
+            ["exec", "--runtimeconfig", workerRuntimeConfigPath, "--depsfile", workerDepsFilePath, workerAssemblyPath, KeycloakWorkerProtocol.RealmReady]);
     }
 }
 

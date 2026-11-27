@@ -18,6 +18,8 @@ import time
 import uuid
 import zipfile
 
+from worker_payload import read_worker_payload, worker_payload_target
+
 spec = importlib.util.spec_from_file_location("boundary", Path(__file__).with_name("run-supervised-boundary.py"))
 boundary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boundary)
@@ -207,10 +209,9 @@ def main():
                     expected = package.read("lib/net10.0/ForgeTrust.AppSurface.Auth.Keycloak.dll")
                 check("reader-is-extracted-package-byte-for-byte", (root / "code/ForgeTrust.AppSurface.Auth.Keycloak.dll").read_bytes() == expected)
             if args.worker_anchor:
-                with zipfile.ZipFile(args.adapter_package) as package:
-                    closure = {info.filename.removeprefix("tools/net10.0/any/realm-ready/"): package.read(info) for info in package.infolist()
-                               if info.filename.startswith("tools/net10.0/any/realm-ready/") and not info.is_dir()}
-                check("complete-worker-payload-is-extracted-candidate", bool(closure) and all((root / "code" / name).read_bytes() == data for name, data in closure.items()))
+                closure = read_worker_payload(args.adapter_package)
+                check("complete-worker-payload-is-extracted-candidate", all(
+                    worker_payload_target(root / "code", name).read_bytes() == data for name, data in closure.items()))
             command = ["create", "--name", config["name"], "--label", "appsurface.feasibility=" + boundary.LABEL,
                        "--label", "appsurface.run=" + run_id, "--network", "none", "--ipc", "private", "--read-only",
                        "--init", "--interactive", "--restart", "no", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -321,7 +322,7 @@ def main():
                                     fault = fault or "AttachmentReapUnavailable"
                     if fault is not None:
                         stop_seconds = time.monotonic() - start
-    source_paths = ["run-sealed-memory.py", "run-supervised-boundary.py", source_folder + "/Program.cs"]
+    source_paths = ["run-sealed-memory.py", "run-supervised-boundary.py", "worker_payload.py", source_folder + "/Program.cs"]
     if args.assembly != "SealedMemoryProbe":
         source_paths += ["../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/KeycloakClientCredentialMemoryCapture.cs",
                          "../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/KeycloakClientCredentialReference.cs"]

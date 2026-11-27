@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Auth.Keycloak;
+using RealmReadyEnvironment = ForgeTrust.AppSurface.Auth.Keycloak.KeycloakWorkerProtocol.RealmReadyEnvironment;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -42,100 +43,31 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
 
         if (args is [KeycloakWorkerProtocol.InitializeVolume, var uidText])
             return RunInitializeVolumeCommand(volumeRoot, uidText, standardError, InitializeNativeVolume);
-        var (configured, desiredPath, bindingsPath, resultPath) = args switch
-        {
-            [KeycloakWorkerProtocol.Reconcile, var desiredArgument, var bindingsArgument, var resultArgument]
-                => (true, desiredArgument, bindingsArgument, resultArgument),
-            _ => (false, string.Empty, string.Empty, string.Empty)
-        };
-        var fencedAnchor = args is [KeycloakWorkerProtocol.FencedMemoryAnchor, _, _, _, _];
-        var fenceOnly = args is [KeycloakWorkerProtocol.OwnerFence, _, _, _];
-        var memoryAnchor = fencedAnchor || args is ["--appsurface-keycloak-memory-anchor", _, _];
-        if (!configured && !memoryAnchor && !fenceOnly && args is not ["--appsurface-keycloak-realm-ready"]) return 1;
         var boundaryStage = "configuration";
+        (Func<CancellationToken, Task<int>> Execute, bool Finite, string? ResultPath)? command = args switch
+        {
+            [KeycloakWorkerProtocol.Reconcile, var desired, var bindings, var result]
+                => (token => RunRealmAsync(token, (desired, bindings, result)), true, result),
+            [KeycloakWorkerProtocol.FencedMemoryAnchor, var input, var ready, var port, var owner]
+                => (token => HoldAnchorAsync(input, ready, token, ParsePort(port), owner), false, null),
+            [KeycloakWorkerProtocol.OwnerFence, var ready, var port, var owner]
+                => (token => HoldAnchorAsync(null, ready, token, ParsePort(port), owner), false, null),
+            ["--appsurface-keycloak-memory-anchor", var input, var ready]
+                => (token => HoldAnchorAsync(input, ready, token, null, null), false, null),
+            [KeycloakWorkerProtocol.RealmReady] => (token => RunRealmAsync(token), true, null),
+            _ => null
+        };
+        if (command is not { } selected) return 1;
+
         var execution = Stopwatch.StartNew();
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (!memoryAnchor && !fenceOnly) stop.CancelAfter(TimeSpan.FromSeconds(120));
+        if (selected.Finite) stop.CancelAfter(TimeSpan.FromSeconds(120));
         using var term = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => { context.Cancel = true; stop.Cancel(); });
         ConsoleCancelEventHandler interrupt = (_, e) => { e.Cancel = true; stop.Cancel(); };
         Console.CancelKeyPress += interrupt;
         try
         {
-            if (memoryAnchor)
-            {
-                boundaryStage = "memory-anchor";
-                return await HoldAnchorAsync(args[1], args[2], stop.Token, fencedAnchor ? int.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture) : null, fencedAnchor ? args[4] : null);
-            }
-            if (fenceOnly)
-            {
-                boundaryStage = "owner-fence";
-                return await HoldAnchorAsync(null, args[1], stop.Token, int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture), args[3]);
-            }
-            using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false, UseCookies = false };
-            // Historical internal variable name: this qualified seam pins the exact peer certificate, not a CA chain.
-            var publicCa = getEnvironmentVariable(KeycloakWorkerProtocol.CertificateFileEnvironmentVariable);
-            if (!string.IsNullOrEmpty(publicCa))
-            {
-                KeycloakPinnedCertificate.Configure(handler, publicCa);
-            }
-            using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-            if (!configured)
-            {
-                var baseline = Baseline(getEnvironmentVariable);
-                await (checkBaseline ?? RealmBaselineVerifier.CheckOnceAsync)(http, baseline, File.ReadAllText, stop.Token);
-                standardError.WriteLine("AppSurface Keycloak realm-ready gate completed.");
-                return 0;
-            }
-            WriteStarted(resultPath);
-            if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-            var privateFile = new FileInfo(bindingsPath);
-            if (!privateFile.Exists || privateFile.LinkTarget is not null || privateFile.Length > 16 * 1024
-                || (File.GetUnixFileMode(bindingsPath) & (UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite
-                    | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
-                throw new InvalidDataException();
-            if (new FileInfo(desiredPath).Length > 1024 * 1024) throw new InvalidDataException();
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var desired = JsonSerializer.Deserialize<RealmReconcileDesired>(File.ReadAllBytes(desiredPath), options) ?? throw new InvalidDataException();
-            var bindings = JsonSerializer.Deserialize<KeycloakWorkerBindings>(File.ReadAllBytes(bindingsPath), options) ?? throw new InvalidDataException();
-            http.BaseAddress = new Uri(bindings.BaseAddress);
-            if ((bindings.CaptureRoot is null) != (bindings.CaptureRunId is null)) throw new InvalidDataException();
-            boundaryStage = "client-capture";
-            if (bindings.ClientCredentialReference is not null && bindings.ClientCredentialReferenceFile is not null)
-                throw new InvalidDataException();
-            var credentialReference = bindings.ClientCredentialReference;
-            if (bindings.ClientCredentialReferenceFile is { } referenceFile)
-            {
-                var metadata = new FileInfo(referenceFile);
-                if (!metadata.Exists || metadata.LinkTarget is not null || metadata.Length is < 1 or > 16 * 1024)
-                    throw new InvalidDataException();
-                credentialReference = JsonSerializer.Deserialize<KeycloakClientCredentialReference>(File.ReadAllBytes(referenceFile))
-                    ?? throw new InvalidDataException();
-            }
-            var sources = (bindings.ClientSecret is null ? 0 : 1) + (bindings.CaptureRoot is null ? 0 : 1)
-                + (credentialReference is null ? 0 : 1);
-            if (sources != (desired.Confidential ? 1 : 0)) throw new InvalidDataException();
-            if (credentialReference is { } reference
-                && (reference.MemoryIdentity is null || reference.Authority.AbsoluteUri != new Uri(desired.Authority).AbsoluteUri
-                    || reference.ClientId != desired.ClientId || reference.RunId != bindings.ExpectedCaptureRunId))
-                throw new InvalidDataException();
-            var clientSecret = credentialReference is { } memory ? memory.Read()
-                : bindings.CaptureRoot is null ? bindings.ClientSecret : RealmClientCapture.Read(bindings.CaptureRoot, bindings.CaptureRunId!);
-            boundaryStage = "reconciliation";
-            var clock = Stopwatch.StartNew();
-            var result = await (reconcile ?? RealmReconciler.ReconcileAsync)(http, desired,
-                new RealmReconcileCredentials(bindings.AdminUsername, bindings.AdminPassword, clientSecret) { BrokerSecrets = bindings.BrokerSecrets }, stop.Token);
-            var envelope = new
-            {
-                result,
-                elapsedSeconds = clock.Elapsed.TotalSeconds,
-                assemblies = AppDomain.CurrentDomain.GetAssemblies().Where(a => !a.IsDynamic)
-                    .Select(a => new { name = a.GetName().Name, location = a.Location }).ToArray(),
-                workerReferences = typeof(AppSurfaceKeycloakRealmReadyEntryPoint).Assembly.GetReferencedAssemblies().Select(a => a.Name).ToArray(),
-                pureReferences = typeof(KeycloakSecurity).Assembly.GetReferencedAssemblies().Select(a => a.Name).ToArray()
-            };
-            File.WriteAllText(resultPath, JsonSerializer.Serialize(envelope));
-            standardError.WriteLine("AppSurface Keycloak reconciliation: " + result.Code + "/" + result.Stage + ".");
-            return result.Ready ? 0 : 20;
+            return await selected.Execute(stop.Token);
         }
         catch (OperationCanceledException)
         {
@@ -149,7 +81,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
         }
         catch (Exception error)
         {
-            if (configured)
+            if (selected.ResultPath is { } resultPath)
             {
                 var failureReceipt = JsonSerializer.Serialize(new
                 {
@@ -168,10 +100,97 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
                     // Keep the worker's safe failure status when its receipt path is unavailable.
                 }
             }
-            standardError.WriteLine("AppSurface Keycloak realm-ready gate failed. Code: " + (configured ? "WorkerBoundaryFailure" : "ASKEYC001") + ".");
-            return configured ? 70 : 1;
+            var code = selected.ResultPath is not null ? "WorkerBoundaryFailure" : KeycloakBaselineDiagnosticCodes.InvalidOptions;
+            standardError.WriteLine($"AppSurface Keycloak realm-ready gate failed. Code: {code}.");
+            return selected.ResultPath is not null ? 70 : 1;
         }
         finally { Console.CancelKeyPress -= interrupt; }
+
+        static int ParsePort(string value) => int.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+
+        async Task<int> RunRealmAsync(CancellationToken token,
+            (string DesiredPath, string BindingsPath, string ResultPath)? request = null)
+        {
+            using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false, UseCookies = false };
+            // Historical internal variable name: this qualified seam pins the exact peer certificate, not a CA chain.
+            var publicCa = getEnvironmentVariable(KeycloakWorkerProtocol.CertificateFileEnvironmentVariable);
+            if (!string.IsNullOrEmpty(publicCa))
+            {
+                KeycloakPinnedCertificate.Configure(handler, publicCa);
+            }
+            using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+            if (request is not { } inputs)
+            {
+                var baseline = Baseline(getEnvironmentVariable);
+                await (checkBaseline ?? RealmBaselineVerifier.CheckOnceAsync)(http, baseline, File.ReadAllText, token);
+                standardError.WriteLine("AppSurface Keycloak realm-ready gate completed.");
+                return 0;
+            }
+            var (desiredPath, bindingsPath, resultPath) = inputs;
+            WriteStarted(resultPath);
+            if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+            var privateFile = new FileInfo(bindingsPath);
+            if (!privateFile.Exists || privateFile.LinkTarget is not null || privateFile.Length > 16 * 1024
+                || (File.GetUnixFileMode(bindingsPath) & (UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite
+                    | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
+                throw new InvalidDataException();
+            if (new FileInfo(desiredPath).Length > 1024 * 1024) throw new InvalidDataException();
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var desired = JsonSerializer.Deserialize<RealmReconcileDesired>(File.ReadAllBytes(desiredPath), options) ?? throw new InvalidDataException();
+            var bindings = JsonSerializer.Deserialize<KeycloakWorkerBindings>(File.ReadAllBytes(bindingsPath), options) ?? throw new InvalidDataException();
+            http.BaseAddress = new Uri(bindings.BaseAddress);
+            if ((bindings.CaptureRoot is null) != (bindings.CaptureRunId is null)) throw new InvalidDataException();
+            boundaryStage = "client-capture";
+            var clientSecret = ResolveClientCredential(desired, bindings);
+            boundaryStage = "reconciliation";
+            var clock = Stopwatch.StartNew();
+            var result = await (reconcile ?? RealmReconciler.ReconcileAsync)(http, desired,
+                new RealmReconcileCredentials(bindings.AdminUsername, bindings.AdminPassword, clientSecret) { BrokerSecrets = bindings.BrokerSecrets }, token);
+            var envelope = new
+            {
+                result,
+                elapsedSeconds = clock.Elapsed.TotalSeconds,
+                assemblies = AppDomain.CurrentDomain.GetAssemblies().Where(a => !a.IsDynamic)
+                    .Select(a => new { name = a.GetName().Name, location = a.Location }).ToArray(),
+                workerReferences = typeof(AppSurfaceKeycloakRealmReadyEntryPoint).Assembly.GetReferencedAssemblies().Select(a => a.Name).ToArray(),
+                pureReferences = typeof(KeycloakSecurity).Assembly.GetReferencedAssemblies().Select(a => a.Name).ToArray()
+            };
+            File.WriteAllText(resultPath, JsonSerializer.Serialize(envelope));
+            standardError.WriteLine("AppSurface Keycloak reconciliation: " + result.Code + "/" + result.Stage + ".");
+            return result.Ready ? 0 : 20;
+        }
+    }
+
+    /// <summary>Resolves exactly one credential for a confidential client, or none for a public client.</summary>
+    private static string? ResolveClientCredential(RealmReconcileDesired desired, KeycloakWorkerBindings bindings)
+    {
+        return (desired.Confidential, bindings.ClientSecret, bindings.CaptureRoot, bindings.CaptureRunId,
+            bindings.ClientCredentialReference, bindings.ClientCredentialReferenceFile) switch
+        {
+            (false, null, null, null, null, null) => null,
+            (true, { } secret, null, null, null, null) => secret,
+            (true, null, { } root, { } runId, null, null) => RealmClientCapture.Read(root, runId),
+            (true, null, null, null, { } reference, null) => ReadVerifiedReference(reference),
+            (true, null, null, null, null, { } referenceFile) => ReadVerifiedReference(LoadReference(referenceFile)),
+            _ => throw new InvalidDataException()
+        };
+
+        string ReadVerifiedReference(KeycloakClientCredentialReference reference)
+        {
+            if (reference.MemoryIdentity is null || reference.Authority.AbsoluteUri != new Uri(desired.Authority).AbsoluteUri
+                || reference.ClientId != desired.ClientId || reference.RunId != bindings.ExpectedCaptureRunId)
+                throw new InvalidDataException();
+            return reference.Read();
+        }
+
+        static KeycloakClientCredentialReference LoadReference(string path)
+        {
+            var metadata = new FileInfo(path);
+            if (!metadata.Exists || metadata.LinkTarget is not null || metadata.Length is < 1 or > 16 * 1024)
+                throw new InvalidDataException();
+            return JsonSerializer.Deserialize<KeycloakClientCredentialReference>(File.ReadAllBytes(path))
+                ?? throw new InvalidDataException();
+        }
     }
 
     /// <summary>Runs a volume metadata command while keeping native reads behind injectable, guarded readers.</summary>
@@ -453,11 +472,16 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
         File.WriteAllText(output + ".started", JsonSerializer.Serialize(new { pid = Environment.ProcessId, startTicks = process.StartTime.ToUniversalTime().Ticks }));
     }
 
+    /// <summary>Reads the legacy nonsecret environment contract before contacting Keycloak.</summary>
     private static RealmBaselineDesired Baseline(Func<string, string?> getEnvironmentVariable)
     {
-        string Required(string key) => getEnvironmentVariable("APPSURFACE_KEYCLOAK_REALM_READY_" + key) is { Length: > 0 } value
-            ? value : throw new InvalidDataException();
-        var authority = new Uri(Required("AUTHORITY"));
+        string Required(string key)
+        {
+            var value = getEnvironmentVariable(key);
+            return !string.IsNullOrWhiteSpace(value) ? value : throw new InvalidDataException();
+        }
+
+        var authority = new Uri(Required(RealmReadyEnvironment.Authority));
         var parts = authority.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (authority.Scheme != "https" || authority.Host is not ("localhost" or "127.0.0.1") || authority.UserInfo.Length != 0
             || authority.Query.Length != 0 || authority.Fragment.Length != 0 || parts.Length != 2 || parts[0] != "realms"
@@ -470,11 +494,15 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
                 || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0)) throw new InvalidDataException();
             return uris.ToImmutableArray();
         }
-        var users = Required("SEEDED_USER_NAMES").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var users = Required(RealmReadyEnvironment.SeededUserNames)
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (users.Length == 0 || users.Distinct(StringComparer.Ordinal).Count() != users.Length) throw new InvalidDataException();
-        return new(authority.AbsoluteUri, Required("CLIENT_ID"), parts[1],
-            Uris("REDIRECT_URIS", Required("CALLBACK_PATH")), Uris("POST_LOGOUT_REDIRECT_URIS", Required("SIGNED_OUT_CALLBACK_PATH")),
-            users.ToImmutableArray(), Required("REALM_IMPORT_DIRECTORY"), Environment.GetEnvironmentVariable("APPSURFACE_KEYCLOAK_REALM_READY_LOGIN_THEME_NAME"));
+        var theme = getEnvironmentVariable(RealmReadyEnvironment.LoginThemeName);
+        return new(authority.AbsoluteUri, Required(RealmReadyEnvironment.ClientId), parts[1],
+            Uris(RealmReadyEnvironment.RedirectUris, Required(RealmReadyEnvironment.CallbackPath)),
+            Uris(RealmReadyEnvironment.PostLogoutRedirectUris, Required(RealmReadyEnvironment.SignedOutCallbackPath)),
+            users.ToImmutableArray(), Required(RealmReadyEnvironment.RealmImportDirectory),
+            string.IsNullOrWhiteSpace(theme) ? null : theme);
     }
 
     /// <summary>Contains the private, bounded declaration consumed by Linux sealed-memory capture.</summary>

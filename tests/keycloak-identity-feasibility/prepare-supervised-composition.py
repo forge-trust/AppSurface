@@ -6,9 +6,11 @@ import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import tempfile
 import zipfile
+
+from replay_environment import dotnet_host, run_offline_build, verify_offline_restore, verify_sdk_version
+from worker_payload import read_worker_payload, worker_payload_target
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -18,13 +20,17 @@ def main():
     p.add_argument('--packages', type=Path, required=True)
     p.add_argument('--evidence', type=Path, required=True)
     p.add_argument('--sdk', type=Path, required=True)
+    p.add_argument('--playwright-modules', type=Path, required=True, help='Directory containing playwright and playwright-core')
+    p.add_argument('--chromium-engine', type=Path, required=True, help='Root of the pinned Chromium headless shell distribution')
     p.add_argument('--version', required=True)
     p.add_argument('--identity-version', help='Use a coordinated pure Keycloak/adapter pair with an existing OIDC package closure')
     a = p.parse_args()
+    dotnet = dotnet_host(a.sdk)
     os.umask(0o077)
     a.evidence.mkdir(parents=True, exist_ok=False)
-    root = Path(tempfile.mkdtemp(prefix='i888-compose-prepared-', dir='/private/tmp'))
-    for name in ['code', 'source', 'nuget', 'http', 'scratch', 'browser']:
+    root = Path(tempfile.mkdtemp(prefix='i888-compose-prepared-', dir='/private/tmp')).resolve()
+    verify_sdk_version(dotnet, root)
+    for name in ('code', 'source', 'browser'):
         (root/name).mkdir()
     repo = Path(__file__).resolve().parents[2]
     packages = {}
@@ -45,13 +51,9 @@ def main():
         version = a.identity_version if name == 'ForgeTrust.AppSurface.Auth.Keycloak' and a.identity_version else a.version
         extract(a.packages/(name+'.'+version+'.nupkg'), 'lib/net10.0/'+name+'.dll')
     adapter = a.packages/('ForgeTrust.AppSurface.Auth.Aspire.Keycloak.'+(a.identity_version or a.version)+'.nupkg')
-    with zipfile.ZipFile(adapter) as z:
-        closure = {i.filename.removeprefix('tools/net10.0/any/realm-ready/'):z.read(i)
-                   for i in z.infolist() if i.filename.startswith('tools/net10.0/any/realm-ready/') and not i.is_dir()}
+    closure = read_worker_payload(adapter)
     for name, data in closure.items():
-        if Path(name).is_absolute() or '..' in Path(name).parts:
-            raise ValueError('invalid closure path')
-        target = root/'code'/name
+        target = worker_payload_target(root/'code', name)
         if target.exists() and target.read_bytes()!=data:
             raise ValueError('worker/pure candidate mismatch')
         target.parent.mkdir(parents=True,exist_ok=True)
@@ -68,8 +70,6 @@ def main():
         for member in value.get('runtime',{}):
             if member.endswith('.dll'):
                 extract(path,member)
-    env = dict(os.environ,DOTNET_ROOT=str(a.sdk),NUGET_PACKAGES=str(root/'nuget'),
-               NUGET_HTTP_CACHE_PATH=str(root/'http'),NUGET_SCRATCH=str(root/'scratch'),MSBUILDDISABLENODEREUSE='1')
     outcomes=[]
     for folder,assembly,web in [('supervised-web','SupervisedWeb',True),('supervised-seed','SupervisedSeed',False)]:
         source=root/'source'/folder
@@ -77,28 +77,26 @@ def main():
         shutil.copyfile(Path(__file__).with_name(folder)/'Program.cs',source/'Program.cs')
         refs=''.join('<Reference Include="'+dll.stem+'"><HintPath>'+str(dll)+'</HintPath></Reference>' for dll in (root/'code').glob('*.dll')
                      if dll.stem!='ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker')
-        (source/'Fixture.csproj').write_text('<Project Sdk="Microsoft.NET.Sdk'+('.Web' if web else '')+'"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><AssemblyName>'+assembly+'</AssemblyName><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><UseAppHost>false</UseAppHost><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup><ItemGroup>'+refs+'</ItemGroup></Project>')
-        (source/'NuGet.Config').write_text('<configuration><packageSources><clear/></packageSources></configuration>')
-        for stage,arguments in [('restore',['restore','--configfile',str(source/'NuGet.Config')]),('publish',['publish','--no-restore','-c','Release','-o',str(source/'publish'),'-m:1','-nr:false','-p:UseSharedCompilation=false'])]:
-            command=[str(a.sdk/'dotnet'),*arguments,str(source/'Fixture.csproj')]
-            with (a.evidence/(folder+'-'+stage+'.log')).open('x') as log:
-                result=subprocess.run(command,cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=120)
-            outcomes.append({'command':command,'exitCode':result.returncode})
-            if result.returncode:
-                raise RuntimeError(folder+' '+stage+' failed; inspect saved log')
-        assert not json.loads((source/'obj/project.assets.json').read_text())['libraries']
+        project = source/'Fixture.csproj'
+        project.write_text('<Project Sdk="Microsoft.NET.Sdk'+('.Web' if web else '')+'"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><AssemblyName>'+assembly+'</AssemblyName><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><UseAppHost>false</UseAppHost><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup><ItemGroup>'+refs+'</ItemGroup></Project>')
+        cache = source/'build-cache'
+        steps = run_offline_build(dotnet, project, cache_root=cache, publish_to=source/'publish',
+                                  logs=(a.evidence/(folder+'-restore.log'), a.evidence/(folder+'-publish.log')))
+        if steps[-1].exit_code:
+            raise RuntimeError(folder+' '+steps[-1].stage+' failed; inspect saved log')
+        outcomes.extend({'command': step.command, 'exitCode': step.exit_code} for step in steps)
+        verify_offline_restore(source/'obj/project.assets.json', cache/'nuget')
         for path in (source/'publish').iterdir():
             if path.suffix in ['.dll','.json']:
                 destination=root/'code'/path.name
                 if destination.exists() and destination.read_bytes()!=path.read_bytes():
                     raise ValueError('fixture replaces candidate bytes')
                 shutil.copyfile(path,destination)
-    assert not any((root/'nuget').iterdir())
     for module in ['playwright','playwright-core']:
-        shutil.copytree(Path('/Users/andrew/.gstack/repos/gstack/node_modules')/module,root/'browser/node_modules'/module)
-    shutil.copytree('/Users/andrew/Library/Caches/ms-playwright/chromium_headless_shell-1254',root/'browser/engine')
+        shutil.copytree(a.playwright_modules/module,root/'browser/node_modules'/module)
+    shutil.copytree(a.chromium_engine,root/'browser/engine')
     shutil.copyfile(Path(__file__).with_name('supervised-browser.mjs'),root/'browser/supervised-browser.mjs')
-    receipt={'schema':1,'passed':True,'root':str(root),'packages':packages,'extractedAssemblies':payload,
+    receipt={'schema':1,'passed':True,'root':str(root),'sdk':str(dotnet.parent),'packages':packages,'extractedAssemblies':payload,
              'workerClosure':{name:hashlib.sha256(data).hexdigest() for name,data in closure.items()},
              'commands':outcomes,'emptyPackageCache':True,'noPackageFeeds':True,'projectReferences':[],
              'codeManifest':{p.relative_to(root/'code').as_posix():sha(p) for p in (root/'code').rglob('*') if p.is_file()},

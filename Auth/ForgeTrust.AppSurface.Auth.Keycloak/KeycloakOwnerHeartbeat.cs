@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
-using System.Text;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak;
 
@@ -15,14 +14,13 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak;
 /// </remarks>
 internal sealed class KeycloakOwnerHeartbeat : IAsyncDisposable
 {
-    private const int FrameLength = 33;
     private const int AwaitingAcknowledgement = 0;
     private const int AcknowledgementInProgress = 1;
     private const int Acknowledged = 2;
     private const int Monitoring = 3;
     private const int Disposed = 4;
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(8);
-    private static readonly byte[] Acknowledgement = [(byte)'R'];
+    private static readonly byte[] Acknowledgement = [KeycloakWorkerProtocol.OwnerHeartbeatAcknowledgement];
 
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
@@ -81,7 +79,7 @@ internal sealed class KeycloakOwnerHeartbeat : IAsyncDisposable
         if (operationTimeout <= TimeSpan.Zero || operationTimeout > TimeSpan.FromDays(24))
             throw new ArgumentOutOfRangeException(nameof(operationTimeout));
 
-        var expectedFrame = Encoding.ASCII.GetBytes(expectedOwner + "\n");
+        var expectedFrame = KeycloakWorkerProtocol.EncodeOwnerHeartbeatFrame(expectedOwner);
         var listener = new TcpListener(IPAddress.Any, port);
         TcpClient? client = null;
         var initialDeadline = new Deadline(operationTimeout);
@@ -112,7 +110,7 @@ internal sealed class KeycloakOwnerHeartbeat : IAsyncDisposable
             }
 
             listener.Stop();
-            var receivedFrame = new byte[FrameLength];
+            var receivedFrame = new byte[KeycloakWorkerProtocol.OwnerHeartbeatFrameLength];
             try
             {
                 if (!await ReadFrameAsync(client.GetStream(), receivedFrame, initialDeadline, cancellationToken)
@@ -199,7 +197,7 @@ internal sealed class KeycloakOwnerHeartbeat : IAsyncDisposable
 
         while (true)
         {
-            var receivedFrame = new byte[FrameLength];
+            var receivedFrame = new byte[KeycloakWorkerProtocol.OwnerHeartbeatFrameLength];
             try
             {
                 var frameDeadline = new Deadline(_operationTimeout);

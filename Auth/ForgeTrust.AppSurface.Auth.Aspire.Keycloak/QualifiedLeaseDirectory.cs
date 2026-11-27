@@ -32,6 +32,29 @@ internal static class QualifiedProcessIdentity
 /// <remarks>Root ancestors are trusted; extended ACL validation remains a separate gate.</remarks>
 internal sealed class QualifiedLeaseDirectory : IDisposable
 {
+    // Darwin fcntl.h, errno.h, stat.h, and stdio.h values for this ARM64 lease boundary.
+    private const int OpenReadOnly = 0x0000;
+    private const int OpenReadWrite = 0x0002;
+    private const int OpenNonBlocking = 0x00000004;
+    private const int OpenNoFollow = 0x00000100;
+    private const int OpenDirectoryFlag = 0x00100000;
+    private const int OpenCloseOnExec = 0x01000000;
+    private const int OpenNoFollowAny = 0x20000000;
+    private const int OpenAtFlags = OpenNoFollow | OpenCloseOnExec | OpenNonBlocking;
+    private const int LockExclusive = 0x02;
+    private const int LockNonBlocking = 0x04;
+    private const int LockUnlock = 0x08;
+    private const int NoSuchFile = 2;
+    private const int FileExists = 17;
+    private const int WouldBlock = 35;
+    private const uint RenameExclusive = 0x00000004;
+    private const int FileTypeMask = 0xf000;
+    private const int DirectoryType = 0x4000;
+    private const int RegularFileType = 0x8000;
+    private const int PermissionModeMask = 0xfff;
+    private const int PrivateDirectoryMode = (int)(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    private const int PrivateFileMode = (int)(UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
     private readonly SafeFileHandle _root;
     private readonly SafeFileHandle _directory;
     private readonly SafeFileHandle _lock;
@@ -48,10 +71,14 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
         {
             root = System.IO.Path.GetFullPath(root);
             Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            _root = Open(root, 0x20000000 | 0x100000); ValidateDirectory(_root);
+            _root = OpenDirectory(root);
+            ValidateDirectory(_root);
             Path = System.IO.Path.Combine(root, key);
-            if (mkdirat(_root, key, 0x1c0) != 0 && Marshal.GetLastPInvokeError() != 17) throw new QualifiedOwnershipFailure("UnsafeLeasePath");
-            _directory = OpenAt(_root, key, 0x100000); ValidateDirectory(_directory); _directoryId = Id(_directory);
+            if (mkdirat(_root, key, PrivateDirectoryMode) != 0 && Marshal.GetLastPInvokeError() != FileExists)
+                throw new QualifiedOwnershipFailure("UnsafeLeasePath");
+            _directory = OpenAt(_root, key, OpenDirectoryFlag);
+            ValidateDirectory(_directory);
+            _directoryId = Id(_directory);
             try
             {
                 using var created = NewPrivateFile(System.IO.Path.Combine(Path, "owner.lock"));
@@ -59,12 +86,14 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
             catch (IOException) when (File.Exists(System.IO.Path.Combine(Path, "owner.lock"))
                 || new FileInfo(System.IO.Path.Combine(Path, "owner.lock")).LinkTarget is not null)
             { }
-            _lock = OpenAt(_directory, "owner.lock", 2); ValidateFile(_lock);
-            if (flock(_lock, 2 | 4) != 0) throw new QualifiedOwnershipFailure(Marshal.GetLastPInvokeError() == 35 ? "Contention" : "LockUnavailable");
+            _lock = OpenAt(_directory, "owner.lock", OpenReadWrite);
+            ValidateFile(_lock);
+            if (flock(_lock, LockExclusive | LockNonBlocking) != 0)
+                throw new QualifiedOwnershipFailure(Marshal.GetLastPInvokeError() == WouldBlock ? "Contention" : "LockUnavailable");
             _lockId = Id(_lock);
-            using var second = OpenAt(_directory, "owner.lock", 2);
-            if (flock(second, 2 | 4) == 0) throw new QualifiedOwnershipFailure("LockNotEnforced");
-            if (Marshal.GetLastPInvokeError() != 35) throw new QualifiedOwnershipFailure("LockUnavailable");
+            using var second = OpenAt(_directory, "owner.lock", OpenReadWrite);
+            if (flock(second, LockExclusive | LockNonBlocking) == 0) throw new QualifiedOwnershipFailure("LockNotEnforced");
+            if (Marshal.GetLastPInvokeError() != WouldBlock) throw new QualifiedOwnershipFailure("LockUnavailable");
         }
         catch
         {
@@ -78,7 +107,7 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
     /// <summary>Reads the incarnation of an owner-only directory through a no-follow handle.</summary>
     internal static FileId ReadPrivateDirectoryId(string path)
     {
-        using var directory = Open(path, 0x20000000 | 0x100000);
+        using var directory = OpenDirectory(path);
         return ValidateDirectory(directory);
     }
 
@@ -90,45 +119,39 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
     internal static FileId? TryCreatePrivateRunDirectory(string root, string ownerId)
     {
         if (!Guid.TryParseExact(ownerId, "N", out _)) throw new QualifiedOwnershipFailure("UnsafeRunDirectory");
-        using var parent = Open(root, 0x20000000 | 0x100000);
+        using var parent = OpenDirectory(root);
         ValidateDirectory(parent);
-        if (mkdirat(parent, ownerId, 0x1c0) != 0)
+        if (mkdirat(parent, ownerId, PrivateDirectoryMode) != 0)
         {
-            if (Marshal.GetLastPInvokeError() == 17) return null; // EEXIST: leave the existing path alone.
+            if (Marshal.GetLastPInvokeError() == FileExists) return null;
             throw new QualifiedOwnershipFailure("UnsafeRunDirectory");
         }
-        using var directory = OpenAt(parent, ownerId, 0x100000);
+        using var directory = OpenAt(parent, ownerId, OpenDirectoryFlag);
         return ValidateDirectory(directory);
-    }
-    internal static byte[] ReadAbsoluteRecord(string path)
-    {
-        using var handle = Open(path, 0x20000000); ValidateFile(handle);
-        var stat = Inspect(handle); if (stat.Size < 2 || stat.Size > 4096) throw new QualifiedOwnershipFailure("InvalidProcessRecord");
-        using var file = new FileStream(handle, FileAccess.Read); var bytes = new byte[(int)stat.Size]; file.ReadExactly(bytes);
-        return bytes;
     }
 
     internal void VerifyAnchor()
     {
-        using var path = Open(Path, 0x20000000 | 0x100000); ValidateDirectory(path);
+        using var path = OpenDirectory(Path);
+        ValidateDirectory(path);
         if (Id(path) != _directoryId || Identity("owner.lock") != _lockId) throw new QualifiedOwnershipFailure("LeaseAnchorChanged");
     }
     internal bool Exists(string name)
     {
-        var fd = openat(_directory, name, 0x100 | 0x1000000 | 4);
+        var fd = openat(_directory, name, OpenAtFlags);
         if (fd >= 0) { using var file = new SafeFileHandle((IntPtr)fd, true); ValidateFile(file); return true; }
-        if (Marshal.GetLastPInvokeError() == 2) return false;
+        if (Marshal.GetLastPInvokeError() == NoSuchFile) return false;
         throw new QualifiedOwnershipFailure("UnsafeMarker");
     }
     internal byte[] Read(string name)
     {
-        using var handle = OpenAt(_directory, name, 0); ValidateFile(handle);
+        using var handle = OpenAt(_directory, name, OpenReadOnly); ValidateFile(handle);
         var stat = Inspect(handle); if (stat.Size < 2 || stat.Size > 65536) throw new QualifiedOwnershipFailure("InvalidMarker");
         using var file = new FileStream(handle, FileAccess.Read); var bytes = new byte[(int)stat.Size]; file.ReadExactly(bytes);
         if (file.ReadByte() != -1 || Id(handle) != ToId(stat)) throw new QualifiedOwnershipFailure("MarkerChanged");
         return bytes;
     }
-    internal FileId Identity(string name) { using var handle = OpenAt(_directory, name, 0); ValidateFile(handle); return Id(handle); }
+    internal FileId Identity(string name) { using var handle = OpenAt(_directory, name, OpenReadOnly); ValidateFile(handle); return Id(handle); }
     internal void WriteNew(string name, byte[] bytes) => Write(name, bytes, false);
     internal void Replace(string name, byte[] bytes) => Write(name, bytes, true);
     private void Write(string name, byte[] bytes, bool replace)
@@ -140,7 +163,7 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
         }
         if (!replace && Exists(name)) throw new QualifiedOwnershipFailure("QualifiedActiveOwner");
         var renamed = replace ? renameat(_directory, temporary, _directory, name)
-            : renameatx_np(_directory, temporary, _directory, name, 4);
+            : renameatx_np(_directory, temporary, _directory, name, RenameExclusive);
         if (renamed != 0 || fsync(_directory) != 0)
             throw new QualifiedOwnershipFailure("MarkerPersistenceUncertain");
     }
@@ -156,7 +179,7 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
         try
         {
             if (!_lock.IsClosed)
-                _ = flock(_lock, 8); // Darwin LOCK_UN
+                _ = flock(_lock, LockUnlock);
         }
         finally
         {
@@ -176,14 +199,14 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
             UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
         });
     }
-    private static SafeFileHandle Open(string path, int flags)
+    private static SafeFileHandle OpenDirectory(string path)
     {
-        var fd = open(path, flags | 0x1000000 | 4);
+        var fd = open(path, OpenNoFollowAny | OpenDirectoryFlag | OpenCloseOnExec | OpenNonBlocking);
         if (fd < 0) throw new QualifiedOwnershipFailure("UnsafeLeasePath"); return new((IntPtr)fd, true);
     }
     private static SafeFileHandle OpenAt(SafeFileHandle parent, string name, int flags)
     {
-        var fd = openat(parent, name, flags | 0x100 | 0x1000000 | 4);
+        var fd = openat(parent, name, flags | OpenAtFlags);
         if (fd < 0) throw new QualifiedOwnershipFailure("UnsafeRecord"); return new((IntPtr)fd, true);
     }
     private static Stat Inspect(SafeFileHandle fd)
@@ -193,12 +216,18 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
     private static FileId ValidateDirectory(SafeFileHandle fd)
     {
         var status = Inspect(fd);
-        if ((status.Mode & 0xf000) != 0x4000 || (status.Mode & 0xfff) != 0x1c0 || status.Owner != getuid())
+        if ((status.Mode & FileTypeMask) != DirectoryType
+            || (status.Mode & PermissionModeMask) != PrivateDirectoryMode || status.Owner != getuid())
             throw new QualifiedOwnershipFailure("UnsafeLeasePath");
         return ToId(status);
     }
     private static void ValidateFile(SafeFileHandle fd)
-    { var s = Inspect(fd); if ((s.Mode & 0xf000) != 0x8000 || (s.Mode & 0xfff) != 0x180 || s.Owner != getuid() || s.Links != 1) throw new QualifiedOwnershipFailure("UnsafeRecord"); }
+    {
+        var status = Inspect(fd);
+        if ((status.Mode & FileTypeMask) != RegularFileType
+            || (status.Mode & PermissionModeMask) != PrivateFileMode || status.Owner != getuid() || status.Links != 1)
+            throw new QualifiedOwnershipFailure("UnsafeRecord");
+    }
     [StructLayout(LayoutKind.Explicit, Size = 144)]
     private struct Stat
     {

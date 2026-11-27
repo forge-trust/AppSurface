@@ -136,6 +136,6 @@ public static class AppSurfaceKeycloakHostingExtensions
             new AppSurfaceKeycloakReadinessProbe(registration),
             realmFile,
             themeRegistration?.Registration,
-            new AppSurfaceKeycloakRealmReadyConfiguration(snapshot, realmFile, themeRegistration?.Registration));
+            new AppSurfaceKeycloakRealmReadyConfiguration(registration, realmFile));
     }
 }

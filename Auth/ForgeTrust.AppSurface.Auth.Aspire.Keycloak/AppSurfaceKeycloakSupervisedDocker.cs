@@ -132,6 +132,27 @@ internal sealed class SupervisedDocker
         catch { throw Failure(); }
     }
 
+    /// <summary>Reads the local image identifier used in a durable container launch intent.</summary>
+    /// <param name="image">The configured image reference.</param>
+    /// <param name="ct">Cancellation token for the bounded Docker command.</param>
+    /// <returns>The nonblank image identifier from exactly one inspect object.</returns>
+    /// <exception cref="OperationCanceledException">The caller cancelled the command.</exception>
+    /// <exception cref="IOException">The image identifier could not be verified.</exception>
+    internal async Task<string> ImageIdAsync(string image, CancellationToken ct)
+    {
+        try
+        {
+            var json = await RunAsync(ct, "image", "inspect", image).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 64 });
+            var id = RequiredString(SingleInspectObject(document), "Id");
+            if (string.IsNullOrWhiteSpace(id) || id.Any(char.IsControl))
+                throw Failure();
+            return id;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { throw Failure(); }
+    }
+
     /// <summary>Inspects one full native container identifier and returns its complete Docker JSON document.</summary>
     /// <param name="id">The 64-character lowercase hexadecimal container identifier.</param>
     /// <param name="ct">Cancellation token for the bounded Docker command.</param>
@@ -233,10 +254,12 @@ internal sealed class SupervisedDocker
     /// <param name="expectedId">The required full native identifier, or <see langword="null"/> when only the name is known.</param>
     /// <param name="expectedRun">The exact value required for the <c>appsurface.run</c> configuration label.</param>
     /// <param name="ct">Cancellation token for each bounded Docker command.</param>
-    /// <returns>A detached, immutable observation, or <see langword="null"/> only when the required name and identifier are both absent.</returns>
+    /// <param name="requireProfile">Whether to read the additional fields used to verify ownership.</param>
+    /// <returns>A detached observation, or <see langword="null"/> only when the required name and identifier are both absent.</returns>
     /// <exception cref="OperationCanceledException">The caller cancelled an inventory command.</exception>
     /// <exception cref="IOException">The name, identifier, inspect snapshot, run label, or required field shape could not be verified.</exception>
-    internal async Task<SupervisedObservedContainer?> ContainerAsync(string name, string? expectedId, string expectedRun, CancellationToken ct)
+    internal async Task<SupervisedObservedContainer?> ContainerAsync(string name, string? expectedId, string expectedRun,
+        CancellationToken ct, bool requireProfile = false)
     {
         try
         {
@@ -265,7 +288,7 @@ internal sealed class SupervisedDocker
 
             var id = expectedId ?? byName[0];
             using var document = await InspectAsync(id, ct).ConfigureAwait(false);
-            var observed = ReadObservedContainer(SingleInspectObject(document), name, id, expectedRun);
+            var observed = ReadObservedContainer(SingleInspectObject(document), name, id, expectedRun, requireProfile);
             return observed;
         }
         catch (OperationCanceledException) { throw; }
@@ -406,13 +429,14 @@ internal sealed class SupervisedDocker
         return root[0];
     }
 
-    private static SupervisedObservedContainer ReadObservedContainer(JsonElement item, string expectedName, string expectedId, string expectedRun)
+    private static SupervisedObservedContainer ReadObservedContainer(JsonElement item, string expectedName, string expectedId,
+        string expectedRun, bool requireProfile)
     {
         var id = RequiredString(item, "Id");
         var nativeName = RequiredString(item, "Name");
-        var image = RequiredString(RequiredObject(item, "Config"), "Image");
-        var imageId = RequiredString(item, "Image");
         var configuration = RequiredObject(item, "Config");
+        var image = RequiredString(configuration, "Image");
+        var imageId = RequiredString(item, "Image");
         var labels = RequiredObject(configuration, "Labels");
         var run = RequiredString(labels, "appsurface.run");
         var host = RequiredObject(item, "HostConfig");
@@ -442,8 +466,59 @@ internal sealed class SupervisedDocker
             throw Failure();
 
         return new SupervisedObservedContainer(id, expectedName, image, imageId, pidMode, networkMode, init,
-            running, paused, restarting, hostPid, status, restartPolicy, privileged, readonlyRoot, user, item.Clone());
+            running, paused, restarting, hostPid, status, restartPolicy, privileged, readonlyRoot, user,
+            OptionalInt32(state, "ExitCode"), requireProfile ? ReadProfile(item, host) : null);
     }
+
+    private static SupervisedContainerProfileProof ReadProfile(JsonElement item, JsonElement host)
+    {
+        var added = host.GetProperty("CapAdd");
+        var capAdd = added.ValueKind == JsonValueKind.Array
+            ? added.EnumerateArray().Select(OptionalElementString).ToArray()
+            : null;
+        var capDrop = RequiredStringArray(host, "CapDrop");
+        var securityOptions = RequiredStringArray(host, "SecurityOpt");
+        var mounts = item.GetProperty("Mounts").EnumerateArray().Select(mount => new SupervisedObservedMount(
+            OptionalElementString(mount, "Type"), OptionalElementString(mount, "Source"),
+            OptionalElementString(mount, "Name"), OptionalElementString(mount, "Destination"),
+            OptionalElementBoolean(mount, "RW"))).ToArray();
+        var ports = host.GetProperty("PortBindings");
+        SupervisedObservedPortBinding[] portBindings = ports.ValueKind switch
+        {
+            JsonValueKind.Null => [],
+            JsonValueKind.Object => ports.EnumerateObject().Select(property => new SupervisedObservedPortBinding(property.Name,
+                property.Value.ValueKind == JsonValueKind.Array
+                    ? property.Value.EnumerateArray().Select(mapping => new SupervisedObservedPortMapping(
+                        OptionalElementString(mapping, "HostIp"), OptionalElementString(mapping, "HostPort"))).ToArray()
+                    : null)).ToArray(),
+            _ => throw Failure()
+        };
+
+        return new SupervisedContainerProfileProof(capAdd, capDrop, securityOptions,
+            host.GetProperty("PidsLimit").GetInt64(), host.GetProperty("Memory").GetInt64(),
+            host.GetProperty("Devices").GetArrayLength(), mounts, portBindings);
+    }
+
+    private static string?[] RequiredStringArray(JsonElement parent, string name) =>
+        parent.GetProperty(name).EnumerateArray().Select(OptionalElementString).ToArray();
+
+    private static string? OptionalElementString(JsonElement parent, string name) =>
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var value)
+            ? OptionalElementString(value)
+            : null;
+
+    private static string? OptionalElementString(JsonElement value) =>
+        value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static bool? OptionalElementBoolean(JsonElement parent, string name) =>
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => null
+            }
+            : null;
 
     private static JsonElement RequiredObject(JsonElement parent, string name)
     {
@@ -498,6 +573,12 @@ internal sealed class SupervisedDocker
         };
     }
 
+    private static int? OptionalInt32(JsonElement parent, string name) =>
+        parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out var result)
+                ? result
+                : null;
+
     private static int RequiredInt32(JsonElement parent, string name)
     {
         var value = RequiredProperty(parent, name);
@@ -518,24 +599,38 @@ internal sealed class SupervisedDocker
 /// <remarks>Record equality compares all five verified values using their normal ordinal string equality.</remarks>
 internal sealed record SupervisedVolume(string Name, string Driver, string Scope, string CreatedAt, string Mountpoint);
 
-/// <summary>Detached immutable view of a container inspect snapshot observed by <see cref="SupervisedDocker.ContainerAsync"/>.</summary>
+/// <summary>Typed identity and liveness observation returned by <see cref="SupervisedDocker.ContainerAsync"/>.</summary>
 /// <param name="Id">Full native 64-character lowercase hexadecimal container identifier.</param>
 /// <param name="Name">Exact container name without Docker inspect's leading slash.</param>
 /// <param name="Image">Configured image reference from <c>Config.Image</c>.</param>
 /// <param name="ImageId">Native image identifier from Docker's top-level <c>Image</c> field.</param>
-/// <param name="PidMode">Host configuration PID mode, including an empty default value.</param>
-/// <param name="NetworkMode">Host configuration network mode.</param>
-/// <param name="Init">Host configuration init setting; a missing or explicit null value is represented as false.</param>
-/// <param name="Running">Container running state from the inspect snapshot.</param>
-/// <param name="Paused">Container paused state from the inspect snapshot.</param>
-/// <param name="Restarting">Container restarting state from the inspect snapshot.</param>
-/// <param name="HostPid">Host process identifier reported by Docker, including zero when not assigned.</param>
-/// <param name="Status">Human-readable Docker state status.</param>
+/// <param name="PidMode">Host PID mode, including the empty default value.</param>
+/// <param name="NetworkMode">Host network mode.</param>
+/// <param name="Init">Host init setting, with missing or null represented as false.</param>
+/// <param name="Running">Required container running state from the inspect result.</param>
+/// <param name="Paused">Required container paused state from the inspect result.</param>
+/// <param name="Restarting">Required container restarting state from the inspect result.</param>
+/// <param name="HostPid">Required host process identifier from Docker.</param>
+/// <param name="Status">Required nonempty human-readable Docker state status.</param>
 /// <param name="RestartPolicy">Restart policy name from the host configuration.</param>
 /// <param name="Privileged">Whether Docker reports privileged mode.</param>
 /// <param name="ReadonlyRoot">Whether Docker reports a read-only root filesystem.</param>
 /// <param name="User">Configured container user from <c>Config.User</c>.</param>
-/// <param name="Snapshot">Detached full inspect object for parent-side validation; it is never written to diagnostics.</param>
-internal sealed record SupervisedObservedContainer(string Id, string Name, string Image, string ImageId, string PidMode,
-    string NetworkMode, bool Init, bool Running, bool Paused, bool Restarting, int HostPid, string Status,
-    string RestartPolicy, bool Privileged, bool ReadonlyRoot, string User, JsonElement Snapshot);
+/// <param name="ExitCode">Container exit code, when reported as an integer.</param>
+/// <param name="Profile">Typed proof-only details, parsed for ownership verification.</param>
+internal sealed record SupervisedObservedContainer(string Id, string Name, string Image, string ImageId,
+    string PidMode, string NetworkMode, bool Init, bool Running, bool Paused, bool Restarting, int HostPid, string Status,
+    string RestartPolicy, bool Privileged, bool ReadonlyRoot, string User, int? ExitCode, SupervisedContainerProfileProof? Profile);
+
+/// <summary>Typed Docker details needed only for recorded-profile verification.</summary>
+internal sealed record SupervisedContainerProfileProof(string?[]? CapAdd, string?[] CapDrop, string?[] SecurityOptions,
+    long ProcessLimit, long MemoryBytes, int DeviceCount, SupervisedObservedMount[] Mounts, SupervisedObservedPortBinding[] PortBindings);
+
+/// <summary>Typed details for one Docker mount.</summary>
+internal sealed record SupervisedObservedMount(string? Type, string? Source, string? Name, string? Destination, bool? Writable);
+
+/// <summary>One entry in Docker's port-binding object.</summary>
+internal sealed record SupervisedObservedPortBinding(string Name, SupervisedObservedPortMapping[]? Mappings);
+
+/// <summary>One host address and port returned for a container port.</summary>
+internal sealed record SupervisedObservedPortMapping(string? HostIp, string? HostPort);

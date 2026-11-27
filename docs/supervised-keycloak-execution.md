@@ -195,6 +195,8 @@ an authentication mechanism against either principal or protection from a frozen
 
 If stop, inventory, volume identity, cleanup, or the deadline is uncertain, `RunAsync` returns nonzero and retains the active marker. Do not delete that marker or its lock files by hand. The retained record blocks another run from taking the same owner key. On a persistent-volume run, the exact Docker volume name and returned `OwnerId` are inputs to guarded recovery.
 
+An interruption while creating a new persistent volume can leave the reservation without a recorded volume identity, even if Docker created the volume. Guarded recovery requires both the recorded identity and completed staging. An incomplete reservation stays active and requires owner investigation.
+
 Run [`AppSurfaceKeycloakSupervisedRun.VerifyStoppedAndClearAsync`](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/AppSurfaceKeycloakSupervisedRun.cs) in a separate recovery-only branch **before creating the normal Aspire builder or registering resources**:
 
 ```csharp

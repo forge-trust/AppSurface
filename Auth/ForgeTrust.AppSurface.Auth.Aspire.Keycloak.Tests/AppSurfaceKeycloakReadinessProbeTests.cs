@@ -150,7 +150,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
 
-        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid, exception.Code);
+        Assert.Equal("ASKEYC004", exception.Code);
     }
 
     [Fact]
@@ -286,7 +286,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
 
-        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.AuthorizationChallengeInvalid, exception.Code);
+        Assert.Equal("ASKEYC006", exception.Code);
         Assert.DoesNotContain("appsurface-admin-local-only", exception.Message, StringComparison.Ordinal);
     }
 

@@ -142,6 +142,12 @@ internal static class RealmReconciler
         private const string OwnerKey = "appsurface.issue888.managed";
         private const string Owner = "generic-feasibility";
         private const int MaximumResponseBytes = 1024 * 1024;
+        private static readonly (string Key, string Value)[] DisabledBrokerEndpoints =
+        [
+            ("authorizationUrl", "https://provider.invalid/authorize"),
+            ("tokenUrl", "https://provider.invalid/token"),
+            ("userInfoUrl", "https://provider.invalid/userinfo")
+        ];
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private string stage = "validation";
         private string? bearer, realmId, clientId, managedDigest;
@@ -295,8 +301,10 @@ internal static class RealmReconciler
             return CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(actual)), SHA256.HashData(Encoding.UTF8.GetBytes(credentials.ClientSecret!)));
         }
 
-        private JsonObject MapperPatch(RealmReconcileMapper mapper)
+        private static JsonObject MapperFields(RealmReconcileMapper mapper)
         {
+            var type = mapper.UserAttribute is not null ? "oidc-usermodel-attribute-mapper"
+                : mapper.SessionNote is not null ? "oidc-usersessionmodel-note-mapper" : "oidc-hardcoded-claim-mapper";
             var config = new JsonObject
             {
                 [OwnerKey] = Owner,
@@ -304,94 +312,81 @@ internal static class RealmReconciler
                 ["jsonType.label"] = "String",
                 ["id.token.claim"] = "true",
                 ["access.token.claim"] = "true",
-                ["userinfo.token.claim"] = "true"
+                ["userinfo.token.claim"] = "true",
+                // Only one source applies. Null fields must be absent on readback and are removed on write.
+                ["claim.value"] = mapper.UserAttribute is null && mapper.SessionNote is null ? mapper.Value : null,
+                ["user.attribute"] = mapper.UserAttribute,
+                ["user.session.note"] = mapper.SessionNote
             };
-            string type;
-            if (mapper.UserAttribute is not null) { type = "oidc-usermodel-attribute-mapper"; config["user.attribute"] = mapper.UserAttribute; }
-            else if (mapper.SessionNote is not null) { type = "oidc-usersessionmodel-note-mapper"; config["user.session.note"] = mapper.SessionNote; }
-            else { type = "oidc-hardcoded-claim-mapper"; config["claim.value"] = mapper.Value; }
             return new JsonObject { ["name"] = mapper.Name, ["protocol"] = "openid-connect", ["protocolMapper"] = type, ["config"] = config };
         }
         private static bool Owned(JsonNode? node) => Text(node?["config"], OwnerKey) == Owner;
+        private static bool ManagedItemMatches(JsonNode? node, JsonObject fields) => Owned(node) && ManagedFieldsMatch(node, fields);
 
-        private bool MapperMatches(JsonNode? node, RealmReconcileMapper mapper)
+        private static bool ManagedFieldsMatch(JsonNode? node, JsonObject fields)
         {
-            var config = node?["config"];
-            return Text(config, OwnerKey) == Owner
-                && Text(node, "name") == mapper.Name
-                && Text(node, "protocol") == "openid-connect"
-                && Text(config, "jsonType.label") == "String"
-                && Text(node, "protocolMapper") == MapperType(mapper)
-                && Text(config, "claim.name") == mapper.Claim
-                && OptionalTextMatches(config, "user.attribute", mapper.UserAttribute)
-                && OptionalTextMatches(config, "user.session.note", mapper.SessionNote)
-                && (mapper.UserAttribute is not null || mapper.SessionNote is not null
-                    ? config?["claim.value"] is null : Text(config, "claim.value") == mapper.Value)
-                && new[] { "id.token.claim", "access.token.claim", "userinfo.token.claim" }.All(key => Text(config, key) == "true");
+            return fields.All(field => field.Value switch
+            {
+                null => node?[field.Key] is null,
+                JsonObject section => ManagedFieldsMatch(node?[field.Key], section),
+                JsonValue value when value.TryGetValue<bool>(out var flag) => Bool(node, field.Key, flag),
+                _ => Text(node, field.Key) == field.Value.GetValue<string>()
+            });
         }
 
-        private static bool OptionalTextMatches(JsonNode? config, string key, string? expected) =>
-            expected is null ? config?[key] is null : Text(config, key) == expected;
-        private static string MapperType(RealmReconcileMapper mapper) => mapper.UserAttribute is not null ? "oidc-usermodel-attribute-mapper"
-            : mapper.SessionNote is not null ? "oidc-usersessionmodel-note-mapper" : "oidc-hardcoded-claim-mapper";
+        private static JsonObject CreateManagedPatch(JsonObject fields, JsonNode? current)
+        {
+            var patch = (JsonObject)fields.DeepClone();
+            var config = current?["config"]?.DeepClone() as JsonObject ?? new JsonObject();
+            foreach (var (key, value) in fields["config"]!.AsObject())
+            {
+                if (value is null)
+                    config.Remove(key);
+                else
+                    config[key] = value.DeepClone();
+            }
+            patch["config"] = config;
+            return patch;
+        }
+
         private string MapperRoot => Admin + "/clients/" + Uri.EscapeDataString(clientId!) + "/protocol-mappers/models";
         private string BrokerRoot => Admin + "/identity-provider/instances";
-        private JsonObject BrokerPatch(RealmReconcileBroker broker) => broker.ProviderId == "google" ? new JsonObject
+        private static JsonObject BrokerFields(RealmReconcileBroker broker)
         {
-            ["alias"] = broker.Alias,
-            ["displayName"] = broker.DisplayName,
-            ["providerId"] = "google",
-            ["enabled"] = true,
-            ["trustEmail"] = false,
-            ["storeToken"] = false,
-            ["linkOnly"] = false,
-            ["config"] = new JsonObject
+            var google = broker.ProviderId == "google";
+            var config = new JsonObject
             {
                 [OwnerKey] = Owner,
-                ["clientId"] = broker.ClientId,
-                ["clientSecret"] = credentials.BrokerSecrets![broker.Alias],
-                ["defaultScope"] = "openid profile email",
+                ["clientId"] = google ? broker.ClientId : "synthetic-disabled-provider",
                 ["syncMode"] = "IMPORT"
-            }
-        } : new()
-        {
-            ["alias"] = broker.Alias,
-            ["providerId"] = "oidc",
-            ["enabled"] = false,
-            ["trustEmail"] = false,
-            ["storeToken"] = false,
-            ["linkOnly"] = false,
-            ["config"] = new JsonObject
+            };
+            var fields = new JsonObject
             {
-                [OwnerKey] = Owner,
-                ["clientId"] = "synthetic-disabled-provider",
-                ["authorizationUrl"] = "https://provider.invalid/authorize",
-                ["tokenUrl"] = "https://provider.invalid/token",
-                ["userInfoUrl"] = "https://provider.invalid/userinfo",
-                ["syncMode"] = "IMPORT"
+                ["alias"] = broker.Alias,
+                ["providerId"] = broker.ProviderId,
+                ["enabled"] = broker.Enabled,
+                ["trustEmail"] = false,
+                ["storeToken"] = false,
+                ["linkOnly"] = false,
+                ["config"] = config
+            };
+            if (google)
+            {
+                config["defaultScope"] = "openid profile email";
+                if (broker.DisplayName is { } name)
+                    fields["displayName"] = name;
             }
-        };
-        private bool BrokerMatches(JsonNode? node, RealmReconcileBroker broker)
-        {
-            var config = node?["config"];
-            if (Text(config, OwnerKey) != Owner || Text(node, "alias") != broker.Alias)
-                return false;
-
-            return broker.ProviderId == "google"
-                ? Text(node, "providerId") == "google"
-                    && (broker.DisplayName is null || Text(node, "displayName") == broker.DisplayName)
-                    && Bool(node, "enabled", true) && Bool(node, "trustEmail", false) && Bool(node, "storeToken", false)
-                    && Bool(node, "linkOnly", false) && Text(config, "clientId") == broker.ClientId
-                    && Text(config, "defaultScope") == "openid profile email" && Text(config, "syncMode") == "IMPORT"
-                    && GoogleSecretIsMaskedOrMatches(node, broker)
-                : Text(node, "providerId") == "oidc"
-                    && Bool(node, "enabled", false) && Bool(node, "trustEmail", false) && Bool(node, "storeToken", false)
-                    && Bool(node, "linkOnly", false) && Text(config, "clientId") == "synthetic-disabled-provider"
-                    && Text(config, "authorizationUrl") == "https://provider.invalid/authorize"
-                    && Text(config, "tokenUrl") == "https://provider.invalid/token"
-                    && Text(config, "userInfoUrl") == "https://provider.invalid/userinfo"
-                    && Text(config, "syncMode") == "IMPORT";
+            else
+            {
+                foreach (var (key, value) in DisabledBrokerEndpoints)
+                    config[key] = value;
+            }
+            return fields;
         }
+
+        private bool BrokerMatches(JsonNode? node, RealmReconcileBroker broker, JsonObject fields) =>
+            ManagedItemMatches(node, fields)
+                && (broker.ProviderId != "google" || GoogleSecretIsMaskedOrMatches(node, broker));
         private bool GoogleSecretMatches(JsonNode? node, RealmReconcileBroker broker)
         {
             var actual = Text(node?["config"], "clientSecret");
@@ -419,19 +414,17 @@ internal static class RealmReconciler
             {
                 var current = Find(nodes, "name", mapper.Name);
                 if (current is not null && !Owned(current)) throw new Failure("UnmanagedCollision");
-                if (MapperMatches(current, mapper)) continue;
-                var patch = MapperPatch(mapper);
-                if (current?["config"] is JsonObject existingConfig)
-                {
-                    var merged = (JsonObject)existingConfig.DeepClone();
-                    merged.Remove("claim.value"); merged.Remove("user.attribute"); merged.Remove("user.session.note");
-                    foreach (var pair in patch["config"]!.AsObject()) merged[pair.Key] = pair.Value?.DeepClone();
-                    patch["config"] = merged;
-                }
+                var fields = MapperFields(mapper);
+                if (ManagedItemMatches(current, fields)) continue;
+                var patch = CreateManagedPatch(fields, current);
                 if (current is not null) patch["id"] = current["id"]!.GetValue<string>();
                 await WriteAsync(current is null ? HttpMethod.Post : HttpMethod.Put,
                     current is null ? MapperRoot : MapperRoot + "/" + Uri.EscapeDataString(current["id"]!.GetValue<string>()), patch,
-                    async () => MapperMatches(Find((await ReadAsync(MapperRoot).ConfigureAwait(false))!.AsArray(), "name", mapper.Name), mapper)).ConfigureAwait(false);
+                    async () =>
+                    {
+                        var observed = Find((await ReadAsync(MapperRoot).ConfigureAwait(false))!.AsArray(), "name", mapper.Name);
+                        return ManagedItemMatches(observed, fields);
+                    }).ConfigureAwait(false);
             }
             foreach (var name in desired.RemoveMappers)
             {
@@ -450,34 +443,30 @@ internal static class RealmReconciler
             {
                 var current = Find(nodes, "alias", broker.Alias);
                 if (current is not null && !Owned(current)) throw new Failure("UnmanagedCollision");
-                if (BrokerMatches(current, broker) && (broker.ProviderId != "google" || acknowledgedGoogleWrites.Contains(broker.Alias))) continue;
-                var patch = BrokerPatch(broker);
-                if (broker.ProviderId == "google" && broker.DisplayName is null)
+                var fields = BrokerFields(broker);
+                var google = broker.ProviderId == "google";
+                if (BrokerMatches(current, broker, fields) && (!google || acknowledgedGoogleWrites.Contains(broker.Alias))) continue;
+                var patch = CreateManagedPatch(fields, current);
+                if (google)
                 {
-                    patch.Remove("displayName");
-                    if (current?["displayName"] is { } existingDisplayName)
+                    if (broker.DisplayName is null && current?["displayName"] is { } existingDisplayName)
                         patch["displayName"] = existingDisplayName.DeepClone();
-                }
-                if (current?["config"] is JsonObject existingConfig)
-                {
-                    var merged = (JsonObject)existingConfig.DeepClone();
-                    if (broker.ProviderId == "google")
-                    {
-                        merged.Remove("authorizationUrl"); merged.Remove("tokenUrl"); merged.Remove("userInfoUrl");
-                        merged.Remove("logoutUrl"); merged.Remove("issuer");
-                    }
-                    foreach (var pair in patch["config"]!.AsObject()) merged[pair.Key] = pair.Value?.DeepClone();
-                    patch["config"] = merged;
+                    var config = patch["config"]!.AsObject();
+                    foreach (var (key, _) in DisabledBrokerEndpoints)
+                        config.Remove(key);
+                    config.Remove("logoutUrl");
+                    config.Remove("issuer");
+                    config["clientSecret"] = credentials.BrokerSecrets![broker.Alias];
                 }
                 await WriteAsync(current is null ? HttpMethod.Post : HttpMethod.Put, current is null ? BrokerRoot : BrokerRoot + "/" + Uri.EscapeDataString(broker.Alias),
                     patch, async () =>
                     {
                         var observed = Find((await ReadAsync(BrokerRoot).ConfigureAwait(false))!.AsArray(), "alias", broker.Alias);
-                        if (!BrokerMatches(observed, broker)) return false;
-                        if (broker.ProviderId == "google" && !GoogleSecretMatches(observed, broker)) return false;
+                        if (!BrokerMatches(observed, broker, fields)) return false;
+                        if (google && !GoogleSecretMatches(observed, broker)) return false;
                         return true;
                     }).ConfigureAwait(false);
-                if (broker.ProviderId == "google") acknowledgedGoogleWrites.Add(broker.Alias);
+                if (google) acknowledgedGoogleWrites.Add(broker.Alias);
             }
             foreach (var alias in desired.RemoveBrokers)
             {
@@ -492,8 +481,8 @@ internal static class RealmReconciler
         {
             var mappers = (await ReadAsync(MapperRoot).ConfigureAwait(false))!.AsArray();
             var brokers = (await ReadAsync(BrokerRoot).ConfigureAwait(false))!.AsArray();
-            if (desired.Mappers.Any(mapper => !MapperMatches(Find(mappers, "name", mapper.Name), mapper))
-                || desired.Brokers.Any(broker => !BrokerMatches(Find(brokers, "alias", broker.Alias), broker))
+            if (desired.Mappers.Any(mapper => !ManagedItemMatches(Find(mappers, "name", mapper.Name), MapperFields(mapper)))
+                || desired.Brokers.Any(broker => !BrokerMatches(Find(brokers, "alias", broker.Alias), broker, BrokerFields(broker)))
                 || desired.RemoveMappers.Any(name => Find(mappers, "name", name) is not null)
                 || desired.RemoveBrokers.Any(alias => Find(brokers, "alias", alias) is not null)) throw new Failure("ReadbackMismatch");
         }

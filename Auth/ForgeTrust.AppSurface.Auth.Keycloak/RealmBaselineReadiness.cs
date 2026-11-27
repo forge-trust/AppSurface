@@ -3,8 +3,19 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using static ForgeTrust.AppSurface.Auth.Keycloak.KeycloakBaselineDiagnosticCodes;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak;
+
+/// <summary>Stable readiness codes shared by the baseline verifier, worker, and AppHost diagnostics.</summary>
+internal static class KeycloakBaselineDiagnosticCodes
+{
+    internal const string InvalidOptions = "ASKEYC001";
+    internal const string MetadataUnavailable = "ASKEYC003";
+    internal const string MetadataInvalid = "ASKEYC004";
+    internal const string RealmEvidenceInvalid = "ASKEYC005";
+    internal const string AuthorizationChallengeInvalid = "ASKEYC006";
+}
 
 /// <summary>
 /// Describes the nonsecret realm baseline that must be present before a local Keycloak realm is ready.
@@ -64,10 +75,6 @@ internal sealed class RealmBaselineException : InvalidOperationException
 internal static class RealmBaselineVerifier
 {
     private const int MaximumAuthorizationResponseBytes = 16 * 1024;
-    private const string MetadataUnavailableCode = "ASKEYC003";
-    private const string MetadataInvalidCode = "ASKEYC004";
-    private const string RealmEvidenceInvalidCode = "ASKEYC005";
-    private const string AuthorizationChallengeInvalidCode = "ASKEYC006";
     private const string SeededUserLastName = "Local User";
     private const string SeededUserEmailDomain = "appsurface.local";
 
@@ -109,14 +116,14 @@ internal static class RealmBaselineVerifier
         catch (HttpRequestException ex)
         {
             throw new RealmBaselineException(
-                MetadataUnavailableCode,
-                $"Problem: Keycloak OpenID metadata is unavailable. Cause: HTTP request failed ({ex.GetType().Name}). Fix: confirm the container runtime is available, port {GetAuthorityPort(desired.Authority)} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {MetadataUnavailableCode}.");
+                MetadataUnavailable,
+                $"Problem: Keycloak OpenID metadata is unavailable. Cause: HTTP request failed ({ex.GetType().Name}). Fix: confirm the container runtime is available, port {GetAuthorityPort(desired.Authority)} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {MetadataUnavailable}.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new RealmBaselineException(
-                MetadataUnavailableCode,
-                $"Problem: Keycloak OpenID metadata is unavailable. Cause: the metadata request exceeded the configured readiness HTTP timeout. Fix: confirm the container runtime is available, port {GetAuthorityPort(desired.Authority)} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {MetadataUnavailableCode}.");
+                MetadataUnavailable,
+                $"Problem: Keycloak OpenID metadata is unavailable. Cause: the metadata request exceeded the configured readiness HTTP timeout. Fix: confirm the container runtime is available, port {GetAuthorityPort(desired.Authority)} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {MetadataUnavailable}.");
         }
 
         using (response)
@@ -124,8 +131,8 @@ internal static class RealmBaselineVerifier
             if (!response.IsSuccessStatusCode)
             {
                 throw new RealmBaselineException(
-                    MetadataUnavailableCode,
-                    $"Problem: Keycloak OpenID metadata returned HTTP {(int)response.StatusCode}. Cause: Keycloak is not ready for realm '{desired.Realm}'. Fix: wait for startup, inspect container logs, and inspect the effective local state. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {MetadataUnavailableCode}.");
+                    MetadataUnavailable,
+                    $"Problem: Keycloak OpenID metadata returned HTTP {(int)response.StatusCode}. Cause: Keycloak is not ready for realm '{desired.Realm}'. Fix: wait for startup, inspect container logs, and inspect the effective local state. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {MetadataUnavailable}.");
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -134,8 +141,8 @@ internal static class RealmBaselineVerifier
             if (!string.Equals(issuer, desired.Authority, StringComparison.Ordinal))
             {
                 throw new RealmBaselineException(
-                    MetadataInvalidCode,
-                    $"Problem: Keycloak metadata issuer does not match the expected AppSurface realm. Cause: expected '{desired.Authority}' but received '{issuer ?? "<missing>"}'. Fix: verify the realm import and authority configuration. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {MetadataInvalidCode}.");
+                    MetadataInvalid,
+                    $"Problem: Keycloak metadata issuer does not match the expected AppSurface realm. Cause: expected '{desired.Authority}' but received '{issuer ?? "<missing>"}'. Fix: verify the realm import and authority configuration. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {MetadataInvalid}.");
             }
         }
     }
@@ -311,15 +318,15 @@ internal static class RealmBaselineVerifier
             || body.Contains("invalid_redirect_uri", StringComparison.OrdinalIgnoreCase))
         {
             throw new RealmBaselineException(
-                AuthorizationChallengeInvalidCode,
-                $"Problem: Keycloak rejected the configured public client or redirect URI. Cause: client '{desired.ClientId}' or redirect '{redirectUri}' was not accepted by the authorization endpoint. Fix: inspect effective managed settings and update the callback path and web proof port together. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AuthorizationChallengeInvalidCode}.");
+                AuthorizationChallengeInvalid,
+                $"Problem: Keycloak rejected the configured public client or redirect URI. Cause: client '{desired.ClientId}' or redirect '{redirectUri}' was not accepted by the authorization endpoint. Fix: inspect effective managed settings and update the callback path and web proof port together. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AuthorizationChallengeInvalid}.");
         }
 
         if (!response.IsSuccessStatusCode && !IsRedirect(response.StatusCode))
         {
             throw new RealmBaselineException(
-                AuthorizationChallengeInvalidCode,
-                $"Problem: Keycloak authorization endpoint returned HTTP {(int)response.StatusCode}. Cause: the configured public client did not produce a login challenge or redirect. Fix: inspect Keycloak logs, effective managed settings, and verify the realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AuthorizationChallengeInvalidCode}.");
+                AuthorizationChallengeInvalid,
+                $"Problem: Keycloak authorization endpoint returned HTTP {(int)response.StatusCode}. Cause: the configured public client did not produce a login challenge or redirect. Fix: inspect Keycloak logs, effective managed settings, and verify the realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AuthorizationChallengeInvalid}.");
         }
     }
 
@@ -371,6 +378,6 @@ internal static class RealmBaselineVerifier
 
     private static RealmBaselineException RealmEvidence(string cause) =>
         new(
-            RealmEvidenceInvalidCode,
-            $"Problem: generated Keycloak realm evidence is invalid. Cause: {cause} Fix: regenerate the realm import from AppSurfaceKeycloakOptions and verify effective managed state without deleting storage. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {RealmEvidenceInvalidCode}.");
+            RealmEvidenceInvalid,
+            $"Problem: generated Keycloak realm evidence is invalid. Cause: {cause} Fix: regenerate the realm import from AppSurfaceKeycloakOptions and verify effective managed state without deleting storage. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {RealmEvidenceInvalid}.");
 }

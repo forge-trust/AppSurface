@@ -15,6 +15,8 @@ AppSurfaceKeycloakThemeOptions? AcceptanceTheme() => input.ThemeDirectory is nul
     new AppSurfaceKeycloakThemeOptions("acceptance", input.ThemeDirectory,
         AppSurfaceKeycloakImageReference.Parse(executionKeycloakImage)) { Platform = "linux/arm64" };
 var execution=new AppSurfaceKeycloakSupervisedOptions{LeaseRoot=input.LeaseRoot,RunRoot=Path.Join(Directory.GetParent(root)!.FullName,"runs")};
+if (Environment.GetEnvironmentVariable("DOCKER_HOST") is { } dockerEndpoint)
+    execution.DockerEndpoint = dockerEndpoint;
 if(scenario.StartsWith("recover-",StringComparison.Ordinal))
 {
     try

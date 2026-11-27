@@ -10,12 +10,13 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import shutil
-import subprocess
 import tempfile
-import time
 import zipfile
+
+from replay_environment import run_offline_build, verify_offline_restore
+from worker_payload import PURE_LIBRARY, read_worker_payload, worker_payload_target
 
 
 def digest(path):
@@ -32,27 +33,18 @@ def main():
     os.umask(0o077)
     args.evidence.mkdir(parents=True, exist_ok=False)
     root = Path(tempfile.mkdtemp(prefix="i888-memory-worker-", dir="/private/tmp")).resolve()
-    for name in ("source", "extracted", "code", "nuget", "http-cache", "scratch", "fixture-publish"):
+    for name in ("source", "extracted", "code", "fixture-publish"):
         (root / name).mkdir(mode=0o700)
     source = Path(__file__).with_name("memory-library-probe") / "Program.cs"
     shutil.copyfile(source, root / "source/Program.cs")
-    worker_prefix = "tools/net10.0/any/realm-ready/"
     with zipfile.ZipFile(args.package) as package:
-        pure = package.read("lib/net10.0/ForgeTrust.AppSurface.Auth.Keycloak.dll")
-    (root / "extracted/ForgeTrust.AppSurface.Auth.Keycloak.dll").write_bytes(pure)
-    closure = {}
-    with zipfile.ZipFile(args.adapter_package) as package:
-        for item in package.infolist():
-            if not item.filename.startswith(worker_prefix) or item.is_dir():
-                continue
-            relative = PurePosixPath(item.filename.removeprefix(worker_prefix))
-            if relative.is_absolute() or ".." in relative.parts or str(relative) in closure:
-                raise ValueError("invalid or duplicate worker closure entry")
-            closure[str(relative)] = package.read(item)
-    if not closure or closure.get("ForgeTrust.AppSurface.Auth.Keycloak.dll") != pure:
+        pure = package.read("lib/net10.0/" + PURE_LIBRARY)
+    (root / "extracted" / PURE_LIBRARY).write_bytes(pure)
+    closure = read_worker_payload(args.adapter_package)
+    if closure.get(PURE_LIBRARY) != pure:
         raise ValueError("candidate pure and recursive worker closure differ")
     for name, data in closure.items():
-        path = root / "code" / name
+        path = worker_payload_target(root / "code", name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
     project = root / "source/MemoryLibraryProbe.csproj"
@@ -68,28 +60,11 @@ def main():
   </Reference></ItemGroup>
 </Project>
 ''')
-    config = root / "NuGet.Config"
-    config.write_text('<configuration><packageSources><clear /></packageSources></configuration>\n')
-    environment = dict(os.environ, DOTNET_ROOT=str(args.sdk.resolve()),
-                       NUGET_PACKAGES=str(root / "nuget"), NUGET_HTTP_CACHE_PATH=str(root / "http-cache"),
-                       NUGET_SCRATCH=str(root / "scratch"), DOTNET_CLI_TELEMETRY_OPTOUT="1",
-                       DOTNET_SKIP_FIRST_TIME_EXPERIENCE="1", MSBUILDDISABLENODEREUSE="1")
-    dotnet = str(args.sdk.resolve() / "dotnet")
-    commands = [
-        [dotnet, "restore", str(project), "--configfile", str(config), "--packages", str(root / "nuget")],
-        [dotnet, "publish", str(project), "--configuration", "Release", "--no-restore",
-         "--output", str(root / "fixture-publish"), "-m:1", "-nr:false"],
-    ]
-    outcomes = []
-    for index, command in enumerate(commands):
-        started = time.monotonic()
-        with (args.evidence / (str(index) + ".log")).open("x") as log:
-            result = subprocess.run(command, cwd=project.parent, env=environment, stdout=log,
-                                    stderr=subprocess.STDOUT, timeout=120)
-        outcomes.append({"command": command, "exitCode": result.returncode, "seconds": time.monotonic() - started})
-        if result.returncode:
-            break
-    success = len(outcomes) == 2 and all(item["exitCode"] == 0 for item in outcomes)
+    dotnet = args.sdk.resolve() / "dotnet"
+    steps = run_offline_build(dotnet, project, cache_root=root, publish_to=root / "fixture-publish",
+                              logs=(args.evidence / "0.log", args.evidence / "1.log"))
+    outcomes = [{"command": step.command, "exitCode": step.exit_code, "seconds": step.seconds} for step in steps]
+    success = steps[-1].exit_code == 0
     if success:
         for path in (root / "fixture-publish").rglob("*"):
             if not path.is_file():
@@ -99,14 +74,16 @@ def main():
                 raise ValueError("fixture output would replace candidate bytes")
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, destination)
-        assets = json.loads((root / "source/obj/project.assets.json").read_text())
-        success = (not assets["libraries"] and set(assets["packageFolders"]) == {str(root / "nuget")}
-                   and not any((root / "nuget").iterdir())
-                   and all((root / "code" / name).read_bytes() == data for name, data in closure.items()))
+        try:
+            verify_offline_restore(root / "source/obj/project.assets.json", root / "nuget", exact_package_folder=True)
+        except ValueError:
+            success = False
+        else:
+            success = all((root / "code" / name).read_bytes() == data for name, data in closure.items())
     receipt = {"schema": 1, "kind": "extracted-worker-anchor-preparation", "passed": success,
                "preparedRoot": str(root), "sdk": str(args.sdk.resolve()), "commands": outcomes,
                "emptyPackageCache": not any((root / "nuget").iterdir()),
-               "clearedPackageFeeds": config.read_text(), "probeSourceSha256": digest(source),
+               "clearedPackageFeeds": project.with_name("NuGet.Config").read_text(), "probeSourceSha256": digest(source),
                "packageSha256": digest(args.package), "adapterPackageSha256": digest(args.adapter_package),
                "workerClosure": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(closure.items())},
                "runtimePayload": {str(path.relative_to(root / "code")): digest(path)

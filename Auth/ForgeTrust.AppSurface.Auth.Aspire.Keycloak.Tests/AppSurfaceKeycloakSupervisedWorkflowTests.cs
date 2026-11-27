@@ -418,6 +418,12 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
                     var publicInput = File.ReadAllText(TestPathUtils.PathUnder(run.RunDirectory, "public", "config.json"));
                     using var publicConfig = JsonDocument.Parse(publicInput);
                     Assert.Equal(publicWeb, publicConfig.RootElement.GetProperty("PublicWebOrigin").GetString());
+                    Assert.Equal(options.Authority!.OriginalString, publicConfig.RootElement.GetProperty("Authority").GetString());
+                    Assert.Equal($"https://localhost:{keycloakPort}/realms/{options.Realm}",
+                        publicConfig.RootElement.GetProperty("AdminAuthority").GetString());
+                    using var workerBindings = JsonDocument.Parse(
+                        File.ReadAllText(TestPathUtils.PathUnder(run.RunDirectory, "private-worker", "bindings.json")));
+                    Assert.Equal($"https://localhost:{keycloakPort}/", workerBindings.RootElement.GetProperty("BaseAddress").GetString());
                     Assert.DoesNotContain(seedCredentialValue, publicInput);
                 }
                 lock (dockerFixture.ContainersLock)

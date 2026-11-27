@@ -14,11 +14,15 @@ namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
 
 public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
 {
-    [Fact]
-    public async Task BaselineModeParsesConfiguredLocalInputsAndUsesTheInjectedVerifier()
+    [Theory]
+    [InlineData("application", "application")]
+    [InlineData(" \t", null)]
+    [InlineData(null, null)]
+    public async Task BaselineModeParsesConfiguredLocalInputsAndUsesTheInjectedVerifier(string? theme, string? expectedTheme)
     {
         using var files = new TestFiles();
         var environment = BaselineEnvironment(files.FilePath("realm.json"));
+        environment["APPSURFACE_KEYCLOAK_REALM_READY_LOGIN_THEME_NAME"] = theme;
         RealmBaselineDesired? observed = null;
         using var error = new StringWriter();
 
@@ -32,7 +36,13 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         Assert.Equal("demo", observed.Realm);
         Assert.Equal("public-client", observed.ClientId);
         Assert.Equal("https://localhost:8443/realms/demo", observed.Authority);
-        Assert.Equal("/callback", Assert.Single(observed.RedirectUris).Split("localhost:5001")[1]);
+        Assert.Equal("http://localhost:5001/callback", Assert.Single(observed.RedirectUris));
+        Assert.Equal("http://localhost:5001/signed-out", Assert.Single(observed.PostLogoutRedirectUris));
+        Assert.Collection(observed.SeededUserNames,
+            user => Assert.Equal("alice", user),
+            user => Assert.Equal("bob", user));
+        Assert.Equal(files.FilePath("realm.json"), observed.RealmImportDirectory);
+        Assert.Equal(expectedTheme, observed.LoginThemeName);
         Assert.Contains("AppSurface Keycloak realm-ready gate completed.", error.ToString());
     }
 
@@ -58,7 +68,11 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
     [InlineData("REDIRECT_URIS", "[\"http://private@localhost:5001/callback\"]")]
     [InlineData("REDIRECT_URIS", "[\"http://localhost:5001/callback#private\"]")]
     [InlineData("CLIENT_ID", "")]
-    public async Task InvalidBaselineBindingFailsWithSafeEnvelope(string key, string value)
+    [InlineData("CLIENT_ID", " \t")]
+    [InlineData("REALM_IMPORT_DIRECTORY", " \t")]
+    [InlineData("AUTHORITY", null)]
+    [InlineData("SEEDED_USER_NAMES", null)]
+    public async Task InvalidBaselineBindingFailsWithSafeEnvelope(string key, string? value)
     {
         var environment = BaselineEnvironment("unused");
         environment["APPSURFACE_KEYCLOAK_REALM_READY_" + key] = value;
@@ -75,8 +89,10 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         Assert.Equal("AppSurface Keycloak realm-ready gate failed. Code: ASKEYC001.", error.ToString().Trim());
     }
 
-    [Fact]
-    public async Task BaselineFailurePreservesTheStableCodeWithoutPublishingDetails()
+    [Theory]
+    [InlineData(true, "ASKEYC019")]
+    [InlineData(false, "ASKEYC001")]
+    public async Task BaselineFailurePreservesTheStableCodeWithoutPublishingDetails(bool baselineFailure, string code)
     {
         var environment = BaselineEnvironment("unused");
         using var error = new StringWriter();
@@ -84,10 +100,27 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         var exitCode = await AppSurfaceKeycloakRealmReadyEntryPoint.RunAsync(
             ["--appsurface-keycloak-realm-ready"], environment.GetValueOrDefault, TextWriter.Null, error,
             CancellationToken.None,
-            checkBaseline: (_, _, _, _) => throw new RealmBaselineException("ASKEYC019", "verifier-only details"));
+            checkBaseline: (_, _, _, _) => throw (baselineFailure
+                ? new RealmBaselineException("ASKEYC019", "verifier-only details")
+                : new InvalidOperationException("verifier-only details")));
 
         Assert.Equal(1, exitCode);
-        Assert.Equal("AppSurface Keycloak realm-ready gate failed. Code: ASKEYC019.", error.ToString().Trim());
+        Assert.Equal($"AppSurface Keycloak realm-ready gate failed. Code: {code}.", error.ToString().Trim());
+    }
+
+    [Fact]
+    public async Task CancelledBaselineReturnsTheCancellationExitCode()
+    {
+        var environment = BaselineEnvironment("unused");
+        using var error = new StringWriter();
+
+        var exitCode = await AppSurfaceKeycloakRealmReadyEntryPoint.RunAsync(
+            ["--appsurface-keycloak-realm-ready"], environment.GetValueOrDefault, TextWriter.Null, error,
+            new CancellationToken(canceled: true),
+            checkBaseline: (_, _, _, token) => Task.FromCanceled(token));
+
+        Assert.Equal(124, exitCode);
+        Assert.Equal("AppSurface Keycloak realm-ready gate was cancelled.", error.ToString().Trim());
     }
 
     [Fact]
@@ -1047,6 +1080,7 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
 
     [Theory]
     [InlineData("public-with-secret", "client-capture")]
+    [InlineData("public-with-reference-file", "client-capture")]
     [InlineData("confidential-without-source", "client-capture")]
     [InlineData("capture-root-without-run", "configuration")]
     [InlineData("capture-run-without-root", "configuration")]
@@ -1068,6 +1102,8 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
 
         using var files = new TestFiles();
         var desired = JsonNode.Parse(DesiredJson)!.AsObject();
+        desired["confidential"] = scenario is not ("public-with-secret" or "public-with-reference-file"
+            or "capture-root-without-run" or "capture-run-without-root");
         var bindings = JsonNode.Parse(BindingsJson)!.AsObject();
         const string syntheticPrivateValue = "synthetic-confidential-input";
         const string runId = "aabbccddeeff00112233445566778899";
@@ -1079,7 +1115,8 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         switch (scenario)
         {
             case "public-with-secret": bindings["clientSecret"] = syntheticPrivateValue; break;
-            case "confidential-without-source": desired["confidential"] = true; break;
+            case "public-with-reference-file": bindings["clientCredentialReferenceFile"] = files.Write("reference.json", "{"); break;
+            case "confidential-without-source": break;
             case "capture-root-without-run": bindings["captureRoot"] = files.Root; break;
             case "capture-run-without-root": bindings["captureRunId"] = runId; break;
             case "missing-reference": bindings["clientCredentialReferenceFile"] = files.FilePath("absent.json"); break;
@@ -1094,7 +1131,6 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
                 bindings["clientCredentialReferenceFile"] = link;
                 break;
             case "conflicting-sources":
-                desired["confidential"] = true;
                 bindings["clientSecret"] = syntheticPrivateValue;
                 bindings["captureRoot"] = files.Root;
                 bindings["captureRunId"] = runId;
@@ -1107,7 +1143,6 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
             case "wrong-reference-client":
             case "wrong-reference-run":
             case "file-custody-reference":
-                desired["confidential"] = true;
                 bindings["expectedCaptureRunId"] = scenario == "wrong-reference-run" ? Guid.Empty.ToString("N") : runId;
                 if (scenario == "file-custody-reference")
                     reference = new KeycloakClientCredentialReference(files.Root, runId, reference.Authority, reference.ClientId);
@@ -1135,6 +1170,8 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         var receipt = File.ReadAllText(output);
         using var envelope = JsonDocument.Parse(receipt);
         Assert.Equal(stage, envelope.RootElement.GetProperty("stage").GetString());
+        if (scenario == "public-with-reference-file")
+            Assert.Equal(nameof(InvalidDataException), envelope.RootElement.GetProperty("type").GetString());
         Assert.DoesNotContain(syntheticPrivateValue, receipt);
         Assert.DoesNotContain(syntheticPrivateValue, error.ToString());
     }
@@ -1399,7 +1436,10 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
     {
         private readonly CancellationTokenSource _cancellation;
 
-        internal CancelOnWriteLineTextWriter(CancellationTokenSource cancellation) => _cancellation = cancellation;
+        internal CancelOnWriteLineTextWriter(CancellationTokenSource cancellation)
+        {
+            _cancellation = cancellation;
+        }
 
         internal bool WroteLine { get; private set; }
 

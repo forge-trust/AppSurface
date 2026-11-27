@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Coverage.NativeInventory;
 using ForgeTrust.AppSurface.Testing;
 using YamlDotNet.RepresentationModel;
-using ForgeTrust.AppSurface.Coverage.NativeInventory;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
@@ -281,6 +281,20 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Equal("${{ matrix.producerId }}", coverageSecurity["env"].AsMapping()["COVERAGE_KEYCLOAK_PRODUCER"].AsScalar());
         Assert.Equal("${{ matrix.runner }}", coverageSecurity["runs-on"].AsScalar());
         var securitySteps = coverageSecurity["steps"].AsSequence();
+        var jobEnvironment = coverageSecurity["env"].AsMapping();
+        Assert.Equal("${{ github.workspace }}/.nuget/packages", jobEnvironment["NUGET_PACKAGES"].AsScalar());
+        Assert.All(jobEnvironment.Children.Values, value => Assert.DoesNotContain("runner.", value.AsScalar()));
+        Assert.DoesNotContain(new YamlScalarNode("AppSurfaceKeycloakWorkerBuildRoot"), jobEnvironment.Children.Keys);
+        var directories = FindStep(securitySteps, "Configure Keycloak coverage directories");
+        Assert.Equal("${{ matrix.keycloak }}", directories["if"].AsScalar());
+        Assert.Equal("pwsh", directories["shell"].AsScalar());
+        var configureDirectories = directories["run"].AsScalar();
+        Assert.Contains("Join-Path $env:RUNNER_TEMP 'coverage-keycloak-packages'", configureDirectories);
+        Assert.Contains("Join-Path $env:RUNNER_TEMP 'coverage-keycloak-worker-build'", configureDirectories);
+        Assert.Contains("Add-Content -LiteralPath $env:GITHUB_ENV", configureDirectories);
+        Assert.Contains("NUGET_PACKAGES=$packages", configureDirectories);
+        Assert.Contains("AppSurfaceKeycloakWorkerBuildRoot=$workerBuildRoot", configureDirectories);
+        Assert.True(IndexOf(securitySteps, directories) < IndexOf(securitySteps, FindStep(securitySteps, "Setup .NET SDK")));
         var canonicalCheckout = FindStep(securitySteps, "Preserve committed bytes on Windows");
         Assert.Equal("${{ runner.os == 'Windows' }}", canonicalCheckout["if"].AsScalar());
         Assert.Equal("git config --global core.autocrlf false", canonicalCheckout["run"].AsScalar());
@@ -311,8 +325,6 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.True(IndexOf(securitySteps, bundle) < IndexOf(securitySteps, captureStep));
         Assert.Contains("if ($keycloakLane)", capture);
         Assert.Contains("$env:COVERAGE_INCLUDE_KEYCLOAK -eq 'true'", capture);
-        Assert.Contains("coverage-keycloak-worker-build", coverageSecurity["env"].AsMapping()["AppSurfaceKeycloakWorkerBuildRoot"].AsScalar());
-        Assert.Contains("coverage-keycloak-packages", coverageSecurity["env"].AsMapping()["NUGET_PACKAGES"].AsScalar());
         Assert.Contains("!matrix.keycloak", FindStep(securitySteps, "Run coverage security contracts")["if"].AsScalar());
         Assert.Contains("!matrix.keycloak", FindStep(securitySteps, "Prepare generated docs stylesheet for coverage security tests")["if"].AsScalar());
         Assert.Contains("'--cli', $env:COVERAGE_CLI_PATH", capture);
