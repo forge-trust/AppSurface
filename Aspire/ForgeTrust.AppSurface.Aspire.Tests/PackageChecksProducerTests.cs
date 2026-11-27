@@ -58,7 +58,8 @@ public sealed class PackageChecksProducerTests
         Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
         Assert.Equal(Assertions, result.SatisfiedAssertionIds);
         Assert.Equal(3, requests.Count);
-        Assert.Equal(new[] { "gate", "verify", "verify-packages" }, requests.Select(r => r.Arguments.Contains("verify-packages", StringComparer.Ordinal) ? "verify-packages" : r.Arguments[^1]));
+        Assert.Equal(new[] { "gate", "verify", "verify-packages" },
+            requests.Select(request => request.Arguments.SkipWhile(argument => argument != "--").Skip(1).FirstOrDefault()));
         Assert.All(requests, request =>
         {
             Assert.Equal(Path.GetFullPath(root.FullName), request.WorkingDirectory);
