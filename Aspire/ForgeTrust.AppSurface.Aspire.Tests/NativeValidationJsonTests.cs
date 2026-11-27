@@ -50,7 +50,7 @@ public sealed class NativeValidationJsonTests
     [Fact]
     public void Receipt_RejectsUnknownSchemaAndCannotSatisfyEvidenceManifestContract()
     {
-        var (plan, receipt) = CreateRecipeReceipt();
+        var (_, receipt) = CreateRecipeReceipt();
         var bytes = NativeValidationReceiptCodec.Serialize(receipt);
         var changedSchema = JsonNode.Parse(bytes)!.AsObject();
         changedSchema["SchemaVersion"] = NativeValidationReceiptCodec.CurrentSchemaVersion + 1;
@@ -65,8 +65,8 @@ public sealed class NativeValidationJsonTests
             NativeValidationReceiptCodec.Deserialize(Encoding.UTF8.GetBytes(unknownEntry.ToJsonString())));
         Assert.Throws<JsonException>(() =>
             NativeValidationReceiptCodec.Deserialize(Encoding.UTF8.GetBytes(missingEntry.ToJsonString())));
-        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(bytes);
-        Assert.False(EvidenceManifestBuilder.Verify(plan, manifest));
+        // The canonical manifest reader rejects a native receipt before verification.
+        Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidenceManifest>(bytes));
     }
 
     [Fact]

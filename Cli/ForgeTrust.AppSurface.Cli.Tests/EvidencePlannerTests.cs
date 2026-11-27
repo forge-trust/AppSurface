@@ -652,7 +652,7 @@ public sealed class EvidencePlannerTests
         var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
             workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, [], diffPath), CancellationToken.None));
 
-        Assert.True(diffFileAccess.WasOpened);
+        Assert.True(diffFileAccess.WasReplaced);
         Assert.Contains("ASEVD206", exception.Message, StringComparison.Ordinal);
         Assert.Contains("exceeds the 20971520 byte limit", exception.Message, StringComparison.Ordinal);
     }
@@ -1080,15 +1080,18 @@ public sealed class EvidencePlannerTests
         Assert.Equal("Correct the input and rerun.", diagnostic.Fix);
     }
 
-    private sealed class ReplacingEvidenceDiffFileAccess(string expectedPath, byte[] replacement) : IEvidenceDiffFileAccess
+    private sealed class ReplacingEvidenceDiffFileAccess(string targetPath, byte[] replacement) : IEvidenceInputFileAccess
     {
-        public bool WasOpened { get; private set; }
+        public bool WasReplaced { get; private set; }
 
         public Stream OpenRead(string path)
         {
-            Assert.Equal(expectedPath, path);
-            File.WriteAllBytes(path, replacement);
-            WasOpened = true;
+            if (string.Equals(path, targetPath, StringComparison.Ordinal))
+            {
+                File.WriteAllBytes(path, replacement);
+                WasReplaced = true;
+            }
+
             return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
     }
