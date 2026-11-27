@@ -323,11 +323,13 @@ public sealed class CoverageSolutionScriptTests
         Assert.Equal(new[]
         {
             "${{ runner.temp }}/coverage-native-results",
+            "${{ runner.temp }}/packed-reuse-journey-feed/pack-logs/pack-*.log",
             "${{ runner.temp }}/packed-reuse-diagnostics/**/pack-*.log",
             "${{ runner.temp }}/packed-reuse-diagnostics/**/source.log",
             "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/proof.json",
             "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log",
-            "${{ runner.temp }}/packed-reuse-diagnostics/**/consumer-proof.log"
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/packed-progress.jsonl",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/fixture-progress.jsonl"
         }, ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("path")]).Value!
             .Split('\n', StringSplitOptions.RemoveEmptyEntries));
         Assert.Equal("warn", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("if-no-files-found")]).Value);

@@ -65,9 +65,11 @@ internal static class EvidenceReusePackageProof
         var stages = new List<StageResult>();
         var stage = "admission";
         var reportPath = PathUtils.PathUnder(output, "proof.json");
+        using var progress = PackedProofProgress.TryCreate(PathUtils.PathUnder(output, "packed-progress.jsonl"));
         try
         {
-            var runner = new ProofRunner(output, dotnet, stages);
+            progress?.Record("admission", "completed");
+            var runner = new ProofRunner(output, dotnet, stages, progress);
             var pinnedSdkVersion = await WritePinnedSdkConfigurationAsync(output, cancellationToken).ConfigureAwait(false);
             var sdk = await runner.RunAsync("sdk", dotnet, ["--version"], output, cancellationToken).ConfigureAwait(false);
             var sdkVersion = sdk.StandardOutput.Trim();
@@ -91,6 +93,7 @@ internal static class EvidenceReusePackageProof
             var host = await ProveHostAsync(output, version, packages, runner, cancellationToken).ConfigureAwait(false);
             stage = "cli";
             var cli = await ProveCliAsync(output, command, config, version, runner, cancellationToken).ConfigureAwait(false);
+            progress?.Record("proof-write", "started");
             await File.WriteAllBytesAsync(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
             {
                 schemaVersion = 1,
@@ -107,6 +110,7 @@ internal static class EvidenceReusePackageProof
                 stages,
                 limitations = "Cooperative local workload proof on the current OS; no containment or unregistered-child settlement claim."
             }, JsonOptions), cancellationToken).ConfigureAwait(false);
+            progress?.Record("proof-write", "completed");
             Console.WriteLine("Packed Evidence CLI and prepared Kestrel host reuse proof passed.");
             return 0;
         }
@@ -117,6 +121,7 @@ internal static class EvidenceReusePackageProof
             WriteFailure(stage, contract ?? exception.GetType().Name);
             try
             {
+                progress?.Record("failure-proof-write", "started");
                 await File.WriteAllBytesAsync(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
                 {
                     schemaVersion = 1,
@@ -126,6 +131,7 @@ internal static class EvidenceReusePackageProof
                     contract,
                     stages
                 }, JsonOptions), CancellationToken.None).ConfigureAwait(false);
+                progress?.Record("failure-proof-write", "completed");
             }
             catch (Exception reportException) when (reportException is IOException or UnauthorizedAccessException)
             {
@@ -429,16 +435,20 @@ internal static class EvidenceReusePackageProof
         var fixture = await PrepareCliFixtureAsync(output, config, version, runner, token).ConfigureAwait(false);
         var results = new List<object>();
         string? originSha = null;
-        foreach (var mode in new[] { "fresh", "warm", "audit" })
+        foreach (var mode in new[] { CliProofMode.Fresh, CliProofMode.Warm, CliProofMode.Audit })
         {
-            var root = Path.Join(output, "cli-" + mode);
+            var stage = "cli-" + CliModeLabel(mode);
+            var root = PathUtils.PathUnder(output, stage);
             var arguments = new List<string> { "evidence", "run", "--policy", "evidence.policy.json", "--solution", "Consumer.slnx", "--path", "Consumer.Alpha/AlphaDecision.cs", "--reuse", "--receipt-store", Path.Join(output, "cli-receipts"), "--output", root };
-            if (mode == "audit") arguments.Add("--verify-reuse");
-            await runner.RunSyntheticLocalAsync("cli-" + mode, command, arguments, fixture.Repository, token).ConfigureAwait(false);
+            if (mode == CliProofMode.Audit) arguments.Add("--verify-reuse");
+            await runner.RunSyntheticLocalAsync(stage, command, arguments, fixture.Repository, token).ConfigureAwait(false);
+            runner.Progress?.Record(stage, "artifact-validation-started");
             var run = await ValidateCliRunAsync(root, mode, output, token).ConfigureAwait(false);
-            if (mode == "fresh") originSha = run.CoverageSha;
-            if (mode == "warm") Require(run.CoverageSha == originSha, "warm-original-report-byte-identity");
-            if (mode == "warm")
+            runner.Progress?.Record(stage, "artifact-validation-completed");
+            if (mode == CliProofMode.Fresh) originSha = run.CoverageSha;
+            else if (mode == CliProofMode.Warm)
+            {
+                Require(run.CoverageSha == originSha, "warm-original-report-byte-identity");
                 await runner.RunSyntheticLocalAsync("restored-coverage-reader", command,
                     ["coverage", "gate", "--coverage", Path.Join(root, "coverage", "coverage.cobertura.xml"),
                         "--min-line", CliProofGate.MinLinePercent.ToString(CultureInfo.InvariantCulture),
@@ -446,6 +456,7 @@ internal static class EvidenceReusePackageProof
                         "--tolerance", CliProofGate.TolerancePercent.ToString(CultureInfo.InvariantCulture),
                         "--output", Path.Join(output, "restored-reader-reports")],
                     fixture.Repository, token).ConfigureAwait(false);
+            }
             Require(ValidationProof.Equal(fixture.InputHashes, await FixtureInputsAsync(fixture.Repository, token).ConfigureAwait(false)), "locked-complete-inputs-unchanged");
             results.Add(run.Proof);
         }
@@ -485,14 +496,15 @@ internal static class EvidenceReusePackageProof
         return (repository, inputHashes);
     }
 
-    private static async Task<(object Proof, string CoverageSha)> ValidateCliRunAsync(string root, string mode, string output, CancellationToken token)
+    private static async Task<(object Proof, string CoverageSha)> ValidateCliRunAsync(
+        string root, CliProofMode mode, string output, CancellationToken token)
     {
         var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(root, "evidence-manifest.json"), token).ConfigureAwait(false));
         Require(manifest.ExecutionVerdict == EvidenceExecutionVerdict.Passed, "cli-manifest-passed");
         var producer = manifest.ProducerResults.Single();
-        var expected = mode == "warm" ? EvidenceProducerOutcome.Reused : EvidenceProducerOutcome.Passed;
+        var expected = mode == CliProofMode.Warm ? EvidenceProducerOutcome.Reused : EvidenceProducerOutcome.Passed;
         Require(producer.Outcome == expected, "cli-fresh-warm-audit-outcome");
-        if (mode == "audit")
+        if (mode == CliProofMode.Audit)
         {
             using var summary = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, "evidence-summary.json"), token).ConfigureAwait(false));
             Require(summary.RootElement.GetProperty("reuseDecisions").EnumerateArray().Any(decision =>
@@ -500,14 +512,14 @@ internal static class EvidenceReusePackageProof
                 && decision.TryGetProperty("VerifiedReceiptCompared", out var compared) && compared.GetBoolean()),
                 "cli-audit-compared-verified-receipt");
         }
-        if (mode == "warm")
+        if (mode == CliProofMode.Warm)
         {
             Require(manifest.ClaimKind == EvidenceClaimKind.LocalReusedComplete
                 && manifest.Eligibility == EvidenceClaimEligibility.Informational, "cli-reuse-informational");
             Require(producer.Diagnostic is { } diagnostic
                 && diagnostic.Contains("coverage/coverage-gate.md", StringComparison.Ordinal)
                 && diagnostic.Contains("relative to the producer artifact root", StringComparison.Ordinal)
-                && !diagnostic.Contains(Path.Join(output, "cli-fresh"), StringComparison.Ordinal),
+                && !diagnostic.Contains(PathUtils.PathUnder(output, "cli-" + CliModeLabel(CliProofMode.Fresh)), StringComparison.Ordinal),
                 "cli-reuse-diagnostic-current-artifacts");
         }
         var artifacts = producer.Artifacts?.ToArray() ?? [];
@@ -520,10 +532,11 @@ internal static class EvidenceReusePackageProof
             var file = Path.Join(root, relative);
             Require(File.Exists(file) && new FileInfo(file).Length == artifact.LengthBytes
                 && await HashAsync(file, token).ConfigureAwait(false) == artifact.Sha256, "cli-original-report-custody");
-            bytes += new FileInfo(file).Length;
+            bytes += artifact.LengthBytes;
         }
         Require(bytes <= 256L * 1024 * 1024, "cli-existing-aggregate-limit");
-        foreach (var required in new[] { "coverage.cobertura.xml", "coverage-gate.json", "coverage-gate.md", "timings.json" })
+        const string coverageReport = "coverage.cobertura.xml";
+        foreach (var required in new[] { coverageReport, "coverage-gate.json", "coverage-gate.md", "timings.json" })
             Require(artifacts.Any(artifact => artifact.RelativePath == "coverage/" + required)
                 && File.Exists(Path.Join(root, "coverage", required)), "cli-required-managed-reports-in-inventory");
         using var gate = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, "coverage", "coverage-gate.json"), token).ConfigureAwait(false));
@@ -545,10 +558,10 @@ internal static class EvidenceReusePackageProof
         Require(testCases == 6, "actual-five-fixture-tests-and-packed-child-helper");
         using var timings = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, "coverage", "timings.json"), token).ConfigureAwait(false));
         Require(timings.RootElement.GetProperty("projects").GetArrayLength() == 2, "real-two-test-project-fixture");
-        var coverageSha = await HashAsync(Path.Join(root, "coverage", "coverage.cobertura.xml"), token).ConfigureAwait(false);
+        var coverageSha = artifacts.First(artifact => artifact.RelativePath == "coverage/" + coverageReport).Sha256;
         return (new
         {
-            mode,
+            mode = CliModeLabel(mode),
             outcome = expected.ToString(),
             claim = manifest.ClaimKind.ToString(),
             testCaseCount = testCases,
@@ -559,6 +572,17 @@ internal static class EvidenceReusePackageProof
             inventory = artifacts
         }, coverageSha);
     }
+
+    // These labels also appear in proof.json and the on-disk stage paths.
+    private static string CliModeLabel(CliProofMode mode) => mode switch
+    {
+        CliProofMode.Fresh => "fresh",
+        CliProofMode.Warm => "warm",
+        CliProofMode.Audit => "audit",
+        _ => throw new ArgumentOutOfRangeException(nameof(mode))
+    };
+
+    private enum CliProofMode { Fresh, Warm, Audit }
 
     private static async Task PrepareGitAsync(string root, ProofRunner runner, string stage, CancellationToken token)
     {
@@ -633,8 +657,9 @@ internal static class EvidenceReusePackageProof
     private sealed record StageResult(string Stage, int ExitCode, long ElapsedMilliseconds, bool SyntheticLocal,
         string? InterruptedWhile);
 
-    private sealed class ProofRunner(string root, string dotnet, List<StageResult> stages)
+    private sealed class ProofRunner(string root, string dotnet, List<StageResult> stages, PackedProofProgress? progress)
     {
+        internal PackedProofProgress? Progress { get; } = progress;
         internal string Dotnet { get; } = dotnet;
         internal string Packages { get; } = PathUtils.PathUnder(root, "packages");
         internal Task<PackedProofProcess.Result> RunAsync(string stage, string executable, IReadOnlyList<string> arguments,
@@ -670,7 +695,8 @@ internal static class EvidenceReusePackageProof
             if (syntheticLocal) environment.Remove("GITHUB_ACTIONS");
             var result = await PackedProofProcess.RunAsync(stage, start, root, cancellationToken,
                 stageTimeout ?? TimeSpan.FromMinutes(5), exit =>
-                    stages.Add(new(stage, exit.ExitCode, exit.ElapsedMilliseconds, syntheticLocal, exit.InterruptedWhile))).ConfigureAwait(false);
+                    stages.Add(new(stage, exit.ExitCode, exit.ElapsedMilliseconds, syntheticLocal, exit.InterruptedWhile)),
+                Progress).ConfigureAwait(false);
             Require(result.ExitCode == 0, "stage-" + stage);
             return result;
         }

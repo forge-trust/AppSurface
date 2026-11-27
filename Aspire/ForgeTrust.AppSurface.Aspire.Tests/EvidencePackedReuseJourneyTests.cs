@@ -12,6 +12,8 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
 {
     private const string DiagnosticsParentVariable = "APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS";
+    private const string FeedVariable = "APPSURFACE_PACKED_JOURNEY_FEED";
+    private const string VersionVariable = "APPSURFACE_PACKED_JOURNEY_VERSION";
 
     [Fact]
     public void PhysicalDirectoryPreservesFilesystemRoots()
@@ -105,110 +107,165 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task RejectedPreparedFeedReportsExitCodeAndDiagnosticsWithoutAProofReport()
+    {
+        var scratch = Directory.CreateTempSubdirectory("rejected-packed-journey-").FullName;
+        try
+        {
+            var feed = Directory.CreateDirectory(TestPathUtils.PathUnder(scratch, "empty-feed")).FullName;
+            var proofRoot = TestPathUtils.PathUnder(scratch, "proof");
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var result = await ValidationProgram.RunAsync(
+                ["--operation", "reuse-package-proof", "--feed", feed, "--version", "0.1.0-test",
+                    "--output", proofRoot, "--dotnet", TestDotnetHost.ResolveExisting(), "--source-commit",
+                    "0123456789abcdef0123456789abcdef01234567"], deadline.Token);
+
+            Assert.Equal(1, result);
+            Assert.False(Directory.Exists(proofRoot));
+            var reportPath = TestPathUtils.PathUnder(proofRoot, "proof.json");
+            var failure = await Assert.ThrowsAsync<Xunit.Sdk.XunitException>(
+                () => ReadJourneyReportAsync(result, reportPath, scratch, deadline.Token));
+            Assert.Contains("Packed journey exited with code 1.", failure.Message, StringComparison.Ordinal);
+            Assert.Contains(scratch, failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            NativeEvidenceTestDirectory.Delete(scratch);
+        }
+    }
+
+    [Fact]
     public async Task ActualPackedConsumersRestoreTheOriginalReportsAndSkipWarmHostStartup()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         // Assembly.Location uses the physical path on macOS; pin scratch to the same spelling
         // before the proof compares the independently loaded consumer assemblies to their root.
         var scratch = CreateScratchDirectory(repository, Environment.GetEnvironmentVariable(DiagnosticsParentVariable));
-        var feed = TestPathUtils.PathUnder(scratch, "feed");
-        var proofRoot = TestPathUtils.PathUnder(scratch, "proof");
-        var dotnet = ResolveDotnet();
+        var work = TestPathUtils.PathUnder(scratch, "work");
+        var proofRoot = TestPathUtils.PathUnder(work, "proof");
+        var dotnet = TestDotnetHost.ResolveExisting();
+        using var progress = PackedProofProgress.TryCreate(TestPathUtils.PathUnder(scratch, "fixture-progress.jsonl"));
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(15));
         var passed = false;
         try
         {
+            Directory.CreateDirectory(work);
             var git = PackedProofProcess.CreateStartInfo("git", ["rev-parse", "HEAD"], repository);
             var source = await PackedProofProcess.RunAsync("source", git, scratch, deadline.Token);
             Assert.True(source.ExitCode == 0, $"Source lookup failed. Retained logs: {scratch}");
             var commit = source.StandardOutput.Trim();
-            var version = "0.0.0-packed-test." + Guid.NewGuid().ToString("N");
-            // The test project's reference graph already restored the package projects.
-            await PackedCandidateFeed.PrepareAsync(new(repository, dotnet, feed, version, commit,
-                PackedCandidateFeed.Mode.Reuse, LogDirectory: scratch, NoRestore: true), deadline.Token);
-
-            var consumerLog = TestPathUtils.PathUnder(scratch, "consumer-proof.log");
-            await File.WriteAllTextAsync(consumerLog, JsonSerializer.Serialize(new
+            var feed = Environment.GetEnvironmentVariable(FeedVariable);
+            var version = Environment.GetEnvironmentVariable(VersionVariable);
+            if (feed is null && version is null)
             {
-                stage = "consumer-proof",
-                state = "starting",
-                startedAtUtc = DateTimeOffset.UtcNow
-            }), deadline.Token);
+                feed = TestPathUtils.PathUnder(work, "feed");
+                version = "0.0.0-packed-test." + Guid.NewGuid().ToString("N");
+                // The test project's reference graph already restored the package projects.
+                await PackedCandidateFeed.PrepareAsync(new(repository, dotnet, feed, version, commit,
+                    PackedCandidateFeed.Mode.Reuse, LogDirectory: scratch, NoRestore: true), deadline.Token);
+            }
+            else if (feed is null || !Path.IsPathFullyQualified(feed) || string.IsNullOrWhiteSpace(version))
+                throw new InvalidOperationException($"Set {FeedVariable} to an absolute feed path and {VersionVariable} to its version.");
+
+            progress?.Record("consumer-proof", "started");
             var result = await ValidationProgram.RunAsync(
                 ["--operation", "reuse-package-proof", "--feed", feed, "--version", version,
                     "--output", proofRoot, "--dotnet", dotnet, "--source-commit", commit], deadline.Token);
-            await File.WriteAllTextAsync(consumerLog, JsonSerializer.Serialize(new
-            {
-                stage = "consumer-proof",
-                state = "completed",
-                exitCode = result
-            }), CancellationToken.None);
+            progress?.Record("consumer-proof", "completed", result);
             var reportPath = TestPathUtils.PathUnder(proofRoot, "proof.json");
-            var report = await File.ReadAllTextAsync(reportPath, deadline.Token);
-            Assert.True(result == 0, $"Packed journey failed. Retained report {reportPath}:{Environment.NewLine}{report}");
-            using var document = JsonDocument.Parse(report);
-            var proof = document.RootElement;
-            Assert.True(proof.GetProperty("passed").GetBoolean());
-            Assert.Equal(commit, proof.GetProperty("expectedSourceCommit").GetString());
-            Assert.Equal(8, proof.GetProperty("packages").GetArrayLength());
-            Assert.Equal(["host-run", "host-published-run", "cli-fresh", "cli-warm", "restored-coverage-reader", "cli-audit"],
-                proof.GetProperty("stages").EnumerateArray()
-                    .Where(stage => stage.GetProperty("SyntheticLocal").GetBoolean())
-                    .Select(stage => stage.GetProperty("Stage").GetString()));
-            var negatives = proof.GetProperty("negatives").EnumerateArray().ToArray();
-            Assert.Equal(["tool-graph-version", "host-private-edge"],
-                negatives.Select(item => item.GetProperty("kind").GetString()));
-            Assert.Equal(
-                ["Native validation contract failed: packed-reuse/tool-bundled-graph-version",
-                    "Native validation contract failed: packed-reuse/exact-private-edge-in-every-framework-group"],
-                negatives.Select(item => item.GetProperty("contract").GetString()));
-            Assert.All(negatives, item =>
-            {
-                Assert.Equal(1, item.GetProperty("exitCode").GetInt32());
-                Assert.False(item.GetProperty("outputCreated").GetBoolean());
-                var rejectedOutput = Path.Join(proofRoot, "negative-" + item.GetProperty("kind").GetString(), "must-not-exist");
-                Assert.False(Directory.Exists(rejectedOutput));
-                Assert.False(File.Exists(rejectedOutput));
-                Assert.False(File.Exists(rejectedOutput + ".packed-reuse.claim"));
-            });
-            foreach (var mode in new[] { "built", "publish" })
-            {
-                var host = proof.GetProperty("host").GetProperty(mode);
-                Assert.Equal(1, host.GetProperty("firstFactoryCount").GetInt32());
-                Assert.Equal(0, host.GetProperty("secondFactoryCount").GetInt32());
-                Assert.Equal(1, host.GetProperty("cleanedApplications").GetInt32());
-                Assert.Equal("Reused", host.GetProperty("secondOutcome").GetString());
-            }
-
-            var runs = proof.GetProperty("cli").GetProperty("runs").EnumerateArray().ToArray();
-            Assert.Equal(["fresh", "warm", "audit"], runs.Select(run => run.GetProperty("mode").GetString()));
-            Assert.Equal(["Passed", "Reused", "Passed"], runs.Select(run => run.GetProperty("outcome").GetString()));
-            Assert.Equal(runs[0].GetProperty("coverageSha256").GetString(), runs[1].GetProperty("coverageSha256").GetString());
-            Assert.All(runs, run =>
-            {
-                Assert.Equal(6, run.GetProperty("testCaseCount").GetInt32());
-                Assert.Equal(2, run.GetProperty("testProjectCount").GetInt32());
-                Assert.True(run.GetProperty("artifactCount").GetInt32() > 5);
-            });
+            progress?.Record("test-proof-validation", "started");
+            var report = await ReadJourneyReportAsync(result, reportPath, scratch, deadline.Token);
+            AssertJourneyProof(report, proofRoot, commit);
+            progress?.Record("test-proof-validation", "completed");
             passed = true;
         }
         finally
         {
-            if (passed) NativeEvidenceTestDirectory.Delete(scratch);
+            if (passed)
+            {
+                // Keep the marker outside the payload being removed so a watchdog can retain it.
+                progress?.Record("fixture-cleanup", "started");
+                NativeEvidenceTestDirectory.Delete(work);
+                progress?.Record("fixture-cleanup", "completed");
+                progress?.Dispose();
+                NativeEvidenceTestDirectory.Delete(scratch);
+            }
             else output.WriteLine("Retained packed consumer diagnostics: " + scratch);
         }
     }
 
-    internal static string ResolveDotnet()
+    private static async Task<string> ReadJourneyReportAsync(
+        int exitCode, string reportPath, string scratch, CancellationToken cancellationToken)
     {
-        var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        var explicitHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        if (!string.IsNullOrEmpty(explicitHost) && File.Exists(explicitHost)) return Path.GetFullPath(explicitHost);
-        var root = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-        if (!string.IsNullOrEmpty(root) && File.Exists(TestPathUtils.PathUnder(root, executable)))
-            return TestPathUtils.PathUnder(root, executable);
-        return (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator)
-            .Where(Directory.Exists).Select(directory => TestPathUtils.PathUnder(directory, executable)).First(File.Exists);
+        if (exitCode == 0)
+            return await File.ReadAllTextAsync(reportPath, cancellationToken);
+
+        var failure = $"Packed journey exited with code {exitCode}. Retained diagnostics are in {scratch}.";
+        try
+        {
+            var report = await File.ReadAllTextAsync(reportPath, cancellationToken);
+            failure += $"{Environment.NewLine}Report from {reportPath}{Environment.NewLine}{report}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            // A refused feed may never produce a report. Optional diagnostics cannot replace its exit code.
+        }
+
+        throw new Xunit.Sdk.XunitException(failure);
+    }
+
+    private static void AssertJourneyProof(string report, string proofRoot, string expectedCommit)
+    {
+        using var document = JsonDocument.Parse(report);
+        var proof = document.RootElement;
+        Assert.True(proof.GetProperty("passed").GetBoolean());
+        Assert.Equal(expectedCommit, proof.GetProperty("expectedSourceCommit").GetString());
+        Assert.Equal(8, proof.GetProperty("packages").GetArrayLength());
+        Assert.Equal(["host-run", "host-published-run", "cli-fresh", "cli-warm", "restored-coverage-reader", "cli-audit"],
+            proof.GetProperty("stages").EnumerateArray()
+                .Where(stage => stage.GetProperty("SyntheticLocal").GetBoolean())
+                .Select(stage => stage.GetProperty("Stage").GetString()));
+        var negatives = proof.GetProperty("negatives").EnumerateArray().ToArray();
+        Assert.Equal(["tool-graph-version", "host-private-edge"],
+            negatives.Select(item => item.GetProperty("kind").GetString()));
+        Assert.Equal(
+            ["Native validation contract failed: packed-reuse/tool-bundled-graph-version",
+                "Native validation contract failed: packed-reuse/exact-private-edge-in-every-framework-group"],
+            negatives.Select(item => item.GetProperty("contract").GetString()));
+        Assert.All(negatives, item =>
+        {
+            Assert.Equal(1, item.GetProperty("exitCode").GetInt32());
+            Assert.False(item.GetProperty("outputCreated").GetBoolean());
+            var rejectedOutput = Path.Join(proofRoot, "negative-" + item.GetProperty("kind").GetString(), "must-not-exist");
+            Assert.False(Directory.Exists(rejectedOutput));
+            Assert.False(File.Exists(rejectedOutput));
+            Assert.False(File.Exists(rejectedOutput + ".packed-reuse.claim"));
+        });
+        foreach (var mode in new[] { "built", "publish" })
+        {
+            var host = proof.GetProperty("host").GetProperty(mode);
+            Assert.Equal(1, host.GetProperty("firstFactoryCount").GetInt32());
+            Assert.Equal(0, host.GetProperty("secondFactoryCount").GetInt32());
+            Assert.Equal(1, host.GetProperty("cleanedApplications").GetInt32());
+            Assert.Equal("Reused", host.GetProperty("secondOutcome").GetString());
+        }
+
+        var runs = proof.GetProperty("cli").GetProperty("runs").EnumerateArray().ToArray();
+        Assert.Equal(["fresh", "warm", "audit"], runs.Select(run => run.GetProperty("mode").GetString()));
+        Assert.Equal(["Passed", "Reused", "Passed"], runs.Select(run => run.GetProperty("outcome").GetString()));
+        Assert.Equal(runs[0].GetProperty("coverageSha256").GetString(), runs[1].GetProperty("coverageSha256").GetString());
+        Assert.All(runs, run =>
+        {
+            Assert.Equal(6, run.GetProperty("testCaseCount").GetInt32());
+            Assert.Equal(2, run.GetProperty("testProjectCount").GetInt32());
+            var inventory = run.GetProperty("inventory").EnumerateArray().ToArray();
+            Assert.True(run.GetProperty("artifactCount").GetInt32() > 5);
+            Assert.Equal(inventory.Sum(artifact => artifact.GetProperty("LengthBytes").GetInt64()),
+                run.GetProperty("artifactBytes").GetInt64());
+            var coverage = Assert.Single(inventory,
+                artifact => artifact.GetProperty("RelativePath").GetString() == "coverage/coverage.cobertura.xml");
+            Assert.Equal(coverage.GetProperty("Sha256").GetString(), run.GetProperty("coverageSha256").GetString());
+        });
     }
 
     /// <summary>Creates private test scratch, optionally beneath an existing diagnostics parent outside the checkout.</summary>

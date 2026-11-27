@@ -99,6 +99,42 @@ public sealed class NativeEvidenceProgramTests
     }
 
     [Fact]
+    public async Task PackCandidateFeed_RejectsInvalidNoRestoreValueBeforeCreatingOutput()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-invalid-restore-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            var result = await InvokeAsync(["--operation", "pack-candidate-feed", "--mode", "reuse",
+                "--repository", root, "--output", feed, "--version", "1.0.0", "--source-commit", new string('a', 40),
+                "--dotnet", TestDotnetHost.Resolve(), "--no-restore", "invalid"]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(feed));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackageRecipeRejectsNoRestoreBeforeCreatingOutput()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-pack-option-").FullName;
+        try
+        {
+            var output = TestPathUtils.PathUnder(root, "recipe-output");
+            var result = await InvokeAsync(["--package", TestPathUtils.PathUnder(root, "candidate.nupkg"),
+                "--repository", root, "--output", output, "--version", "1.0.0", "--source-commit", new string('a', 40),
+                "--dotnet", TestDotnetHost.Resolve(), "--mode", "storage", "--no-restore", "true"]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(output));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task PackCandidateFeed_ExtendNeutralRejectsMissingCliArchiveWithoutMutation()
     {
         var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-").FullName;

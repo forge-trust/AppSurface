@@ -122,6 +122,28 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
+    public void NativeCoveragePreparesPackedReuseFeedAfterLockedRestoreAndBeforeCollection()
+    {
+        var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
+        var securitySteps = job["steps"].AsSequence();
+        var restoreStep = FindStep(securitySteps, "Restore coverage security tests (locked)");
+        var preparationStep = FindStep(securitySteps, "Prepare packed reuse journey feed");
+        Assert.True(IndexOf(securitySteps, restoreStep) < IndexOf(securitySteps, preparationStep));
+        var prepare = preparationStep["run"].AsScalar();
+        Assert.Contains("--operation pack-candidate-feed --mode reuse", prepare);
+        Assert.Contains("--source-commit $env:COVERAGE_SOURCE_COMMIT", prepare);
+        Assert.Contains("--no-restore true", prepare);
+        const string publishFeed = "APPSURFACE_PACKED_JOURNEY_FEED=$feed";
+        Assert.Contains(publishFeed, prepare);
+        Assert.Contains("APPSURFACE_PACKED_JOURNEY_VERSION=$env:COVERAGE_CLI_CANDIDATE_VERSION", prepare);
+        const string checkExit = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }";
+        Assert.Contains(checkExit, prepare);
+        Assert.True(prepare.IndexOf(checkExit, StringComparison.Ordinal) < prepare.IndexOf(publishFeed, StringComparison.Ordinal));
+        var collectorStep = FindStep(securitySteps, "Run coverage security contracts");
+        Assert.True(IndexOf(securitySteps, preparationStep) < IndexOf(securitySteps, collectorStep));
+    }
+
+    [Fact]
     public void NativeCollectorFilterMatchesTheOrderedSelectorPolicy()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
@@ -529,6 +551,8 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var upload = FindStep(steps, "Preserve evidence inputs, plan, proof, and artifacts")["with"].AsMapping()["path"].AsScalar();
         Assert.Contains("native-coverage-library-proof/proof.json", upload);
         Assert.Contains("native-coverage-library-proof/published-proof/runs/**", upload);
+        Assert.Contains("${{ runner.temp }}/native-coverage-library-feed/pack-logs/pack-*.log", upload);
+        Assert.Contains("${{ runner.temp }}/native-evidence-reuse-package-proof/packed-progress.jsonl", upload);
     }
 
     [Fact]

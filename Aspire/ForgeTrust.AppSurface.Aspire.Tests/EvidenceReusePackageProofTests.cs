@@ -599,7 +599,7 @@ public sealed class EvidenceReusePackageProofTests
             using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 
             var result = await EvidenceReusePackageProof.RunAsync(fixture.Root, Version, output,
-                EvidencePackedReuseJourneyTests.ResolveDotnet(), Commit, deadline.Token);
+                TestDotnetHost.ResolveExisting(), Commit, deadline.Token);
 
             Assert.Equal(1, result);
             using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(output, "proof.json")));
@@ -680,6 +680,280 @@ public sealed class EvidenceReusePackageProofTests
         }
         finally { Directory.Delete(scratch.FullName, recursive: true); }
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PackedProofWaitsForHeldOutputPipesAfterRootExit(bool recordProgress)
+    {
+        using var fixture = ProofScratch.ForProbe();
+        using var probe = new SdkCancellationProbeFixture(fixture.Root, "root-exits-with-pipe-child");
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var journal = TestPathUtils.PathUnder(fixture.Root, "packed-progress.jsonl");
+        using var progress = recordProgress ? PackedProofProgress.TryCreate(journal) : null;
+        if (recordProgress) Assert.NotNull(progress);
+        const string childPidFile = "sdk-probe.child-pid";
+        var childPidPath = TestPathUtils.PathUnder(probe.ProbeRoot, childPidFile);
+        var start = PackedProofProcess.CreateStartInfo(probe.ExecutablePath, [], fixture.Root);
+        var run = PackedProofProcess.RunAsync("cli-audit", start, fixture.Root, CancellationToken.None, progress: progress);
+        Process? child = null;
+        try
+        {
+            while (!File.Exists(childPidPath))
+            {
+                // gstack-timing-ok: wait for the owned descendant to publish its PID independently of journal readiness.
+                await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+            }
+
+            if (recordProgress)
+            {
+                child = TryGetProbeProcess(probe.ProbeRoot, probe.ExecutablePath, childPidFile);
+                Assert.NotNull(child);
+                ProgressRecord[] entries;
+                while (!(entries = await ReadProgressAsync(journal, deadline.Token)).Any(entry => entry.Boundary == "process-exited"))
+                {
+                    // gstack-timing-ok: wait for the root exit observation while the owned child still holds the pipes.
+                    await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+                }
+
+                Assert.False(child.HasExited);
+                Assert.Equal(["process-started", "process-exited"], entries.Select(entry => entry.Boundary));
+                Assert.Equal(0, entries[1].ExitCode);
+            }
+            else
+            {
+                var rootPidPath = TestPathUtils.PathUnder(probe.ProbeRoot, "sdk-probe.root-pid");
+                while (!File.Exists(rootPidPath))
+                {
+                    // gstack-timing-ok: wait for the root's published PID before observing its exit.
+                    await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+                }
+
+                var rootPid = int.Parse(await File.ReadAllTextAsync(rootPidPath, deadline.Token),
+                    System.Globalization.CultureInfo.InvariantCulture);
+                Process? root;
+                try { root = Process.GetProcessById(rootPid); }
+                catch (ArgumentException) { root = null; } // The published root PID has already exited.
+                using (root)
+                {
+                    if (root is { HasExited: false })
+                    {
+                        Assert.True(IsProbeProcess(root, probe.ExecutablePath) || root.HasExited,
+                            "The published root PID must identify the private probe.");
+                        await root.WaitForExitAsync(deadline.Token);
+                    }
+                }
+
+                using var pipeHolder = TryGetProbeProcess(probe.ProbeRoot, probe.ExecutablePath, childPidFile);
+                Assert.NotNull(pipeHolder);
+                Assert.False(pipeHolder.HasExited);
+            }
+
+            Assert.False(run.IsCompleted, "The runner must still be waiting for the inherited output pipes.");
+        }
+        finally
+        {
+            // The no-journal case reaches cleanup without an open handle, like a failed readiness assertion.
+            child ??= TryGetProbeProcess(probe.ProbeRoot, probe.ExecutablePath, childPidFile);
+            using (child)
+            {
+                await File.WriteAllTextAsync(probe.StopPath, "stop");
+                await fixture.WaitForSettlementAsync(run, child?.WaitForExitAsync(), TimeSpan.FromSeconds(15));
+            }
+        }
+
+        Assert.False(fixture.Retain, "The proof task and its owned descendant must both be joined.");
+        Assert.Equal(0, (await run).ExitCode);
+        if (recordProgress)
+        {
+            Assert.Equal(new[] { "process-exited", "process-started", "stderr-drained", "stdout-drained" },
+                (await ReadProgressAsync(journal, deadline.Token)).Select(entry => entry.Boundary).Order(StringComparer.Ordinal));
+        }
+        else Assert.False(File.Exists(journal));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ProgressRecordsProcessAndStreamOutcomesDuringCancellationCleanup(bool rejectTreeKill, bool rejectRootKill)
+    {
+        using var fixture = ProofScratch.ForProbe();
+        using var probe = new SdkCancellationProbeFixture(fixture.Root);
+        using var caller = new CancellationTokenSource();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var journal = TestPathUtils.PathUnder(fixture.Root, "packed-progress.jsonl");
+        using var progress = PackedProofProgress.TryCreate(journal);
+        Assert.NotNull(progress);
+        var rootKillAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var treeKillFailure = new AggregateException("Simulated process-tree termination failure.");
+        var rootKillFailure = new NotSupportedException("Simulated root termination failure.");
+        var start = PackedProofProcess.CreateStartInfo(probe.ExecutablePath, [], fixture.Root);
+        var run = PackedProofProcess.RunAsync("cli-audit", start, fixture.Root, caller.Token, progress: progress,
+            terminateProcess: rejectTreeKill ? (process, entireProcessTree) =>
+            {
+                if (entireProcessTree) throw treeKillFailure;
+                rootKillAttempt.SetResult();
+                if (rejectRootKill) throw rootKillFailure;
+                process.Kill();
+            }
+        : null);
+        Process? ownedProcess = null;
+        try
+        {
+            var pidPath = TestPathUtils.PathUnder(probe.ProbeRoot, "sdk-probe.pid");
+            while (!File.Exists(pidPath))
+            {
+                // gstack-timing-ok: wait for the probe to publish its PID, not an elapsed-time assertion.
+                await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+            }
+            ownedProcess = TryGetProbeProcess(probe.ProbeRoot, probe.ExecutablePath);
+            Assert.NotNull(ownedProcess);
+            caller.Cancel();
+            if (rejectRootKill)
+            {
+                await rootKillAttempt.Task.WaitAsync(deadline.Token);
+                Assert.False(run.IsCompleted);
+                await File.WriteAllTextAsync(probe.StopPath, "stop", deadline.Token);
+                var failure = await Assert.ThrowsAsync<AggregateException>(() => run.WaitAsync(deadline.Token));
+                Assert.Collection(failure.InnerExceptions,
+                    exception => Assert.Same(treeKillFailure, exception),
+                    exception => Assert.Same(rootKillFailure, exception));
+            }
+            else if (rejectTreeKill)
+            {
+                await rootKillAttempt.Task.WaitAsync(deadline.Token);
+                Assert.Same(treeKillFailure, await Assert.ThrowsAsync<AggregateException>(() => run.WaitAsync(deadline.Token)));
+            }
+            else
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(deadline.Token));
+                Assert.True(run.IsCanceled);
+            }
+            Assert.True(ownedProcess.HasExited);
+
+            var entries = await ReadProgressAsync(journal, deadline.Token);
+            var boundaries = entries.Select(entry => entry.Boundary).ToArray();
+            Assert.Contains("wait-interrupted", boundaries);
+            Assert.Equal(rejectTreeKill, boundaries.Contains("cleanup-kill-failed"));
+            Assert.Equal(rejectRootKill, boundaries.Contains("cleanup-root-kill-failed"));
+            Assert.NotNull(Assert.Single(entries, entry => entry.Boundary == "cleanup-process-exited").ExitCode);
+            Assert.Single(boundaries, boundary => boundary is "cleanup-stdout-drained" or "cleanup-stdout-cancelled" or "cleanup-stdout-faulted");
+            Assert.Single(boundaries, boundary => boundary is "cleanup-stderr-drained" or "cleanup-stderr-cancelled" or "cleanup-stderr-faulted");
+            Assert.Equal("interruption-cleanup-completed", boundaries[^1]);
+        }
+        finally
+        {
+            ownedProcess ??= TryGetProbeProcess(probe.ProbeRoot, probe.ExecutablePath);
+            using (ownedProcess)
+            {
+                caller.Cancel();
+                await File.WriteAllTextAsync(probe.StopPath, "stop");
+                await fixture.WaitForSettlementAsync(run, ownedProcess?.WaitForExitAsync(), TimeSpan.FromSeconds(10));
+            }
+        }
+
+        Assert.False(fixture.Retain, "The proof task and its owned SDK probe must both be joined.");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProbeCleanupDeadlineRetainsJournalAndStopMarker(bool proofRunPending)
+    {
+        var fixture = ProofScratch.ForProbe();
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = proofRunPending ? pending.Task : Task.CompletedTask;
+        var processExit = proofRunPending ? Task.CompletedTask : pending.Task;
+        try
+        {
+            var journal = TestPathUtils.PathUnder(fixture.Root, "packed-progress.jsonl");
+            var stop = TestPathUtils.PathUnder(fixture.Root, "stop-sdk-probe");
+            await File.WriteAllTextAsync(journal, "progress");
+            await File.WriteAllTextAsync(stop, "stop");
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+                fixture.WaitForSettlementAsync(run, processExit, TimeSpan.Zero));
+
+            fixture.Dispose();
+            Assert.Equal("progress", await File.ReadAllTextAsync(journal));
+            Assert.Equal("stop", await File.ReadAllTextAsync(stop));
+        }
+        finally
+        {
+            pending.TrySetResult();
+            await fixture.WaitForSettlementAsync(run, processExit, TimeSpan.Zero);
+            fixture.Dispose();
+        }
+        Assert.False(Directory.Exists(fixture.Root));
+    }
+
+    [Fact]
+    public async Task ProbeCleanupRetainsScratchWhenBothTasksSettleAfterTheDeadline()
+    {
+        var fixture = ProofScratch.ForProbe();
+        var run = new TaskCompletionSource();
+        var exit = new TaskCompletionSource();
+        var journal = TestPathUtils.PathUnder(fixture.Root, "packed-progress.jsonl");
+        try
+        {
+            await File.WriteAllTextAsync(journal, "progress");
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+                fixture.WaitForSettlementAsync(run.Task, exit.Task, TimeSpan.Zero, wait: async completion =>
+                {
+                    try { await completion.WaitAsync(TimeSpan.Zero); }
+                    finally
+                    {
+                        run.TrySetResult();
+                        exit.TrySetResult();
+                        await completion;
+                    }
+                }));
+
+            fixture.Dispose();
+            Assert.Equal("progress", await File.ReadAllTextAsync(journal));
+        }
+        finally
+        {
+            run.TrySetResult();
+            exit.TrySetResult();
+            await fixture.WaitForSettlementAsync(run.Task, exit.Task, TimeSpan.Zero);
+            fixture.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ProgressRecordAfterStreamClosurePreservesExistingEntries()
+    {
+        using var fixture = new ProofScratch();
+        var journal = TestPathUtils.PathUnder(fixture.Root, "packed-progress.jsonl");
+        using var stream = File.Create(journal);
+        using var progress = new PackedProofProgress(stream);
+        progress.Record("cli-audit", "process-started");
+
+        stream.Dispose();
+        progress.Record("cli-audit", "process-exited", 0);
+
+        var entry = Assert.Single(await ReadProgressAsync(journal, CancellationToken.None));
+        Assert.Equal("process-started", entry.Boundary);
+    }
+
+    private static async Task<ProgressRecord[]> ReadProgressAsync(string journal, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(journal, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        var text = await reader.ReadToEndAsync(cancellationToken);
+        var complete = text[..(text.LastIndexOf('\n') + 1)];
+        return complete.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line =>
+        {
+            using var row = JsonDocument.Parse(line);
+            Assert.Equal("cli-audit", row.RootElement.GetProperty("stage").GetString());
+            var boundary = row.RootElement.GetProperty("boundary").GetString()!;
+            var exitCode = row.RootElement.GetProperty("exitCode");
+            return new ProgressRecord(boundary, exitCode.ValueKind == JsonValueKind.Null ? null : exitCode.GetInt32());
+        }).ToArray();
+    }
+
+    private sealed record ProgressRecord(string Boundary, int? ExitCode);
 
     [Fact]
     public async Task NonzeroProbeExitIsReturnedWhenFinalStageLogCannotBeWritten()
@@ -816,7 +1090,42 @@ public sealed class EvidenceReusePackageProofTests
     {
         internal string Root { get; } = Directory.CreateTempSubdirectory("evidence-proof-output-").FullName;
 
-        public void Dispose() => NativeEvidenceTestDirectory.Delete(Root);
+        internal bool Retain { get; private set; }
+
+        /// <summary>Creates scratch that retains diagnostics until the probe settles.</summary>
+        internal static ProofScratch ForProbe() => new() { Retain = true };
+
+        /// <summary>Allows deletion after the proof task settles and the observed owned process exits.</summary>
+        /// <param name="run">The proof task whose outcome the test checks separately.</param>
+        /// <param name="ownedProcessExit">The owned process exit task, if its identity was confirmed.</param>
+        /// <param name="timeout">The cleanup wait allowance.</param>
+        /// <param name="wait">Optional test seam for ordering deadline expiry and task settlement.</param>
+        /// <remarks>A missing process observation or expired cleanup deadline retains the scratch files.</remarks>
+        internal async Task WaitForSettlementAsync(
+            Task run, Task? ownedProcessExit, TimeSpan timeout, Func<Task, Task>? wait = null)
+        {
+            Retain = true;
+            var exit = ownedProcessExit ?? Task.CompletedTask;
+            var settlement = Task.WhenAll(run, exit);
+            var completion = ObserveSettlementAsync(settlement);
+            await (wait?.Invoke(completion) ?? completion.WaitAsync(timeout));
+
+            if (!exit.IsCompletedSuccessfully)
+                await settlement;
+
+            Retain = ownedProcessExit is null;
+
+            // Keep task outcomes separate from the deadline and observe faults even after it expires.
+            static async Task ObserveSettlementAsync(Task task)
+                => await task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+
+        public void Dispose()
+        {
+            if (Retain)
+                global::System.Console.Error.WriteLine($"Retained probe diagnostics in {Root} because settlement could not be confirmed.");
+            else NativeEvidenceTestDirectory.Delete(Root);
+        }
     }
 
     private sealed class SdkCancellationProbeFixture : IDisposable
@@ -829,20 +1138,8 @@ public sealed class EvidenceReusePackageProofTests
 
         internal SdkCancellationProbeFixture(string root, string mode = "cancel", string? secretEnvironmentValue = null)
         {
-            var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-            var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent!.Name;
-            var source = TestPathUtils.PathUnder(repository, "tests", "ForgeTrust.AppSurface.CoverageLeaseProbe", "bin",
-                configuration, "net10.0");
-            var appHostName = "ForgeTrust.AppSurface.CoverageLeaseProbe" + (OperatingSystem.IsWindows() ? ".exe" : "");
-            Assert.True(File.Exists(TestPathUtils.PathUnder(source, appHostName)));
             var bin = TestPathUtils.PathUnder(root, "sdk-bin");
-            Directory.CreateDirectory(bin);
-            foreach (var file in Directory.EnumerateFiles(source))
-                File.Copy(file, TestPathUtils.PathUnder(bin, Path.GetFileName(file)));
-            ExecutablePath = TestPathUtils.PathUnder(bin, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
-            File.Copy(TestPathUtils.PathUnder(bin, appHostName), ExecutablePath);
-            if (!OperatingSystem.IsWindows())
-                File.SetUnixFileMode(ExecutablePath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            ExecutablePath = CoverageLeaseProbeStager.Stage(bin, "dotnet");
 
             ProbeRoot = TestPathUtils.PathUnder(root, "sdk-probe");
             Directory.CreateDirectory(ProbeRoot);
@@ -873,9 +1170,10 @@ public sealed class EvidenceReusePackageProofTests
         }
     }
 
-    private static Process? TryGetProbeProcess(string probeRoot, string executablePath)
+    private static Process? TryGetProbeProcess(
+        string probeRoot, string executablePath, string pidFileName = "sdk-probe.pid")
     {
-        var pidPath = TestPathUtils.PathUnder(probeRoot, "sdk-probe.pid");
+        var pidPath = TestPathUtils.PathUnder(probeRoot, pidFileName);
         if (!File.Exists(pidPath)
             || !int.TryParse(File.ReadAllText(pidPath), System.Globalization.NumberStyles.None,
                 System.Globalization.CultureInfo.InvariantCulture, out var pid))

@@ -68,7 +68,7 @@ internal static class Program
 
                 Candidate feed preparation: --operation pack-candidate-feed --mode neutral|reuse|extend-neutral
                 --repository <checkout> --output <feed> --version <exact-version> --source-commit <sha>
-                --dotnet <absolute-host> [--package <existing-candidate-cli.nupkg>]
+                --dotnet <absolute-host> [--package <existing-candidate-cli.nupkg>] [--no-restore true|false]
 
                 Native coverage capture: --operation capture-native --repository <checkout>
                 --report <normalized.xml> --raw-report <collector.xml>
@@ -87,9 +87,12 @@ internal static class Program
         try
         {
             var options = Parse(args);
-            if (options.ContainsKey("--feed") && options.GetValueOrDefault("--operation") != "reuse-package-proof")
+            var operation = options.GetValueOrDefault("--operation");
+            if (options.ContainsKey("--feed") && operation != "reuse-package-proof")
                 throw new ArgumentException("--feed requires --operation reuse-package-proof.");
-            if (options.TryGetValue("--operation", out var operation))
+            if (options.ContainsKey("--no-restore") && operation != "pack-candidate-feed")
+                throw new ArgumentException("--no-restore requires --operation pack-candidate-feed.");
+            if (operation is not null)
             {
                 if (operation == "pack-candidate-feed")
                     return await PackCandidateFeedAsync(options, cancellationToken);
@@ -189,7 +192,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--feed", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings"];
+        string[] allowed = ["--package", "--feed", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings", "--no-restore"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)
@@ -202,7 +205,7 @@ internal static class Program
 
     private static async Task<int> PackCandidateFeedAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken)
     {
-        string[] allowed = ["--operation", "--mode", "--repository", "--output", "--version", "--source-commit", "--dotnet", "--package"];
+        string[] allowed = ["--operation", "--mode", "--repository", "--output", "--version", "--source-commit", "--dotnet", "--package", "--no-restore"];
         if (options.Keys.Except(allowed, StringComparer.Ordinal).Any()) throw new ArgumentException("Unsupported candidate feed option.");
         var mode = Required(options, "--mode") switch
         {
@@ -214,11 +217,14 @@ internal static class Program
         var dotnet = Path.GetFullPath(Required(options, "--dotnet"));
         if (!File.Exists(dotnet)) throw new ArgumentException("The selected dotnet host does not exist.");
         var output = Path.GetFullPath(Required(options, "--output"));
+        if (!bool.TryParse(options.GetValueOrDefault("--no-restore", "false"), out var noRestore))
+            throw new ArgumentException("--no-restore requires true or false.");
         try
         {
             await PackedCandidateFeed.PrepareAsync(new(
                 Path.GetFullPath(Required(options, "--repository")), dotnet, output, Required(options, "--version"),
-                Required(options, "--source-commit"), mode, options.GetValueOrDefault("--package")), cancellationToken);
+                Required(options, "--source-commit"), mode, options.GetValueOrDefault("--package"),
+                NoRestore: noRestore), cancellationToken);
         }
         catch (PackedCandidateFeed.PreparationException exception)
         {

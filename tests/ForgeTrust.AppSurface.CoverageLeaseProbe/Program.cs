@@ -366,12 +366,17 @@ static async Task<int> RunHeartbeatChildAsync(string recordRoot)
     {
         AppendJsonLine(Path.Join(recordRoot, "heartbeat.jsonl"), new Heartbeat(Environment.ProcessId,
             executionId, nonce, sequence++, DateTimeOffset.UtcNow));
-        if (File.Exists(stopPath)
-            && string.Equals(await File.ReadAllTextAsync(stopPath), executionId + "|" + nonce, StringComparison.Ordinal))
+        if (File.Exists(stopPath))
         {
-            WriteJson(Path.Join(recordRoot, "heartbeat-completed.json"), new HeartbeatCompletion(
-                Environment.ProcessId, executionId, nonce, sequence));
-            return 0;
+            // Windows can observe the marker while the controller still has it open for writing.
+            using var stop = new FileStream(stopPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stop);
+            if (string.Equals(await reader.ReadToEndAsync(), executionId + "|" + nonce, StringComparison.Ordinal))
+            {
+                WriteJson(Path.Join(recordRoot, "heartbeat-completed.json"), new HeartbeatCompletion(
+                    Environment.ProcessId, executionId, nonce, sequence));
+                return 0;
+            }
         }
         await Task.Delay(TimeSpan.FromMilliseconds(150));
     }

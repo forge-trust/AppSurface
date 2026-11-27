@@ -32,6 +32,18 @@ public sealed class EvidenceReceiptSettlementProcessTests
             var firstHeartbeat = await WaitForHeartbeatAsync(tree, executionId, nonce);
             heartbeat = OpenRecordedProcess(firstHeartbeat.ProcessId);
 
+            // Keep the controller's write handle open through a complete polling iteration.
+            // The child must keep working until it sees the full execution ID and nonce.
+            await using (var incompleteStop = new FileStream(tree.StopPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+            {
+                await incompleteStop.WriteAsync(System.Text.Encoding.UTF8.GetBytes(executionId + "|"));
+                await incompleteStop.FlushAsync();
+                var latestSequence = ReadHeartbeats(tree, executionId, nonce).Max(static item => item.Sequence);
+                var continued = await WaitForHeartbeatAfterAsync(tree, executionId, nonce, latestSequence + 1,
+                    "heartbeat progress while the partial stop marker is open");
+                Assert.Equal(firstHeartbeat.ProcessId, continued.ProcessId);
+            }
+
             await RequestOwnedChildStopAsync(tree, executionId, nonce);
             await WaitForExitAsync(heartbeat, "cooperative heartbeat child");
             await WaitForExitAsync(client, "cooperative child client");
@@ -83,7 +95,8 @@ public sealed class EvidenceReceiptSettlementProcessTests
             holder.Kill(entireProcessTree: false);
             await WaitForExitAsync(holder, "holder root after non-tree kill");
             var afterExitSequence = ReadHeartbeats(tree, executionId, nonce).Max(static item => item.Sequence);
-            var afterKill = await WaitForHeartbeatAfterAsync(tree, executionId, nonce, afterExitSequence);
+            var afterKill = await WaitForHeartbeatAfterAsync(tree, executionId, nonce, afterExitSequence,
+                "heartbeat progress after holder termination");
             Assert.Equal(firstHeartbeat.ProcessId, afterKill.ProcessId);
             Assert.False(heartbeat.HasExited);
             Assert.False(client.HasExited);
@@ -161,6 +174,20 @@ public sealed class EvidenceReceiptSettlementProcessTests
         Assert.Throws<JsonException>(() => ReadHeartbeats(tree, tree.ExecutionId, "nonce"));
     }
 
+    [Fact]
+    public async Task WaitUntilAsync_ReportsReadinessDescriptionWhenDeadlineExpires()
+    {
+        using var deadline = new CancellationTokenSource();
+        deadline.Cancel();
+
+        var timeout = await Assert.ThrowsAsync<TimeoutException>(() =>
+            WaitUntilAsync<string>(static () => null, static value => value is not null,
+                "partial stop marker readiness", deadline.Token));
+
+        Assert.Contains("partial stop marker readiness", timeout.Message, StringComparison.Ordinal);
+        Assert.IsAssignableFrom<OperationCanceledException>(timeout.InnerException);
+    }
+
     private static Process StartHolder(SettlementTree tree)
         => StartProbe(true, "settlement-holder", tree.StoreRoot, tree.RepositoryNamespace, tree.Key, tree.ExecutionId, tree.RecordRoot);
 
@@ -175,9 +202,10 @@ public sealed class EvidenceReceiptSettlementProcessTests
         => await WaitUntilAsync(() => ReadHeartbeats(tree, executionId, nonce).FirstOrDefault(),
             static heartbeat => heartbeat is not null, "first nonce-bound child heartbeat");
 
-    private static async Task<Heartbeat> WaitForHeartbeatAfterAsync(SettlementTree tree, string executionId, string nonce, int sequence)
+    private static async Task<Heartbeat> WaitForHeartbeatAfterAsync(
+        SettlementTree tree, string executionId, string nonce, int sequence, string description)
         => await WaitUntilAsync(() => ReadHeartbeats(tree, executionId, nonce).LastOrDefault(),
-            heartbeat => heartbeat is not null && heartbeat.Sequence > sequence, "heartbeat progress after holder termination");
+            heartbeat => heartbeat is not null && heartbeat.Sequence > sequence, description);
 
     private static IReadOnlyList<Heartbeat> ReadHeartbeats(SettlementTree tree, string executionId, string nonce)
     {
@@ -210,12 +238,25 @@ public sealed class EvidenceReceiptSettlementProcessTests
     private static async Task<T> WaitUntilAsync<T>(Func<T?> read, Func<T?, bool> ready, string description)
     {
         using var timeout = new CancellationTokenSource(ProcessDeadline);
-        while (true)
+        return await WaitUntilAsync(read, ready, description, timeout.Token);
+    }
+
+    private static async Task<T> WaitUntilAsync<T>(
+        Func<T?> read, Func<T?, bool> ready, string description, CancellationToken deadlineToken)
+    {
+        try
         {
-            timeout.Token.ThrowIfCancellationRequested();
-            var value = read();
-            if (ready(value)) return value!;
-            await Task.Delay(PollInterval, timeout.Token);
+            while (true)
+            {
+                deadlineToken.ThrowIfCancellationRequested();
+                var value = read();
+                if (ready(value)) return value!;
+                await Task.Delay(PollInterval, deadlineToken);
+            }
+        }
+        catch (OperationCanceledException exception) when (deadlineToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Timed out waiting for {description} within {ProcessDeadline}.", exception);
         }
     }
 

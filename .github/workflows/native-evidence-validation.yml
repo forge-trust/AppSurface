@@ -229,10 +229,12 @@ jobs:
           name: native-evidence-${{ matrix.os }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
+            ${{ runner.temp }}/native-coverage-library-feed/pack-logs/pack-*.log
             ${{ runner.temp }}/native-coverage-library-proof/proof.json
             ${{ runner.temp }}/native-coverage-library-proof/*.log
             ${{ runner.temp }}/native-coverage-library-proof/direct/runs/**
             ${{ runner.temp }}/native-evidence-reuse-package-proof/proof.json
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/packed-progress.jsonl
             ${{ runner.temp }}/native-evidence-reuse-package-proof/*.log
             ${{ runner.temp }}/native-evidence-reuse-package-proof/cli-fresh/**
             ${{ runner.temp }}/native-evidence-reuse-package-proof/cli-warm/**

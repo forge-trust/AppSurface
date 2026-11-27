@@ -480,19 +480,14 @@ public sealed class EvidenceSdkIdentityFailureCoverageTests
 
         internal SdkProcessFixture(string root, string mode)
         {
-            var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-            var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent!.Name;
-            var source = TestPathUtils.PathUnder(repository, "tests", "ForgeTrust.AppSurface.CoverageLeaseProbe", "bin", configuration, "net10.0");
-            var executable = "ForgeTrust.AppSurface.CoverageLeaseProbe" + (OperatingSystem.IsWindows() ? ".exe" : "");
-            Assert.True(File.Exists(TestPathUtils.PathUnder(source, executable)));
             var bin = TestPathUtils.PathUnder(root, "sdk-bin");
-            Directory.CreateDirectory(bin);
-            foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, TestPathUtils.PathUnder(bin, Path.GetFileName(file)));
-            var sdk = TestPathUtils.PathUnder(bin, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+            var sdk = CoverageLeaseProbeStager.Stage(bin, "dotnet");
             ExecutablePath = sdk;
-            if (mode == "unlaunchable") File.WriteAllText(sdk, "This fixture is not an executable SDK.");
-            else File.Copy(TestPathUtils.PathUnder(bin, executable), sdk);
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(sdk, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            if (mode == "unlaunchable")
+            {
+                // Replace the content in place so the staged Unix execute permissions remain intact.
+                File.WriteAllText(sdk, "This fixture is not an executable SDK.");
+            }
             _directory = Directory.GetCurrentDirectory();
             var values = new Dictionary<string, string?>
             {
