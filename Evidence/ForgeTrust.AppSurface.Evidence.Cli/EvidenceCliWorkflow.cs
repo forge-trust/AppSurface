@@ -78,8 +78,12 @@ internal sealed class EvidenceCliWorkflow
     }
 
     /// <summary>
-    /// Resolves an evidence plan and reports prerequisite readiness without provisioning resources or running producers.
+    /// Resolves an evidence plan and reports structural prerequisites without provisioning resources or running producers.
     /// </summary>
+    /// <remarks>
+    /// A registered verifier must validate the execution envelope in the consumer's protected workflow.
+    /// Planning and CI environment values provide no admission.
+    /// </remarks>
     public async Task<EvidenceDoctorReport> DoctorAsync(EvidencePlanningRequest request, CancellationToken cancellationToken)
     {
         var plan = await ExplainAsync(request, cancellationToken).ConfigureAwait(false);
@@ -104,23 +108,14 @@ internal sealed class EvidenceCliWorkflow
             }
         }
 
-        if (plan.Profile.Scope == EvidenceProfileScope.Release)
-        {
-            var githubActions = string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
-            checks.Add(new EvidenceDoctorCheck(
-                "trusted-envelope",
-                githubActions,
-                githubActions ? "ready" : "blocked",
-                githubActions ? "GitHub Actions environment is available for the consumer envelope verifier." : "Release evidence requires a CI-provided trusted envelope.",
-                githubActions ? null : "Run from the consumer's protected CI workflow or request observation-only evidence."));
-        }
+        checks.Add(new EvidenceDoctorCheck(
+            "trusted-envelope",
+            false,
+            "unverified",
+            "The execution envelope is unverified. Planning and CI environment values grant no admission.",
+            "Use the registered verifier in the consumer's protected workflow. See guides/evidencehost-cookbook.md#release-evidence."));
 
-        var blocked = checks.Any(static check => string.Equals(check.Status, "blocked", StringComparison.Ordinal));
-        var external = checks.Any(static check => string.Equals(check.Status, "external-prerequisite", StringComparison.Ordinal));
-        return new EvidenceDoctorReport(
-            blocked ? "blocked" : external ? "ready_with_external_prerequisites" : "ready",
-            plan,
-            checks);
+        return new EvidenceDoctorReport("ready_with_external_prerequisites", plan, checks);
     }
 
     /// <summary>

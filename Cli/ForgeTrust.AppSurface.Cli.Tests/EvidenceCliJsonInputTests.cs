@@ -33,7 +33,7 @@ public sealed class EvidenceCliJsonInputTests
             input,
             report =>
             {
-                Assert.Equal("ready", report.Status);
+                Assert.Contains(report.Checks, check => check is { Id: "policy", Status: "ready", Satisfied: true });
                 Assert.Equal("docs", report.Plan.Profile.Id);
             },
             (plan, manifest) => Assert.True(EvidenceManifestBuilder.Verify(plan, manifest)));
