@@ -77,7 +77,7 @@ internal sealed partial class EvidenceDoctorCommand(EvidenceCliWorkflow workflow
         try
         {
             var report = await Workflow.DoctorAsync(CreatePlanningRequest(), console.RegisterCancellationHandler());
-            await console.Output.WriteLineAsync($"Evidence doctor: {report.Status}");
+            await console.Output.WriteLineAsync("Evidence doctor: ready_with_external_prerequisites");
             foreach (var check in report.Checks)
             {
                 await console.Output.WriteLineAsync($"  {check.Status} {check.Id}: {check.Message}");

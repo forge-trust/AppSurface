@@ -41,14 +41,11 @@ public sealed class EvidenceDoctorTrustTests
             CancellationToken.None);
 
         var envelope = Assert.Single(report.Checks, check => check.Id == "trusted-envelope");
-        Assert.False(envelope.Satisfied);
         Assert.Equal("unverified", envelope.Status);
         Assert.Contains("grant no admission", envelope.Message, StringComparison.Ordinal);
         Assert.Contains("registered verifier", envelope.NextAction, StringComparison.Ordinal);
-        Assert.Contains("guides/evidencehost-cookbook.md#release-evidence", envelope.NextAction, StringComparison.Ordinal);
-        Assert.Equal("ready_with_external_prerequisites", report.Status);
-        Assert.Contains(report.Checks, check => check.Id == "policy" && check.Satisfied && check.Status == "ready");
-        Assert.Contains(report.Checks, check => check.Id == "diff" && check.Satisfied && check.Status == "ready");
+        Assert.Contains(report.Checks, check => check is { Id: "policy", Status: "ready" });
+        Assert.Contains(report.Checks, check => check is { Id: "diff", Status: "ready" });
         Assert.All(report.Checks, check =>
         {
             Assert.DoesNotContain(EnvironmentCanary, check.Message, StringComparison.Ordinal);

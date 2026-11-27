@@ -333,7 +333,8 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <
 ## Pitfalls
 
 - Do not run a repository-wide coverage gate after intentionally filtering out required tests and expect a complete claim. A filtered suite cannot close a coverage assertion; it can close only the `test` assertion of a producer whose filter is declared in the policy and bound into the plan.
-- Read the [doctor check details](#doctor-preflight) for any external prerequisites before running evidence.
+- Treat `doctor` exit code 0 and `ready_with_external_prerequisites` as [preflight results](#doctor-preflight).
+  Gate releases on a `ReleaseComplete` claim from the [protected workflow with its registered verifier](../../guides/evidencehost-cookbook.md#release-evidence).
 - Do not set `--observation-only` on a job that must satisfy a PR or release gate.
 - Do not hand-edit generated artifacts; use `verify`.
 

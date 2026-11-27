@@ -120,7 +120,7 @@ Use [`appsurface evidence doctor`](../Evidence/ForgeTrust.AppSurface.Evidence.Cl
 
 | Signal | Meaning | Next action |
 | --- | --- | --- |
-| `ready_with_external_prerequisites` from `doctor` | The policy and diff resolved. The envelope is unverified, and selected Docker or browser prerequisites may still be missing. | Read each check. Address missing runtime prerequisites and use the registered verifier for a release run. |
+| `ready_with_external_prerequisites` from `doctor` | The policy and diff resolved. The envelope is unverified, and selected Docker or browser prerequisites may still be missing. | Read each check to prepare the run. Gate releases on a `ReleaseComplete` claim from the [protected workflow](#release-evidence) with its registered verifier. |
 | Nonzero exit from `doctor` | The command could not resolve the policy or diff. | Read the diagnostic and fix the input. |
 | `ClaimKind.None` | A producer, obligation, artifact, or envelope did not complete. | Read `evidence-summary.json`; do not lower a gate blindly. |
 | A `reason=` line from a `test` producer | One declared test project is incomplete. | Follow the `next:` line printed with it, or look the reason up in the [reason table](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#reasons). |

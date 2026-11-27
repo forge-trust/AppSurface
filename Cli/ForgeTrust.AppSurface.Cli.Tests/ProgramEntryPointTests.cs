@@ -3660,7 +3660,11 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("Use 'appsurface evidence init", output, StringComparison.Ordinal);
         Assert.Contains("Evidence doctor: ready_with_external_prerequisites", output, StringComparison.Ordinal);
         Assert.Contains("unverified trusted-envelope", output, StringComparison.Ordinal);
-        Assert.Contains("Next: Use the registered verifier", output, StringComparison.Ordinal);
+        const string releaseEvidenceGuide =
+            "https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#release-evidence";
+        Assert.Contains(output.Split('\n'), line =>
+            line.TrimStart().StartsWith("Next:", StringComparison.Ordinal)
+            && line.Contains(releaseEvidenceGuide, StringComparison.Ordinal));
         Assert.Contains("ASEVD204", missingDoctorException.Message, StringComparison.Ordinal);
         Assert.Contains("ASEVD117", ambiguousDoctorException.Message, StringComparison.Ordinal);
         Assert.Contains("ASEVD117", ambiguousRunException.Message, StringComparison.Ordinal);

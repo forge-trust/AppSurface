@@ -89,8 +89,8 @@ internal sealed class EvidenceCliWorkflow
         var plan = await ExplainAsync(request, cancellationToken).ConfigureAwait(false);
         var checks = new List<EvidenceDoctorCheck>
         {
-            new("policy", true, "ready", $"Policy '{plan.PolicyId}' resolved profile '{plan.Profile.Id}'.", null),
-            new("diff", true, "ready", $"Resolved {plan.ChangedPaths.Count} normalized changed path(s).", null),
+            new("policy", "ready", $"Policy '{plan.PolicyId}' resolved profile '{plan.Profile.Id}'.", null),
+            new("diff", "ready", $"Resolved {plan.ChangedPaths.Count} normalized changed path(s).", null),
         };
         foreach (var producer in plan.Profile.Producers)
         {
@@ -110,12 +110,11 @@ internal sealed class EvidenceCliWorkflow
 
         checks.Add(new EvidenceDoctorCheck(
             "trusted-envelope",
-            false,
             "unverified",
             "The execution envelope is unverified. Planning and CI environment values grant no admission.",
-            "Use the registered verifier in the consumer's protected workflow. See guides/evidencehost-cookbook.md#release-evidence."));
+            "Use the registered verifier in the consumer's protected workflow. See https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#release-evidence"));
 
-        return new EvidenceDoctorReport("ready_with_external_prerequisites", plan, checks);
+        return new EvidenceDoctorReport(plan, checks);
     }
 
     /// <summary>
@@ -434,7 +433,6 @@ internal sealed class EvidenceCliWorkflow
             || File.Exists("/var/run/docker.sock");
         return new EvidenceDoctorCheck(
             $"docker:{producerId}",
-            available,
             available ? "ready" : "external-prerequisite",
             available ? "Docker capability is available." : $"Producer '{producerId}' requires Docker-backed disposable dependencies.",
             available ? null : "Start Docker Desktop or use the consumer CI runner that provides Docker.");
@@ -445,7 +443,6 @@ internal sealed class EvidenceCliWorkflow
         var available = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
         return new EvidenceDoctorCheck(
             $"browser:{producerId}",
-            available,
             available ? "ready" : "external-prerequisite",
             available ? "Browser capability is configured." : $"Producer '{producerId}' requires the consumer's browser test runtime.",
             available ? null : "Install the consumer browser runtime or use its CI browser image.");
@@ -818,12 +815,12 @@ internal sealed record EvidenceInitializationResult(string RootPath, IReadOnlyLi
 /// <summary>
 /// Describes one environment or capability prerequisite observed by the evidence doctor.
 /// </summary>
-internal sealed record EvidenceDoctorCheck(string Id, bool Satisfied, string Status, string Message, string? NextAction);
+internal sealed record EvidenceDoctorCheck(string Id, string Status, string Message, string? NextAction);
 
 /// <summary>
 /// Describes the plan and prerequisite checks produced by the evidence doctor.
 /// </summary>
-internal sealed record EvidenceDoctorReport(string Status, EvidencePlan Plan, IReadOnlyList<EvidenceDoctorCheck> Checks);
+internal sealed record EvidenceDoctorReport(EvidencePlan Plan, IReadOnlyList<EvidenceDoctorCheck> Checks);
 
 /// <summary>
 /// Represents a stable, user-actionable EvidenceHost CLI failure.
