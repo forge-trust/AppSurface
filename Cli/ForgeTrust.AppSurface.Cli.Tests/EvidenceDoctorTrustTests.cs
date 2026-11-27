@@ -18,7 +18,7 @@ public sealed class EvidenceDoctorTrustTests
     [InlineData(EvidenceProfileScope.Release, "true")]
     [InlineData(EvidenceProfileScope.Release, "false")]
     [InlineData(EvidenceProfileScope.Release, EnvironmentCanary)]
-    public async Task Doctor_ShouldReportProtectedFactsUnverifiedWithoutExecutingSubject(
+    public async Task Doctor_ShouldReportUnverifiedEnvelopeAndPreservePolicyDirectory(
         EvidenceProfileScope scope,
         string? githubActions)
     {
@@ -43,7 +43,7 @@ public sealed class EvidenceDoctorTrustTests
         var envelope = Assert.Single(report.Checks, check => check.Id == "trusted-envelope");
         Assert.Equal("unverified", envelope.Status);
         Assert.Contains("grant no admission", envelope.Message, StringComparison.Ordinal);
-        Assert.Contains("registered verifier", envelope.NextAction, StringComparison.Ordinal);
+        Assert.StartsWith("For release evidence, use the registered verifier", envelope.NextAction, StringComparison.Ordinal);
         Assert.Contains(report.Checks, check => check is { Id: "policy", Status: "ready" });
         Assert.Contains(report.Checks, check => check is { Id: "diff", Status: "ready" });
         Assert.All(report.Checks, check =>
@@ -54,5 +54,35 @@ public sealed class EvidenceDoctorTrustTests
         Assert.Equal([policyPath], Directory.GetFiles(directory.Path));
         Assert.Empty(Directory.GetDirectories(directory.Path));
         Assert.Equal(bytes, await File.ReadAllBytesAsync(policyPath));
+    }
+
+    [Fact]
+    public async Task Doctor_ShouldReportMissingBrowserRuntimeForAReleaseProfile()
+    {
+        using var browserPath = new EnvironmentVariableScope("PLAYWRIGHT_BROWSERS_PATH", null);
+        using var directory = TestDirectory.Create();
+        var policyPath = TestPathUtils.PathUnder(directory.Path, "evidence.policy.json");
+        var profile = new EvidenceProfile(
+            "release",
+            EvidenceProfileScope.Release,
+            [],
+            [
+                new EvidenceProducerDeclaration("database", "postgres-integration", "1", [], ["database/assertion@1"], [], 60),
+                new EvidenceProducerDeclaration("browser", "playwright-browser", "1", [], ["browser/assertion@1"], [], 60),
+            ],
+            [
+                new EvidenceObligation("database", "database", "Database behavior changed.", ["database"], "database/assertion@1"),
+                new EvidenceObligation("browser", "browser", "Browser behavior changed.", ["browser"], "browser/assertion@1"),
+            ]);
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(new EvidencePolicy("release-policy", "1", "release", [profile], [])));
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+
+        var report = await workflow.DoctorAsync(new EvidencePlanningRequest(policyPath, ["src/Feature.cs"], null), CancellationToken.None);
+
+        Assert.Contains(report.Checks, check => check.Id == "docker:database");
+        Assert.Contains(report.Checks, check => check.Id == "trusted-envelope");
+        var browser = Assert.Single(report.Checks, check => check.Id == "browser:browser");
+        Assert.Equal("external-prerequisite", browser.Status);
+        Assert.Contains("Install the consumer browser runtime", browser.NextAction, StringComparison.Ordinal);
     }
 }

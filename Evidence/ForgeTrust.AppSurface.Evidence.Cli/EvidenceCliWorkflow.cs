@@ -112,7 +112,7 @@ internal sealed class EvidenceCliWorkflow
             "trusted-envelope",
             "unverified",
             "The execution envelope is unverified. Planning and CI environment values grant no admission.",
-            "Use the registered verifier in the consumer's protected workflow. See https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#release-evidence"));
+            "For release evidence, use the registered verifier in the consumer's protected workflow. See https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#release-evidence"));
 
         return new EvidenceDoctorReport(plan, checks);
     }

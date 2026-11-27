@@ -3601,7 +3601,17 @@ public sealed class ProgramEntryPointTests
             PolicyPath = policyPath,
             Paths = ["src/Feature.cs"],
         };
-        await doctor.ExecuteAsync(console);
+        using var doctorConsole = new FakeInMemoryConsole();
+        await doctor.ExecuteAsync(doctorConsole);
+
+        var doctorOutput = doctorConsole.ReadOutputString();
+        Assert.Contains("Evidence doctor: ready_with_external_prerequisites", doctorOutput, StringComparison.Ordinal);
+        Assert.Contains("unverified trusted-envelope", doctorOutput, StringComparison.Ordinal);
+        const string releaseEvidenceGuide =
+            "https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#release-evidence";
+        Assert.Contains(doctorOutput.Split('\n'), line =>
+            line.TrimStart().StartsWith("Next:", StringComparison.Ordinal)
+            && line.Contains(releaseEvidenceGuide, StringComparison.Ordinal));
 
         var missingDoctor = new EvidenceDoctorCommand(workflow)
         {
@@ -3656,15 +3666,7 @@ public sealed class ProgramEntryPointTests
         };
         var verifyException = await Assert.ThrowsAsync<CommandException>(() => verify.ExecuteAsync(console).AsTask());
 
-        var output = console.ReadOutputString();
-        Assert.Contains("Use 'appsurface evidence init", output, StringComparison.Ordinal);
-        Assert.Contains("Evidence doctor: ready_with_external_prerequisites", output, StringComparison.Ordinal);
-        Assert.Contains("unverified trusted-envelope", output, StringComparison.Ordinal);
-        const string releaseEvidenceGuide =
-            "https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#release-evidence";
-        Assert.Contains(output.Split('\n'), line =>
-            line.TrimStart().StartsWith("Next:", StringComparison.Ordinal)
-            && line.Contains(releaseEvidenceGuide, StringComparison.Ordinal));
+        Assert.Contains("Use 'appsurface evidence init", console.ReadOutputString(), StringComparison.Ordinal);
         Assert.Contains("ASEVD204", missingDoctorException.Message, StringComparison.Ordinal);
         Assert.Contains("ASEVD117", ambiguousDoctorException.Message, StringComparison.Ordinal);
         Assert.Contains("ASEVD117", ambiguousRunException.Message, StringComparison.Ordinal);
