@@ -8063,6 +8063,10 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         Assert.DoesNotContain("package-evidence-*/package-checks/**", packageGateWorkflow, StringComparison.Ordinal);
         Assert.DoesNotContain("package-evidence-*/package-checks/artifacts/**", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("package-evidence-*/artifacts/**", packageGateWorkflow, StringComparison.Ordinal);
+        Assert.Contains("\"--\", \"gate\"]", packageChecksProducer, StringComparison.Ordinal);
+        Assert.Contains("\"--\", \"verify\"]", packageChecksProducer, StringComparison.Ordinal);
+        Assert.Contains("\"--\", \"verify-packages\",", packageChecksProducer, StringComparison.Ordinal);
+        Assert.Contains("\"--package-version\", version", packageChecksProducer, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, packageChecksProducer);
         Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.Contains("Upload package validation diagnostics", packageArtifactsWorkflow, StringComparison.Ordinal);

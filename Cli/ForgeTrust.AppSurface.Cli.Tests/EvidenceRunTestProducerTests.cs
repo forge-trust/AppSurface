@@ -13,6 +13,7 @@ public sealed class EvidenceRunTestProducerTests
     private const string ProducerId = "tooling-tests";
     private const string ProjectPath = "tests/A/A.csproj";
     private const string HiddenTestName = "Zeta.Hidden.CaseName";
+    private const int PlanSizeMarginBytes = 4096;
 
     [Fact]
     public async Task Run_ShouldCloseTheAssertionPrintTheCountsTableAndVerify()
@@ -39,6 +40,82 @@ public sealed class EvidenceRunTestProducerTests
         Assert.Equal(EvidenceClaimKind.TargetedComplete, verified.ClaimKind);
         Assert.Equal(["tests-complete"], verified.ClosedObligationIds);
         fixture.AssertNoHiddenName(output + fixture.Console.ReadErrorString() + summary);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Run_ShouldWriteOnlyPlansThatVerifyWithinTheJsonLimit(bool oversizedPlan)
+    {
+        using var fixture = Fixture.Create();
+        var margin = oversizedPlan ? PlanSizeMarginBytes : -PlanSizeMarginBytes;
+        await fixture.WritePolicyNearPlanSizeLimitAsync(margin);
+
+        if (oversizedPlan)
+        {
+            var exception = await Assert.ThrowsAsync<CommandException>(() => fixture.RunAsync());
+
+            Assert.StartsWith("ASEVD217: The generated Evidence plan", exception.Message, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(fixture.Output));
+            Assert.Empty(fixture.Source.Calls);
+        }
+        else
+        {
+            fixture.Source.Inventory = ["A.One"];
+            fixture.Source.Results = [new("A.One", TestCaseOutcome.Passed)];
+
+            await fixture.RunAsync();
+
+            var planFile = new FileInfo(TestPathUtils.PathUnder(fixture.Output, "evidence-plan.json"));
+            Assert.InRange(planFile.Length, EvidenceCanonicalJson.MaximumInputBytes - 2L * PlanSizeMarginBytes, EvidenceCanonicalJson.MaximumInputBytes);
+            Assert.Equal(EvidenceClaimKind.TargetedComplete, (await fixture.VerifyAsync()).ClaimKind);
+        }
+    }
+
+    [Fact]
+    public async Task Run_ShouldPreservePreviousEvidenceWhenPlanIsOversized()
+    {
+        using var fixture = Fixture.Create();
+        fixture.Source.Inventory = ["A.One"];
+        fixture.Source.Results = [new("A.One", TestCaseOutcome.Passed)];
+        await fixture.RunAsync();
+
+        var priorFiles = Directory.GetFiles(fixture.Output, "*", SearchOption.AllDirectories);
+        var priorBytes = priorFiles.ToDictionary(static path => path, File.ReadAllBytes);
+        fixture.Source.Calls.Clear();
+        await fixture.WritePolicyNearPlanSizeLimitAsync(PlanSizeMarginBytes);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => fixture.RunAsync());
+
+        Assert.StartsWith("ASEVD217: The generated Evidence plan", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(fixture.Source.Calls);
+        var retainedFiles = Directory.GetFiles(fixture.Output, "*", SearchOption.AllDirectories);
+        Assert.Equal(priorFiles.Order(StringComparer.Ordinal), retainedFiles.Order(StringComparer.Ordinal));
+        foreach (var path in retainedFiles)
+        {
+            Assert.Equal(priorBytes[path], await File.ReadAllBytesAsync(path));
+        }
+
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, (await fixture.VerifyAsync()).ClaimKind);
+    }
+
+    [Fact]
+    public async Task WriteManifest_ShouldRejectOutputLargerThanTheVerificationLimit()
+    {
+        using var directory = TestDirectory.Create();
+        var output = TestPathUtils.PathUnder(directory.Path, "evidence");
+        var plan = Fixture.Plan(Fixture.Policy());
+        var result = new EvidenceProducerResult(
+            ProducerId, EvidenceProducerOutcome.Failed, [], new string('a', EvidenceCanonicalJson.MaximumInputBytes));
+        var manifest = EvidenceManifestBuilder.Build(plan, [result]);
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
+            workflow.WriteManifestAsync(manifest, output, CancellationToken.None));
+
+        Assert.Equal("ASEVD217", exception.Code);
+        Assert.Contains("generated Evidence manifest", exception.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
     }
 
     [Fact]
@@ -141,6 +218,8 @@ public sealed class EvidenceRunTestProducerTests
         Assert.Contains("  tests/A/A.csproj | filter: FullyQualifiedName~A | minimumTests: 7", output, StringComparison.Ordinal);
         Assert.Contains(TestEvidenceRunSupport.PreviewLine, output, StringComparison.Ordinal);
         using var summary = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Output, "evidence-summary.json")));
+        Assert.Equal(new[] { "kind", "profile", "scope", "matchedRules", "obligations", "testProducers", "next" },
+            summary.RootElement.EnumerateObject().Select(static property => property.Name));
         var producer = summary.RootElement.GetProperty("testProducers")[0];
         Assert.Equal(ProducerId, producer.GetProperty("id").GetString());
         Assert.True(producer.GetProperty("preview").GetBoolean());
@@ -184,6 +263,18 @@ public sealed class EvidenceRunTestProducerTests
         var distinct = plan with { Profile = profile with { Producers = [profile.Producers[0], profile.Producers[2]] } };
         TestEvidenceRunSupport.ValidateSelection(distinct);
         Assert.Throws<ArgumentNullException>(() => TestEvidenceRunSupport.ValidateSelection(null!));
+    }
+
+    [Fact]
+    public void ValidateReuseContext_ShouldRequireFreshExecutionForThePreviewProducer()
+    {
+        var plan = Fixture.Plan(Fixture.Policy());
+
+        var exception = Assert.Throws<CommandException>(() =>
+            EvidenceReuseCommandOptions.ValidateContext(true, plan, _ => null));
+
+        Assert.Contains("reuse.test_preview_requires_fresh", exception.Message, StringComparison.Ordinal);
+        EvidenceReuseCommandOptions.ValidateContext(false, plan, _ => null);
     }
 
     [Fact]
@@ -480,6 +571,19 @@ public sealed class EvidenceRunTestProducerTests
         }
 
         public static EvidencePlan Plan(EvidencePolicy policy) => new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("scripts/build.sh")]);
+
+        public Task WritePolicyNearPlanSizeLimitAsync(int margin)
+        {
+            var policy = Policy();
+            var profile = Assert.Single(policy.Profiles);
+            var obligation = Assert.Single(profile.Obligations);
+            // The plan carries this text in the selected profile and in the policy snapshot.
+            var rationale = new string('a', EvidenceCanonicalJson.MaximumInputBytes / 2 + margin);
+            var sizedProfile = profile with { Obligations = [obligation with { Rationale = rationale }] };
+            var json = EvidenceCanonicalJson.Serialize(policy with { Profiles = [sizedProfile] });
+            Assert.True(json.Length < EvidenceCanonicalJson.MaximumInputBytes);
+            return File.WriteAllBytesAsync(PolicyPath, json);
+        }
 
         public async Task RunAsync()
         {

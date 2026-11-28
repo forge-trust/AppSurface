@@ -158,12 +158,15 @@ public sealed class RazorWireDialogPlaywrightTests
     [Fact]
     public async Task InlineFormFallback_ThenStreamOpenKeepsIdsAndValidationSeparate()
     {
-        await using var context = await _fixture.Browser.NewContextAsync();
+        await using var context = await _fixture.CreateFunctionalRuntimeContextAsync();
         var page = await context.NewPageAsync();
         await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
         await page.Locator($"form[action*='{SaveDialogPath}']").EvaluateAsync("form => form.dataset.turbo = 'false'");
-        await OpenSaveDialogAsync(page);
-        await page.WaitForURLAsync($"**{SaveDialogPath}");
+        // Wait for the fallback document and its scripts without depending on decorative resource loads.
+        var fallbackNavigation = page.WaitForURLAsync(
+            $"{_fixture.BaseUrl}{SaveDialogPath}",
+            new PageWaitForURLOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await Task.WhenAll(fallbackNavigation, OpenSaveDialogAsync(page));
         var inlineForm = page.Locator("section[aria-labelledby='inline-dialog-form-heading'] form");
         await inlineForm.Locator("input[name=Name]").FillAsync("Inline Reader");
         var inlineErrors = await inlineForm.Locator("[data-rw-form-errors]").InnerTextAsync();
@@ -390,11 +393,10 @@ public sealed class RazorWireDialogPlaywrightTests
     [Fact]
     public async Task DialogStatusAndCompleteDialog_UseFullHtmlFallbackWhenJavaScriptIsDisabled()
     {
-        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        await using var context = await _fixture.CreateFunctionalRuntimeContextAsync(new BrowserNewContextOptions
         {
             JavaScriptEnabled = false
         });
-        await RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync(context);
         var page = await context.NewPageAsync();
         await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
 

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.AppSurface.Evidence.Aspire" Version="[CANDIDATE_VERSION]" />
+    <PackageReference Include="ForgeTrust.AppSurface.Evidence.Contracts" Version="[CANDIDATE_VERSION]" />
+    <PackageReference Include="ForgeTrust.AppSurface.Evidence.Planner" Version="[CANDIDATE_VERSION]" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>

@@ -10,14 +10,6 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed class PackageChecksProducer : IEvidenceProducer
 {
     private const string ProducerId = "package-checks";
-    private const string OutputDirectoryName = ProducerId;
-    private const string ReportDirectoryName = "artifacts";
-    private const string ArtifactManifestName = "package-artifact-manifest.json";
-    private const string ValidationReportName = "package-validation-report.md";
-    private const string Gate = "gate";
-    private const string Verify = "verify";
-    private const string VerifyPackages = "verify-packages";
-    private const string LogExtension = ".log";
     private const int MaxProofBytes = 2 * 1024 * 1024;
     private static readonly string[] AssertionIds =
     [
@@ -41,24 +33,6 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
     /// <inheritdoc />
     public string Id => ProducerId;
 
-    /// <summary>Selects package diagnostics from a slash-normalized path in the repository proof directory.</summary>
-    internal static bool RetainsLocalDiagnostic(string proofRelativePath)
-    {
-        const string prefix = OutputDirectoryName + "/";
-        if (!proofRelativePath.StartsWith(prefix, StringComparison.Ordinal))
-            return false;
-
-        var path = proofRelativePath[prefix.Length..];
-        if (path == Gate + LogExtension || path == Verify + LogExtension || path == VerifyPackages + LogExtension)
-            return true;
-
-        const string reportPrefix = ReportDirectoryName + "/";
-        if (!path.StartsWith(reportPrefix, StringComparison.Ordinal))
-            return false;
-        var report = path[reportPrefix.Length..];
-        return !report.Contains('/') && (report == ArtifactManifestName || report.EndsWith(".md", StringComparison.Ordinal));
-    }
-
     /// <summary>Runs the package gate, generated-documentation verification and isolated package validation.</summary>
     public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
     {
@@ -66,11 +40,11 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
         if (context.Producer.Id != ProducerId) return Failure("Package-checks declaration mismatch.");
 
         var output = Path.GetFullPath(_settings.OutputDirectory);
-        var packageOutput = PathUtils.PathUnder(output, OutputDirectoryName);
+        var packageOutput = PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.PackageChecksDirectoryName);
         var cache = _settings.PackageRestoreCache ?? PathUtils.PathUnder(packageOutput, "nuget-packages");
-        var artifacts = PathUtils.PathUnder(packageOutput, ReportDirectoryName);
-        var manifestPath = PathUtils.PathUnder(artifacts, ArtifactManifestName);
-        var reportPath = PathUtils.PathUnder(artifacts, ValidationReportName);
+        var artifacts = PathUtils.PathUnder(packageOutput, RepositoryEvidenceOutputLayout.ArtifactsDirectoryName);
+        var manifestPath = PathUtils.PathUnder(artifacts, RepositoryEvidenceOutputLayout.PackageArtifactManifestFileName);
+        var reportPath = Path.Join(artifacts, "package-validation-report.md");
         var version = "0.0.0-evidence." + Guid.NewGuid().ToString("N");
         var commands = new List<CommandEvidence>();
         var stage = "settings";
@@ -83,31 +57,31 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
             var environment = new Dictionary<string, string>(_settings.CommandEnvironment, StringComparer.Ordinal) { ["NUGET_PACKAGES"] = cache };
             var project = Path.Join(_settings.RepositoryRoot, "tools", "ForgeTrust.AppSurface.PackageIndex", "ForgeTrust.AppSurface.PackageIndex.csproj");
 
-            stage = Gate;
+            stage = RepositoryEvidenceOutputLayout.PackageGateStageName;
             await RunAsync(stage, ["run", "--project", project, "--configuration", "Release",
-                "--property:RestoreConfigFile=" + PathUtils.PathUnder(_settings.RepositoryRoot, "NuGet.package-gate.config"), "--", stage], environment, commands, cancellationToken).ConfigureAwait(false);
-            stage = Verify;
-            await RunAsync(stage, ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", stage], environment, commands, cancellationToken).ConfigureAwait(false);
-            stage = VerifyPackages;
-            await RunAsync(stage, ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", stage,
+                "--property:RestoreConfigFile=" + Path.Join(_settings.RepositoryRoot, "NuGet.package-gate.config"), "--", "gate"], environment, commands, cancellationToken).ConfigureAwait(false);
+            stage = RepositoryEvidenceOutputLayout.PackageVerifyStageName;
+            await RunAsync(stage, ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", "verify"], environment, commands, cancellationToken).ConfigureAwait(false);
+            stage = RepositoryEvidenceOutputLayout.PackageVerifyPackagesStageName;
+            await RunAsync(stage, ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", "verify-packages",
                 "--package-version", version, "--artifacts-output", artifacts, "--artifact-manifest", manifestPath, "--report", reportPath],
                 environment, commands, cancellationToken).ConfigureAwait(false);
 
-            var manifest = await ReadBoundedAsync(manifestPath, cancellationToken).ConfigureAwait(false);
-            var report = await ReadBoundedAsync(reportPath, cancellationToken).ConfigureAwait(false);
+            var manifest = ReadProof(manifestPath, cancellationToken);
+            var report = ReadProof(reportPath, cancellationToken);
             ValidateManifest(manifest, version);
             ValidateReport(report, version);
             await VerifyArchivesAsync(manifest, artifacts, cancellationToken).ConfigureAwait(false);
             if (context.Artifacts is null) return Failure("Package-checks producer has no artifact writer.");
 
-            await context.Artifacts.WriteAsync("package-manifest", "proof/" + ArtifactManifestName, manifest, cancellationToken).ConfigureAwait(false);
-            await context.Artifacts.WriteAsync("package-report", "proof/" + ValidationReportName, report, cancellationToken).ConfigureAwait(false);
+            await context.Artifacts.WriteAsync("package-manifest", "proof/" + RepositoryEvidenceOutputLayout.PackageArtifactManifestFileName, manifest, cancellationToken).ConfigureAwait(false);
+            await context.Artifacts.WriteAsync("package-report", "proof/package-validation-report.md", report, cancellationToken).ConfigureAwait(false);
             var resultBytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
                 completed = true,
                 packageVersion = version,
-                artifactManifestSha256 = Hash(manifest),
-                validationReportSha256 = Hash(report),
+                artifactManifestSha256 = Hash(manifest.Span),
+                validationReportSha256 = Hash(report.Span),
                 commands,
                 assertions = AssertionIds,
             });
@@ -125,8 +99,7 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
                 artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
                     [("result", bytes), ("transcript", JsonSerializer.SerializeToUtf8Bytes(commands))]).ConfigureAwait(false);
             }
-            var commandDiagnostic = exception is EvidenceCommandException { CleanupUnconfirmed: true }
-                ? " Command cleanup could not be confirmed." : string.Empty;
+            var commandDiagnostic = RepositoryCommandSettlement.IsUnconfirmedCleanup(exception) ? " cleanup_failed." : string.Empty;
             return Failure($"Package checks failed at {stage}." + commandDiagnostic + artifactDiagnostic);
         }
     }
@@ -139,7 +112,7 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
         var result = await _command(request, cancellationToken).ConfigureAwait(false);
         commands.Add(new CommandEvidence(name, result.ExitCode, result.ElapsedMilliseconds, result.OutputTruncated,
             HashText(result.StandardOutput), HashText(result.StandardError)));
-        await File.WriteAllTextAsync(PathUtils.PathUnder(_settings.OutputDirectory, OutputDirectoryName, name + LogExtension),
+        await File.WriteAllTextAsync(RepositoryEvidenceOutputLayout.PackageCheckLogPath(_settings.OutputDirectory, name),
             result.StandardOutput + "\n" + result.StandardError, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.OutputTruncated) throw new InvalidOperationException("Package command did not complete successfully.");
     }
@@ -157,14 +130,14 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
         if (Directory.Exists(packageOutput) || File.Exists(packageOutput)) throw new InvalidOperationException("Package-check output must be fresh.");
     }
 
-    private static async Task<byte[]> ReadBoundedAsync(string path, CancellationToken cancellationToken)
+    private static ReadOnlyMemory<byte> ReadProof(string path, CancellationToken cancellationToken)
     {
         var info = new FileInfo(path);
-        if (!info.Exists || info.Length is <= 0 or > MaxProofBytes) throw new InvalidDataException("Package proof missing or outside byte bounds.");
-        return await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        if (!info.Exists || info.Length <= 0) throw new InvalidDataException("Package proof missing or outside byte bounds.");
+        return ValidationProof.ReadBoundedFile(path, MaxProofBytes, cancellationToken);
     }
 
-    private static void ValidateManifest(byte[] bytes, string version)
+    private static void ValidateManifest(ReadOnlyMemory<byte> bytes, string version)
     {
         using var document = JsonDocument.Parse(bytes);
         var root = document.RootElement;
@@ -174,15 +147,15 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
             throw new InvalidDataException("Package artifact manifest did not validate expected version and entries.");
     }
 
-    private static void ValidateReport(byte[] bytes, string version)
+    private static void ValidateReport(ReadOnlyMemory<byte> bytes, string version)
     {
-        var report = System.Text.Encoding.UTF8.GetString(bytes);
+        var report = System.Text.Encoding.UTF8.GetString(bytes.Span);
         if (!report.Contains(version, StringComparison.Ordinal) || !report.Contains("Package", StringComparison.OrdinalIgnoreCase)
             || report.Contains("validation failed", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Package validation report did not describe a successful versioned run.");
     }
 
-    private static async Task VerifyArchivesAsync(byte[] bytes, string artifacts, CancellationToken cancellationToken)
+    private static async Task VerifyArchivesAsync(ReadOnlyMemory<byte> bytes, string artifacts, CancellationToken cancellationToken)
     {
         using var manifest = JsonDocument.Parse(bytes);
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -208,7 +181,7 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
         return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
-    private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    private static string Hash(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     private static string HashText(string value) => Hash(System.Text.Encoding.UTF8.GetBytes(value));
     private static EvidenceProducerResult Failure(string diagnostic) => new(ProducerId, EvidenceProducerOutcome.Failed, [], diagnostic);
     private sealed record CommandEvidence(string Stage, int ExitCode, long ElapsedMilliseconds, bool OutputTruncated, string StdoutSha256, string StderrSha256);

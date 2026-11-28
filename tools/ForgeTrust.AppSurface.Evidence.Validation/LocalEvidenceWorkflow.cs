@@ -17,21 +17,21 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed class LocalEvidenceWorkflow
 {
     private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _command;
-    private readonly Func<IReadOnlyDictionary<string, string>, CancellationToken, Task<EvidenceManifest>>? _workflow;
+    private readonly Func<IReadOnlyDictionary<string, string>, CancellationToken, RepositoryEvidenceWorkflow.LocalExecutionContext, Task<EvidenceManifest>> _workflow;
 
     /// <summary>
-    /// Creates local orchestration. Tests may replace the package command or producer execution while planning
+    /// Creates local orchestration. Tests may replace the package command or the execution operation while planning
     /// and final manifest and artifact verification continue through the repository workflow.
     /// </summary>
     /// <param name="command">Optional bounded seam for creating the candidate package.</param>
-    /// <param name="workflow">Optional test producer execution that writes artifacts and returns an unpublished manifest.</param>
+    /// <param name="workflow">Optional replacement for repository execution. It receives the same local services as the default executor.</param>
     internal LocalEvidenceWorkflow(
         Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>>? command = null,
-        Func<IReadOnlyDictionary<string, string>, CancellationToken, Task<EvidenceManifest>>? workflow = null)
+        Func<IReadOnlyDictionary<string, string>, CancellationToken, RepositoryEvidenceWorkflow.LocalExecutionContext, Task<EvidenceManifest>>? workflow = null)
     {
         var runner = new EvidenceCommandRunner();
         _command = command ?? runner.RunAsync;
-        _workflow = workflow;
+        _workflow = workflow ?? RepositoryEvidenceWorkflow.RunLocalAsync;
     }
 
     /// <summary>Plans or executes current local changes and returns zero only for successful verification or an empty inventory.</summary>
@@ -42,13 +42,10 @@ internal sealed class LocalEvidenceWorkflow
         var operation = options.GetValueOrDefault("--operation");
         if (operation is not ("local" or "local-plan")) throw new ArgumentException("Expected local or local-plan.");
         var repository = Path.GetFullPath(options.GetValueOrDefault("--repository", Directory.GetCurrentDirectory()));
-        var explicitOutput = options.TryGetValue("--output", out var output) ? Path.GetFullPath(output) : null;
         cancellationToken.ThrowIfCancellationRequested();
+        var explicitOutput = options.TryGetValue("--output", out var output) ? Path.GetFullPath(output) : null;
         if (operation == "local-plan" && explicitOutput is not null)
-        {
-            await RunFreshAsync(options, repository, operation, new LocalEvidenceRun(explicitOutput, null), cancellationToken);
-            return 0;
-        }
+            return await RunFreshAsync(options, repository, operation, explicitOutput, new(null), cancellationToken);
 
         if (!Path.Exists(PathUtils.PathUnder(repository, ".git")))
             throw new ArgumentException("Local evidence requires a Git worktree root.");
@@ -56,65 +53,72 @@ internal sealed class LocalEvidenceWorkflow
         if (!Path.IsPathFullyQualified(gitDirectory))
             throw new ArgumentException("Local evidence requires an absolute worktree Git directory.");
         return await LocalEvidenceOutput.RunAsync(repository, operation, gitDirectory,
-            run => RunFreshAsync(options, repository, operation, run, cancellationToken), explicitOutput);
+            (scratch, managedRun) => RunFreshAsync(options, repository, operation, scratch, managedRun, cancellationToken), explicitOutput);
     }
 
-    private async Task<LocalEvidenceRunResult?> RunFreshAsync(
-        IReadOnlyDictionary<string, string> options, string repository, string operation,
-        LocalEvidenceRun localRun, CancellationToken cancellationToken)
+    private async Task<int> RunFreshAsync(IReadOnlyDictionary<string, string> options, string repository, string operation,
+        string output, LocalEvidenceOutput.ManagedRun managedRun, CancellationToken cancellationToken)
     {
-        var output = localRun.OutputDirectory;
         var policy = Path.GetFullPath(options.GetValueOrDefault("--policy", PathUtils.PathUnder(repository, ".github", "evidence.policy.json")));
         var baseRevision = options.GetValueOrDefault("--base", "origin/main");
         if (Path.Exists(output)) throw new ArgumentException("Evidence output must be fresh.");
         var git = new RepositoryGitChanges();
         var changes = await git.CollectLocalAsync(repository, baseRevision, cancellationToken);
-        var policySnapshot = await File.ReadAllBytesAsync(policy, cancellationToken);
-        var policyDigest = EvidenceDigest.Sha256(policySnapshot);
+        var policySnapshot = ValidationProof.ReadBoundedFile(policy, EvidenceCanonicalJson.MaximumInputBytes, cancellationToken);
+        var policyDigest = EvidenceDigest.Sha256(policySnapshot.Span);
         Directory.CreateDirectory(output);
         if (options.ContainsKey("--output"))
             Console.WriteLine("Local evidence output: " + output);
-        var paths = PathUtils.PathUnder(output, RepositoryEvidenceLayout.ChangedPathsFile);
+        var paths = PathUtils.PathUnder(output, "changed-paths.json");
         var pathsBytes = EvidenceCanonicalJson.Serialize(changes.Paths);
         await File.WriteAllBytesAsync(paths, pathsBytes, cancellationToken);
-        await File.WriteAllTextAsync(PathUtils.PathUnder(output, RepositoryEvidenceLayout.SourceStateFile), JsonSerializer.Serialize(changes, Program.JsonOptions), cancellationToken);
+        await File.WriteAllTextAsync(PathUtils.PathUnder(output, "source-state.json"), JsonSerializer.Serialize(changes, Program.JsonOptions), cancellationToken);
         if (changes.Paths.Count == 0)
         {
             Console.WriteLine("No local changes relative to the selected base; no evidence collected.");
-            await File.WriteAllTextAsync(PathUtils.PathUnder(output, RepositoryEvidenceLayout.SummaryFile), "No changed paths. No evidence claim was produced.\n", cancellationToken);
-            return null;
+            await File.WriteAllTextAsync(PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.SummaryFileName),
+                "No changed paths. No evidence claim was produced.\n", cancellationToken);
+            managedRun.SkipArchive = true;
+            return 0;
         }
 
         // Preserve checked-in rules/contracts while binding dirty local content into the canonical
         // plan and manifest. HEAD remains package metadata, not the complete local identity.
-        var localPolicy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(policySnapshot);
+        var localPolicy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(policySnapshot.Span);
         localPolicy = localPolicy with { Id = localPolicy.Id + "-local-" + changes.SourceDigest };
-        var resolvedPolicy = PathUtils.PathUnder(output, RepositoryEvidenceLayout.LocalPolicyFile);
+        var resolvedPolicy = PathUtils.PathUnder(output, "local-policy.json");
         var policyBytes = EvidenceCanonicalJson.Serialize(localPolicy);
         await File.WriteAllBytesAsync(resolvedPolicy, policyBytes, cancellationToken);
-        LocalEvidenceReplayInput[] replayInputs =
-        [
-            LocalEvidenceReplayInput.Snapshot(RepositoryEvidenceLayout.ChangedPathsFile, pathsBytes),
-            LocalEvidenceReplayInput.Snapshot(RepositoryEvidenceLayout.LocalPolicyFile, policyBytes),
-        ];
+        var replayInputs = new Dictionary<string, LocalEvidenceOutput.ArchiveEntry>(StringComparer.Ordinal)
+        {
+            ["changed-paths.json"] = LocalEvidenceOutput.ArchiveEntry.Snapshot(pathsBytes),
+            ["local-policy.json"] = LocalEvidenceOutput.ArchiveEntry.Snapshot(policyBytes),
+        };
 
+        var planDirectory = PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.PlanDirectoryName);
         var common = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["--policy"] = resolvedPolicy,
             ["--changed-paths"] = paths,
             ["--operation"] = "plan",
-            ["--output"] = PathUtils.PathUnder(output, RepositoryEvidenceLayout.PlanDirectory),
+            ["--output"] = planDirectory,
             ["--scope"] = options.GetValueOrDefault("--scope", "all"),
         };
         await RepositoryEvidenceWorkflow.RunAsync(common, cancellationToken);
-        var planPath = PathUtils.PathUnder(output, RepositoryEvidenceLayout.PlanDirectory, RepositoryEvidenceLayout.PlanFile);
+        var planPath = PathUtils.PathUnder(planDirectory, RepositoryEvidenceOutputLayout.PlanFileName);
         var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(planPath, cancellationToken));
-        if (operation == "local-plan") return new(plan, null, replayInputs);
+        if (operation == "local-plan")
+        {
+            managedRun.VerifyPublication(plan, replayInputs, null);
+            return 0;
+        }
 
         // Pin the resolved base, not a moving branch name, when checking for edits during collection.
-        var verifySourceAsync = localRun.TrackSourceVerification(token => RequireUnchangedAsync(git, repository, changes, policy, policyDigest, token));
-        await verifySourceAsync(cancellationToken);
-        var proof = PathUtils.PathUnder(output, RepositoryEvidenceLayout.ProofDirectory);
+        var verifySource = managedRun.Settlement.TrackSourceCheck(
+            token => RequireUnchangedAsync(git, repository, changes, policy, policyDigest, token));
+        var execution = new RepositoryEvidenceWorkflow.LocalExecutionContext(verifySource, managedRun);
+        await execution.VerifySourceAsync(cancellationToken);
+        var proof = PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ProofDirectoryName);
         common["--operation"] = "run";
         common["--output"] = proof;
         common["--plan"] = planPath;
@@ -126,17 +130,17 @@ internal sealed class LocalEvidenceWorkflow
             common["--diff-base"] = changes.BaseCommit;
             if (plan.Profile.Producers.Any(producer => producer.Id == "solution-coverage"))
             {
-                var patch = PathUtils.PathUnder(output, RepositoryEvidenceLayout.PatchFile);
+                var patch = PathUtils.PathUnder(output, "changed.patch");
                 await git.WriteLocalPatchAsync(repository, changes.BaseCommit, changes.Paths, patch, cancellationToken);
                 common["--diff-file"] = patch;
             }
             if (RepositoryEvidenceWorkflow.RequiresPackage(plan.Profile))
             {
                 var version = "0.0.0-local." + Guid.NewGuid().ToString("N");
-                var feed = Path.Join(output, "feed");
-                var package = Path.Join(feed, "ForgeTrust.AppSurface.Cli." + version + ".nupkg");
+                var feed = PathUtils.PathUnder(output, "feed");
+                var package = PathUtils.PathUnder(feed, "ForgeTrust.AppSurface.Cli." + version + ".nupkg");
                 var request = new EvidenceCommandRequest(dotnet,
-                    ["pack", Path.Join(repository, "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"),
+                    ["pack", PathUtils.PathUnder(repository, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"),
                     "--configuration", "Release", "--output", feed, "/p:RestoreLockedMode=true", "/p:PackageVersion=" + version,
                     "/p:RepositoryCommit=" + changes.HeadCommit, "/p:SourceRevisionId=" + changes.HeadCommit],
                     repository, TimeSpan.FromMinutes(10))
@@ -144,10 +148,10 @@ internal sealed class LocalEvidenceWorkflow
                     MaximumOutputBytes = 4 * 1024 * 1024,
                     Environment = new RepositoryCheckSettings(repository, dotnet, output).CommandEnvironment,
                 };
-                var result = await _command(request, cancellationToken);
-                await File.WriteAllTextAsync(PathUtils.PathUnder(output, RepositoryEvidenceLayout.PackageBuildLog), result.StandardOutput + "\n" + result.StandardError, cancellationToken);
+                var result = await managedRun.Settlement.Track(_command)(request, cancellationToken);
+                await File.WriteAllTextAsync(PathUtils.PathUnder(output, "package-build.log"), result.StandardOutput + "\n" + result.StandardError, cancellationToken);
                 ValidationProof.Require(result.ExitCode == 0 && !result.OutputTruncated && File.Exists(package), "local candidate package build");
-                await verifySourceAsync(cancellationToken);
+                await execution.VerifySourceAsync(cancellationToken);
                 common["--package"] = package;
                 common["--version"] = version;
                 common["--source-commit"] = changes.HeadCommit;
@@ -156,18 +160,11 @@ internal sealed class LocalEvidenceWorkflow
                 common["--scratch-parent"] = Path.GetTempPath();
             }
         }
-        EvidenceManifest manifest;
-        if (_workflow is null)
-        {
-            manifest = await RepositoryEvidenceWorkflow.RunLocalAsync(common, cancellationToken, verifySourceAsync, localRun);
-        }
-        else
-        {
-            manifest = await _workflow(common, cancellationToken);
-            await RepositoryEvidenceWorkflow.FinalizeLocalManifestAsync(plan, manifest, proof, verifySourceAsync, localRun, cancellationToken);
-        }
+        var manifest = await _workflow(common, cancellationToken, execution);
+        await RepositoryEvidenceWorkflow.FinalizeLocalManifestAsync(plan, manifest, proof, execution, cancellationToken);
+        managedRun.VerifyPublication(plan, replayInputs, manifest);
         Console.WriteLine($"Local evidence gate passed: {manifest.ClaimKind}. This run covers the current OS; CI requires its native matrix.");
-        return new(plan, manifest, replayInputs);
+        return 0;
     }
 
     private static async Task RequireUnchangedAsync(RepositoryGitChanges git, string repository, RepositoryChangeSet original,
@@ -175,7 +172,7 @@ internal sealed class LocalEvidenceWorkflow
     {
         var current = await git.CollectLocalAsync(repository, original.BaseCommit, cancellationToken);
         ValidationProof.Require(current.SourceDigest == original.SourceDigest
-            && EvidenceDigest.Sha256(await File.ReadAllBytesAsync(policy, cancellationToken)) == policyDigest,
+            && await ValidationProof.HashAsync(policy, cancellationToken) == policyDigest,
             "local source or policy changed during evidence; rerun from the new source state");
     }
 

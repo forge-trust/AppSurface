@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -326,6 +327,42 @@ public sealed class NativeConsumerContractTests
     }
 
     [Fact]
+    public async Task ProduceAsync_OptionalGitStatusCleanupFailureRetainsWorkspaceWithoutGrantingAssertions()
+    {
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var parent = Directory.CreateTempSubdirectory("appsurface-native-git-cleanup-failure-").FullName;
+        try
+        {
+            var commandCount = 0;
+            Task<EvidenceCommandResult> FailGitStatus(EvidenceCommandRequest request, CancellationToken _)
+            {
+                commandCount++;
+                Assert.Equal("git", request.FileName);
+                Assert.Equal(["status", "--porcelain", "--untracked-files=all"], request.Arguments);
+                return Task.FromException<EvidenceCommandResult>(
+                    new EvidenceCommandException(EvidenceCommandException.CleanupFailedCode, "child cleanup was not confirmed"));
+            }
+
+            var settings = Settings(root, parent);
+            var producer = new InstalledConsumerProducer(settings, FailGitStatus);
+
+            var result = await producer.ProduceAsync(Context(Declaration(producer.Id)), CancellationToken.None);
+
+            Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+            Assert.Contains(EvidenceCommandException.CleanupFailedCode, result.Diagnostic, StringComparison.Ordinal);
+            Assert.Empty(result.SatisfiedAssertionIds);
+            Assert.Equal(1, commandCount);
+            var workspace = Assert.Single(Directory.EnumerateDirectories(parent, "evidence-workspace-*"));
+
+            var cleanup = await Assert.ThrowsAsync<EvidenceCommandException>(() => producer.DisposeAsync().AsTask());
+
+            Assert.True(cleanup.CleanupUnconfirmed);
+            Assert.True(Directory.Exists(workspace));
+        }
+        finally { NativeEvidenceTestDirectory.Delete(parent); }
+    }
+
+    [Fact]
     public async Task ExternalProfile_WithDirtyRealGitFixture_IsRejectedBeforeCandidateJourney()
     {
         var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
@@ -425,6 +462,45 @@ public sealed class NativeConsumerContractTests
 
             File.WriteAllText(Path.Join(root, "coverage-gate.json"), GateJson(patch: false));
             InstalledConsumerProducer.ValidateGateReportForTests(root, hasPatch: false);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("refs/remotes/origin/main")]
+    public void GateArgumentsSupplyOverallAndOptionalPatchPolicy(string? diffBase)
+    {
+        var output = TestPathUtils.PathUnder(Path.GetTempPath(), "managed-coverage");
+        var expected = new List<string>
+        {
+            "coverage", "gate", "--coverage", TestPathUtils.PathUnder(output, "coverage.cobertura.xml"), "--output", output,
+            "--min-line", "95", "--min-branch", "85", "--tolerance", "0", "--no-github-summary",
+        };
+        if (diffBase is not null)
+            expected.AddRange(["--diff-base", diffBase, "--min-patch-line", "95", "--min-patch-branch", "85"]);
+
+        Assert.Equal(expected, InstalledConsumerProducer.BuildGateArguments(output, diffBase));
+    }
+
+    [Theory]
+    [InlineData("thresholds", "line", 94, false, "coverage gate thresholds")]
+    [InlineData("effectiveThresholds", "branch", 84, false, "coverage gate effective thresholds")]
+    [InlineData("thresholds", "patchLine", 94, true, "patch gate thresholds")]
+    [InlineData("effectiveThresholds", "patchBranch", 84, true, "patch gate effective thresholds")]
+    public void GateReportContract_RejectsMismatchedThresholds(string section, string metric, int value, bool hasPatch, string diagnostic)
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-gate-contract-").FullName;
+        try
+        {
+            var gate = JsonNode.Parse(GateJson(patch: hasPatch))!;
+            gate[section]![metric] = value;
+            File.WriteAllText(TestPathUtils.PathUnder(root, "coverage-gate.json"), gate.ToJsonString());
+
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                InstalledConsumerProducer.ValidateGateReportForTests(root, hasPatch));
+
+            Assert.Equal(ValidationProof.ContractFailurePrefix + diagnostic, exception.Message);
         }
         finally { Directory.Delete(root, recursive: true); }
     }

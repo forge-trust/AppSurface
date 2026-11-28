@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,6 +16,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     private const string ProducerId = "installed-consumer";
     private const string PackageId = "ForgeTrust.AppSurface.Cli";
     private const string CliAssembly = "ForgeTrust.AppSurface.Cli.dll";
+    private static readonly EvidenceCoverageGateRequirements GateRequirements = new(95, 85, 95, 85, TolerancePercent: 0);
     private static readonly string[] AssertionIds =
     [
         "consumer/package-identity@1",
@@ -24,8 +26,9 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     ];
 
     private readonly ValidationSettings _settings;
-    private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _runCommand;
-    private readonly NativeProducerWorkspace _scratch = new();
+    private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _command;
+    private NativeProducerWorkspace? _workspace;
+    private int _disposed;
     private string? _settingsHash;
     private List<CommandSummary> _commandSummaries = [];
     private string _stageDetail = "";
@@ -33,12 +36,20 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     private string _lastOutput = "";
     private string _lastError = "";
 
-    /// <summary>Creates an installed-consumer producer with immutable settings and an optional command runner.</summary>
-    public InstalledConsumerProducer(ValidationSettings settings,
-        Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>>? runCommand = null)
+    /// <summary>Creates an installed-consumer producer with immutable caller settings.</summary>
+    public InstalledConsumerProducer(ValidationSettings settings, EvidenceCommandRunner? runner = null)
+        : this(settings, (runner ?? new EvidenceCommandRunner()).RunAsync)
+    {
+    }
+
+    /// <summary>Creates the producer with the repository workflow's command runner.</summary>
+    /// <param name="settings">The immutable consumer validation settings.</param>
+    /// <param name="command">The bounded command runner, optionally observed for local scratch retention.</param>
+    internal InstalledConsumerProducer(ValidationSettings settings,
+        Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> command)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _runCommand = runCommand ?? new EvidenceCommandRunner().RunAsync;
+        _command = command ?? throw new ArgumentNullException(nameof(command));
     }
 
     /// <summary>Gets the stable producer identifier.</summary>
@@ -62,7 +73,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             _commandSummaries = [];
             _stageDetail = "";
             _lastExitCode = null;
-            _scratch.Create(
+            _workspace = NativeProducerWorkspace.Create(
                 _settings.ScratchParent,
                 new EvidenceWorkspaceOptions(_settings.MaximumScratchBytes, _settings.MinimumFreeBytes));
             var budget = new Func<CancellationToken, ValueTask>(_ => CheckBudgetAsync());
@@ -111,7 +122,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
         catch (EvidenceCommandException exception)
         {
-            _scratch.RecordCommandFailure(exception);
+            _workspace?.RecordCommandFailure(exception);
             return Failure($"The installed-consumer command journey did not complete/{exception.Code}.", stopwatch.ElapsedMilliseconds);
         }
         catch (Exception exception) when (IsContractFailure(exception))
@@ -119,7 +130,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             var exitDetail = _lastExitCode is { } exitCode ? $"/exit-{exitCode}" : "";
             if (context.Artifacts is not null)
             {
-                var root = _scratch.Current?.RootPath ?? "";
+                var root = _workspace?.RootPath ?? "";
                 string Safe(string value) => RedactAndBoundDiagnostic(value, root);
                 await context.Artifacts.WriteAsync("result", "proof/result.json", JsonSerializer.SerializeToUtf8Bytes(new
                 {
@@ -136,8 +147,16 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
     }
 
-    /// <summary>Disposes settled scratch or reports an unsettled command to the supervisor.</summary>
-    public ValueTask DisposeAsync() => _scratch.DisposeAsync();
+    /// <summary>Disposes the producer-owned workspace so host cleanup is part of the claim.</summary>
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0 || _workspace is null)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return _workspace.DisposeAsync();
+    }
 
     private async Task<SourceSnapshot> PrepareSourceAsync(ConsumerValidationOptions options, Func<CancellationToken, ValueTask> budget, CancellationToken cancellationToken)
     {
@@ -166,15 +185,14 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
 
         var beforeHash = await HashTrackedFilesAsync(sourceDirectory, budget, cancellationToken).ConfigureAwait(false);
-        var workspace = _scratch.Current!;
-        var destination = PathUtils.PathUnder(workspace.RootPath, "consumer");
+        var destination = Path.Join(_workspace!.RootPath, "consumer");
         if (options.SourceDirectory is null)
         {
             CopyDirectory(sourceDirectory, destination);
         }
         else
         {
-            await RunCheckedAsync("git", ["clone", "--no-local", "--no-checkout", sourceDirectory, destination], workspace.RootPath, new Dictionary<string, string>(), budget, cancellationToken).ConfigureAwait(false);
+            await RunCheckedAsync("git", ["clone", "--no-local", "--no-checkout", sourceDirectory, destination], _workspace.RootPath, new Dictionary<string, string>(), budget, cancellationToken).ConfigureAwait(false);
             await RunCheckedAsync("git", ["checkout", "--detach", expectedCommit ?? originalCommit], destination, new Dictionary<string, string>(), budget, cancellationToken).ConfigureAwait(false);
         }
         var afterHash = await HashTrackedFilesAsync(destination, budget, cancellationToken).ConfigureAwait(false);
@@ -216,21 +234,20 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             ValidationProof.VerifyPackage(archive, _settings);
         }
 
-        var workspace = _scratch.Current!;
-        var toolPath = PathUtils.PathUnder(workspace.RootPath, "tool");
-        var cliHome = PathUtils.PathUnder(workspace.RootPath, "cli-home");
+        var toolPath = Path.Join(_workspace!.RootPath, "tool");
+        var cliHome = Path.Join(_workspace.RootPath, "cli-home");
         Directory.CreateDirectory(toolPath);
         Directory.CreateDirectory(cliHome);
         // Explicitly selected for installation only; a conventional NuGet.Config
         // here would also redirect the consumer's ordinary dependency restore.
-        var sourceConfig = PathUtils.PathUnder(workspace.RootPath, "NuGet.tool.config");
+        var sourceConfig = Path.Join(_workspace.RootPath, "NuGet.tool.config");
         await File.WriteAllTextAsync(sourceConfig, $"<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><packageSources><clear /><add key=\"candidate\" value=\"{SecurityElementEscape(Path.GetDirectoryName(packagePath)!)}\" /></packageSources></configuration>", cancellationToken).ConfigureAwait(false);
 
         // Keep tool installation's package graph private to this workspace, then
         // let the consumer's ordinary restore read the existing shared cache. The
         // package identity proof is anchored to the private .store and the exact
         // local feed above; the fixture dependencies do not need to be recopied.
-        var installEnvironment = BuildEnvironment(cliHome, PathUtils.PathUnder(workspace.RootPath, "nuget"));
+        var installEnvironment = BuildEnvironment(cliHome, Path.Join(_workspace.RootPath, "nuget"));
         var args = new List<string>
         {
             "tool", "install", PackageId, "--tool-path", toolPath,
@@ -275,7 +292,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         {
             var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var candidate = string.IsNullOrWhiteSpace(userProfile) ? "" : Path.Join(userProfile, ".nuget", "packages");
-            sharedNuGetCache = Directory.Exists(candidate) ? candidate : PathUtils.PathUnder(workspace.RootPath, "nuget");
+            sharedNuGetCache = Directory.Exists(candidate) ? candidate : Path.Join(_workspace.RootPath, "nuget");
         }
         var consumerEnvironment = BuildEnvironment(cliHome, sharedNuGetCache);
         return new PackageSnapshot(packageHash, archiveAssemblyHash, executable, consumerEnvironment);
@@ -319,16 +336,15 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private async Task<CoverageSnapshot> RunCoverageAsync(SourceSnapshot source, PackageSnapshot package, ConsumerValidationOptions options, Func<CancellationToken, ValueTask> budget, CancellationToken cancellationToken)
     {
-        var output = PathUtils.PathUnder(_scratch.Current!.RootPath, "coverage");
+        var output = Path.Join(_workspace!.RootPath, "coverage");
         var args = new List<string> { "coverage", "run", "--solution", source.SolutionPath, "--configuration", "Release", "--output", output, "--test-results", "junit", "--artifact-retention", "managed", "--no-progress-timeout", "10m" };
         foreach (var project in source.TestProjects) args.AddRange(["--test-project", project]);
         _stageDetail = "run";
         await RunCheckedAsync(package.Executable, args, source.Root, MergeEnvironment(package.Environment, options.Environment), budget, cancellationToken).ConfigureAwait(false);
 
-        var gateArgs = new List<string> { "coverage", "gate", "--coverage", Path.Join(output, "coverage.cobertura.xml"), "--output", output, "--min-line", "95", "--min-branch", "85", "--tolerance", "0", "--no-github-summary" };
-        if (options.DiffBase is not null) gateArgs.AddRange(["--diff-base", options.DiffBase, "--min-patch-line", "95", "--min-patch-branch", "85"]);
         _stageDetail = "gate";
-        await RunCheckedAsync(package.Executable, gateArgs, source.Root, MergeEnvironment(package.Environment, options.Environment), budget, cancellationToken).ConfigureAwait(false);
+        await RunCheckedAsync(package.Executable, BuildGateArguments(output, options.DiffBase), source.Root,
+            MergeEnvironment(package.Environment, options.Environment), budget, cancellationToken).ConfigureAwait(false);
 
         _stageDetail = "junit";
         var testCases = ReadJUnitReports(output, source.ExpectedProjectCount, cancellationToken);
@@ -389,7 +405,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private async ValueTask CheckBudgetAsync()
     {
-        _scratch.Current?.CheckBudget();
+        _workspace?.CheckBudget();
         await ValueTask.CompletedTask;
     }
 
@@ -463,7 +479,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private async Task<EvidenceCommandResult> RunCheckedAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IReadOnlyDictionary<string, string> environment, Func<CancellationToken, ValueTask> budget, CancellationToken cancellationToken)
     {
-        var result = await _runCommand(new EvidenceCommandRequest(fileName, arguments, workingDirectory, TimeSpan.FromMinutes(20)) { Environment = environment, MaximumOutputBytes = 4 * 1024 * 1024, CheckBudget = budget }, cancellationToken).ConfigureAwait(false);
+        var result = await _command(new EvidenceCommandRequest(fileName, arguments, workingDirectory, TimeSpan.FromMinutes(20)) { Environment = environment, MaximumOutputBytes = 4 * 1024 * 1024, CheckBudget = budget }, cancellationToken).ConfigureAwait(false);
         _commandSummaries.Add(new CommandSummary(
             Path.GetFileName(fileName),
             result.ExitCode,
@@ -485,7 +501,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     {
         try
         {
-            var result = await _runCommand(new EvidenceCommandRequest("git", args, directory, TimeSpan.FromMinutes(2)) { MaximumOutputBytes = 256 * 1024, CheckBudget = budget }, token).ConfigureAwait(false);
+            var result = await _command(new EvidenceCommandRequest("git", args, directory, TimeSpan.FromMinutes(2)) { MaximumOutputBytes = 256 * 1024, CheckBudget = budget }, token).ConfigureAwait(false);
             ValidationProof.Require(!result.OutputTruncated, "complete git output");
             if (result.ExitCode != 0 && !allowMissing) throw new InvalidDataException("Required source identity command failed.");
             return result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
@@ -615,20 +631,42 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         return path;
     }
 
+    /// <summary>Builds the installed CLI gate invocation from the policy used to verify its report.</summary>
+    /// <param name="output">The managed coverage directory containing the merged report.</param>
+    /// <param name="diffBase">The selected base for the optional patch gate.</param>
+    /// <returns>Ordered, culture-invariant CLI arguments.</returns>
+    internal static IReadOnlyList<string> BuildGateArguments(string output, string? diffBase)
+    {
+        static string Number(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+
+        var arguments = new List<string>
+        {
+            "coverage", "gate", "--coverage", PathUtils.PathUnder(output, "coverage.cobertura.xml"), "--output", output,
+            "--min-line", Number(GateRequirements.MinLinePercent), "--min-branch", Number(GateRequirements.MinBranchPercent),
+            "--tolerance", Number(GateRequirements.TolerancePercent), "--no-github-summary",
+        };
+        if (diffBase is not null)
+            arguments.AddRange(["--diff-base", diffBase, "--min-patch-line", Number(GateRequirements.MinPatchLinePercent!.Value),
+                "--min-patch-branch", Number(GateRequirements.MinPatchBranchPercent!.Value)]);
+        return arguments;
+    }
+
     private static void ValidateGateReport(string output, bool hasPatch, CancellationToken cancellationToken)
     {
         using var document = ValidationProof.ReadJsonFile(Path.Join(output, "coverage-gate.json"), 1024 * 1024, cancellationToken);
         var root = document.RootElement;
-        ValidationProof.Require(root.GetProperty("passed").GetBoolean(), "coverage gate passed");
-        ValidationProof.Require(root.GetProperty("tolerancePercent").GetDecimal() == 0m, "coverage gate zero tolerance");
-        var thresholds = root.GetProperty("thresholds");
-        ValidationProof.Require(thresholds.GetProperty("line").GetDecimal() == 95m && thresholds.GetProperty("branch").GetDecimal() == 85m, "coverage gate thresholds");
-        var effective = root.GetProperty("effectiveThresholds");
-        ValidationProof.Require(effective.GetProperty("line").GetDecimal() == 95m && effective.GetProperty("branch").GetDecimal() == 85m, "coverage gate effective thresholds");
+        ValidationProof.RequireOverallCoverageGate(root, GateRequirements);
         if (hasPatch)
         {
-            ValidationProof.Require(thresholds.GetProperty("patchLine").GetDecimal() == 95m && thresholds.GetProperty("patchBranch").GetDecimal() == 85m, "patch gate thresholds");
-            ValidationProof.Require(effective.GetProperty("patchLine").GetDecimal() == 95m && effective.GetProperty("patchBranch").GetDecimal() == 85m, "patch gate effective thresholds");
+            var thresholds = root.GetProperty("thresholds");
+            var effective = root.GetProperty("effectiveThresholds");
+            var patchLine = GateRequirements.MinPatchLinePercent!.Value;
+            var patchBranch = GateRequirements.MinPatchBranchPercent!.Value;
+            var tolerance = GateRequirements.TolerancePercent;
+            ValidationProof.Require(thresholds.GetProperty("patchLine").GetDecimal() == patchLine
+                && thresholds.GetProperty("patchBranch").GetDecimal() == patchBranch, "patch gate thresholds");
+            ValidationProof.Require(effective.GetProperty("patchLine").GetDecimal() == Math.Max(0m, patchLine - tolerance)
+                && effective.GetProperty("patchBranch").GetDecimal() == Math.Max(0m, patchBranch - tolerance), "patch gate effective thresholds");
         }
     }
 

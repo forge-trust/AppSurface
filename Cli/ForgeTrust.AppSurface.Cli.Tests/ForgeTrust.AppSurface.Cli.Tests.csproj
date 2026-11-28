@@ -47,6 +47,14 @@
 
   <ItemGroup>
     <Compile Include="../../tools/ForgeTrust.AppSurface.Coverage.Dogfood/CoverageDogfoodResultValidation.cs" Link="CoverageDogfoodResultValidation.cs" />
+    <Compile Include="../../tools/ForgeTrust.AppSurface.Coverage.Dogfood/NativeCoverageCaptureInputs.cs" Link="NativeCoverageCaptureInputs.cs" />
+    <Compile Include="../../tools/ForgeTrust.AppSurface.Coverage.Dogfood/NativeCoverageTestInventory.cs" Link="NativeCoverageTestInventory.cs" />
+    <EmbeddedResource Include="../../.github/workflows/native-coverage-test-projects.txt">
+      <LogicalName>ForgeTrust.AppSurface.Coverage.Dogfood.native-coverage-test-projects.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../.github/workflows/native-coverage-test-selectors.txt">
+      <LogicalName>ForgeTrust.AppSurface.Coverage.Dogfood.native-coverage-test-selectors.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

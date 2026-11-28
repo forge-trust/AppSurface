@@ -338,6 +338,163 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             PlanOptions(paths, narrowedPolicy, NewPath("narrowed-conservative-plan")), CancellationToken.None));
     }
 
+    [Fact]
+    public async Task RunLocalAsync_RejectsNonRunBeforeCreatingOutput()
+    {
+        var paths = await WritePathsAsync([new NormalizedDiffPath("README.md")]);
+        var output = NewPath("local-plan-rejected");
+        var options = PlanOptions(paths, CheckedInPolicyPath, output);
+        var execution = new RepositoryEvidenceWorkflow.LocalExecutionContext(
+            _ => Task.CompletedTask, new LocalEvidenceOutput.ManagedRun(null));
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            RepositoryEvidenceWorkflow.RunLocalAsync(options, CancellationToken.None, execution));
+
+        Assert.False(Directory.Exists(output));
+
+        var runOutput = NewPath("local-run-without-settlement");
+        var runOptions = WorkflowOptions("run", paths, CheckedInPolicyPath, ("--output", runOutput));
+        var missingSettlement = new RepositoryEvidenceWorkflow.LocalExecutionContext(_ => Task.CompletedTask, null);
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            RepositoryEvidenceWorkflow.RunLocalAsync(runOptions, CancellationToken.None, missingSettlement));
+
+        Assert.Contains("managed cleanup tracking", failure.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(runOutput));
+    }
+
+    [Fact]
+    public async Task RunLocalAsync_ReturnsUnpublishedCandidateAndFinalizerStagesThenPromotes()
+    {
+        var paths = await WritePathsAsync([new NormalizedDiffPath("README.md")]);
+        var planned = await PlanAsync(paths, CheckedInPolicyPath);
+        var output = NewPath("local-no-evidence-run");
+        var manifestPath = TestPathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ManifestFileName);
+        var managedRun = new LocalEvidenceOutput.ManagedRun(null);
+        var sourceChecks = 0;
+        var execution = new RepositoryEvidenceWorkflow.LocalExecutionContext(async cancellationToken =>
+        {
+            sourceChecks++;
+            var staged = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+                await File.ReadAllBytesAsync(manifestPath, cancellationToken));
+            Assert.Equal(EvidenceClaimKind.ObservationOnly, staged.ClaimKind);
+            Assert.Equal(EvidenceClaimEligibility.Informational, staged.Eligibility);
+        }, managedRun);
+        var options = WorkflowOptions("run", paths, CheckedInPolicyPath,
+            ("--plan", TestPathUtils.PathUnder(planned.Output, RepositoryEvidenceOutputLayout.PlanFileName)),
+            ("--output", output));
+
+        var candidate = await RepositoryEvidenceWorkflow.RunLocalAsync(options, CancellationToken.None, execution);
+
+        Assert.Equal(EvidenceClaimKind.NoEvidenceRequired, candidate.ClaimKind);
+        Assert.False(File.Exists(manifestPath));
+        Assert.False(managedRun.CleanupUnconfirmed);
+
+        await RepositoryEvidenceWorkflow.FinalizeLocalManifestAsync(planned.Plan, candidate, output, execution, CancellationToken.None);
+
+        var published = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
+        Assert.Equal(candidate.ManifestDigest, published.ManifestDigest);
+        Assert.Equal(EvidenceClaimEligibility.PullRequestGate, published.Eligibility);
+        Assert.Equal(1, sourceChecks);
+    }
+
+    [Fact]
+    public async Task FinalizeLocalManifestAsync_LeavesObservationOnlyWhenCleanupIsUnconfirmedAndSummaryIsUnavailable()
+    {
+        var evidence = await CreateSyntheticEvidenceAsync();
+        var output = NewPath("cleanup-unconfirmed-finalization");
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(TestPathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.SummaryFileName));
+        var managedRun = new LocalEvidenceOutput.ManagedRun(null);
+        managedRun.BeginHostExecution();
+        var sourceChecked = false;
+        var execution = new RepositoryEvidenceWorkflow.LocalExecutionContext(_ =>
+        {
+            sourceChecked = true;
+            return Task.CompletedTask;
+        }, managedRun);
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            RepositoryEvidenceWorkflow.FinalizeLocalManifestAsync(
+                evidence.Plan, evidence.Manifest, output, execution, CancellationToken.None));
+
+        var staged = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(
+            TestPathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ManifestFileName)));
+        Assert.Equal(EvidenceClaimKind.ObservationOnly, staged.ClaimKind);
+        Assert.False(sourceChecked);
+        Assert.Contains("cleanup is confirmed", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FinalizeLocalManifestAsync_RequiresManagedRunBeforeCreatingOutput()
+    {
+        var evidence = await CreateSyntheticEvidenceAsync();
+        var output = NewPath("finalization-without-settlement");
+        var execution = new RepositoryEvidenceWorkflow.LocalExecutionContext(_ => Task.CompletedTask, null);
+
+        var failure = await Assert.ThrowsAsync<ArgumentException>(() =>
+            RepositoryEvidenceWorkflow.FinalizeLocalManifestAsync(
+                evidence.Plan, evidence.Manifest, output, execution, CancellationToken.None));
+
+        Assert.Contains("managed cleanup tracking", failure.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public async Task FinalizeLocalManifestAsync_KeepsObservationOnlyWhenPromotionIsCanceled()
+    {
+        var evidence = await CreateSyntheticEvidenceAsync();
+        var output = NewPath("promotion-canceled");
+        Directory.CreateDirectory(output);
+        CopySyntheticArtifactsToOutput(evidence, output);
+
+        var manifestPath = TestPathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ManifestFileName);
+        using var cancellation = new CancellationTokenSource();
+        var managedRun = new LocalEvidenceOutput.ManagedRun(null);
+        var execution = new RepositoryEvidenceWorkflow.LocalExecutionContext(_ =>
+        {
+            cancellation.Cancel();
+            return Task.CompletedTask;
+        }, managedRun);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            RepositoryEvidenceWorkflow.FinalizeLocalManifestAsync(
+                evidence.Plan, evidence.Manifest, output, execution, cancellation.Token));
+
+        var staged = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
+        Assert.Equal(EvidenceClaimKind.ObservationOnly, staged.ClaimKind);
+        Assert.Empty(Directory.EnumerateFiles(output, RepositoryEvidenceOutputLayout.ManifestFileName + ".*.tmp"));
+    }
+
+    [Fact]
+    public async Task FinalizeLocalManifestAsync_RemovesTemporaryManifestWhenPromotionFails()
+    {
+        var evidence = await CreateSyntheticEvidenceAsync();
+        var output = NewPath("promotion-fails");
+        Directory.CreateDirectory(output);
+        CopySyntheticArtifactsToOutput(evidence, output);
+
+        var manifestPath = TestPathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ManifestFileName);
+        byte[] stagedBytes = [];
+        var execution = new RepositoryEvidenceWorkflow.LocalExecutionContext(async cancellationToken =>
+        {
+            stagedBytes = await File.ReadAllBytesAsync(manifestPath, cancellationToken);
+            File.Delete(manifestPath);
+            Directory.CreateDirectory(manifestPath);
+        }, new LocalEvidenceOutput.ManagedRun(null));
+
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+            RepositoryEvidenceWorkflow.FinalizeLocalManifestAsync(
+                evidence.Plan, evidence.Manifest, output, execution, CancellationToken.None));
+
+        Assert.NotEmpty(stagedBytes);
+        Assert.True(Directory.Exists(manifestPath));
+        Assert.Empty(Directory.EnumerateFiles(output, RepositoryEvidenceOutputLayout.ManifestFileName + ".*.tmp"));
+        Directory.Delete(manifestPath);
+        await File.WriteAllBytesAsync(manifestPath, stagedBytes);
+        var staged = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
+        Assert.Equal(EvidenceClaimKind.ObservationOnly, staged.ClaimKind);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -382,57 +539,6 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             ("--artifact-root", Path.Join(runOutput, "artifacts")));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             RepositoryEvidenceWorkflow.RunAsync(driftedPolicyOptions, CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task RunLocalAsync_RejectsPlanBeforeCreatingOutput()
-    {
-        var paths = await WritePathsAsync([new NormalizedDiffPath("README.md")]);
-        var output = NewPath("rejected-local-plan");
-        var options = PlanOptions(paths, CheckedInPolicyPath, output);
-
-        var failure = await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunLocalAsync(
-            options, CancellationToken.None, static _ => Task.CompletedTask, new LocalEvidenceRun(output, null)));
-
-        Assert.Contains("--operation run", failure.Message, StringComparison.Ordinal);
-        Assert.False(Path.Exists(output));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task LocalRun_KeepsObservationUntilManifestPromotion(bool cancelPromotion)
-    {
-        var planned = await PlanAsync(["README.md"]);
-        var output = NewPath("local-run");
-        var manifestPath = TestPathUtils.PathUnder(output, "evidence-manifest.json");
-        var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
-            ("--plan", TestPathUtils.PathUnder(planned.Output, "evidence-plan.json")),
-            ("--output", output));
-        using var cancellation = new CancellationTokenSource();
-
-        var run = RepositoryEvidenceWorkflow.RunLocalAsync(options, cancellation.Token, async token =>
-        {
-            var provisional = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath, token));
-            Assert.Equal(EvidenceClaimKind.ObservationOnly, provisional.ClaimKind);
-            Assert.Equal(EvidenceClaimEligibility.Informational, provisional.Eligibility);
-            if (cancelPromotion)
-                cancellation.Cancel();
-        }, new LocalEvidenceRun(output, null));
-
-        if (cancelPromotion)
-        {
-            var failure = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
-            Assert.Equal(cancellation.Token, failure.CancellationToken);
-        }
-        else
-        {
-            Assert.Equal(EvidenceClaimKind.NoEvidenceRequired, (await run).ClaimKind);
-        }
-
-        var retained = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
-        Assert.Equal(cancelPromotion ? EvidenceClaimKind.ObservationOnly : EvidenceClaimKind.NoEvidenceRequired, retained.ClaimKind);
-        Assert.Empty(Directory.EnumerateFiles(output, ".manifest-*.tmp"));
     }
 
     [Fact]
@@ -788,6 +894,19 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             declaration.AssertionIds, Artifacts: writer.WrittenArtifacts);
         var manifest = EvidenceManifestBuilder.Build(plan, [result]);
         return new SyntheticEvidence(plan, manifest, artifactRoot, resultPath);
+    }
+
+    private static void CopySyntheticArtifactsToOutput(SyntheticEvidence evidence, string output)
+    {
+        var artifactRoot = TestPathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ArtifactsDirectoryName);
+        Directory.CreateDirectory(artifactRoot);
+        foreach (var sourceFile in Directory.EnumerateFiles(evidence.ArtifactRoot, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(evidence.ArtifactRoot, sourceFile);
+            var destination = TestPathUtils.PathUnder(artifactRoot, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(sourceFile, destination);
+        }
     }
 
     private static EvidencePolicy RenameProducerEverywhere(EvidencePolicy policy, string oldId, string newId) =>

@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.IO.Enumeration;
 using System.Security.Cryptography;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
@@ -9,9 +10,42 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 /// <summary>Owns the default local validation scratch and publishes bounded-history results in the worktree.</summary>
 internal static class LocalEvidenceOutput
 {
-    private const string PendingCleanupFileName = "run.pending-cleanup";
+    private const string ProofPrefix = RepositoryEvidenceOutputLayout.ProofDirectoryName + "/";
+    private const string PackageChecksDirectory = ProofPrefix + RepositoryEvidenceOutputLayout.PackageChecksDirectoryName;
 
-    private sealed record RequiredArchiveEntry(long LengthBytes, string Sha256);
+    private static readonly HashSet<string> ExactArchivePaths = CreateExactArchivePaths();
+
+    private static readonly ArchiveDirectory[] ArchiveDirectories =
+    [
+        new(RepositoryEvidenceOutputLayout.PlanDirectoryName, recursive: true),
+        new(ProofPrefix + RepositoryEvidenceOutputLayout.ArtifactsDirectoryName, recursive: true),
+        new(ProofPrefix + "coverage", recursive: true, ShouldRetainCoverageFile),
+        new(PackageChecksDirectory + "/artifacts", recursive: false,
+            static path => path.EndsWith(".md", StringComparison.Ordinal)),
+    ];
+
+    private static HashSet<string> CreateExactArchivePaths()
+    {
+        var paths = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "changed-paths.json",
+            "changed.patch",
+            "local-policy.json",
+            "source-state.json",
+            "package-build.log",
+            RepositoryEvidenceOutputLayout.SummaryFileName,
+            ProofPrefix + RepositoryEvidenceOutputLayout.PlanFileName,
+            ProofPrefix + RepositoryEvidenceOutputLayout.ManifestFileName,
+            ProofPrefix + RepositoryEvidenceOutputLayout.SummaryFileName,
+            ProofPrefix + RepositoryEvidenceOutputLayout.SelectionFileName,
+            $"{PackageChecksDirectory}/{RepositoryEvidenceOutputLayout.ArtifactsDirectoryName}/{RepositoryEvidenceOutputLayout.PackageArtifactManifestFileName}",
+        };
+
+        foreach (var stageName in RepositoryEvidenceOutputLayout.PackageCheckStageNames)
+            paths.Add(RepositoryEvidenceOutputLayout.PackageCheckLogArchiveEntryName(stageName));
+
+        return paths;
+    }
 
     private static readonly EnumerationOptions OutputFiles = new()
     {
@@ -20,164 +54,230 @@ internal static class LocalEvidenceOutput
         MaxRecursionDepth = 64,
     };
 
-    /// <summary>Runs local execution or managed planning under the worktree lease.</summary>
-    /// <remarks>Both execution modes share the worktree lease and pending cleanup marker. Planning may run during recovery.</remarks>
-    /// <param name="repository">The worktree root that owns validation state.</param>
-    /// <param name="operation">The local execution or managed planning operation.</param>
-    /// <param name="gitDirectory">The per-worktree Git metadata directory that holds the lease.</param>
-    /// <param name="run">The callback that creates the current plan or completes validation.</param>
-    /// <param name="explicitOutput">An optional caller-owned fresh output path that bypasses archive retention.</param>
-    /// <returns>Zero after successful execution or planning.</returns>
-    internal static async Task<int> RunAsync(string repository, string operation, string gitDirectory,
-        Func<LocalEvidenceRun, Task<LocalEvidenceRunResult?>> run, string? explicitOutput = null)
+    /// <summary>Tracks cleanup and verified archive entries for one execution or plan.</summary>
+    /// <param name="packageRestoreCache">The private restore cache, or null for explicit output.</param>
+    internal sealed class ManagedRun(string? packageRestoreCache)
     {
-        var planOnly = operation == "local-plan";
+        private bool _hostCleanupUnconfirmed;
+
+        /// <summary>Gets the private package-gate restore cache when output is managed.</summary>
+        internal string? PackageRestoreCache { get; } = packageRestoreCache;
+
+        /// <summary>Gets the tracker for command cleanup, including nested source checks.</summary>
+        internal RepositoryCommandSettlement Settlement { get; } = new();
+
+        /// <summary>Gets whether started commands and the evidence host have confirmed cleanup.</summary>
+        internal bool CleanupUnconfirmed => _hostCleanupUnconfirmed || Settlement.HasUnconfirmedCleanup;
+
+        /// <summary>Records that host execution must report cleanup before publishing a result.</summary>
+        internal void BeginHostExecution() => _hostCleanupUnconfirmed = true;
+
+        /// <summary>Records whether the host confirmed cleanup.</summary>
+        internal void RecordHostCleanup(bool completed) => _hostCleanupUnconfirmed = !completed;
+
+        /// <summary>Leaves the retained archive in place when the local inventory is empty.</summary>
+        internal bool SkipArchive { get; set; }
+
+        /// <summary>Gets the original replay inputs and verified artifact identities.</summary>
+        internal IReadOnlyDictionary<string, ArchiveEntry>? VerifiedEntries { get; private set; }
+
+        /// <summary>Binds the archive to the original plan, replay inputs and optional completed execution.</summary>
+        internal void VerifyPublication(EvidencePlan plan, IReadOnlyDictionary<string, ArchiveEntry> replayInputs,
+            EvidenceManifest? manifest)
+        {
+            var entries = new Dictionary<string, ArchiveEntry>(replayInputs, StringComparer.Ordinal)
+            {
+                [RepositoryEvidenceOutputLayout.PlanDirectoryName + "/" + RepositoryEvidenceOutputLayout.PlanFileName] =
+                    ArchiveEntry.Snapshot(EvidenceCanonicalJson.Serialize(plan)),
+            };
+            if (manifest is not null)
+            {
+                entries.Add(ProofPrefix + RepositoryEvidenceOutputLayout.ManifestFileName,
+                    ArchiveEntry.Snapshot(EvidenceCanonicalJson.Serialize(manifest)));
+                foreach (var producer in manifest.ProducerResults)
+                {
+                    foreach (var artifact in producer.Artifacts ?? [])
+                    {
+                        var entry = $"{ProofPrefix}{RepositoryEvidenceOutputLayout.ArtifactsDirectoryName}/{producer.ProducerId}/{artifact.RelativePath}";
+                        entries.Add(entry, new(artifact.LengthBytes, artifact.Sha256));
+                    }
+                }
+            }
+            VerifiedEntries = entries;
+        }
+    }
+
+    /// <summary>The expected bytes for a replay entry written to a compact archive.</summary>
+    /// <param name="Length">The original byte length.</param>
+    /// <param name="Sha256">The original SHA-256 digest.</param>
+    internal sealed record ArchiveEntry(long Length, string Sha256)
+    {
+        /// <summary>Records the identity of a replay input before execution can change it.</summary>
+        internal static ArchiveEntry Snapshot(ReadOnlySpan<byte> bytes) => new(bytes.Length, EvidenceDigest.Sha256(bytes));
+    }
+
+    /// <summary>Runs against fresh scratch and replaces the matching compact archive after the run.</summary>
+    /// <remarks>Explicit execution and managed output share the worktree's cleanup guard and lock.</remarks>
+    /// <param name="repository">The worktree that owns the managed output.</param>
+    /// <param name="operation">The local execution or planning operation.</param>
+    /// <param name="gitDirectory">The worktree-specific Git metadata directory.</param>
+    /// <param name="run">Receives fresh scratch and the managed run's services.</param>
+    /// <param name="explicitOutput">The caller's fresh unpacked output directory, if supplied.</param>
+    internal static async Task<int> RunAsync(string repository, string operation, string gitDirectory,
+        Func<string, ManagedRun, Task<int>> run, string? explicitOutput = null)
+    {
         var control = RequireDirectory(PathUtils.PathUnder(gitDirectory, "appsurface-local-evidence"));
         var lockPath = PathUtils.PathUnder(control, "run.lock");
         RequirePlainPath(lockPath);
         using var lease = Acquire(lockPath);
-
-        var pendingCleanup = planOnly ? null : PathUtils.PathUnder(control, PendingCleanupFileName);
-        if (pendingCleanup is not null)
-            RequireSettledWorktree(pendingCleanup);
+        var pending = operation == "local" ? PathUtils.PathUnder(control, "run.pending-cleanup") : null;
+        if (pending is not null)
+        {
+            RequirePlainPath(pending);
+            if (Path.Exists(pending))
+            {
+                var message = "Local evidence execution is blocked because a previous run may still have active commands. " +
+                    $"After confirming its processes have stopped, remove the cleanup marker at {pending} and retry.";
+                Console.Error.WriteLine(message);
+                throw new InvalidOperationException(message);
+            }
+        }
 
         if (explicitOutput is not null)
-        {
-            await RunWithRetryGuardAsync(new LocalEvidenceRun(explicitOutput, null), pendingCleanup, run);
-            return 0;
-        }
+            return await RunWithRetryGuardAsync(explicitOutput, new ManagedRun(null), pending, run);
 
         var results = RequireDirectory(PathUtils.PathUnder(repository, "TestResults"));
         var evidence = RequireDirectory(PathUtils.PathUnder(results, "repository-evidence"));
         var root = RequireDirectory(PathUtils.PathUnder(evidence, "local"));
-        await RunManagedAsync(root, planOnly ? "latest-plan" : "latest", pendingCleanup, run);
-        return 0;
-    }
 
-    private static async Task RunManagedAsync(string root, string archive, string? pendingCleanup,
-        Func<LocalEvidenceRun, Task<LocalEvidenceRunResult?>> run)
-    {
-        // Package discovery excludes hidden ancestors, not every ignored Git path.
+        // Package discovery skips hidden directories. Generated consumer projects belong in scratch.
         var scratch = RequireDirectory(PathUtils.PathUnder(root, ".scratch"));
         var packageCache = PathUtils.PathUnder(scratch, "package-restore");
-        if (pendingCleanup is not null)
-            RequirePlainPath(packageCache);
+        RequirePlainPath(packageCache);
         var workspace = EvidenceWorkspace.Create(scratch, new(MinimumFreeBytes: 0));
         var output = workspace.GetPath("run");
-        var localRun = new LocalEvidenceRun(output, packageCache);
+        var state = new ManagedRun(packageCache);
+        var cleanup = false;
+        var runFailed = false;
         Console.WriteLine("Local evidence scratch: " + output);
         try
         {
-            var proof = await RunWithRetryGuardAsync(localRun, pendingCleanup, run);
-            if (proof is not null)
-                Publish(workspace, output, root, archive + ".zip", "Validation completed.", proof);
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
-        {
-            var removed = false;
+            int exitCode;
             try
             {
-                if (Directory.Exists(output))
-                {
-                    var suffix = failure is OperationCanceledException ? "-cancelled.zip" : "-failure.zip";
-                    Publish(workspace, output, root, archive + suffix, $"Failed: {failure.GetType().Name}: {failure.Message}");
-                }
-                else
-                {
-                    Console.Error.WriteLine($"Local evidence could not start: {failure.Message}");
-                }
-                if (CanCleanFailedRun(localRun, failure))
-                {
-                    await workspace.DisposeAsync();
-                    removed = true;
-                }
+                exitCode = await RunWithRetryGuardAsync(output, state, pending, run);
+                if (!state.SkipArchive)
+                    PublishArchive(exitCode == 0 ? ".zip" : "-failure.zip", $"Exit code: {exitCode}",
+                        exitCode == 0 ? state.VerifiedEntries : null);
             }
-            catch (Exception retentionFailure) when (retentionFailure is not OutOfMemoryException and not StackOverflowException)
+            catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
             {
-                Console.Error.WriteLine($"Could not finalize local evidence: {retentionFailure.Message}");
+                runFailed = true;
+                try
+                {
+                    if (Directory.Exists(output))
+                        PublishArchive(exception is OperationCanceledException ? "-cancelled.zip" : "-failure.zip",
+                            $"Failed: {exception.GetType().Name}: {exception.Message}", null);
+                    cleanup = !state.CleanupUnconfirmed && await CanCleanFailedRunAsync(output);
+                }
+                catch (Exception archiveFailure) when (archiveFailure is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    Console.Error.WriteLine($"Could not retain the failed local evidence: {archiveFailure.Message}");
+                }
+
+                throw;
             }
 
-            if (!removed)
+            cleanup = !state.CleanupUnconfirmed && (exitCode == 0 || await CanCleanFailedRunAsync(output));
+            return exitCode;
+        }
+        finally
+        {
+            if (!cleanup)
+            {
                 Console.Error.WriteLine("Local evidence scratch retained for inspection: " + workspace.RootPath);
-            throw;
-        }
-
-        await workspace.DisposeAsync();
-    }
-
-    private static void RequireSettledWorktree(string pendingCleanup)
-    {
-        RequirePlainPath(pendingCleanup);
-        if (!Path.Exists(pendingCleanup))
-            return;
-
-        var message = "Local evidence execution is blocked because a previous run may still have active commands. " +
-            $"After confirming its processes have stopped, remove the cleanup marker at {pendingCleanup} and retry.";
-        Console.Error.WriteLine(message);
-        throw new InvalidOperationException(message);
-    }
-
-    private static async Task<LocalEvidenceRunResult?> RunWithRetryGuardAsync(LocalEvidenceRun localRun, string? pendingCleanup,
-        Func<LocalEvidenceRun, Task<LocalEvidenceRunResult?>> run)
-    {
-        if (pendingCleanup is null)
-            return await run(localRun);
-
-        // Arm the guard before starting work so abrupt validator exit also blocks an unsafe retry.
-        using (var stream = new FileStream(pendingCleanup, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-        using (var writer = new StreamWriter(stream))
-            writer.WriteLine(localRun.OutputDirectory);
-
-        LocalEvidenceRunResult? proof;
-        try
-        {
-            proof = await run(localRun);
-            if (localRun.CleanupUnconfirmed)
-                throw new InvalidOperationException("Local evidence command cleanup could not be confirmed.");
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
-        {
-            if (CleanupUnconfirmed(localRun, failure))
-            {
-                Console.Error.WriteLine("Local evidence cleanup marker retained: " + pendingCleanup);
             }
             else
             {
-                try { File.Delete(pendingCleanup); }
+                try
+                {
+                    await workspace.DisposeAsync();
+                }
+                catch (Exception exception) when (runFailed && exception is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"Could not remove local evidence scratch at {workspace.RootPath}: {exception.Message}");
+                }
+            }
+        }
+
+        void PublishArchive(string suffix, string status, IReadOnlyDictionary<string, ArchiveEntry>? verified)
+        {
+            var archivePrefix = operation == "local-plan" ? "latest-plan" : "latest";
+            Publish(workspace, output, root, archivePrefix + suffix, status, verified);
+        }
+    }
+
+    private static async Task<int> RunWithRetryGuardAsync(string output, ManagedRun state, string? pending,
+        Func<string, ManagedRun, Task<int>> run)
+    {
+        if (pending is not null)
+        {
+            using var stream = new FileStream(pending, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using var writer = new StreamWriter(stream);
+            writer.WriteLine(output);
+        }
+
+        int exitCode;
+        try
+        {
+            exitCode = await run(output, state);
+            if (exitCode == 0 && state.CleanupUnconfirmed)
+                throw new InvalidOperationException("Local evidence cleanup could not be confirmed.");
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
+        {
+            state.Settlement.Observe(failure);
+            if (pending is not null && !state.CleanupUnconfirmed)
+            {
+                try { File.Delete(pending); }
                 catch (Exception markerFailure) when (markerFailure is IOException or UnauthorizedAccessException)
                 {
-                    Console.Error.WriteLine("Could not clear the local evidence cleanup marker: " + markerFailure.Message);
+                    Console.Error.WriteLine($"Could not clear the local evidence cleanup marker at {pending}: {markerFailure.Message}");
                 }
             }
             throw;
         }
 
-        File.Delete(pendingCleanup);
-        return proof;
+        if (pending is not null && !state.CleanupUnconfirmed)
+            File.Delete(pending);
+        return exitCode;
     }
 
-    private static bool CleanupUnconfirmed(LocalEvidenceRun run, Exception failure) =>
-        run.CleanupUnconfirmed || failure is EvidenceCommandException { CleanupUnconfirmed: true };
-
-    private static bool CanCleanFailedRun(LocalEvidenceRun run, Exception failure)
+    private static async Task<bool> CanCleanFailedRunAsync(string output)
     {
-        if (CleanupUnconfirmed(run, failure))
-            return false;
-        var proof = PathUtils.PathUnder(run.OutputDirectory, RepositoryEvidenceLayout.ProofDirectory);
+        var proof = PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ProofDirectoryName);
         if (!Directory.Exists(proof))
             return true;
-        var manifest = PathUtils.PathUnder(proof, RepositoryEvidenceLayout.ManifestFile);
+        var manifest = PathUtils.PathUnder(proof, RepositoryEvidenceOutputLayout.ManifestFileName);
         if (!File.Exists(manifest))
             return false;
-        return EvidenceCanonicalJson.Deserialize<EvidenceManifest>(File.ReadAllBytes(manifest)).Metrics.CleanupCompleted;
+        try
+        {
+            // Cleanup still needs this result if the run ended through cancellation.
+            await using var input = File.OpenRead(manifest);
+            var result = await EvidenceCanonicalJson.DeserializeAsync<EvidenceManifest>(input);
+            return result.Metrics.CleanupCompleted;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or System.Text.Json.JsonException)
+        {
+            return false;
+        }
     }
 
     private static void Publish(EvidenceWorkspace workspace, string output, string root, string name, string status,
-        LocalEvidenceRunResult? proof = null)
+        IReadOnlyDictionary<string, ArchiveEntry>? verified)
     {
-        // A rejected success ZIP must not occupy the staging path for its failure archive.
         var temporary = workspace.GetPath(name + ".staging");
-        var requiredEntries = proof is null ? null : BuildRequiredEntries(proof);
         using (var archive = ZipFile.Open(temporary, ZipArchiveMode.Create))
         {
             using (var writer = new StreamWriter(archive.CreateEntry("run-status.txt").Open()))
@@ -185,17 +285,23 @@ internal static class LocalEvidenceOutput
 
             if (Directory.Exists(output))
             {
-                foreach (var file in Directory.EnumerateFiles(output, "*", OutputFiles))
+                var files = new FileSystemEnumerable<string>(output, static (ref FileSystemEntry entry) => entry.ToFullPath(), OutputFiles)
                 {
-                    var relative = Path.GetRelativePath(output, file).Replace(Path.DirectorySeparatorChar, '/');
-                    if (ShouldRetain(relative, requiredEntries))
+                    ShouldIncludePredicate = static (ref FileSystemEntry entry) => !entry.IsDirectory,
+                    ShouldRecursePredicate = (ref FileSystemEntry entry) =>
+                        CanTraverseArchiveDirectory(RelativeArchivePath(output, entry.ToFullPath()), verified),
+                };
+                foreach (var file in files)
+                {
+                    var relative = RelativeArchivePath(output, file);
+                    if (verified?.ContainsKey(relative) == true || ShouldRetain(relative))
                         archive.CreateEntryFromFile(file, relative, CompressionLevel.Fastest);
                 }
             }
         }
 
-        if (requiredEntries is not null)
-            VerifyRequiredEntries(temporary, requiredEntries);
+        if (verified is not null)
+            VerifyArchive(temporary, verified);
 
         var destination = PathUtils.PathUnder(root, name);
         RequirePlainPath(destination);
@@ -203,75 +309,70 @@ internal static class LocalEvidenceOutput
         Console.WriteLine("Local evidence output: " + destination);
     }
 
-    private static Dictionary<string, RequiredArchiveEntry> BuildRequiredEntries(LocalEvidenceRunResult proof)
-    {
-        var requiredEntries = new Dictionary<string, RequiredArchiveEntry>(StringComparer.Ordinal);
-        foreach (var input in proof.ReplayInputs)
-            requiredEntries.Add(input.RelativePath, new(input.LengthBytes, input.Sha256));
-
-        var planBytes = EvidenceCanonicalJson.Serialize(proof.Plan);
-        requiredEntries.Add(RepositoryEvidenceLayout.PlanEntry,
-            new(planBytes.LongLength, EvidenceDigest.Sha256(planBytes)));
-        if (proof.Manifest is not { } manifest)
-            return requiredEntries;
-
-        var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
-        requiredEntries.Add(RepositoryEvidenceLayout.ManifestEntry,
-            new(manifestBytes.LongLength, EvidenceDigest.Sha256(manifestBytes)));
-        foreach (var producer in manifest.ProducerResults)
-        {
-            foreach (var artifact in producer.Artifacts ?? [])
-            {
-                var entry = RepositoryEvidenceLayout.ArtifactEntry(producer.ProducerId, artifact.RelativePath);
-                requiredEntries.Add(entry, new(artifact.LengthBytes, artifact.Sha256));
-            }
-        }
-
-        return requiredEntries;
-    }
-
-    private static void VerifyRequiredEntries(string path, IReadOnlyDictionary<string, RequiredArchiveEntry> requiredEntries)
+    private static void VerifyArchive(string path, IReadOnlyDictionary<string, ArchiveEntry> verified)
     {
         using var archive = ZipFile.OpenRead(path);
-        foreach (var (name, required) in requiredEntries)
+        foreach (var (name, proof) in verified)
         {
             var entry = archive.GetEntry(name);
-            if (entry is null || entry.Length != required.LengthBytes)
-                throw new InvalidDataException($"Local evidence archive is missing the verified content for {name}.");
-            using var stream = entry.Open();
-            var archivedSha256 = Convert.ToHexString(SHA256.HashData(stream));
-            if (!string.Equals(archivedSha256, required.Sha256, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException($"Local evidence archive digest mismatch for {name}.");
+            if (entry is null || entry.Length != proof.Length)
+                throw new InvalidDataException("Local evidence archive is missing the verified bytes for " + name);
+            using var content = entry.Open();
+            if (!string.Equals(Convert.ToHexString(SHA256.HashData(content)), proof.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Local evidence archive digest mismatch for " + name);
         }
     }
 
-    private static readonly HashSet<string> EvidenceFiles =
-    [
-        RepositoryEvidenceLayout.PatchFile, RepositoryEvidenceLayout.SourceStateFile, RepositoryEvidenceLayout.PackageBuildLog,
-        RepositoryEvidenceLayout.SummaryFile,
-        RepositoryEvidenceLayout.ProofPrefix + RepositoryEvidenceLayout.PlanFile,
-        RepositoryEvidenceLayout.ProofPrefix + RepositoryEvidenceLayout.SummaryFile,
-        RepositoryEvidenceLayout.ProofPrefix + RepositoryEvidenceLayout.SelectionFile,
-    ];
-
-    private static bool ShouldRetain(string path, IReadOnlyDictionary<string, RequiredArchiveEntry>? requiredEntries)
+    /// <summary>Identifies directories that may contain entries eligible for the compact archive.</summary>
+    /// <param name="path">The directory path relative to scratch, with forward slash separators.</param>
+    /// <returns>Whether archive enumeration should enter the directory.</returns>
+    /// <param name="verified">Additional directories containing verified replay entries.</param>
+    internal static bool CanTraverseArchiveDirectory(string path, IReadOnlyDictionary<string, ArchiveEntry>? verified = null)
     {
-        if (requiredEntries?.ContainsKey(path) == true
-            || path.StartsWith(RepositoryEvidenceLayout.PlanPrefix, StringComparison.Ordinal)
-            || path.StartsWith(RepositoryEvidenceLayout.ArtifactPrefix, StringComparison.Ordinal))
-            return true;
-        // Failure and cancellation can have partial proof files without a verified inventory.
-        if (requiredEntries is null
-            && path is RepositoryEvidenceLayout.ChangedPathsFile or RepositoryEvidenceLayout.LocalPolicyFile or RepositoryEvidenceLayout.ManifestEntry)
-            return true;
-        if (EvidenceFiles.Contains(path))
-            return true;
-        if (!path.StartsWith(RepositoryEvidenceLayout.ProofPrefix, StringComparison.Ordinal))
-            return false;
+        var prefix = path + "/";
+        return ExactArchivePaths.Any(file => file.StartsWith(prefix, StringComparison.Ordinal))
+            || ArchiveDirectories.Any(directory => directory.CanTraverse(prefix))
+            || verified?.Keys.Any(file => file.StartsWith(prefix, StringComparison.Ordinal)) == true;
+    }
 
-        var proofRelativePath = path[RepositoryEvidenceLayout.ProofPrefix.Length..];
-        return PackageChecksProducer.RetainsLocalDiagnostic(proofRelativePath)
-            || SolutionCoverageProducer.RetainsLocalDiagnostic(proofRelativePath);
+    private static string RelativeArchivePath(string output, string path) =>
+        Path.GetRelativePath(output, path).Replace(Path.DirectorySeparatorChar, '/');
+
+    private static bool ShouldRetain(string path)
+    {
+        if (ExactArchivePaths.Contains(path))
+            return true;
+        foreach (var directory in ArchiveDirectories)
+        {
+            if (directory.ShouldRetain(path))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ShouldRetainCoverageFile(string path)
+    {
+        var name = Path.GetFileName(path);
+        return name.EndsWith(".log", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("junit-", StringComparison.Ordinal)
+            || name is "coverage.cobertura.xml" or "timings.json" or "summary.txt" or "reportgenerator-summary.txt"
+                or "slow-test-diagnostics.json" or "slow-test-diagnostics.md" or "coverage-gate.json" or "coverage-gate.md"
+                or "coverage-patch-targets.json" or "coverage-patch-targets.md";
+    }
+
+    private sealed class ArchiveDirectory(string path, bool recursive, Func<string, bool>? retainFile = null)
+    {
+        private readonly string _prefix = path + "/";
+
+        public bool CanTraverse(string directoryPrefix) =>
+            _prefix.StartsWith(directoryPrefix, StringComparison.Ordinal)
+            || (recursive && directoryPrefix.StartsWith(_prefix, StringComparison.Ordinal));
+
+        public bool ShouldRetain(string file) =>
+            file.StartsWith(_prefix, StringComparison.Ordinal)
+            && (recursive || !file.AsSpan(_prefix.Length).Contains('/'))
+            && (retainFile?.Invoke(file) ?? true);
     }
 
     private static FileStream Acquire(string path)
@@ -282,7 +383,7 @@ internal static class LocalEvidenceOutput
         }
         catch (IOException)
         {
-            Console.Error.WriteLine("Could not lock local evidence output. Wait for any other managed validation in this worktree to finish.");
+            Console.Error.WriteLine("Could not lock local evidence output. Wait for the other local validation in this worktree to finish.");
             throw;
         }
     }

@@ -12,6 +12,7 @@
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
+    <EmbeddedResource Include="../../global.json" LogicalName="ForgeTrust.AppSurface.Evidence.Validation.PinnedSdk.global.json" />
     <Compile Remove="fixtures/**/*.cs" />
     <None Include="fixtures/**/*" Exclude="fixtures/**/bin/**;fixtures/**/obj/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

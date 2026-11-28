@@ -4,6 +4,21 @@
 
 Read the [EvidenceHost guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/evidencehost.md) first. `EvidenceAspireApplication.StartAsync(...)` can build and start an explicitly consumer-composed `DistributedApplication` and bind a named Aspire health condition to a declared evidence resource. The package never discovers an application, provisions cloud resources, creates a Docker sandbox, attests an artifact, or operates a dashboard.
 
+For opt-in local receipt reuse, use the canonical [reuse guide](../../guides/evidence-reuse.md), including the exact prepared-run factory contract and the cooperative child-lifetime requirement. A prepared host must build only its `RequiredResourceIds`, use the returned `ArtifactDirectories` map for producer roots, and retain its resource scope until settlement.
+
+An admitted child that loses its completion channel leaves settlement unknown. Joining its disconnected handler
+does not authorize disposal of prepared producers or the transferred application scope, even when a producer
+raises a fatal failure. The failure still propagates; the consumer must follow the [stopped-environment recovery
+procedure](../../guides/evidence-reuse.md#admission-failure-and-safe-retry) before releasing retained owners.
+
+Disposing an active prepared run requests its resource factory's cancellation before joining the run. A factory
+must observe that token and clean its partial construction; disposal joins actual work rather than treating
+cancellation as settlement. See the [prepared-host lifecycle](../../guides/evidence-reuse.md#migrating-an-existing-prepared-host).
+
+The [lifecycle inventory](../../guides/evidence-prepared-lifecycle.md) records the host-admission handoff: a scope
+returned after cancellation or disposal won is cleaned without starting readiness or producers; disposal after
+admission joins the already-owned execution.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
@@ -93,11 +108,7 @@ Cleanup clears a file's read-only attribute only after verifying the owned root 
 
 `EvidenceCommandRunner.RunAsync` launches explicit argv with an absolute working directory, optional environment overrides and a positive timeout of at most 4,294,967,294 milliseconds (the cancellation timer limit). Unsupported bounds are rejected before starting a process. Combined stdout/stderr capture defaults to 1 MiB (maximum 256 MiB). `EvidenceCommandResult.OutputTruncated` must prevent assertions that require complete output. Timeout and cancellation use the operating system's process-tree termination through .NET; stable `EvidenceCommandException.Code` values identify start, timeout, budget, capture, drain or cleanup failure without echoing argv, output or environment values. Commands must run in the foreground and keep their children within that lifetime. Deliberately detached daemons are unsupported: once a parent has exited, portable process-tree termination cannot guarantee recovery of escaped descendants. Inherited pipes that remain open fail the bounded drain and cannot produce a complete claim.
 
-Use `EvidenceCommandException.CleanupUnconfirmed` when command exit or output pipe closure could
-not be confirmed. The runner requires EOF on both pipes before it cancels capture. A faulted or
-canceled reader leaves cleanup unconfirmed even when the process has exited. The exception keeps
-the applicable diagnostic code, including `capture_failed` or `drain_timeout`. Keep resources
-the command may still use when this flag is set and report incomplete cleanup to the caller.
+Check `EvidenceCommandException.CleanupUnconfirmed` before deleting scratch or retrying an operation that shares command resources. It is true when process exit or closure of both redirected streams could not be confirmed. A drain or capture failure can carry this state under its own error code. Preserve the affected workspace while its cleanup remains unconfirmed.
 
 Bind a workspace check to the request to enforce capacity while work runs:
 

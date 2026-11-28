@@ -1,18 +1,40 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
-using System.Xml;
-using System.Xml.Linq;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
 /// <summary>Independent input, JSON and byte assertions used by native acceptance producers.</summary>
 internal static class ValidationProof
 {
+    /// <summary>Identifies failures raised by the validator's own contract checks.</summary>
+    internal const string ContractFailurePrefix = "Native validation contract failed: ";
+
     /// <summary>Rejects a failed contract without copying untrusted output into a diagnostic.</summary>
     internal static void Require(bool condition, string contract)
     {
-        if (!condition) throw new InvalidOperationException("Native validation contract failed: " + contract);
+        if (!condition) throw new InvalidOperationException(ContractFailurePrefix + contract);
+    }
+
+    /// <summary>Checks the verdict, tolerance, and configured and effective overall thresholds in a CLI gate report.</summary>
+    /// <param name="gate">The already-parsed root object of the candidate gate report.</param>
+    /// <param name="requirements">The caller's expected overall line, branch, and tolerance values.</param>
+    /// <param name="contract">An optional failure label shared by all checks. The default labels identify individual failures.</param>
+    /// <remarks>Callers retain responsibility for report custody and any patch coverage requirements.</remarks>
+    internal static void RequireOverallCoverageGate(JsonElement gate, EvidenceCoverageGateRequirements requirements, string? contract = null)
+    {
+        Require(gate.GetProperty("passed").GetBoolean(), contract ?? "coverage gate passed");
+        var tolerance = requirements.TolerancePercent;
+        Require(gate.GetProperty("tolerancePercent").GetDecimal() == tolerance, contract ?? "coverage gate zero tolerance");
+        Require(MatchesThresholds(gate.GetProperty("thresholds"), requirements.MinLinePercent, requirements.MinBranchPercent),
+            contract ?? "coverage gate thresholds");
+        Require(MatchesThresholds(gate.GetProperty("effectiveThresholds"),
+                Math.Max(0m, requirements.MinLinePercent - tolerance), Math.Max(0m, requirements.MinBranchPercent - tolerance)),
+            contract ?? "coverage gate effective thresholds");
+
+        static bool MatchesThresholds(JsonElement thresholds, decimal line, decimal branch)
+            => thresholds.GetProperty("line").GetDecimal() == line && thresholds.GetProperty("branch").GetDecimal() == branch;
     }
 
     /// <summary>Computes a file digest without buffering the complete file.</summary>
@@ -26,10 +48,9 @@ internal static class ValidationProof
     internal static void VerifyPackage(ZipArchive archive, ValidationSettings settings)
     {
         var specification = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
-        Require(specification.Length <= 1024 * 1024, "bounded package specification");
-        using var contents = specification.Open();
-        using var reader = XmlReader.Create(contents, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
-        var metadata = XDocument.Load(reader).Root!.Elements().Single(e => e.Name.LocalName == "metadata");
+        var parsedMetadata = PackedCandidateArchive.ReadBoundedMetadata(specification);
+        Require(parsedMetadata is not null, "bounded package specification");
+        var metadata = parsedMetadata!;
         string Value(string name) => metadata.Elements().Single(e => e.Name.LocalName == name).Value;
         Require(Value("id") == "ForgeTrust.AppSurface.Cli", "candidate package ID");
         Require(Value("version") == settings.PackageVersion, "candidate package version");
@@ -53,28 +74,59 @@ internal static class ValidationProof
         if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length <= 0 || info.Length > maximumBytes)
             throw new InvalidDataException("Candidate JSON is missing or exceeds its size limit.");
 
-        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
-        using var bytes = new MemoryStream((int)info.Length);
-        var buffer = new byte[64 * 1024];
-        long total = 0;
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var read = input.Read(buffer, 0, buffer.Length);
-            if (read == 0) break;
-            total += read;
-            if (total > maximumBytes) throw new InvalidDataException("Candidate JSON exceeds its size limit.");
-            bytes.Write(buffer, 0, read);
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
+        var bytes = ReadBoundedFile(path, (int)maximumBytes, cancellationToken);
         try
         {
-            return JsonDocument.Parse(bytes.GetBuffer().AsMemory(0, checked((int)bytes.Length)));
+            return JsonDocument.Parse(bytes);
         }
         catch (JsonException exception)
         {
             throw new InvalidDataException("Candidate JSON is invalid.", exception);
+        }
+    }
+
+    /// <summary>Captures a local file up to an inclusive byte limit and closes it before returning.</summary>
+    /// <param name="path">The source file. Callers apply their own file admission rules.</param>
+    /// <param name="maximumBytes">Maximum number of bytes that may be captured.</param>
+    /// <param name="cancellationToken">Cancels the capture before opening or between reads.</param>
+    /// <returns>The original file bytes.</returns>
+    internal static ReadOnlyMemory<byte> ReadBoundedFile(string path, int maximumBytes, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
+        return ReadBoundedBytes(input, maximumBytes, cancellationToken);
+    }
+
+    /// <summary>Captures the original bytes up to an inclusive limit while leaving the stream open.</summary>
+    /// <param name="input">Readable input at the start of the data to capture.</param>
+    /// <param name="maximumBytes">Maximum number of bytes that may be captured.</param>
+    /// <param name="cancellationToken">Cancels the capture between reads.</param>
+    /// <returns>The original bytes without parsing or normalizing them.</returns>
+    /// <exception cref="InvalidDataException">The input exceeds the size limit.</exception>
+    internal static ReadOnlyMemory<byte> ReadBoundedBytes(Stream input, int maximumBytes, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
+        cancellationToken.ThrowIfCancellationRequested();
+        var length = input.CanSeek ? input.Length - input.Position : 0;
+        if (length > maximumBytes)
+            throw new InvalidDataException("Evidence input exceeds its size limit.");
+
+        using var bytes = new MemoryStream((int)Math.Max(0, length));
+        var buffer = new byte[Math.Min(64 * 1024, maximumBytes)];
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var remaining = maximumBytes - bytes.Length;
+            var read = input.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining + 1));
+            if (read == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return bytes.GetBuffer().AsMemory(0, (int)bytes.Length);
+            }
+
+            if (read > remaining)
+                throw new InvalidDataException("Evidence input exceeds its size limit.");
+            bytes.Write(buffer, 0, read);
         }
     }
 

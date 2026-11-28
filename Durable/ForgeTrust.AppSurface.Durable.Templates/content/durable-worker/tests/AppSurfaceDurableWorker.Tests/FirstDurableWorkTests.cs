@@ -53,6 +53,7 @@ public sealed class FirstDurableWorkTests
         var phase = "postgresql-fixture-setup";
         var primaryFailure = (string?)null;
         var primaryFailureLocation = (string?)null;
+        var prerequisiteCause = (string?)null;
         var cleanupFailures = new List<string>();
         var checkpoints = new List<string>(capacity: 4);
         var cleanupStartedAt = 0L;
@@ -241,7 +242,8 @@ public sealed class FirstDurableWorkTests
         }
         catch (Exception exception)
         {
-            primaryFailure = exception.GetType().Name;
+            primaryFailure = exception is PostgreSqlFixture.DockerPrerequisiteException ? nameof(InvalidOperationException) : exception.GetType().Name;
+            prerequisiteCause = (exception as PostgreSqlFixture.DockerPrerequisiteException)?.SafeCause;
             primaryFailureLocation = GetSafeFailureLocation(exception);
         }
         finally
@@ -281,8 +283,8 @@ public sealed class FirstDurableWorkTests
             var retry = phase == "postgresql-fixture-setup"
                 ? "Confirm Docker, the packaged PostgreSQL role recipe, and the disposable fixture, then rerun: dotnet test --filter FullyQualifiedName~FirstDurableWork"
                 : "Confirm the generated package graph and rerun the FirstDurableWork test";
-            _output.WriteLine(
-                $"[FirstDurableWork] failure phase={phase} code={failureCode} at={primaryFailureLocation ?? "unknown"} cause=The bounded phase did not satisfy its assertion or owned cleanup contract; cleanup={cleanup}; retry={retry}; docs={FirstProofLink}");
+            _output.WriteLine(FirstWorkFailureMarker.Format(
+                phase, failureCode, primaryFailureLocation, prerequisiteCause, cleanup, retry, FirstProofLink));
             throw new InvalidOperationException($"FirstDurableWork failed in phase {phase} ({failureCode}); see {FirstProofLink}.");
         }
 
@@ -783,4 +785,57 @@ public sealed class GeneratedPostgreSqlActivationCollection
 {
     /// <summary>Collection identity shared by the first proof and real activation concurrency scenarios.</summary>
     public const string Name = "generated-postgresql-activation";
+}
+
+public sealed class DockerPrerequisiteDiagnosticTests
+{
+    [Theory]
+    [InlineData("timeout", "docker-probe-timeout")]
+    [InlineData("process-failure", "docker-probe-process-failure")]
+    [InlineData("daemon-unavailable", "docker-daemon-unavailable")]
+    public async Task Fixture_probe_reports_the_closed_cause(string scenario, string expected)
+    {
+        var failure = await Assert.ThrowsAsync<PostgreSqlFixture.DockerPrerequisiteException>(() =>
+            PostgreSqlFixture.RequireDockerAsync(() => BoundedProcessRunner.RequireDockerAsync((_, _) =>
+                scenario switch
+                {
+                    "timeout" => Task.FromException<BoundedProcessResult>(new TimeoutException()),
+                    "process-failure" => Task.FromException<BoundedProcessResult>(new InvalidOperationException()),
+                    "daemon-unavailable" => Task.FromResult(new BoundedProcessResult(1, "", "daemon refusal", false, false)),
+                    _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+                })));
+
+        Assert.Equal(expected, failure.SafeCause);
+    }
+
+    [Fact]
+    public async Task Fixture_probe_accepts_a_successful_daemon_response()
+    {
+        await PostgreSqlFixture.RequireDockerAsync(() => BoundedProcessRunner.RequireDockerAsync((_, _) =>
+            Task.FromResult(new BoundedProcessResult(0, "27.0.0", "", false, false))));
+    }
+
+    [Fact]
+    public async Task Fixture_probe_propagates_unexpected_runner_fault_unchanged()
+    {
+        var original = new IOException("unexpected-fault");
+        var failure = await Assert.ThrowsAsync<IOException>(() => PostgreSqlFixture.RequireDockerAsync(() =>
+            BoundedProcessRunner.RequireDockerAsync((_, _) => Task.FromException<BoundedProcessResult>(original))));
+
+        Assert.Same(original, failure);
+    }
+
+    [Theory]
+    [InlineData("TimeoutException", "docker-probe-timeout")]
+    [InlineData("InvalidOperationException", "docker-probe-process-failure")]
+    [InlineData("daemon-unavailable", "docker-daemon-unavailable")]
+    [InlineData("must-never-appear-in-a-host-response", "docker-prerequisite-unknown")]
+    public void Docker_prerequisite_diagnostic_keeps_a_closed_cause_and_a_failure(string cause, string expected)
+    {
+        var failure = new PostgreSqlFixture.DockerPrerequisiteException(cause);
+
+        Assert.IsAssignableFrom<InvalidOperationException>(failure);
+        Assert.Equal(expected, failure.SafeCause);
+        Assert.DoesNotContain("must-never-appear-in-a-host-response", failure.SafeCause, StringComparison.Ordinal);
+    }
 }

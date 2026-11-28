@@ -29,7 +29,9 @@ internal static class CoverageProjectManifest
     /// </summary>
     internal const string FileName = "coverage-project.json";
 
-    private const int SchemaVersion = 1;
+    /// <summary>The project manifest version emitted by the writer and accepted by report validation.</summary>
+    internal const int SchemaVersion = 1;
+
     private const int MaximumLinkResolutions = 40;
 
     /// <summary>

@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Globalization;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
@@ -29,8 +32,10 @@ public sealed class EvidenceCommandRunnerTests
             Assert.True(int.TryParse(await File.ReadAllTextAsync(pidPath), out var pid));
             Assert.True(pid > 0);
             Assert.False(File.Exists(pidPath + ".pending"));
+            using var child = Process.GetProcessById(pid);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+            await AssertDescendantTerminatedAsync(child);
         }
         finally
         {
@@ -45,6 +50,29 @@ public sealed class EvidenceCommandRunnerTests
                 // Teardown observes runner failures without masking an earlier assertion.
             }
             Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    private static async Task AssertDescendantTerminatedAsync(Process child)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        if (OperatingSystem.IsWindows())
+        {
+            await child.WaitForExitAsync(deadline.Token);
+            Assert.True(child.HasExited);
+            return;
+        }
+
+        while (!child.HasExited)
+        {
+            // A Unix descendant can terminate before its adopting parent reaps it.
+            var result = await ProcessUtils.ExecuteProcessAsync("ps",
+                ["-o", "stat=", "-p", child.Id.ToString(CultureInfo.InvariantCulture)],
+                Directory.GetCurrentDirectory(), NullLogger.Instance, deadline.Token);
+            if (result.ExitCode == 0 && result.Stdout.TrimStart().StartsWith('Z')) return;
+            Assert.True(result.ExitCode is 0 or 1,
+                $"ps exited {result.ExitCode}. stdout: {result.Stdout} stderr: {result.Stderr}");
+            await Task.Delay(20, deadline.Token);
         }
     }
 
@@ -437,6 +465,7 @@ public sealed class EvidenceCommandRunnerTests
         var failure = await Assert.ThrowsAsync<EvidenceCommandException>(() => running);
 
         Assert.Equal(EvidenceCommandException.CleanupFailedCode, failure.Code);
+        Assert.True(failure.CleanupUnconfirmed);
         Assert.Equal(2, stopped);
     }
 
@@ -482,7 +511,37 @@ public sealed class EvidenceCommandRunnerTests
         var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => runner.RunAsync(request));
 
         Assert.Equal(EvidenceCommandException.CleanupFailedCode, exception.Code);
+        Assert.True(exception.CleanupUnconfirmed);
         Assert.Equal(2, capturesStopped);
+    }
+
+    [Fact]
+    public async Task EvidenceProcessShutdown_ReportsUnconfirmedTerminationFailure()
+    {
+        var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => EvidenceProcessShutdown.ConfirmAsync(
+            () => throw new InvalidOperationException("synthetic termination failure"),
+            () => Task.CompletedTask,
+            [],
+            TimeSpan.FromSeconds(1)));
+
+        Assert.Equal(EvidenceCommandException.CleanupFailedCode, exception.Code);
+        Assert.True(exception.CleanupUnconfirmed);
+    }
+
+    [Fact]
+    public async Task EvidenceProcessShutdown_TypesCanceledReaderAsUnconfirmedCapture()
+    {
+        var canceledReader = Task.FromCanceled(new CancellationToken(canceled: true));
+
+        var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => EvidenceProcessShutdown.ConfirmAsync(
+            static () => { },
+            static () => Task.CompletedTask,
+            [canceledReader],
+            TimeSpan.FromSeconds(1),
+            EvidenceCommandException.CaptureFailedCode));
+
+        Assert.Equal(EvidenceCommandException.CaptureFailedCode, exception.Code);
+        Assert.True(exception.CleanupUnconfirmed);
     }
 
     [Fact]

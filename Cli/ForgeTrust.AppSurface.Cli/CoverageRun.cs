@@ -968,19 +968,22 @@ internal sealed class CoverageRunWorkflow
         XmlResolver = null,
     };
 
-    private readonly ICoverageRunProcessRunner _processRunner;
-    private readonly ICoverageRunReportGenerator _reportGenerator;
-    private readonly TimeProvider _timeProvider;
-    private readonly Func<string, string, TimeProvider, CoverageRunHangDiagnosticsReader.InspectionResult> _inspectHangDiagnostics;
-    private readonly Func<CancellationToken, Task>? _beforeSlowTestDiagnostics;
-    private readonly Action? _slowTestDiagnosticsStaged;
-    private readonly Action<string>? _beforeSlowTestDiagnosticsPromotion;
-    private readonly Action? _summaryStaged;
-    private readonly Action? _timingsStaged;
-    private readonly Action<string>? _deleteStagedCoverageFile;
-    private readonly Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? _appendCleanupDiagnostic;
-    private readonly Func<string, string, CoverageRunProject, CancellationToken, Task>? _writeProjectManifest;
-    private readonly Func<string, string?> _getEnvironmentVariable;
+    private readonly WorkflowDependencies _dependencies;
+
+    private sealed record WorkflowDependencies(
+        ICoverageRunProcessRunner ProcessRunner,
+        ICoverageRunReportGenerator ReportGenerator,
+        TimeProvider TimeProvider,
+        Func<CancellationToken, Task>? BeforeSlowTestDiagnostics,
+        Action? SummaryStaged,
+        Action? TimingsStaged,
+        Action<string>? DeleteStagedCoverageFile,
+        Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? AppendCleanupDiagnostic,
+        Action? SlowTestDiagnosticsStaged,
+        Action<string>? BeforeSlowTestDiagnosticsPromotion,
+        Func<string, string, CoverageRunProject, CancellationToken, Task>? WriteProjectManifest,
+        Func<string, string?> GetEnvironmentVariable,
+        Func<string, string, TimeProvider, CoverageRunHangDiagnosticsReader.InspectionResult> InspectHangDiagnostics);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CoverageRunWorkflow"/> class.
@@ -1013,20 +1016,38 @@ internal sealed class CoverageRunWorkflow
         Func<string, string?>? getEnvironmentVariable = null,
         Func<string, string, TimeProvider, CoverageRunHangDiagnosticsReader.InspectionResult>? inspectHangDiagnostics = null)
     {
-        _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
-        _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
-        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
-        _inspectHangDiagnostics = inspectHangDiagnostics ?? ((owned, output, clock) =>
-            CoverageRunHangDiagnosticsReader.Inspect(owned, output, clock));
-        _beforeSlowTestDiagnostics = beforeSlowTestDiagnostics;
-        _slowTestDiagnosticsStaged = slowTestDiagnosticsStaged;
-        _beforeSlowTestDiagnosticsPromotion = beforeSlowTestDiagnosticsPromotion;
-        _summaryStaged = summaryStaged;
-        _timingsStaged = timingsStaged;
-        _deleteStagedCoverageFile = deleteStagedCoverageFile;
-        _appendCleanupDiagnostic = appendCleanupDiagnostic;
-        _writeProjectManifest = writeProjectManifest;
-        _getEnvironmentVariable = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        _dependencies = new WorkflowDependencies(
+            ProcessRunner: processRunner ?? throw new ArgumentNullException(nameof(processRunner)),
+            ReportGenerator: reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator)),
+            TimeProvider: timeProvider ?? throw new ArgumentNullException(nameof(timeProvider)),
+            BeforeSlowTestDiagnostics: beforeSlowTestDiagnostics,
+            SummaryStaged: summaryStaged,
+            TimingsStaged: timingsStaged,
+            DeleteStagedCoverageFile: deleteStagedCoverageFile,
+            AppendCleanupDiagnostic: appendCleanupDiagnostic,
+            SlowTestDiagnosticsStaged: slowTestDiagnosticsStaged,
+            BeforeSlowTestDiagnosticsPromotion: beforeSlowTestDiagnosticsPromotion,
+            WriteProjectManifest: writeProjectManifest,
+            GetEnvironmentVariable: getEnvironmentVariable ?? Environment.GetEnvironmentVariable,
+            InspectHangDiagnostics: inspectHangDiagnostics ?? ((owned, output, clock) =>
+                CoverageRunHangDiagnosticsReader.Inspect(owned, output, clock)));
+    }
+
+    private CoverageRunWorkflow(WorkflowDependencies dependencies)
+    {
+        _dependencies = dependencies;
+    }
+
+    /// <summary>Clones this engine with a per-invocation runner decorator and preserves every injected collaborator.</summary>
+    /// <param name="decorate">Wraps the existing runner; must return a nonnull invocation-local runner.</param>
+    /// <returns>An independent workflow sharing the report generator, clock and all existing test seams.</returns>
+    /// <remarks>No singleton runner or process environment is mutated. Use this seam for supported adapter policy.</remarks>
+    internal CoverageRunWorkflow WithProcessRunner(Func<ICoverageRunProcessRunner, ICoverageRunProcessRunner> decorate)
+    {
+        ArgumentNullException.ThrowIfNull(decorate);
+        var processRunner = decorate(_dependencies.ProcessRunner);
+        ArgumentNullException.ThrowIfNull(processRunner, nameof(processRunner));
+        return new CoverageRunWorkflow(_dependencies with { ProcessRunner = processRunner });
     }
 
     /// <summary>
@@ -1045,7 +1066,7 @@ internal sealed class CoverageRunWorkflow
         ArgumentNullException.ThrowIfNull(console);
         var timingsStageCancelled = false;
 
-        CoverageRunSandboxGuard.Validate(request.RequireNonSandbox, _getEnvironmentVariable);
+        CoverageRunSandboxGuard.Validate(request.RequireNonSandbox, _dependencies.GetEnvironmentVariable);
 
         if (request.SlowTestDiagnostics && request.TestResults == CoverageRunTestResultFormat.None)
         {
@@ -1059,7 +1080,7 @@ internal sealed class CoverageRunWorkflow
             request.HeartbeatInterval,
             request.NoProgressTimeout,
             console,
-            _timeProvider,
+            _dependencies.TimeProvider,
             cancellationToken);
         var runConsole = supervisor.Console;
         var supervisedCancellationToken = supervisor.CancellationToken;
@@ -1091,7 +1112,7 @@ internal sealed class CoverageRunWorkflow
                 .ToArray();
             CoverageRunOutputGuard.Validate(outputDirectory, resolution.SolutionDirectory, resolution.Projects);
             var collectorObservations = new List<CoverageArtifactSettingsResult>();
-            await CoverageRunDriverPreflight.ValidateAsync(request.CoverageDriver, request.Configuration, resolution, _processRunner, supervisor, supervisedCancellationToken,
+            await CoverageRunDriverPreflight.ValidateAsync(request.CoverageDriver, request.Configuration, resolution, _dependencies.ProcessRunner, supervisor, supervisedCancellationToken,
                 request.TestArguments, (project, framework, json) =>
                 {
                     collectorObservations.Add(
@@ -1114,7 +1135,7 @@ internal sealed class CoverageRunWorkflow
                 else
                 {
                     artifactSession = await CoverageArtifactSession.BeginAsync(outputDirectory, resolution.SolutionDirectory,
-                        request.Clean, console, _timeProvider, supervisedCancellationToken).ConfigureAwait(false);
+                        request.Clean, console, _dependencies.TimeProvider, supervisedCancellationToken).ConfigureAwait(false);
                     ownsArtifactSession = true;
                 }
             }
@@ -1127,7 +1148,7 @@ internal sealed class CoverageRunWorkflow
             CoverageRunOutputGuard.Prepare(outputDirectory, resolution.SolutionDirectory, resolution.Projects, request.Clean);
             terminalOutputPrepared = true;
             supervisor.BindOutputDirectory(outputDirectory);
-            var runStarted = _timeProvider.GetTimestamp();
+            var runStarted = _dependencies.TimeProvider.GetTimestamp();
             terminalRunStarted = runStarted;
             var build = await BuildIfNeededAsync(request, resolution, supervisor, runConsole, supervisedCancellationToken);
             terminalBuildSeconds = build.Seconds;
@@ -1228,7 +1249,7 @@ internal sealed class CoverageRunWorkflow
                 ThrowNoCoverageFiles(request, projectResults);
             }
 
-            var mergeStarted = _timeProvider.GetTimestamp();
+            var mergeStarted = _dependencies.TimeProvider.GetTimestamp();
             // ReportGenerator uses fixed output names. Isolate every invocation so --no-clean
             // can never mistake a retained output from an earlier run for this merge's result.
             var mergeDirectory = Path.Join(outputDirectory, "reportgenerator", Guid.NewGuid().ToString("N"));
@@ -1241,7 +1262,7 @@ internal sealed class CoverageRunWorkflow
                 {
                     try
                     {
-                        merge = await _reportGenerator.MergeSupervisedAsync(
+                        merge = await _dependencies.ReportGenerator.MergeSupervisedAsync(
                             coverageFiles,
                             mergeDirectory,
                             operation.ReserveProcess(),
@@ -1317,7 +1338,7 @@ internal sealed class CoverageRunWorkflow
                     diagnostics,
                     runConsole,
                     supervisor.Commit,
-                    _summaryStaged,
+                    _dependencies.SummaryStaged,
                     supervisedCancellationToken);
                 await WriteTimingsAsync(
                     request,
@@ -1506,7 +1527,7 @@ internal sealed class CoverageRunWorkflow
         {
             try
             {
-                list = await _processRunner.RunAsync(
+                list = await _dependencies.ProcessRunner.RunAsync(
                     new CoverageRunProcessRequest("dotnet", ["sln", solutionPath, "list"], solutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
                     cancellationToken);
             }
@@ -2074,7 +2095,7 @@ internal sealed class CoverageRunWorkflow
         }
 
         await console.WriteOutputAsync($"Building {resolution.SolutionPath}...", cancellationToken);
-        var started = _timeProvider.GetTimestamp();
+        var started = _dependencies.TimeProvider.GetTimestamp();
         var args = new List<string> { "build", resolution.SolutionPath, "--configuration", request.Configuration, "-v", "minimal" };
         if (request.NoRestore)
         {
@@ -2086,7 +2107,7 @@ internal sealed class CoverageRunWorkflow
         {
             try
             {
-                result = await _processRunner.RunAsync(
+                result = await _dependencies.ProcessRunner.RunAsync(
                     new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
                     cancellationToken);
             }
@@ -2118,7 +2139,7 @@ internal sealed class CoverageRunWorkflow
         CancellationToken cancellationToken)
     {
         await console.WriteOutputAsync($"Building {resolution.Projects.Count.ToString(CultureInfo.InvariantCulture)} selected test project(s)...", cancellationToken);
-        var started = _timeProvider.GetTimestamp();
+        var started = _dependencies.TimeProvider.GetTimestamp();
         foreach (var project in resolution.Projects)
         {
             var args = new List<string> { "build", project.FullPath, "--configuration", request.Configuration, "-v", "minimal" };
@@ -2137,7 +2158,7 @@ internal sealed class CoverageRunWorkflow
             {
                 try
                 {
-                    result = await _processRunner.RunAsync(
+                    result = await _dependencies.ProcessRunner.RunAsync(
                         new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
                         cancellationToken);
                 }
@@ -2288,7 +2309,7 @@ internal sealed class CoverageRunWorkflow
         try
         {
             Directory.CreateDirectory(projectOutputDirectory);
-            await (_writeProjectManifest ?? CoverageProjectManifest.WriteAsync)(
+            await (_dependencies.WriteProjectManifest ?? CoverageProjectManifest.WriteAsync)(
                 projectOutputDirectory,
                 resolution.SolutionDirectory,
                 project,
@@ -2310,7 +2331,7 @@ internal sealed class CoverageRunWorkflow
         }
         var logFile = Path.Join(projectOutputDirectory, "dotnet-test.log");
         var cleanupLogFile = Path.Join(projectOutputDirectory, "coverage-normalization.log");
-        var started = _timeProvider.GetTimestamp();
+        var started = _dependencies.TimeProvider.GetTimestamp();
 
         await console.WriteOutputAsync(
             $"[{entry.ExecutionIndex + 1}/{resolution.Projects.Count}] starting {project.RelativePath}{(project.IsExclusive ? " (exclusive)" : string.Empty)}",
@@ -2339,7 +2360,7 @@ internal sealed class CoverageRunWorkflow
                 state.InvocationId = Guid.NewGuid().ToString("N");
                 state.OwnedResultsDirectory = driverInvocation.RawResultsDirectory;
                 state.HangPlan = hangPlan;
-                processResult = await _processRunner.RunAsync(
+                processResult = await _dependencies.ProcessRunner.RunAsync(
                     new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, logFile, operation.ObserveBytes, operation.ReserveProcess()),
                     cancellationToken);
                 InspectHangDiagnostics(state, outputDirectory);
@@ -2348,13 +2369,13 @@ internal sealed class CoverageRunWorkflow
                     driverInvocation,
                     cancellationToken,
                     supervisor.Commit,
-                    deleteStagedFile: _deleteStagedCoverageFile,
+                    deleteStagedFile: _dependencies.DeleteStagedCoverageFile,
                     removeRedundantRaw: request.Clean && request.ArtifactRetention == "managed");
                 if (normalization.Status == "produced")
                     request.ArtifactSession?.Inventory.RecordFile(Path.Join(projectOutputDirectory, "coverage.cobertura.xml"));
                 if (normalization.CleanupDiagnostic is not null)
                 {
-                    var cleanupLog = await (_appendCleanupDiagnostic ?? CoverageRunProjectLog.AppendCleanupDiagnosticAsync)(
+                    var cleanupLog = await (_dependencies.AppendCleanupDiagnostic ?? CoverageRunProjectLog.AppendCleanupDiagnosticAsync)(
                         cleanupLogFile,
                         normalization.CleanupDiagnostic,
                         cancellationToken);
@@ -2512,8 +2533,8 @@ internal sealed class CoverageRunWorkflow
 
         try
         {
-            state.HangDiagnostics = _inspectHangDiagnostics(
-                state.OwnedResultsDirectory, outputDirectory, _timeProvider);
+            state.HangDiagnostics = _dependencies.InspectHangDiagnostics(
+                state.OwnedResultsDirectory, outputDirectory, _dependencies.TimeProvider);
         }
         catch (Exception ex) when (IsNonFatalDiagnosticException(ex))
         {
@@ -2953,7 +2974,7 @@ internal sealed class CoverageRunWorkflow
         try
         {
             await File.WriteAllTextAsync(stagedPath, json + Environment.NewLine, cancellationToken);
-            _timingsStaged?.Invoke();
+            _dependencies.TimingsStaged?.Invoke();
             if (cancellationToken.IsCancellationRequested)
             {
                 onCancelledStage?.Invoke();
@@ -2999,7 +3020,7 @@ internal sealed class CoverageRunWorkflow
             return null;
         }
 
-        var diagnosticStarted = _timeProvider.GetTimestamp();
+        var diagnosticStarted = _dependencies.TimeProvider.GetTimestamp();
         var stagedMarkdownPath = Path.Join(
             outputDirectory,
             $".{CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName}.{Guid.NewGuid():N}.tmp");
@@ -3010,9 +3031,9 @@ internal sealed class CoverageRunWorkflow
         string? activeStagedJsonPath = null;
         try
         {
-            if (_beforeSlowTestDiagnostics is not null)
+            if (_dependencies.BeforeSlowTestDiagnostics is { } beforeSlowTestDiagnostics)
             {
-                await _beforeSlowTestDiagnostics(cancellationToken);
+                await beforeSlowTestDiagnostics(cancellationToken);
             }
 
             var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken, observeProgress);
@@ -3028,7 +3049,7 @@ internal sealed class CoverageRunWorkflow
                 observeProgress);
             activeStagedMarkdownPath = diagnostics.StagedMarkdownPath;
             activeStagedJsonPath = diagnostics.StagedJsonPath;
-            _slowTestDiagnosticsStaged?.Invoke();
+            _dependencies.SlowTestDiagnosticsStaged?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
             CommitStagedDiagnostics(
                 activeStagedMarkdownPath,
@@ -3037,7 +3058,7 @@ internal sealed class CoverageRunWorkflow
                 diagnostics.JsonPath,
                 commit,
                 transition,
-                _beforeSlowTestDiagnosticsPromotion);
+                _dependencies.BeforeSlowTestDiagnosticsPromotion);
 
             request.ArtifactSession?.Inventory.RecordFile(diagnostics.MarkdownPath);
             request.ArtifactSession?.Inventory.RecordFile(diagnostics.JsonPath);
@@ -3236,7 +3257,7 @@ internal sealed class CoverageRunWorkflow
 
     private long ElapsedSeconds(long started)
     {
-        return (long)_timeProvider.GetElapsedTime(started).TotalSeconds;
+        return (long)_dependencies.TimeProvider.GetElapsedTime(started).TotalSeconds;
     }
 
     private static string ResolveUserPath(string path, string currentDirectory)

@@ -1,5 +1,7 @@
 # EvidenceHost Cookbook
 
+The [local producer reuse recipe](./evidence-reuse.md) covers explicit input promises, cooperative child lifetime, fresh/reuse CLI commands, prepared-host composition, store recovery, and versioned contracts. Treat its version matrix as a candidate until the released-reader matrix is recorded.
+
 The repository validation tool has two distinct uses. Its [direct package recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys) validates a supplied package outside EvidenceHost and writes `native-validation-receipt.json`, with no EvidenceHost claim or gate authority. AppSurface's [policy-backed local and CI workflow](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) selects changed-path coverage, package checks and native acceptance through the checked-in policy and emits the manifest used by the repository evidence gate.
 
 Its [shared local and CI policy recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development)
@@ -114,15 +116,14 @@ Release profiles require an explicit `IEvidenceExecutionEnvelopeVerifier` regist
 registration.SetEnvelopeVerifier(githubActionsEnvelopeVerifier);
 ```
 
-Run `appsurface evidence doctor` from the protected release workflow first. A local release run reports `blocked`; it does not guess a release envelope.
+Use [`appsurface evidence doctor`](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#doctor-preflight) to check the release policy, diff, and selected runtime prerequisites. The envelope check reports `unverified` in every environment. Validate the envelope through the registered verifier in the protected release workflow.
 
 ## Diagnose before you rerun
 
 | Signal | Meaning | Next action |
 | --- | --- | --- |
-| `ready` from `doctor` | Policy and currently selected prerequisites are available. | Run `explain`, then `run`. |
-| `ready_with_external_prerequisites` | The policy is valid but the CI image must provide Docker or browser capability. | Fix the runner/image; do not treat it as a pass. |
-| `blocked` | A policy/diff/envelope condition prevents a truthful run. | Read the named diagnostic and fix the source condition. |
+| `ready_with_external_prerequisites` from `doctor` | The policy and diff resolved. The envelope is unverified, and selected Docker or browser prerequisites may still be missing. | Read each check to prepare the run. Gate releases on a `ReleaseComplete` claim from the [protected workflow](#release-evidence) with its registered verifier. |
+| Nonzero exit from `doctor` | The command could not resolve the policy or diff. | Read the diagnostic and fix the input. |
 | `ClaimKind.None` | A producer, obligation, artifact, or envelope did not complete. | Read `evidence-summary.json`; do not lower a gate blindly. |
 | A `reason=` line from a `test` producer | One declared test project is incomplete. | Follow the `next:` line printed with it, or look the reason up in the [reason table](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#reasons). |
 | `ObservationOnly` | A useful signal that cannot satisfy a gate. | Use it for discovery, then define the missing profile/producer before enforcement. |

@@ -10,7 +10,7 @@ Run the same checked-in [evidence policy](https://github.com/forge-trust/AppSurf
 
 ```bash
 dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local-plan
-dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release --no-build --no-restore -- --operation local
+dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local
 ```
 
 `local-plan` explains the selected profile, producers and obligations without packing or running tests.
@@ -18,36 +18,35 @@ dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configura
 current checkout, `.github/evidence.policy.json`, and `--base origin/main`. Use `--base COMMIT_OR_REF` for
 another comparison or `--repository /absolute/checkout` from elsewhere. The default uses
 `TestResults/repository-evidence/local/` in the selected worktree and prints the retained archive as
-`Local evidence output:`. Each invocation validates in fresh scratch. The command keeps separate
-archives for the most recent success, failure and cancellation (`latest.zip`, `latest-failure.zip`
-and `latest-cancelled.zip`). Planning uses the corresponding `latest-plan` names. An error before
-output exists leaves the previous archives available. An empty change inventory prints a summary and
-leaves the latest verified proof and plan available. Local execution with either output mode and
-managed planning are serialized by an exclusive `appsurface-local-evidence/run.lock` in the
-worktree's Git metadata directory. Keep .NET file locking enabled.
+`Local evidence output:`. Each invocation validates in fresh workspaces under `.scratch/` in that
+directory. Package discovery skips hidden directories, keeping generated consumer projects out of
+the repository's package inventory. Each run replaces only its own
+archive. Executions use `latest.zip`, `latest-failure.zip`, and `latest-cancelled.zip`. Plans use
+the corresponding `latest-plan` names. An empty change inventory or an error before output exists
+leaves the previous archives intact. Managed planning and both execution modes share a per-worktree
+lock in the worktree's Git metadata directory.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage
-diagnostics. Before replacing an archive for a completed run, the validator checks the original resolved
-policy, changed-path inventory, plan and any verified manifest and bound files. To replay verification,
-extract the archive and use `local-policy.json`, `changed-paths.json`, `plan/evidence-plan.json`,
-`proof/evidence-manifest.json`, and `proof/artifacts/` with the same scope that produced the proof.
-Scratch is removed after successful retention and known cleanup. The validator tracks
-subprocess cleanup and the EvidenceHost cleanup result. Subprocess cleanup requires process
-exit and end-of-stream on both output pipes. The Git collector keeps draining excess output
-within the cleanup deadline after it stops retaining bytes. Each `local` execution creates
-`appsurface-local-evidence/run.pending-cleanup` beside the lock before starting and clears it after
-confirmed cleanup. If cleanup is unconfirmed or the validator exits abruptly, the marker blocks
-another `local` execution in that worktree, including one using `--output`. A blocked retry prints
-the marker path and recovery steps. The marker contains the prior run's output path. After the
-validator exits, `local-plan` remains available while the marker is present. Use the existing
-validator build with `--no-build --no-restore` during recovery
-so the .NET invocation skips building the driver. Confirm that the prior validation processes have
-stopped before removing the marker and retrying. Keep any retained scratch you need for inspection.
-Scratch and the private `.scratch/package-restore/` cache stay outside package discovery.
-The cache keeps the package-gate build warm and its worktree restore metadata usable between runs. Installed-consumer and
-cold-cache proofs still have their own isolated restores and feeds.
+diagnostics. Before replacing a successful archive, the validator verifies the original resolved
+policy, changed-path inventory, plan, and any verified manifest and declared artifacts inside the
+staged ZIP. Archive traversal skips scratch trees outside retained paths. Extract `local-policy.json`,
+`changed-paths.json`, `plan/evidence-plan.json`, `proof/evidence-manifest.json`, and `proof/artifacts/`
+to replay `verify` with the producing scope. Scratch is removed
+after successful retention and known cleanup. If execution or archiving stops without confirmed
+cleanup, the scratch path is retained for diagnosis. When a failed run has a proof directory, an
+unreadable or oversized manifest also keeps scratch. The validator tracks the host cleanup result
+and confirms subprocess exit and closure of both output pipes before declaring cleanup complete.
+For `local`, it records the run's output path in `appsurface-local-evidence/run.pending-cleanup`
+beside `run.lock`, relative to `git rev-parse --absolute-git-dir`. A crash or unconfirmed cleanup
+leaves the marker in place and blocks execution even with an explicit `--output`. After the prior
+validator exits, `local-plan` remains available. Remove the printed marker only after confirming
+the prior processes have stopped, and keep any scratch needed for investigation. Run recovery
+planning with `--no-build --no-restore` to avoid rebuilding the validator during diagnosis. The private
+`.scratch/package-restore/` cache keeps package discovery out of restored fixtures and keeps the package-gate build warm and its worktree restore metadata usable
+between runs. Installed-consumer and cold-cache proofs still have their own isolated restores and feeds.
 
 Use `--output /absolute/fresh-output` when you need a complete, unpacked run for a specific investigation
-or a script that consumes the raw files. After building the tool once, invoke
+or a script that consumes the raw files. With explicit output, `Local evidence output:` prints that
+directory. After building the tool once, invoke
 its DLL directly or use `dotnet run --no-build --no-restore` with the same configuration to avoid rebuilding
 the driver. Keep the driver current when changing evidence code.
 
@@ -57,6 +56,9 @@ merge conflicts first. Nothing needs to be committed to select evidence. The col
 once without fetching; fetch explicitly when an updated remote comparison is needed. Missing base history
 fails with no claim. An empty local inventory exits successfully without creating an evidence manifest;
 this is distinct from a reviewed documentation change selecting `NoEvidenceRequired`.
+The initial policy digest and the policy used for planning come from the same byte snapshot. The
+snapshot applies the 20 MiB input limit while reading. Local execution hashes the current policy as
+a stream when it checks for drift against the initial digest.
 Local collection rejects tracked `assume-unchanged` or `skip-worktree` index flags, even when those files
 currently match HEAD: Git may otherwise conceal source bytes used by a build. Clear the flags explicitly
 before running evidence; the collector never changes them. The local digest binds the documented Git
@@ -95,10 +97,10 @@ The [C# Git collector](https://github.com/forge-trust/AppSurface/blob/main/tools
 `source-state.json` alongside `changed-paths.json`. Its `sourceDigest` is included in the derived
 `local-policy.json` policy ID, so the canonical plan and resulting manifest bind the exact local source
 state while preserving the checked-in rules and producer contracts. Local execution rechecks source and policy before the
-candidate build, after it, and after producer completion. A completed producer claim starts as
-`ObservationOnly` on disk. The validator atomically replaces it with the gate-eligible manifest after
-checking cleanup, the artifact bytes, and the final source and policy state. Cancellation or failure
-before replacement leaves any written observation available for diagnosis. Keep output under
+candidate build, after it, and after producer completion. Eligible producer results are initially
+saved as `ObservationOnly`. The validator promotes the manifest atomically after cleanup, artifact,
+source and policy checks pass. A failed source check still preserves the original error if the
+summary cannot be written. Keep output under
 ignored `TestResults` or outside the checkout: writing output into an unignored source directory changes
 the inventory and correctly invalidates the run. A local pass covers only the current OS; CI still owns
 its selected native supplement. The recorded source digest describes dirty local inputs; package source metadata
@@ -447,9 +449,11 @@ exercise real Git repositories and malformed inputs, and the
 [workflow contract tests](https://github.com/forge-trust/AppSurface/blob/main/Aspire/ForgeTrust.AppSurface.Aspire.Tests/RepositoryEvidenceWorkflowContractTests.cs)
 verify the CI integration using the existing .NET test project. This path requires only Git and .NET.
 
-`LocalEvidenceWorkflow` has internal package-command and producer execution delegates for deterministic
-orchestration tests. The producer delegate writes artifacts and returns an unpublished manifest. Policy
-planning, source snapshots, artifact verification, and final manifest publication use the production path.
+`LocalEvidenceWorkflow` has internal package-command and execution delegates for deterministic orchestration
+tests. The execution delegate replaces only the `run` operation: policy planning, source snapshots and the
+final canonical manifest/artifact verification remain real. A nonzero delegate result fails the workflow;
+source drift after a completed execution downgrades its manifest to `ObservationOnly`. These seams do not
+change the executable's command-line inputs or permit production callers to supply their own claims.
 
 Plans bind policy and normalized changed paths, not independent commit attestation. The workflow obtains
 the checkout, event inputs, candidate package and manifests within the current run; verification detects
@@ -475,6 +479,74 @@ The storage producer has a 600-second declared deadline. It extracts the package
 
 The installed-consumer producer has a 1,800-second declared deadline. It installs the supplied package in an isolated tool directory and cache, verifies installed bytes, and collects fresh Release coverage and JUnit results from the checked-in two-project consumer. Every required project and test fragment must execute successfully. Overall coverage must pass 95% line and 85% branch with zero tolerance. Report, manifest, log and timing readers must still work, and source/settings integrity must remain unchanged. This fixture proves the repeatable consumer recipe; it does not claim to have executed an arbitrary external application's tests.
 
+### Packed producer reuse package proof
+
+Use `reuse-package-proof` to validate a packed candidate CLI and an independent package-only prepared host. It checks candidate archive identity and dependency closure, installs the packed tool, and runs the host and CLI reuse assertions. The [local producer reuse guide](../../guides/evidence-reuse.md) explains the reuse contract, adoption choices, and pitfalls.
+
+The validator copies the [packed host fixture](https://github.com/forge-trust/AppSurface/blob/dea581f6e39ca8b3c7ea1d89cc4d61b37a86ba49/tools/ForgeTrust.AppSurface.Evidence.Validation/fixtures/packed-host/Program.cs) into proof scratch and fills in the exact candidate version in its [project template](https://github.com/forge-trust/AppSurface/blob/dea581f6e39ca8b3c7ea1d89cc4d61b37a86ba49/tools/ForgeTrust.AppSurface.Evidence.Validation/fixtures/packed-host/PackedHost.csproj.template). It passes the expected assembly IDs to both the built and published host, then verifies their reported paths and hashes against the candidate archives.
+
+Build the validator from the repository root. To build an eight-package candidate feed from the checkout, run:
+
+```bash
+dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release
+dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll \
+  --operation pack-candidate-feed --mode reuse --repository . \
+  --output /absolute/fresh-feed --version EXACT_VERSION --source-commit FULL_SOURCE_COMMIT --dotnet /absolute/dotnet
+```
+
+Pass `--no-restore true` after restoring every candidate project with the locked graph. The build workflow uses this option to prepare the entire packed-journey feed on each native runner before starting coverage collection.
+
+The native acceptance workflow uses `neutral` to prepare the CLI and three coverage libraries, then `extend-neutral` to add four reuse libraries to that same feed after the neutral consumer proof. In either fresh mode, `--package` supplies the existing CLI archive for the requested version. The [candidate package catalog](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Evidence.Validation/PackedCandidatePackages.cs) supplies the exact archive IDs for both feed preparation and reuse admission. The consumer proofs independently verify the package contents and provenance.
+
+Feed preparation checks the complete mode-specific archive inventory before writing. A missing neutral prerequisite or an existing reuse archive reports the affected package ID. Newly built packages are stamped with the supplied full commit. A pack command failure reports the stage and exit code and includes the redacted output retained under `pack-logs`.
+
+Pass the candidate feed to the proof with all five required values:
+
+```bash
+dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll \
+  --operation reuse-package-proof \
+  --feed /absolute/candidate-feed \
+  --version EXACT_VERSION \
+  --source-commit FULL_SOURCE_COMMIT \
+  --dotnet /absolute/dotnet \
+  --output /absolute/fresh-proof
+```
+
+This operation accepts only `--operation`, `--feed`, `--version`, `--source-commit`, `--dotnet`, and `--output`. All are required and there are no option defaults. The feed must contain same-version packages for `ForgeTrust.AppSurface.Cli`, `ForgeTrust.AppSurface.Evidence.Contracts`, `ForgeTrust.AppSurface.Evidence.Planner`, `ForgeTrust.AppSurface.Evidence.Readiness`, `ForgeTrust.AppSurface.Evidence.Coverage`, `ForgeTrust.AppSurface.Coverage`, and `ForgeTrust.AppSurface.Evidence.Aspire`. `ForgeTrust.AppSurface.Evidence.Cli` is checked as well when it is separately packed into the feed. The candidate version and private dependency edges must match exactly, and every package's repository commit metadata must match the supplied 40- or 64-character source commit. The selected .NET host must resolve the exact SDK pinned by the repository's [`global.json`](https://github.com/forge-trust/AppSurface/blob/main/global.json) when the validator was built. The validator copies its embedded configuration into scratch and records the verified SDK version in `proof.json`.
+
+The output path must be fresh and outside both the checkout and candidate feed. Feed admission happens before output creation. A successful proof requires `proof.json`. For a caught failure after admission, the command prints the original diagnostic and attempts to write `proof.json`. If that write fails, it prints a second diagnostic and still exits with failure. Caller cancellation or external termination can leave only the stage logs. Each `<stage>.log` is first written immediately before process launch as JSON containing `stage`, `state: "starting"`, and `startedAtUtc`. If `Process.Start` fails, that marker is removed. For a launched stage, the marker remains during execution and is replaced with captured, redacted output only after the child exits and its output streams are collected. A starting marker is diagnostic only. It does not prove process settlement or acceptance by a gate. The operation returns zero only after all recorded assertions pass. Its audit journey requires `VerifiedReceiptCompared=true` in the CLI summary: a fresh run without a verified candidate cannot satisfy that assertion, even when its coverage gate passes.
+
+The runner captures up to 4 Mi characters per stream and caps the final redacted transcript at the combined
+8 Mi-character budget. Redaction matches values in the original output and writes one marker for each
+merged span of overlapping matches. If a command is interrupted, a trailing fragment at either stream
+boundary is also masked when it matches the start of a configured sensitive value. Redaction markers
+and truncation apply to the retained transcript.
+
+The best-effort `packed-progress.jsonl` journal flushes each boundary as the proof observes it. It records UTC time, elapsed milliseconds, the stage, and the exit code when available. Read the last complete line after an external kill. Separate process, stdout, and stderr entries show what settled, followed by entries for CLI artifact validation and the final proof write. On interruption, cleanup records the process exit and whether each stream drained, was cancelled, or faulted. A failed tree termination triggers a separate request to stop the owned root. If both requests fail, cleanup keeps waiting for the root to exit. The command reports termination failures after joining the root and its streams. A missing journal or incomplete line conveys no acceptance result.
+
+When a stage is interrupted, its `InterruptedWhile` field in `proof.json` records whether the process was still running or which output stream had yet to finish. A child exit code of zero can appear in a failed proof when output collection was interrupted. If writing a diagnostic log fails as well, the command's original exception or nonzero exit code takes precedence. A successful command still requires its redacted log.
+
+Candidate dependency keys in the installed tool and prepared host must use a nonempty `package-id/version` with a single separator and exact casing. The tool may bundle a coherent build version that differs from the archive version, because the proof also verifies the bundled assembly bytes. The proof checks two mutated feeds through the same admission code before it installs the candidate CLI. Each entry in `proof.json` under `negatives` records the exact contract that rejected the feed.
+
+The [neutral and packed reuse proofs](../ForgeTrust.AppSurface.Coverage.Dogfood/README.md#installed-library-proof)
+both require a single private dependency pin with exact ID casing and a closed version range in each framework
+group, or in the ungrouped declaration. The packed proof checks the gate verdict, zero tolerance, and 95% line
+and 85% branch configured and effective thresholds from the verified report bytes.
+
+The packed proof reads each host proof, dependency document, assets document, CLI summary, gate report,
+timings report, and JUnit report under a 16 MiB limit. The CLI manifest uses the canonical 20 MiB limit.
+The validator checks the recorded length and SHA-256 of the exact gate, timings, and JUnit bytes it parses.
+The verified timings document names one distinct JUnit report per fixture project. Each reference must match
+an exact path in the manifest inventory. Other reports still receive custody checks and do not contribute test cases.
+All CLI report hashes stop after the recorded length and one byte to check for EOF. The validator
+keeps snapshots only for reports it parses. The CLI inventory retains its 128-file and 256 MiB limits.
+
+The native [acceptance workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/native-evidence-validation.yml) runs this proof against its same-source candidate packages. The [packed journey test](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidencePackedReuseJourneyTests.cs) also supports the test-only `APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS` environment variable. When set, its value must be an existing absolute parent physically outside the checkout. The test creates a random child directly under that parent with Unix mode `0700`, or a protected Windows ACL granting the current user FullControl with file and directory inheritance. It does not move the directory from platform temporary storage, so the parent needs no same-filesystem relationship to the temp directory. When unset, the test keeps its existing BCL temporary-directory behavior. Successful journeys delete their scratch child; failed or interrupted journeys preserve it. The existing two-minute VSTest [per-test hang timeout](https://learn.microsoft.com/dotnet/core/tools/dotnet-test-vstest#options) is unchanged.
+
+The [build workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) sets this parent to `runner.temp/packed-reuse-diagnostics`. The diagnostics upload collects staged feed logs from `runner.temp/packed-reuse-journey-feed/pack-logs/pack-*.log`. It also collects `pack-*.log`, `source.log`, `proof/*.log`, `proof/proof.json`, and the two progress journals from the test's diagnostics parent. Packing and source lookup use the same child-process logging rules as the proof. The outer `fixture-progress.jsonl` records entry to and return from the in-process validator, test-side proof checks, and fixture cleanup. The journal stays outside the payload being deleted, so an interruption during cleanup can still leave a marker.
+
+The [native EvidenceHost acceptance workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/native-evidence-validation.yml) retains the shared feed's `pack-logs/pack-*.log` and `packed-progress.jsonl` from its standalone reuse proof in the native evidence artifact.
+
 ## External consumer profile
 
 Pass `--consumer-profile /absolute/profile.json` to run a consumer you own. A profile supplies these fields:
@@ -496,13 +568,16 @@ Pass `--consumer-profile /absolute/profile.json` to run a consumer you own. A pr
 
 The source repository is read for identity/integrity and cloned into scratch. The original remains caller-owned. External profiles must provide a nonblank `expectedCommit`; the producer compares source HEAD with this explicit pin before cloning. The built-in fixture does not require this field. An explicit project list must contain the complete intended acceptance inventory; otherwise the solution determines it. `testProjects` is a scoped acceptance declaration, so it must list every intended test project for that profile; it does not silently claim full repository coverage. `.sln` and `.slnx` inputs are parsed before execution and must resolve to at least one test project. When `diffBase` is supplied, the consumer also requires 95/85 patch coverage with zero tolerance. Provide required test fragments so a successful exit cannot hide a missing critical suite; required fragments must be present in non-skipped, passing JUnit cases. Skips are rejected by default. External profiles may explicitly allow a skip only when `permittedSkipPatterns` contains a matching testcase attribute fragment and a nonempty rationale; those skips remain part of the declared profile scope. The checked-in fixture has no permitted skips. JUnit acceptance reads exactly one top-level `junit-*.xml` report per declared project, capped at 16 MiB per report, 64 MiB total and 100,000 testcases. Oversized evidence fails acceptance; it never silently drops tests. DTDs are prohibited, and retained testcase summaries omit output bodies and parent-document references to bound memory. For larger applications, compose separate Evidence obligations that together retain the full intended test inventory. These report bounds never waive the repository coverage gate or allow a missing required suite to pass. Resource-backed applications should compose explicit readiness probes through the [Aspire Evidence package](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md); this tool does not infer or provision their databases. Keep secrets out of profile files and durable evidence.
 
+If a Git command cannot confirm that its child process stopped, the installed-consumer journey fails
+even during an optional source probe.
+
 ## Storage and lifetime
 
 `--maximum-scratch-bytes` defaults to 2 GiB per producer and `--minimum-free-bytes` to 1 GiB. The native [workspace budget](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#owned-workspaces-and-command-budgets) checks before commands and during execution. Measurements are sampled, so a child can allocate between checks; this is not an operating-system disk quota. A budget failure stops the affected journey. Entry/depth limits also bound filesystem inspection.
 
 Candidate JSON readers also enforce cumulative byte limits: 1 MiB for the consumer's `coverage-gate.json` and 16 MiB for the storage run's `.appsurface-coverage-run.json`. Missing, empty, linked, oversized or invalid JSON fails acceptance. These bounds apply before parsing and throughout reading, with cancellation checks; they do not trim evidence or relax coverage requirements.
 
-`--scratch-parent` must already exist and defaults to the platform temporary directory. The installed-consumer and packed-storage producers each own a fresh random child. Cleanup removes only that child after checking its ownership and rejecting links. If a child command's shutdown cannot be confirmed, the producer retains its scratch and prints the path to stderr. The direct receipt and the policy-backed EvidenceHost manifest record incomplete cleanup when they can safely finish. Direct recipe `--output` must be fresh and outside scratch, and remains caller-owned. Use trusted local workspaces because these path checks assume the filesystem is trusted.
+`--scratch-parent` must already exist and defaults to the platform temporary directory. Each direct recipe producer owns a fresh random child. Cleanup removes only that child after checking its ownership and rejecting links. Durable `--output` must be fresh and outside scratch, and remains caller-owned. Cleanup failure makes the direct receipt unsuccessful; policy-backed EvidenceHost execution records an incomplete manifest when it can safely finish. Use trusted local workspaces; path checks do not provide an adversarial filesystem sandbox.
 
 The direct runner executes selected producers sequentially. Built-in deadlines are 600 seconds for `packed-storage` and 1,800 seconds for `installed-consumer`; an optional `native-fan-in` producer has a 300-second deadline. After cancellation or a deadline, it allows up to 10 seconds for the running callback to join. It disposes producers in reverse registration order, with up to 10 seconds per disposal, then verifies the declared artifacts and their hashes. If producer or disposal work remains live past its allowance, the runner stops further disposal, artifact hashing, and receipt publication because live work could still mutate its artifacts. A completed cleanup failure is recorded and makes the receipt unsuccessful.
 

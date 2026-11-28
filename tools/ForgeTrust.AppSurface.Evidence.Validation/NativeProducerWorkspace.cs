@@ -2,64 +2,54 @@ using ForgeTrust.AppSurface.Evidence.Aspire;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
-/// <summary>Owns one native producer workspace and preserves it when child shutdown cannot be confirmed.</summary>
-/// <remarks>A retained path is printed locally. Disposal reports incomplete cleanup to either recipe supervisor.</remarks>
-internal sealed class NativeProducerWorkspace
+/// <summary>Owns a native producer workspace and retains it when subprocess cleanup is unconfirmed.</summary>
+/// <remarks>Retained workspace paths are written to standard error for local inspection.</remarks>
+internal sealed class NativeProducerWorkspace : IAsyncDisposable
 {
-    private EvidenceWorkspace? _workspace;
+    private readonly EvidenceWorkspace _workspace;
     private int _cleanupUnconfirmed;
 
-    /// <summary>Gets the producer's currently owned workspace.</summary>
-    internal EvidenceWorkspace? Current => _workspace;
+    private NativeProducerWorkspace(EvidenceWorkspace workspace)
+    {
+        _workspace = workspace;
+    }
 
-    private bool CleanupUnconfirmed => Volatile.Read(ref _cleanupUnconfirmed) != 0;
+    /// <summary>Gets the newly created absolute workspace path.</summary>
+    internal string RootPath => _workspace.RootPath;
 
-    /// <summary>Creates the producer's isolated workspace under the caller's scratch parent.</summary>
-    internal EvidenceWorkspace Create(string parent, EvidenceWorkspaceOptions options) =>
-        _workspace = EvidenceWorkspace.Create(parent, options);
+    /// <summary>Gets whether the workspace must be retained after an unconfirmed subprocess cleanup.</summary>
+    internal bool CleanupUnconfirmed => Volatile.Read(ref _cleanupUnconfirmed) != 0;
 
-    /// <summary>Retains the workspace when the command runner could not confirm cleanup.</summary>
+    /// <summary>Creates an isolated workspace beneath the supplied scratch parent.</summary>
+    internal static NativeProducerWorkspace Create(string parent, EvidenceWorkspaceOptions options) =>
+        new(EvidenceWorkspace.Create(parent, options));
+
+    /// <summary>Returns a normalized absolute path for a workspace artifact.</summary>
+    internal string GetPath(string relativePath) => _workspace.GetPath(relativePath);
+
+    /// <summary>Checks logical scratch usage and actual volume free space.</summary>
+    internal void CheckBudget() => _workspace.CheckBudget();
+
+    /// <summary>Marks the workspace for retention after unconfirmed subprocess cleanup.</summary>
     internal void RecordCommandFailure(EvidenceCommandException exception)
     {
-        if (_workspace is { } workspace && exception.CleanupUnconfirmed &&
-            Interlocked.Exchange(ref _cleanupUnconfirmed, 1) == 0)
+        if (exception.CleanupUnconfirmed && Interlocked.Exchange(ref _cleanupUnconfirmed, 1) == 0)
         {
-            Console.Error.WriteLine("Native producer scratch retained for inspection: " + workspace.RootPath);
+            Console.Error.WriteLine("Native producer scratch retained for inspection: " + RootPath);
         }
     }
 
-    /// <summary>Releases settled scratch before the next journey. The supervisor reports any recorded command cleanup failure.</summary>
-    internal ValueTask ReleaseIfSettledAsync() =>
-        CleanupUnconfirmed ? ValueTask.CompletedTask : ReleaseAsync();
-
-    /// <summary>Removes settled scratch or signals incomplete cleanup without deleting retained files.</summary>
-    internal ValueTask DisposeAsync()
+    /// <summary>Deletes settled scratch or reports unconfirmed cleanup while retaining the files.</summary>
+    public ValueTask DisposeAsync()
     {
         if (CleanupUnconfirmed)
         {
-            Interlocked.Exchange(ref _workspace, null);
-            return ValueTask.FromException(new EvidenceCommandException(EvidenceCommandException.CleanupFailedCode,
-                "Native producer scratch was retained because command cleanup could not be confirmed."));
+            return ValueTask.FromException(new EvidenceCommandException(
+                EvidenceCommandException.CleanupFailedCode,
+                "Native producer scratch was retained because command cleanup could not be confirmed.",
+                cleanupUnconfirmed: true));
         }
 
-        return ReleaseAsync();
-    }
-
-    private async ValueTask ReleaseAsync()
-    {
-        var workspace = Interlocked.Exchange(ref _workspace, null);
-        if (workspace is null)
-            return;
-
-        try
-        {
-            await workspace.DisposeAsync().ConfigureAwait(false);
-        }
-        catch
-        {
-            // Keep ownership if deletion failed so the supervisor can retry cleanup.
-            Interlocked.CompareExchange(ref _workspace, workspace, null);
-            throw;
-        }
+        return _workspace.DisposeAsync();
     }
 }

@@ -176,7 +176,6 @@ public sealed class EvidenceCommandRunner
             if (budgetFailure.Task.IsCompletedSuccessfully)
             {
                 failure = CreateBudgetException(budgetFailure.Task.Result, "during_execution");
-                await ConfirmShutdownAsync(process, readers, captureLifetime).ConfigureAwait(false);
             }
             else if (cancellationToken.IsCancellationRequested)
             {
@@ -193,7 +192,6 @@ public sealed class EvidenceCommandRunner
             failure = budgetFailure.Task.IsCompletedSuccessfully
                 ? CreateBudgetException(budgetFailure.Task.Result, "during_execution")
                 : new EvidenceCommandException("timeout", "The evidence command exceeded its deadline.");
-            await ConfirmShutdownAsync(process, readers, captureLifetime).ConfigureAwait(false);
         }
         finally
         {
@@ -202,6 +200,7 @@ public sealed class EvidenceCommandRunner
 
         if (failure is not null)
         {
+            await ConfirmShutdownAsync(process, readers, captureLifetime).ConfigureAwait(false);
             await ObserveBoundedAsync(budgetMonitor).ConfigureAwait(false);
             throw failure;
         }

@@ -4,6 +4,8 @@
 
 Start with the [EvidenceHost guide](../../start-here/evidencehost.md). The workflow reads only explicit policy and diff inputs; it does not scan consumer assemblies, discover test projects, provision third-party services, or report outbound usage telemetry. The preview [`test` producer](#test-producer-preview) lists the tests of the projects a policy declares; it never searches for projects.
 
+See the canonical [producer reuse guide](../../guides/evidence-reuse.md) for complete input declarations, optional multi-file report custody, cooperative child lifetime, reuse/audit CLI behavior, and candidate 1.1 constraints.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
@@ -25,16 +27,33 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 | Command | Behavior |
 | --- | --- |
 | `init --sample` | Creates a marked, non-overwriting policy, host skeleton, and local README. `--force` may replace only previously marked starter files. |
-| `doctor` | Resolves policy and reports policy, diff, Docker, browser, and release-envelope prerequisites without starting anything. |
+| `doctor` | Resolves policy and diff, checks selected Docker and browser prerequisites, and reports [envelope verification status](#doctor-preflight). |
 | `explain` | Writes the resolved plan and a human-readable summary without running producers. |
-| `run` | Runs selected built-in `coverage` and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. It first deletes the earlier manifest, summary and the selected `test` producers' artifact directories, so a cancelled rerun cannot leave an old passing manifest behind. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
+| `run` | Runs selected built-in `coverage` and preview [`test`](#test-producer-preview) evidence one producer at a time, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. Once the new plan passes validation, the command deletes the earlier manifest, summary and the selected `test` producers' artifact directories before starting producers. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
 | `verify` | Recomputes binding and digest verification and checks every manifest-listed artifact on disk, without running any producer. See [Verifying evidence](#verifying-evidence). |
+
+Policy, plan, and manifest inputs use the shared [bounded JSON reader](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input). The CLI counts up to 20 MiB per input before parsing and rejects malformed or ambiguous documents. Invalid or unreadable policy input reports `ASEVD205`. Invalid or unreadable plan and manifest input reports `ASEVD209`. These errors omit JSON content and raw reader messages. Missing or invalid input paths report `ASEVD204` for policy and `ASEVD208` for plans and manifests.
+
+The CLI also checks generated plans and manifests against the same 20 MiB verification limit before writing them. A plan can be larger than its policy because it contains both the selected profile and the policy snapshot. `explain` and `run` report `ASEVD217` if the plan exceeds the limit. `run` rejects an oversized plan before retiring earlier output or starting producers. It reports the same code if the resulting manifest exceeds the limit. Shorten descriptive policy text, changed-path inputs, or diagnostics and rerun.
+
+## Doctor preflight
+
+A valid policy and diff return exit code 0 with `ready_with_external_prerequisites`. The `trusted-envelope`
+check reports `unverified` for every profile, including in GitHub Actions. Read the individual checks for
+Docker and browser requirements. A planning or input error returns a nonzero exit with its diagnostic.
+
+Use the report to prepare a run. Release-envelope validation takes place in the consumer's
+[protected workflow with its registered verifier](../../guides/evidencehost-cookbook.md#release-evidence).
 
 ## Incomplete profiles are not complete evidence
 
 An intentionally selected `no-evidence` profile may close a gate. A skipped test project, unavailable browser, missing Docker runtime, or unsupported producer cannot. A filtered test suite cannot close a coverage assertion; it can close the [`test` assertion](#test-producer-preview) of a producer that names its filter in the plan. `run` returns a failing command and a manifest with `ClaimKind.None` for those cases, preserving the diagnostic and next action in `evidence-summary.json`.
 
+For an `ObservationOnly` claim, the `next` field in `evidence-summary.json` identifies the result as informational and directs gate consumers to run fresh evidence without `--observation-only`.
+
 The built-in coverage producer is an in-process adapter over the private [`ForgeTrust.AppSurface.Evidence.Coverage`](../ForgeTrust.AppSurface.Evidence.Coverage/README.md) engine shared with `appsurface coverage run` and `appsurface coverage gate`. Its policy declaration carries the exact overall and optional patch thresholds, tolerance, and patch-line mode; the resolved plan binds those values before collection begins. When a patch gate is selected, `evidence run` captures the bounded `--diff-file` bytes during planning and reuses that immutable snapshot for gate evaluation, so replacing the file mid-run cannot change the measured input. It does not silently convert a partial test selection into a full-profile claim.
+
+The CLI reuse resolver has an internal per-instance `sdkExecutableForTests` seam for deterministic SDK-version-query tests. A supplied path must be fully qualified; it affects only SDK version queries. Production omits it and resolves `dotnet` normally. It does not replace the coverage engine process runner or add a user-facing executable override. The existing 30-second query deadline also covers stdout/stderr draining, including after root exit. Deadline expiry returns `unavailable`; caller cancellation propagates. Actual root termination is joined on cancellation. Releasing the readers does not prove that an unregistered descendant has stopped; the query never admits a receipt from incomplete SDK identity.
 
 Coverage declarations may also set `coverageExecution` with a simple `configuration` identifier, `parallelism` from 1 through 32, and `testResults` of `none` or `junit`. The defaults preserve the legacy Debug, serial, no-managed-results run. These options select the build and test envelope only; the built-in producer keeps its collector, AppSurface test exclusions, coverage gates, and source scope unchanged. See the [`EvidenceCoverageExecutionOptions` contract](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceCoverageExecutionOptions.cs) for the public shape and validation limits.
 
@@ -295,24 +314,27 @@ Tested on 2026-11-22 with released CLI 0.2.0-preview.14 against a CLI that knows
 - `run` refuses to start with `ASEVD216` when the `artifacts` directory or a `test` producer's directory under it is a symbolic link, because retiring earlier outputs would delete through the link. It checks every such directory before it deletes anything. It does not check the `--output` directory itself or its parents. Only `test` producers' artifact directories are retired.
 - The receipt slot must use `relativeRoot` `test`, and its `maximumBytes` must be at least 4096 plus, per project, 512 plus six bytes per character of the project path. The planner checks both (`ASEVD146`, `ASEVD147`) so a run never finishes its tests and then fails to write the receipt.
 
+Profiles that select the preview test producer require a fresh CLI run. Omit `--reuse` for these profiles.
+
 ## Verifying evidence
 
 ```bash
-appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <evidence-plan.json>] [--artifact-root <directory>]
+appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <evidence-plan.json>] [--artifact-root <directory>] [--for-gate]
 ```
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--plan` | `evidence-plan.json` beside the manifest | The resolved plan the manifest must bind to. |
-| `--artifact-root` | the `artifacts` directory beside the manifest | Directory holding one subdirectory per producer id, as `run` writes it. Pass it only when the artifacts were moved. |
+| `--artifact-root` | the `artifacts` directory beside the manifest for the preview test producer | Explicit directory holding one subdirectory per producer id. |
+| `--for-gate` | off | Require a gate-eligible claim in addition to checking integrity. |
 
-`verify` re-resolves the policy snapshot inside the plan, compares digests, and then runs the shared [artifact file check](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#retained-artifact-check) for every artifact a producer result lists. A manifest that lists no artifacts never touches the artifact root.
+`verify` re-resolves the policy snapshot inside the plan, compares digests, and then runs the shared [artifact file check](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#retained-artifact-check) for every artifact a producer result lists. For a CLI coverage run with receipt custody, the default uses the [coverage custody layout](../../guides/evidence-reuse.md#coverage-report-custody) beside the manifest. Keep the whole run directory together when moving it. A manifest that lists no artifacts never touches the artifact root.
 
 | Code | Meaning | Next action |
 | --- | --- | --- |
 | `ASEVD203` | The plan has no resolvable policy snapshot, or the plan and manifest do not bind. | Use the plan and manifest from one run; do not edit them. A plan written by a different CLI version can also fail here. |
-| `ASEVD208` | The plan or manifest file is missing. | Rerun `appsurface evidence run`. |
-| `ASEVD209` | The plan or manifest is not canonical JSON. | Regenerate it; do not reformat generated files. |
+| `ASEVD208` | A plan or manifest path is empty or invalid, or the file is missing. | Check that the paths point to files from the same run. If the files are missing, rerun `appsurface evidence run`. |
+| `ASEVD209` | The plan or manifest could not be read as supported JSON within the input limit. | Regenerate the input using the current supported schema. |
 | `ASEVD213` | A listed artifact is missing, linked, outside the artifact root, or has a different length or SHA-256. The message names the artifact, the producer and the status. | Rerun `appsurface evidence run` and verify the plan, manifest and artifacts from that one run. |
 
 **`verify` proves integrity, not that the gate passed.** It exits 0 for an intact manifest whose claim is `None`. A gate must also read the manifest's `ClaimKind` and `Eligibility`.
@@ -320,7 +342,8 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <
 ## Pitfalls
 
 - Do not run a repository-wide coverage gate after intentionally filtering out required tests and expect a complete claim. A filtered suite cannot close a coverage assertion; it can close only the `test` assertion of a producer whose filter is declared in the policy and bound into the plan.
-- Do not treat `doctor`'s `ready_with_external_prerequisites` status as a pass; it describes what the consumer CI image must provide.
+- Treat `doctor` exit code 0 and `ready_with_external_prerequisites` as [preflight results](#doctor-preflight).
+  Gate releases on a `ReleaseComplete` claim from the [protected workflow with its registered verifier](../../guides/evidencehost-cookbook.md#release-evidence).
 - Do not set `--observation-only` on a job that must satisfy a PR or release gate.
 - Do not hand-edit generated artifacts; use `verify`.
 

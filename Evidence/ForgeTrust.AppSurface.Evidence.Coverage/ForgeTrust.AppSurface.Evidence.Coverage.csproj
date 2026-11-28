@@ -17,10 +17,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Coverage" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Coverage.Dogfood" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Cli" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Aspire" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.CoverageLeaseProbe" />
   </ItemGroup>
@@ -67,5 +73,15 @@
   </ItemGroup>
 
   <Import Project="buildTransitive/ForgeTrust.AppSurface.Evidence.Coverage.ReportGenerator.targets" />
+
+  <!-- The private coordinator and its contract types are released and loaded as one ABI family. -->
+  <Target Name="PinEvidenceReceiptContractsVersion" BeforeTargets="GenerateNuspec">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
+          Condition="'%(_ProjectReferencesWithVersions.Filename)' == 'ForgeTrust.AppSurface.Evidence.Contracts'">
+        <ProjectVersion>[$(PackageVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+  </Target>
 
 </Project>

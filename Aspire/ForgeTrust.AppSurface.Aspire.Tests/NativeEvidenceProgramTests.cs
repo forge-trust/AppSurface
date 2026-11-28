@@ -77,6 +77,319 @@ public sealed class NativeEvidenceProgramTests
         Assert.Contains("--native-coverage-contract-version 2|3 (default 2)", result.StandardOutput, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true, "A valid candidate package version is required.")]
+    [InlineData(false, "A full source commit is required.")]
+    public async Task PackCandidateFeed_RejectsInvalidIdentityBeforeCreatingOutput(bool invalidVersion, string diagnostic)
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-identity-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            var result = await InvokeAsync(["--operation", "pack-candidate-feed", "--mode", "reuse",
+                "--repository", root, "--output", feed, "--version", invalidVersion ? "bad/version" : "1.0.0",
+                "--source-commit", invalidVersion ? new string('a', 40) : new string('z', 40),
+                "--dotnet", TestDotnetHost.Resolve()]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Candidate feed preparation failed. " + diagnostic, result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(feed));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_RejectsInvalidNoRestoreValueBeforeCreatingOutput()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-invalid-restore-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            var result = await InvokeAsync(["--operation", "pack-candidate-feed", "--mode", "reuse",
+                "--repository", root, "--output", feed, "--version", "1.0.0", "--source-commit", new string('a', 40),
+                "--dotnet", TestDotnetHost.Resolve(), "--no-restore", "invalid"]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(feed));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackageRecipeRejectsNoRestoreBeforeCreatingOutput()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-pack-option-").FullName;
+        try
+        {
+            var output = TestPathUtils.PathUnder(root, "recipe-output");
+            var result = await InvokeAsync(["--package", TestPathUtils.PathUnder(root, "candidate.nupkg"),
+                "--repository", root, "--output", output, "--version", "1.0.0", "--source-commit", new string('a', 40),
+                "--dotnet", TestDotnetHost.Resolve(), "--mode", "storage", "--no-restore", "true"]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(output));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_ExtendNeutralRejectsMissingCliArchiveWithoutMutation()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            Directory.CreateDirectory(feed);
+
+            var result = await InvokeAsync(["--operation", "pack-candidate-feed", "--mode", "extend-neutral",
+                "--repository", root, "--output", feed, "--version", "1.0.0", "--source-commit", new string('a', 40),
+                "--dotnet", TestDotnetHost.Resolve()]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.StartsWith("Candidate feed preparation failed.", result.StandardError, StringComparison.Ordinal);
+            Assert.Contains("Missing or nonregular neutral archive for 'ForgeTrust.AppSurface.Cli'.",
+                result.StandardError, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(feed));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_ExtendNeutralPreservesExistingSelectedArchiveAndFeedFiles()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            Directory.CreateDirectory(feed);
+            var sentinelFiles = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ForgeTrust.AppSurface.Cli.1.0.0.nupkg"] = "caller-owned CLI archive",
+                ["ForgeTrust.AppSurface.Evidence.Contracts.1.0.0.nupkg"] = "caller-owned contracts archive",
+                ["ForgeTrust.AppSurface.Evidence.Coverage.1.0.0.nupkg"] = "caller-owned evidence coverage archive",
+                ["ForgeTrust.AppSurface.Coverage.1.0.0.nupkg"] = "caller-owned coverage archive",
+                ["ForgeTrust.AppSurface.Evidence.Planner.1.0.0.nupkg"] = "caller-owned planner archive",
+            };
+            foreach (var (archiveName, contents) in sentinelFiles)
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(feed, archiveName), contents);
+
+            var result = await InvokeAsync(["--operation", "pack-candidate-feed", "--mode", "extend-neutral",
+                "--repository", root, "--output", feed, "--version", "1.0.0", "--source-commit", new string('a', 40),
+                "--dotnet", TestDotnetHost.Resolve()]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.StartsWith("Candidate feed preparation failed.", result.StandardError, StringComparison.Ordinal);
+            Assert.Contains("The feed already contains 'ForgeTrust.AppSurface.Evidence.Planner'.",
+                result.StandardError, StringComparison.Ordinal);
+            Assert.Equal(sentinelFiles.Keys.Order(StringComparer.Ordinal),
+                Directory.EnumerateFiles(feed).Select(path => Path.GetFileName(path)!).Order(StringComparer.Ordinal));
+            foreach (var (archiveName, contents) in sentinelFiles)
+                Assert.Equal(contents, await File.ReadAllTextAsync(TestPathUtils.PathUnder(feed, archiveName)));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("neutral")]
+    [InlineData("reuse")]
+    public async Task PackCandidateFeed_FreshModesRejectOccupiedOutputWithoutMutation(string mode)
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-output-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            Directory.CreateDirectory(feed);
+            var sentinel = TestPathUtils.PathUnder(feed, "caller-owned.txt");
+            await File.WriteAllTextAsync(sentinel, "preserve this feed");
+
+            var result = await InvokeAsync(PackCandidateFeedArguments(root, feed, mode));
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Candidate feed preparation failed. Candidate feed output must be fresh.",
+                result.StandardError, StringComparison.Ordinal);
+            Assert.Equal("preserve this feed", await File.ReadAllTextAsync(sentinel));
+            Assert.Equal(["caller-owned.txt"], Directory.EnumerateFiles(feed)
+                .Select(path => Path.GetFileName(path)!).ToArray());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("neutral", "wrong-name")]
+    [InlineData("reuse", "missing")]
+    public async Task PackCandidateFeed_RejectsWrongOrMissingSuppliedCliArchiveBeforeCreatingOutput(string mode, string failure)
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-cli-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            var archive = failure == "wrong-name"
+                ? TestPathUtils.PathUnder(root, "ForgeTrust.AppSurface.Cli.2.0.0.nupkg")
+                : TestPathUtils.PathUnder(root, "ForgeTrust.AppSurface.Cli.1.0.0.nupkg");
+            if (failure == "wrong-name") await File.WriteAllTextAsync(archive, "wrong-version archive");
+
+            var result = await InvokeAsync(PackCandidateFeedArguments(root, feed, mode, archive));
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains(failure == "wrong-name"
+                    ? "The supplied archive for 'ForgeTrust.AppSurface.Cli' must match the requested version."
+                    : "Missing or nonregular supplied archive for 'ForgeTrust.AppSurface.Cli'.",
+                result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(feed));
+            Assert.Equal(failure == "wrong-name", File.Exists(archive));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_ExtendNeutralRejectsSuppliedCliArchiveWithoutChangingThePreparedFeed()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-extend-cli-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            Directory.CreateDirectory(feed);
+            var cliArchive = TestPathUtils.PathUnder(feed, "ForgeTrust.AppSurface.Cli.1.0.0.nupkg");
+            var sentinel = TestPathUtils.PathUnder(feed, "caller-owned.txt");
+            var suppliedArchive = TestPathUtils.PathUnder(root, "ForgeTrust.AppSurface.Cli.1.0.0.nupkg");
+            await File.WriteAllTextAsync(cliArchive, "prepared neutral CLI");
+            await File.WriteAllTextAsync(sentinel, "prepared feed sentinel");
+            await File.WriteAllTextAsync(suppliedArchive, "separate supplied archive");
+
+            var result = await InvokeAsync(PackCandidateFeedArguments(root, feed, "extend-neutral", suppliedArchive));
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Extending a neutral feed uses its existing CLI archive.",
+                result.StandardError, StringComparison.Ordinal);
+            Assert.Equal("prepared neutral CLI", await File.ReadAllTextAsync(cliArchive));
+            Assert.Equal("prepared feed sentinel", await File.ReadAllTextAsync(sentinel));
+            Assert.Equal(2, Directory.EnumerateFiles(feed).Count());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_NeutralCopiesProvidedCliArchiveAndPacksTheNeutralProjects()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-copy-").FullName;
+        try
+        {
+            var repository = TestPathUtils.PathUnder(root, "repository");
+            Directory.CreateDirectory(repository);
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            var suppliedArchive = TestPathUtils.PathUnder(root, "input", "ForgeTrust.AppSurface.Cli.1.0.0.nupkg");
+            var suppliedBytes = System.Text.Encoding.UTF8.GetBytes("caller-supplied CLI archive bytes");
+            Directory.CreateDirectory(TestPathUtils.PathUnder(root, "input"));
+            await File.WriteAllBytesAsync(suppliedArchive, suppliedBytes);
+            await WritePackProjectAsync(repository,
+                "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj",
+                "ForgeTrust.AppSurface.Evidence.Contracts");
+            await WritePackProjectAsync(repository,
+                "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj",
+                "ForgeTrust.AppSurface.Evidence.Coverage");
+            await WritePackProjectAsync(repository,
+                "Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj",
+                "ForgeTrust.AppSurface.Coverage");
+
+            var result = await InvokeAsync(PackCandidateFeedArguments(repository, feed, "neutral", suppliedArchive));
+
+            Assert.True(result.ExitCode == 0, result.StandardError);
+            Assert.Contains("Candidate feed prepared:", result.StandardOutput, StringComparison.Ordinal);
+            Assert.Equal(suppliedBytes,
+                await File.ReadAllBytesAsync(TestPathUtils.PathUnder(feed, "ForgeTrust.AppSurface.Cli.1.0.0.nupkg")));
+            Assert.True(File.Exists(TestPathUtils.PathUnder(feed, "ForgeTrust.AppSurface.Evidence.Contracts.1.0.0.nupkg")));
+            Assert.True(File.Exists(TestPathUtils.PathUnder(feed, "ForgeTrust.AppSurface.Evidence.Coverage.1.0.0.nupkg")));
+            Assert.True(File.Exists(TestPathUtils.PathUnder(feed, "ForgeTrust.AppSurface.Coverage.1.0.0.nupkg")));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_ReturnsPackFailureAndRetainsItsLog()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-pack-failure-").FullName;
+        try
+        {
+            var repository = TestPathUtils.PathUnder(root, "repository");
+            Directory.CreateDirectory(repository);
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            await WritePackProjectAsync(repository, "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli", failPack: true);
+
+            var result = await InvokeAsync(PackCandidateFeedArguments(repository, feed, "neutral"));
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Candidate stage 'pack-ForgeTrust.AppSurface.Cli' exited with code", result.StandardError,
+                StringComparison.Ordinal);
+            Assert.Contains("controlled candidate pack failure", result.StandardError, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFiles(feed, "ForgeTrust.AppSurface.Cli.1.0.0.nupkg"));
+            var log = Assert.Single(Directory.EnumerateFiles(TestPathUtils.PathUnder(feed, "pack-logs")));
+            Assert.Contains("controlled candidate pack failure", await File.ReadAllTextAsync(log), StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PackCandidateFeed_RejectsSuccessfulPackThatProducesNoArchive()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-no-archive-").FullName;
+        try
+        {
+            var repository = TestPathUtils.PathUnder(root, "repository");
+            Directory.CreateDirectory(repository);
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            var project = await WritePackProjectAsync(repository, "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli", removeArchiveAfterPack: true);
+            var restore = await RunAsync(TestDotnetHost.Resolve(), ["restore", project], repository);
+            Assert.True(restore.ExitCode == 0, restore.StandardError);
+
+            var result = await InvokeAsync(PackCandidateFeedArguments(repository, feed, "neutral", noRestore: true));
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Candidate stage 'pack-ForgeTrust.AppSurface.Cli' did not produce a regular archive for 'ForgeTrust.AppSurface.Cli'.",
+                result.StandardError, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFiles(feed, "ForgeTrust.AppSurface.Cli.1.0.0.nupkg"));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("invalid-mode")]
+    [InlineData("unsupported-option")]
+    [InlineData("missing-host")]
+    public async Task PackCandidateFeed_RejectsInvalidDispatchBeforeCreatingOutput(string failure)
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-candidate-feed-arguments-").FullName;
+        try
+        {
+            var feed = TestPathUtils.PathUnder(root, "candidate-feed");
+            var args = PackCandidateFeedArguments(root, feed, failure == "invalid-mode" ? "invalid" : "neutral").ToList();
+            if (failure == "unsupported-option") args.AddRange(["--report", TestPathUtils.PathUnder(root, "unused-report.json")]);
+            if (failure == "missing-host") args[args.IndexOf("--dotnet") + 1] = TestPathUtils.PathUnder(root, "missing-dotnet");
+
+            var result = await InvokeAsync(args.ToArray());
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Validation failed: ArgumentException.", result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(feed));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task LocalPlanRejectsPackedProofFeedBeforeWritingEvidence()
+    {
+        using var fixture = new NativeCaptureFixture();
+        var output = TestPathUtils.PathUnder(fixture.Root, "evidence");
+        var result = await InvokeAsync(["--operation", "local-plan", "--output", output, "--feed", fixture.Root]);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("ArgumentException", result.StandardError, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
+    }
+
     [Fact]
     public async Task NativeContractVersion_IsRejectedOutsideRepositoryEvidenceRun()
     {
@@ -208,30 +521,6 @@ public sealed class NativeEvidenceProgramTests
         Assert.Contains("No local changes", result.StandardOutput, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Join(output, "proof", "evidence-manifest.json")));
         Assert.False(File.Exists(TestPathUtils.PathUnder(output, "native-validation-receipt.json")));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task LocalExecution_WithPendingCleanupMarker_PrintsRecoveryInstructions(bool withOutput)
-    {
-        using var fixture = new NativeCaptureFixture();
-        var marker = TestPathUtils.PathUnder(fixture.Repository, ".git", "appsurface-local-evidence", "run.pending-cleanup");
-        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
-        const string priorOutput = "synthetic prior output";
-        await File.WriteAllTextAsync(marker, priorOutput);
-        var output = TestPathUtils.PathUnder(fixture.Root, "caller-raw-output");
-        var args = new List<string> { "--operation", "local", "--repository", fixture.Repository };
-        if (withOutput) args.AddRange(["--output", output]);
-
-        var result = await InvokeAsync(args.ToArray());
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains(marker, result.StandardError, StringComparison.Ordinal);
-        Assert.Contains("remove the cleanup marker", result.StandardError, StringComparison.Ordinal);
-        Assert.Contains("processes have stopped", result.StandardError, StringComparison.Ordinal);
-        Assert.Equal(priorOutput, await File.ReadAllTextAsync(marker));
-        Assert.False(Path.Exists(output));
     }
 
     [Fact]
@@ -485,6 +774,49 @@ public sealed class NativeEvidenceProgramTests
             Assert.False(Directory.Exists(output));
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private static string[] PackCandidateFeedArguments(string repository, string feed, string mode,
+        string? packageArchive = null, bool noRestore = false)
+    {
+        var arguments = new List<string>
+        {
+            "--operation", "pack-candidate-feed", "--mode", mode, "--repository", repository,
+            "--output", feed, "--version", "1.0.0", "--source-commit", new string('a', 40),
+            "--dotnet", TestDotnetHost.Resolve(),
+        };
+        if (packageArchive is not null) arguments.AddRange(["--package", packageArchive]);
+        if (noRestore) arguments.AddRange(["--no-restore", "true"]);
+        return [.. arguments];
+    }
+
+    private static async Task<string> WritePackProjectAsync(string repository, string relativeProjectPath,
+        string packageId, bool failPack = false, bool removeArchiveAfterPack = false)
+    {
+        var project = TestPathUtils.PathUnder(repository, relativeProjectPath.Split('/'));
+        Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(repository, "NuGet.Config"),
+            "<configuration><packageSources><clear /></packageSources></configuration>");
+
+        var failureTarget = failPack
+            ? "<Target Name=\"FailCandidatePack\" BeforeTargets=\"GenerateNuspec\"><Error Text=\"controlled candidate pack failure\" /></Target>"
+            : "";
+        var outputRemovalTarget = removeArchiveAfterPack
+            ? "<Target Name=\"RemoveCandidateArchive\" AfterTargets=\"Pack\"><Delete Files=\"$(PackageOutputPath)/$(PackageId).$(PackageVersion).nupkg\" /></Target>"
+            : "";
+        var projectContents = $"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <PackageId>{packageId}</PackageId>
+                <NuGetAudit>false</NuGetAudit>
+              </PropertyGroup>
+              {failureTarget}
+              {outputRemovalTarget}
+            </Project>
+            """;
+        await File.WriteAllTextAsync(project, projectContents);
+        return project;
     }
 
     private static async Task<InvocationResult> InvokeAsync(

@@ -27,6 +27,33 @@ public sealed class EvidenceArtifactStreamingTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task RejectingDuplicateSlotLeavesDestinationAvailable(bool useStream)
+    {
+        using var directory = TempDirectory.Create();
+        var report = new EvidenceArtifactSlot("report", "coverage", "text/plain", false, 128);
+        var duplicate = report with { LogicalName = "duplicate" };
+        var writer = new EvidenceArtifactWriter(
+            new EvidenceProducerDeclaration("streaming", "test", "1", [], [], [duplicate, duplicate, report], 1),
+            directory.Path);
+        byte[] bytes = [1, 2, 3];
+        using var stream = new MemoryStream(bytes);
+
+        Task<EvidenceArtifactResult> WriteAsync(string slot) => (useStream
+            ? writer.WriteAsync(slot, "coverage/report.txt", stream)
+            : writer.WriteAsync(slot, "coverage/report.txt", bytes)).AsTask();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => WriteAsync("duplicate"));
+
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
+        var artifact = await WriteAsync("report");
+        Assert.Equal(bytes.Length, artifact.LengthBytes);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task StreamWrite_CleanupFailurePreservesReplacementAndDoesNotMaskTheReadFailure(bool replaceParent)
     {
         if (OperatingSystem.IsWindows()) return;

@@ -58,8 +58,7 @@ public sealed class PackageChecksProducerTests
         Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
         Assert.Equal(Assertions, result.SatisfiedAssertionIds);
         Assert.Equal(3, requests.Count);
-        Assert.Equal(new[] { "gate", "verify", "verify-packages" },
-            requests.Select(request => request.Arguments.SkipWhile(argument => argument != "--").Skip(1).FirstOrDefault()));
+        Assert.Equal(new[] { "gate", "verify", "verify-packages" }, requests.Select(r => r.Arguments.Contains("verify-packages", StringComparer.Ordinal) ? "verify-packages" : r.Arguments[^1]));
         Assert.All(requests, request =>
         {
             Assert.Equal(Path.GetFullPath(root.FullName), request.WorkingDirectory);
@@ -469,7 +468,7 @@ public sealed class PackageChecksProducerTests
     }
 
     private static RepositoryCheckSettings Settings(string repository, string output) =>
-        new(Path.GetFullPath(repository), ResolveDotnet(), output);
+        new(Path.GetFullPath(repository), TestDotnetHost.ResolveExisting(), output);
 
     private static (EvidenceProducerContext Context, EvidenceArtifactWriter Writer) Context(string output)
     {
@@ -487,14 +486,4 @@ public sealed class PackageChecksProducerTests
 
     private static string ValueAfter(IReadOnlyList<string> args, string option) => args[Array.IndexOf(args.ToArray(), option) + 1];
 
-    private static string ResolveDotnet()
-    {
-        var candidates = new[] { Environment.GetEnvironmentVariable("DOTNET_HOST_PATH"), Environment.GetEnvironmentVariable("DOTNET_ROOT") is { Length: > 0 } root ? TestPathUtils.PathUnder(root, "dotnet") : null }
-            .Where(static path => !string.IsNullOrWhiteSpace(path)).Cast<string>();
-        var explicitHost = candidates.FirstOrDefault(File.Exists);
-        if (explicitHost is not null) return Path.GetFullPath(explicitHost);
-        var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        return (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator)
-            .Select(directory => string.IsNullOrEmpty(directory) ? executable : TestPathUtils.PathUnder(directory, executable)).First(File.Exists);
-    }
 }
