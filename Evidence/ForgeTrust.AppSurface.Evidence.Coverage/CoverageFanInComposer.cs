@@ -441,6 +441,14 @@ internal static class CoverageFanInComposer
             .SelectMany(classes => classes.Elements("class"));
     }
 
+    /// <summary>Resolves an absolute compiler document against the producer's recorded source root.</summary>
+    internal static string GetRepositoryRelativePath(string path, string sourceRoot)
+    {
+        if (GetRootKind(path.Replace('\\', '/')) == RootKind.Relative) throw InvalidCoveragePath();
+        var relative = NormalizeFilename(path, ParseSourceRoot(sourceRoot));
+        return relative.Length > 0 ? relative : throw InvalidCoveragePath();
+    }
+
     private static PortableRoot ParseSourceRoot(string sourceRoot)
     {
         if (string.IsNullOrEmpty(sourceRoot) || sourceRoot.Contains('\0'))

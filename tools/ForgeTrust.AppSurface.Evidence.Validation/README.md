@@ -205,6 +205,14 @@ after every test project and coverage artifact passes validation. It does **not*
 acceptance manifest or close any obligation. It requires `GITHUB_REPOSITORY`, `GITHUB_RUN_ID` and
 `GITHUB_RUN_ATTEMPT`; local patches continue through the normal local workflow.
 
+Selected Keycloak pull-request lanes pass `--include-keycloak-native true` during collection. After the
+complete Release suite succeeds and the checkout is rechecked, collection copies the three fixed Keycloak
+assemblies and matching PDBs from the `Auth.Aspire.Keycloak.Tests` output into
+`coverage/compiler-symbols`. A schema-v1 exact inventory records each file hash, and the collection receipt
+binds the inventory digest. Import requires the exact six files, matching hashes and an unlinked directory
+when the Keycloak profile is selected. The final fan-in receives that imported directory through
+`--primary-compiler-symbols` and validates the `coverlet-collector-cobertura-async-v1` proof profile.
+
 `run --scope coverage --coverage-collection <downloaded-directory>` imports that collection into fresh
 producer output. The schema-v1 receipt binds source commit/tree, SDK, Release configuration, repository,
 run and attempt, plus SHA-256 hashes of `coverage.cobertura.xml` and `timings.json`. Import rejects linked

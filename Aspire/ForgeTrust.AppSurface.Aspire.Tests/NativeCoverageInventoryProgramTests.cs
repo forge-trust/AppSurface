@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Validation;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
@@ -34,11 +35,26 @@ public sealed class NativeCoverageInventoryProgramTests
         foreach (var producer in producers)
         {
             var transported = matrixById[producer.GetProperty("id").GetString()!];
-            Assert.Equal(producer.GetProperty("testProject").GetString(), transported.GetProperty("testProject").GetString());
+            Assert.Equal(
+                producer.GetProperty("testProjects").EnumerateArray().Select(project => project.GetString()),
+                transported.GetProperty("testProjects").EnumerateArray().Select(project => project.GetString()));
             Assert.Equal(producer.GetProperty("filter").GetString(), transported.GetProperty("filter").GetString());
             Assert.Equal(producer.GetProperty("runner").GetString(), transported.GetProperty("runner").GetString());
             Assert.Equal(producer.GetProperty("keycloak").GetBoolean(), transported.GetProperty("keycloak").GetBoolean());
         }
+
+        var workflowDirectory = TestPathUtils.PathUnder(TestPathUtils.FindRepoRoot(AppContext.BaseDirectory), ".github", "workflows");
+        var baselineProjects = File.ReadAllLines(TestPathUtils.PathUnder(workflowDirectory, "native-coverage-test-projects.txt"));
+        var baselineFilter = string.Join('|', File.ReadAllLines(TestPathUtils.PathUnder(workflowDirectory, "native-coverage-test-selectors.txt"))
+            .Select(line => line.Split('\t', 2))
+            .Where(entry => entry[0] is "native" or "shared-cli")
+            .Select(entry => entry[1]));
+        Assert.All(producers.Take(3), producer =>
+        {
+            Assert.False(producer.GetProperty("keycloak").GetBoolean());
+            Assert.Equal(baselineProjects, producer.GetProperty("testProjects").EnumerateArray().Select(project => project.GetString()));
+            Assert.Equal(baselineFilter, producer.GetProperty("filter").GetString());
+        });
 
         if (includeKeycloak)
         {
@@ -50,15 +66,27 @@ public sealed class NativeCoverageInventoryProgramTests
             {
                 Assert.Equal("Arm64", producer.GetProperty("osArchitecture").GetString());
                 Assert.Equal("Arm64", producer.GetProperty("processArchitecture").GetString());
-                Assert.Equal("Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj",
-                    producer.GetProperty("testProject").GetString());
             });
             Assert.Equal("macos-15", armLanes[0].GetProperty("runner").GetString());
             Assert.Equal("Darwin", armLanes[0].GetProperty("nativePlatform").GetString());
-            Assert.Equal("FullyQualifiedName~ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests",
+            Assert.Equal(
+                new[]
+                {
+                    "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj",
+                    "Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Keycloak.Tests.csproj"
+                },
+                armLanes[0].GetProperty("testProjects").EnumerateArray().Select(project => project.GetString()));
+            Assert.Equal(
+                "FullyQualifiedName~ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests|FullyQualifiedName~ForgeTrust.AppSurface.Auth.Keycloak.Tests",
                 armLanes[0].GetProperty("filter").GetString());
             Assert.Equal("ubuntu-24.04-arm", armLanes[1].GetProperty("runner").GetString());
             Assert.Equal("Linux", armLanes[1].GetProperty("nativePlatform").GetString());
+            Assert.Equal(
+                new[]
+                {
+                    "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj"
+                },
+                armLanes[1].GetProperty("testProjects").EnumerateArray().Select(project => project.GetString()));
             Assert.Equal("FullyQualifiedName~AppSurfaceKeycloakLinuxArm64WorkerTests",
                 armLanes[1].GetProperty("filter").GetString());
         }

@@ -9,30 +9,36 @@ internal sealed record NativeCoverageProducer(
     string NativePlatform,
     string OsArchitecture,
     string ProcessArchitecture,
-    string TestProject,
+    IReadOnlyList<string> TestProjects,
     string Filter,
     bool Keycloak);
 
 /// <summary>Single source for the baseline three producers and optional two Keycloak ARM64 producers.</summary>
 internal static class NativeCoverageProducerInventory
 {
-    internal const string CliTestProject = "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj";
-    internal const string KeycloakTestProject = "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj";
+    internal const string KeycloakAdapterTestProject = "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj";
+    internal const string KeycloakCoreTestProject = "Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Keycloak.Tests.csproj";
 
-    internal const string NativeFilter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests";
+    private static readonly NativeCoverageProducer[] Baseline = CreateBaseline();
 
-    private static readonly NativeCoverageProducer[] Baseline =
-    [
-        new("linux", "ubuntu-latest", "Linux", "", "", CliTestProject, NativeFilter, false),
-        new("windows", "windows-latest", "Windows", "", "", CliTestProject, NativeFilter, false),
-        new("darwin", "macos-latest", "Darwin", "", "", CliTestProject, NativeFilter, false)
-    ];
+    private static NativeCoverageProducer[] CreateBaseline()
+    {
+        var projects = NativeCoverageTestInventory.ReadNativeProjects();
+        var filter = NativeCoverageTestInventory.ReadFilter();
+        return
+        [
+            new("linux", "ubuntu-latest", "Linux", "", "", projects, filter, false),
+            new("windows", "windows-latest", "Windows", "", "", projects, filter, false),
+            new("darwin", "macos-latest", "Darwin", "", "", projects, filter, false)
+        ];
+    }
 
     private static readonly NativeCoverageProducer[] KeycloakArm64 =
     [
-        new("darwin-arm64-keycloak", "macos-15", "Darwin", "Arm64", "Arm64", KeycloakTestProject,
-            "FullyQualifiedName~ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests", true),
-        new("linux-arm64-keycloak", "ubuntu-24.04-arm", "Linux", "Arm64", "Arm64", KeycloakTestProject,
+        new("darwin-arm64-keycloak", "macos-15", "Darwin", "Arm64", "Arm64",
+            [KeycloakAdapterTestProject, KeycloakCoreTestProject],
+            "FullyQualifiedName~ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests|FullyQualifiedName~ForgeTrust.AppSurface.Auth.Keycloak.Tests", true),
+        new("linux-arm64-keycloak", "ubuntu-24.04-arm", "Linux", "Arm64", "Arm64", [KeycloakAdapterTestProject],
             "FullyQualifiedName~AppSurfaceKeycloakLinuxArm64WorkerTests", true)
     ];
 
@@ -49,7 +55,7 @@ internal static class NativeCoverageProducerInventory
             nativePlatform = producer.NativePlatform,
             osArchitecture = producer.OsArchitecture,
             processArchitecture = producer.ProcessArchitecture,
-            testProject = producer.TestProject,
+            testProjects = producer.TestProjects,
             filter = producer.Filter,
             keycloak = producer.Keycloak
         }).ToArray();

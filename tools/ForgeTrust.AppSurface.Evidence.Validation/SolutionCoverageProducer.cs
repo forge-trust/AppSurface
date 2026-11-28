@@ -65,6 +65,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var nativeContract = _settings.NativeCoverageContractVersion;
             if (nativeContract is not (2 or 3) || (nativeContract == 3 && (!nativeFanIn || !IsRepositoryCommit(_settings.DiffBase))))
                 throw new InvalidDataException("Native v3 requires native captures and a full pinned SHA-1 Git commit ID.");
+            if (_settings.IncludeKeycloakNativeCoverage && (!nativeFanIn || nativeContract != 3))
+                throw new InvalidDataException("Keycloak native coverage requires v3 fan-in and primary compiler symbols.");
             if (_settings.CoverageCliPath is { } coverageCli
                 && (!Path.IsPathFullyQualified(coverageCli) || !File.Exists(coverageCli)))
                 throw new InvalidOperationException("The installed coverage CLI must be an existing absolute executable.");
@@ -82,14 +84,25 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             Directory.CreateDirectory(coverage);
 
             stage = "collection";
+            string? primaryCompilerSymbols = null;
             if (_settings.CoverageCollectionDirectory is { } collection)
             {
                 if (!string.IsNullOrWhiteSpace(_settings.DiffFile))
                     throw new InvalidDataException("Collected CI coverage cannot be used for a local patch.");
-                await SolutionCoverageHandoff.ImportAsync(collection, coverage, identity, WorkflowRun(), cancellationToken).ConfigureAwait(false);
+                await SolutionCoverageHandoff.ImportAsync(collection, coverage, identity, WorkflowRun(), cancellationToken,
+                    _settings.IncludeKeycloakNativeCoverage).ConfigureAwait(false);
+                if (_settings.IncludeKeycloakNativeCoverage)
+                    primaryCompilerSymbols = PathUtils.PathUnder(coverage, "compiler-symbols");
             }
             else
+            {
                 await CollectCoverageAsync(root, coverage, proof, cancellationToken).ConfigureAwait(false);
+                if (_settings.IncludeKeycloakNativeCoverage)
+                {
+                    await SolutionCoverageHandoff.StageCompilerSymbolsAsync(root, coverage, "Release", cancellationToken).ConfigureAwait(false);
+                    primaryCompilerSymbols = PathUtils.PathUnder(coverage, "compiler-symbols");
+                }
+            }
             var report = Path.Join(coverage, "coverage.cobertura.xml");
             var timings = Path.Join(coverage, "timings.json");
             ValidateTimings(timings, expected, cancellationToken);
@@ -132,10 +145,16 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 if (nativeContract == 3)
                     dogfoodArgs.AddRange(["--diff-policy-id", CoverageFanInPolicy.VisualBaselinePngDiffPolicyId]);
                 if (_settings.IncludeKeycloakNativeCoverage)
-                    dogfoodArgs.AddRange(["--include-keycloak-native", "true"]);
+                {
+                    dogfoodArgs.AddRange(["--include-keycloak-native", "true", "--primary-compiler-symbols",
+                        primaryCompilerSymbols ?? throw new InvalidDataException("Keycloak native coverage has no trusted primary compiler symbols.")]);
+                }
                 await ExecuteAsync("coverage-fanin", dogfoodArgs, root, proof, cancellationToken, _settings.DotnetPath).ConfigureAwait(false);
                 nativeProof = await ValidateNativeFanInAsync(fanInOutput, nativeContract, _settings.DiffBase!,
-                    identity, run, cancellationToken).ConfigureAwait(false);
+                    identity, run, _settings.IncludeKeycloakNativeCoverage
+                        ? CoverageFanInReportProfiles.CoverletCoberturaAsync
+                        : CoverageFanInReportProfiles.CoverletCobertura,
+                    cancellationToken).ConfigureAwait(false);
                 var primaryGateDir = PathUtils.PathUnder(coverage, "primary-gate");
                 Directory.CreateDirectory(primaryGateDir);
                 var primaryGate = PathUtils.PathUnder(primaryGateDir, "coverage-gate.json");
@@ -232,7 +251,11 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         Directory.CreateDirectory(coverage);
         await CollectCoverageAsync(root, coverage, proof, cancellationToken).ConfigureAwait(false);
         await RequireUnchangedSourceAsync(root, identity.Commit, proof, cancellationToken).ConfigureAwait(false);
-        await SolutionCoverageHandoff.WriteAsync(coverage, identity, run, cancellationToken).ConfigureAwait(false);
+        if (_settings.IncludeKeycloakNativeCoverage)
+            await SolutionCoverageHandoff.StageCompilerSymbolsAsync(root, coverage, "Release", cancellationToken).ConfigureAwait(false);
+        await RequireUnchangedSourceAsync(root, identity.Commit, proof, cancellationToken).ConfigureAwait(false);
+        await SolutionCoverageHandoff.WriteAsync(coverage, identity, run, cancellationToken,
+            _settings.IncludeKeycloakNativeCoverage).ConfigureAwait(false);
     }
 
     private async Task<SolutionCoverageIdentity> ReadIdentityAsync(string root, List<CommandProof> proof, CancellationToken cancellationToken)
@@ -349,7 +372,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
 
     /// <summary>Requires the installed adapter's delivered acceptance and separate verification, retaining their artifact binding.</summary>
     private static async Task<NativeGateProof> ValidateNativeFanInAsync(string output, int contractVersion, string diffBase, SolutionCoverageIdentity identity,
-        IReadOnlyDictionary<string, string?> run, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string?> run, string reportProfileId, CancellationToken cancellationToken)
     {
         string? policyDigest = null;
         JsonElement? applicability = null;
@@ -410,13 +433,14 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 PathUtils.PathUnder(output, "composed", "verification.json"), cancellationToken).ConfigureAwait(false))
             throw new InvalidDataException("Native acceptance differs from its retained gate or composition receipt.");
         if (applicability is { } verified)
-            await ValidateV3ApplicabilityAsync(accepted, receipt, verified, proof, diffBase, identity.Commit, cancellationToken).ConfigureAwait(false);
+            await ValidateV3ApplicabilityAsync(accepted, receipt, verified, proof, diffBase, identity.Commit, reportProfileId,
+                cancellationToken).ConfigureAwait(false);
         return proof;
     }
 
     /// <summary>Binds the independent v3 result to the applicability, diff and gate reports retained by the producer.</summary>
     private static async Task ValidateV3ApplicabilityAsync(string accepted, JsonElement receipt, JsonElement verified,
-        NativeGateProof proof, string diffBase, string commit, CancellationToken cancellationToken)
+        NativeGateProof proof, string diffBase, string commit, string reportProfileId, CancellationToken cancellationToken)
     {
         if (receipt.GetProperty("evaluationIntent").GetString() != "currentTrustedRun"
             || receipt.GetProperty("patchOutcome").GetString() != "PatchAccepted")
@@ -444,7 +468,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         using var applicability = JsonDocument.Parse(applicabilityBytes);
         var claim = applicability.RootElement;
         if (claim.GetProperty("schemaVersion").GetInt32() != 3
-            || claim.GetProperty("reportProfileId").GetString() != "coverlet-collector-cobertura-v1"
+            || claim.GetProperty("reportProfileId").GetString() != reportProfileId
             || new[] { "policyDigest", "source", "run", "diffSha256", "diffMetadataSha256" }
                 .Any(property => !JsonElement.DeepEquals(claim.GetProperty(property), receipt.GetProperty(property))))
             throw new InvalidDataException("Native v3 applicability does not bind the accepted policy, source, run and diff.");

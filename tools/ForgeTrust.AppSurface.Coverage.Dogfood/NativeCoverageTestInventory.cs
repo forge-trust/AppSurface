@@ -1,6 +1,6 @@
 using System.Reflection;
 
-/// <summary>Reads the ordered test policy embedded in the Dogfood assembly.</summary>
+/// <summary>Reads the ordered test policy embedded in the repository evidence tools.</summary>
 /// <remarks>The same filter parser serves workflow collection, attestation, and native lifecycle validation.</remarks>
 internal static class NativeCoverageTestInventory
 {

@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 internal sealed record CoverageFanInBounds(long XmlBytes, long JsonBytes, long TotalBytes, int Depth,
     int Lines, int Elements, int Attributes, int TokenCharacters, int Branches, int TotalRecords)
 {
-    /// <summary>Uses the Git reader's fixed UTF-8 limit for retained patch diffs; other text uses the JSON budget.</summary>
+    /// <summary>Uses the Git reader's fixed UTF-8 limit for retained patch diffs. Other non-XML files use the JSON byte ceiling.</summary>
     internal long FileBytes(string name) => name == "diff.patch" ? GitDiffReader.DefaultMaximumDiffBytes
         : name.EndsWith(".xml", StringComparison.Ordinal) ? XmlBytes : JsonBytes;
 }

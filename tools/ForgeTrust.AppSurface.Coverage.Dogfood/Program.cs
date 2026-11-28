@@ -19,7 +19,6 @@ return args.Length > 0 && args[0] == "--package-proof"
 
 internal static class CoverageDogfood
 {
-    private const string ReportProfileId = "coverlet-collector-cobertura-v1";
     private const string CollectorPackageVersion = "10.0.1";
     private const string ShadowProofFileName = "shadow-proof.json";
     private static readonly JsonSerializerOptions Json = new()
@@ -37,6 +36,7 @@ internal static class CoverageDogfood
             Console.WriteLine("Native inputs: --collection-root <coverage-run-output> or --raw-index <project-to-original-json> --timings <json>.");
             Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--contract-version 2|3 (default 2)] [--diff-policy-id appsurface-visual-baseline-png-v1 (v3 only)] [--include-keycloak-native true (v3 only)] [--native-platform Linux|Windows|Darwin] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
             Console.WriteLine("Keycloak ARM64 captures require --native-producer <id> --collection <fresh-directory> and --include-keycloak-native true.");
+            Console.WriteLine("Keycloak fan-in also requires --primary-compiler-symbols <same-run-directory>.");
             return 0;
         }
         var stage = "options";
@@ -49,7 +49,7 @@ internal static class CoverageDogfood
             }
             if (args.Length % 2 != 0) throw new ArgumentException();
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
-            var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "contract-version", "diff-policy-id", "native-platform", "native-producer", "collection", "include-keycloak-native", "collection-root", "raw-index", "primary", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
+            var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "contract-version", "diff-policy-id", "native-platform", "native-producer", "collection", "include-keycloak-native", "collection-root", "raw-index", "primary", "primary-compiler-symbols", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
             for (var i = 0; i < args.Length; i += 2)
                 if (!args[i].StartsWith("--", StringComparison.Ordinal) || !allowed.Contains(args[i][2..]) || !options.TryAdd(args[i][2..], args[i + 1])) throw new ArgumentException();
             var root = Path.GetFullPath(RequireOption(options, "repository"));
@@ -73,7 +73,7 @@ internal static class CoverageDogfood
                     return ReportFailure("options", "unsupported-diff-policy-id",
                         $"Use {CoverageFanInPolicy.VisualBaselinePngDiffPolicyId} for --diff-policy-id.");
             }
-            var operationArguments = ParseOperationArguments(options);
+            var operationArguments = ParseOperationArguments(options, includeKeycloak);
             if (configuration is not ("Debug" or "Release") || Directory.Exists(output) || File.Exists(output)) throw new ArgumentException();
             stage = "source-inventory";
             var solution = XDocument.Load(Path.Join(root, "ForgeTrust.AppSurface.slnx"));
@@ -81,19 +81,21 @@ internal static class CoverageDogfood
             var projects = solution.Descendants("Project").Select(x => x.Attribute("Path")?.Value)
                 .Where(x => x is not null && (x.EndsWith(".Tests.csproj", StringComparison.Ordinal) || x.EndsWith(".IntegrationTests.csproj", StringComparison.Ordinal)))
                 .Select(x => x!.Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
-            var nativeProjects = NativeCoverageTestInventory.ReadNativeProjects();
-            var nativeFilter = NativeCoverageTestInventory.ReadFilter();
             var producerInventory = NativeCoverageProducerInventory.Create(includeKeycloak);
-            var supplements = producerInventory.Select(producer => producer.Keycloak
-                ? new CoverageSupplement(producer.Id, producer.NativePlatform, producer.Filter, [producer.TestProject])
-                : new CoverageSupplement(producer.Id, producer.NativePlatform, nativeFilter, nativeProjects)).ToArray();
-            var keycloakProducer = operationArguments is KeycloakArguments keycloakArguments
-                ? SelectKeycloakProducer(producerInventory, keycloakArguments)
-                : null;
+            var supplements = producerInventory
+                .Select(producer => new CoverageSupplement(producer.Id, producer.NativePlatform, producer.Filter, producer.TestProjects))
+                .ToArray();
+            var selectedProducer = operationArguments switch
+            {
+                KeycloakArguments keycloak => SelectKeycloakProducer(producerInventory, keycloak),
+                NativeArguments nativeArguments => producerInventory.Single(producer =>
+                    !producer.Keycloak && producer.NativePlatform == nativeArguments.Platform),
+                _ => null
+            };
             var limits = new CoverageOperationLimits(TotalRecords: 4_000_000);
             stage = "native-inputs";
             var collectionInputs = operationArguments is CollectionArguments collection
-                ? NativeCoverageCaptureInputs.FromCollection(collection.Root, nativeProjects, checked((int)limits.JsonBytes))
+                ? NativeCoverageCaptureInputs.FromCollection(collection.Root, selectedProducer!.TestProjects, checked((int)limits.JsonBytes))
                 : null;
             var measurements = new InvocationMeasurements();
             string gitVersion = "not-checked-v2";
@@ -131,13 +133,13 @@ internal static class CoverageDogfood
                 Limits: limits)
             {
                 ContractVersion = contractVersion,
-                ReportProfileId = contractVersion == 3 ? ReportProfileId : null,
+                ReportProfileId = contractVersion == 3 ? (includeKeycloak
+                    ? CoverageFanInReportProfiles.CoverletCoberturaAsync : CoverageFanInReportProfiles.CoverletCobertura) : null,
                 DiffPolicyId = diffPolicyId
             };
             if (contractVersion == 3)
             {
-                var collectorProjects = keycloakProducer is not null ? new[] { keycloakProducer.TestProject }
-                    : operationArguments is NativeArguments ? nativeProjects : projects;
+                var collectorProjects = selectedProducer?.TestProjects ?? projects;
                 await ValidateCollectorVersionsAsync(root, collectorProjects.Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal).ToArray(), configuration, measurements);
             }
@@ -176,14 +178,18 @@ internal static class CoverageDogfood
                 if (native is KeycloakArguments keycloak)
                 {
                     await Invoke("collect", new CoverageCollectRequest(policy, root, capture,
-                        Path.GetFullPath(keycloak.Collection), keycloakProducer!.Id, policy.Limits!.OperationSeconds, NoRestore: true), "native");
+                        Path.GetFullPath(keycloak.Collection), selectedProducer!.Id, policy.Limits!.OperationSeconds, NoRestore: true)
+                    {
+                        CompilerSymbolAssemblies = KeycloakCoverageCompilerInputs.AssemblyPaths(
+                            KeycloakCoverageCompilerInputs.TestOutput(root, configuration))
+                    }, "native");
                 }
                 else
                 {
                     var inputs = native is ReplayArguments replay
                         ? NativeCoverageCaptureInputs.FromReplay(replay.RawIndex, replay.Timings)
                         : collectionInputs!;
-                    await Invoke("capture", new CoverageCaptureRequest(policy, root, capture, native.Platform.ToLowerInvariant(),
+                    await Invoke("capture", new CoverageCaptureRequest(policy, root, capture, selectedProducer!.Id,
                         TimingsPath: inputs.TimingsPath, RawCoveragePaths: inputs.RawCoveragePaths), "native");
                 }
                 stage = "native-proof";
@@ -194,7 +200,11 @@ internal static class CoverageDogfood
             else if (fanIn is not null)
             {
                 var primary = Path.Join(output, "primary");
-                await Invoke("capture", new CoverageCaptureRequest(policy, root, primary, "primary", fanIn.Primary, fanIn.Timings), "primary");
+                await Invoke("capture", new CoverageCaptureRequest(policy, root, primary, "primary", fanIn.Primary, fanIn.Timings)
+                {
+                    CompilerSymbolAssemblies = fanIn.SymbolsDirectory is null ? null
+                        : KeycloakCoverageCompilerInputs.AssemblyPaths(Path.GetFullPath(fanIn.SymbolsDirectory))
+                }, "primary");
                 var imported = new List<string>();
                 foreach (var supplement in policy.Supplements)
                 {
@@ -234,10 +244,13 @@ internal static class CoverageDogfood
     }
 
     /// <summary>Resolves the selected operation and its required arguments before any file reads or output creation.</summary>
-    private static OperationArguments ParseOperationArguments(IReadOnlyDictionary<string, string> options)
+    private static OperationArguments ParseOperationArguments(IReadOnlyDictionary<string, string> options, bool includeKeycloak)
     {
         var operation = RequireOption(options, "operation");
         var hasCollectionRoot = options.ContainsKey("collection-root");
+        var hasPrimarySymbols = options.ContainsKey("primary-compiler-symbols");
+        if (hasPrimarySymbols != (includeKeycloak && operation == "fanin"))
+            throw new ArgumentException("Primary compiler symbols are required only for Keycloak fan-in.");
         var hasKeycloakCollection = options.ContainsKey("collection") || options.ContainsKey("native-producer");
         if (hasKeycloakCollection && (operation != "native" || hasCollectionRoot || options.ContainsKey("raw-index")
                 || options.ContainsKey("timings") || options.ContainsKey("primary") || options.ContainsKey("native-inputs")))
@@ -247,7 +260,8 @@ internal static class CoverageDogfood
 
         if (operation == "fanin")
             return new FanInArguments(RequireOption(options, "primary"), RequireOption(options, "timings"),
-                RequireOption(options, "native-inputs"));
+                RequireOption(options, "native-inputs"),
+                hasPrimarySymbols ? RequireOption(options, "primary-compiler-symbols") : null);
 
         if (operation != "native") throw new ArgumentException();
         var platform = RequireOption(options, "native-platform");
@@ -267,7 +281,7 @@ internal static class CoverageDogfood
     private sealed record KeycloakArguments(string Platform, string ProducerId, string Collection) : NativeArguments(Platform);
     private sealed record CollectionArguments(string Platform, string Root) : NativeArguments(Platform);
     private sealed record ReplayArguments(string Platform, string RawIndex, string Timings) : NativeArguments(Platform);
-    private sealed record FanInArguments(string Primary, string Timings, string NativeInputs) : OperationArguments;
+    private sealed record FanInArguments(string Primary, string Timings, string NativeInputs, string? SymbolsDirectory) : OperationArguments;
 
     private static int ReportFailure(string stage, string reason, string recovery)
     {
@@ -392,7 +406,8 @@ internal static class CoverageDogfood
     {
         if (policy.ContractVersion != contractVersion || contractVersion is not (2 or 3)
             || contractVersion == 2 && (policy.ReportProfileId is not null || policy.DiffPolicyId is not null)
-            || contractVersion == 3 && policy.ReportProfileId != ReportProfileId)
+            || contractVersion == 3 && policy.ReportProfileId is not (CoverageFanInReportProfiles.CoverletCobertura
+                or CoverageFanInReportProfiles.CoverletCoberturaAsync))
             throw new InvalidDataException("The explicit fan-in policy version/profile selection is inconsistent.");
         var supplements = policy.Supplements.OrderBy(x => x.Id, StringComparer.Ordinal)
             .Select(x => x with { TestProjects = x.TestProjects?.Order(StringComparer.Ordinal).ToArray() }).ToArray();
@@ -410,7 +425,7 @@ internal static class CoverageDogfood
         {
             2 => new PolicyV2Document(sortedPolicy.Gate, sortedPolicy.Instrumentation!, sortedPolicy.Limits!,
                 sortedPolicy.Run, sortedPolicy.Source, sortedPolicy.Supplements, sortedPolicy.TestProjects),
-            3 => new PolicyV3Document(3, ReportProfileId, sortedPolicy.Gate, sortedPolicy.Instrumentation!,
+            3 => new PolicyV3Document(3, sortedPolicy.ReportProfileId!, sortedPolicy.Gate, sortedPolicy.Instrumentation!,
                 sortedPolicy.Limits!, sortedPolicy.Run, sortedPolicy.Source, sortedPolicy.Supplements, sortedPolicy.TestProjects, sortedPolicy.DiffPolicyId),
             _ => throw new InvalidDataException("Unsupported fan-in contract version.")
         };
@@ -442,10 +457,10 @@ internal static class CoverageDogfood
             CoverageCaptureRequest capture => new CaptureRequestProjection(policy, capture.RepositoryRoot,
                 capture.OutputDirectory, capture.ProducerId, capture.CoveragePath, capture.TimingsPath,
                 capture.RawCoveragePath, capture.ImportDirectory, capture.OriginalSourceRoot, capture.OutputMode,
-                capture.RawCoveragePaths),
+                capture.RawCoveragePaths, capture.CompilerSymbolAssemblies),
             CoverageCollectRequest collect => new CollectRequestProjection(policy, collect.RepositoryRoot,
                 collect.OutputDirectory, collect.CollectionDirectory, collect.ProducerId, collect.DeadlineSeconds,
-                collect.SolutionPath, collect.Parallelism, collect.NoRestore, collect.NoBuild),
+                collect.SolutionPath, collect.Parallelism, collect.NoRestore, collect.NoBuild, collect.CompilerSymbolAssemblies),
             CoverageComposeRequest compose => new ComposeRequestProjection(policy, compose.RepositoryRoot,
                 compose.PrimaryCaptureDirectory, compose.SupplementaryCaptureDirectories, compose.OutputDirectory,
                 compose.OutputMode, compose.EvaluationIntent),
@@ -566,10 +581,12 @@ internal static class CoverageDogfood
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DiffPolicyId);
     private sealed record CaptureRequestProjection(JsonElement Policy, string RepositoryRoot, string OutputDirectory,
         string ProducerId, string? CoveragePath, string? TimingsPath, string? RawCoveragePath, string? ImportDirectory,
-        string? OriginalSourceRoot, CoverageOutputMode OutputMode, IReadOnlyDictionary<string, string>? RawCoveragePaths);
+        string? OriginalSourceRoot, CoverageOutputMode OutputMode, IReadOnlyDictionary<string, string>? RawCoveragePaths,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? CompilerSymbolAssemblies);
     private sealed record CollectRequestProjection(JsonElement Policy, string RepositoryRoot, string OutputDirectory,
         string CollectionDirectory, string ProducerId, int DeadlineSeconds, string? SolutionPath, int Parallelism,
-        bool NoRestore, bool NoBuild);
+        bool NoRestore, bool NoBuild,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? CompilerSymbolAssemblies);
     private sealed record ComposeRequestProjection(JsonElement Policy, string RepositoryRoot, string PrimaryCaptureDirectory,
         IReadOnlyList<string> SupplementaryCaptureDirectories, string OutputDirectory, CoverageOutputMode OutputMode,
         CoverageEvaluationIntent EvaluationIntent);

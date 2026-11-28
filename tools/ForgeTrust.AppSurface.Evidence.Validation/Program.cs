@@ -59,7 +59,7 @@ internal static class Program
 
                 CI coverage collection: --operation collect-coverage --repository <checkout>
                 --output <fresh-directory> --dotnet <absolute-host> [--coverage-cli <absolute-installed-appsurface>]
-                [--coverage-schedule-timings <prior-timings.json>]
+                [--coverage-schedule-timings <prior-timings.json>] [--include-keycloak-native true]
                 Collection alone never closes coverage obligations.
                 verify: --manifest <proof/evidence-manifest.json> --artifact-root <proof/artifacts>
 
@@ -258,8 +258,12 @@ internal static class Program
     private static async Task<int> CollectCoverageAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
         Func<RepositoryCheckSettings, CancellationToken, Task>? collectCoverage)
     {
-        string[] allowed = ["--operation", "--repository", "--output", "--dotnet", "--coverage-cli", "--coverage-schedule-timings"];
+        string[] allowed = ["--operation", "--repository", "--output", "--dotnet", "--coverage-cli", "--coverage-schedule-timings", "--include-keycloak-native"];
         if (options.Keys.Except(allowed, StringComparer.Ordinal).Any()) throw new ArgumentException("Unsupported coverage collection option.");
+        var includeKeycloakNativeCoverage = options.TryGetValue("--include-keycloak-native", out var includeKeycloakNative)
+            && includeKeycloakNative == "true";
+        if (options.ContainsKey("--include-keycloak-native") && !includeKeycloakNativeCoverage)
+            throw new ArgumentException("Keycloak native coverage selection accepts only true.");
         string? coverageCli = null;
         if (options.TryGetValue("--coverage-cli", out var selectedCoverageCli))
         {
@@ -271,6 +275,7 @@ internal static class Program
             Required(options, "--dotnet"), Path.GetFullPath(Required(options, "--output")))
         {
             CoverageCliPath = coverageCli,
+            IncludeKeycloakNativeCoverage = includeKeycloakNativeCoverage,
             CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
         };
         if (collectCoverage is null) await new SolutionCoverageProducer(settings).CollectAsync(cancellationToken);

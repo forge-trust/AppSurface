@@ -54,6 +54,11 @@ internal static partial class CoverageFanInEngine
                 auxiliaryFiles = new(StringComparer.Ordinal) { ["collector.cobertura.xml"] = original };
             }
         }
+        if (r.CompilerSymbolAssemblies is { Count: > 0 } assemblies)
+        {
+            foreach (var (name, bytes) in CoverageFanInCompilerSymbols.ReadPayload(assemblies, io, Full(r.RepositoryRoot)))
+                auxiliaryFiles.Add(name, bytes);
+        }
 
         // Validate measurable points even for a capture that will not be composed in this invocation.
         _ = CoverageFanInComposer.Compose([(document, Full(r.RepositoryRoot))]);
@@ -127,19 +132,23 @@ internal static partial class CoverageFanInEngine
             throw new InvalidDataException("Capture platform or instrumentation differs.");
         var coverage = io.Read(Path.Join(directory, CoverageName), xml: true);
         var files = manifest.GetProperty("files");
+        var compilerSymbolFiles = CoverageFanInCompilerSymbols.RetainedFileNames(files);
+        CoverageFanInCompilerSymbols.ValidateRetainedInventory(r.Expected, producerId, compilerSymbolFiles);
         var document = io.Xml(coverage);
         Dictionary<string, byte[]> auxiliaryFiles;
         var bundleRequest = r with { ProducerId = producerId };
         if (producerId != "primary" && files.TryGetProperty("collector-inventory.json", out _))
-            auxiliaryFiles = LoadNativeSet(bundleRequest, io, directory, document, sourceRoot, files);
+            auxiliaryFiles = LoadNativeSet(bundleRequest, io, directory, document, sourceRoot, files, compilerSymbolFiles);
         else
         {
             var auxiliaryName = producerId == "primary" ? "timings.json" : "collector.cobertura.xml";
-            ExactProperties(files, [CoverageName, auxiliaryName]);
+            ExactProperties(files, [CoverageName, auxiliaryName, .. compilerSymbolFiles]);
             if (producerId != "primary" && NativeProjects(bundleRequest).Length != 1)
                 throw new InvalidDataException("Single-report capture cannot satisfy multiple native projects.");
             auxiliaryFiles = new(StringComparer.Ordinal)
             { [auxiliaryName] = io.Read(Path.Join(directory, auxiliaryName), xml: producerId != "primary") };
+            foreach (var name in compilerSymbolFiles)
+                auxiliaryFiles.Add(name, io.Read(Path.Join(directory, name)));
         }
         if (files.GetProperty(CoverageName).GetString() != CoverageFanInIO.Hash(coverage)
             || auxiliaryFiles.Any(item => files.GetProperty(item.Key).GetString() != CoverageFanInIO.Hash(item.Value)))
@@ -169,7 +178,10 @@ internal static partial class CoverageFanInEngine
             if (File.Exists(Path.Join(directory, CoverageFanInIO.CompletionName))) names.Add(CoverageFanInIO.CompletionName);
             io.ExactInventory(directory, names);
         }
-        return new(Full(directory), manifest, CoverageFanInIO.Hash(manifestBytes), document, coverage, auxiliaryFiles);
+        return new(Full(directory), manifest, CoverageFanInIO.Hash(manifestBytes), document, coverage, auxiliaryFiles)
+        {
+            CompilerMethods = CoverageFanInCompilerSymbols.ReadMethods(compilerSymbolFiles, auxiliaryFiles, sourceRoot)
+        };
     }
     private static void ExactProperties(JsonElement value, IReadOnlyList<string> expected)
     {

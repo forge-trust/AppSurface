@@ -10,10 +10,11 @@ internal static partial class CoverageFanInEngine
         IReadOnlyList<CoverageFanInBundle> bundles)
     {
         var inputs = bundles.Select(x => (x.Document, x.Manifest.GetProperty("sourceRoot").GetString()!)).ToArray();
-        var composed = CoverageFanInComposer.Compose(inputs);
+        var compilerMethods = bundles.Select(bundle => bundle.CompilerMethods).ToArray();
+        var composed = CoverageFanInComposer.Compose(CoverageAsyncPairing.Project(inputs, compilerMethods));
         var primary = new XDocument(bundles[0].Document);
         CoverageFanInComposer.NormalizePaths(primary, inputs[0].Item2);
-        CoverageFanInIndependentVerifier.VerifyComposition(inputs, composed, primary);
+        CoverageFanInIndependentVerifier.VerifyComposition(inputs, composed, primary, compilerMethods);
         var coverage = io.EncodeXml(composed); var primaryBytes = io.EncodeXml(primary);
         return new(StringComparer.Ordinal)
         {
@@ -54,7 +55,8 @@ internal static partial class CoverageFanInEngine
                 throw new InvalidDataException("Composition capture identity differs.");
         var document = io.Xml(coverage); var primaryDocument = io.Xml(primary);
         CoverageFanInIndependentVerifier.VerifyComposition(bundles.Select(x =>
-            (x.Document, x.Manifest.GetProperty("sourceRoot").GetString()!)).ToArray(), document, primaryDocument);
+            (x.Document, x.Manifest.GetProperty("sourceRoot").GetString()!)).ToArray(), document, primaryDocument,
+            bundles.Select(bundle => bundle.CompilerMethods).ToArray());
         return (coverage, primary, document, primaryDocument, receipt);
     }
 

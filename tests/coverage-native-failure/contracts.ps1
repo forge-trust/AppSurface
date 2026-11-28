@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 $script = Join-Path $PSScriptRoot '../../.github/scripts/write-keycloak-native-failure-summary.ps1'
 $scratch = [IO.Directory]::CreateTempSubdirectory('native-failure-contract-').FullName
 $project = 'Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj'
+$coreProject = 'Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Keycloak.Tests.csproj'
+$projects = @($project, $coreProject)
 $timings = Join-Path $scratch 'timings.json'
 $report = Join-Path $scratch 'summary.json'
 
@@ -13,6 +15,16 @@ function Assert-Summary($producer, $status, $exitCode, [string[]]$failedMethods 
         $actual.project -cne $project -or $actual.executionStatus -cne $status -or $actual.exitCode -ne $exitCode -or
         $actual.failedTestMethods -isnot [array] -or ($actual.failedTestMethods -join ',') -cne ($failedMethods -join ',')) {
         throw 'Unexpected Keycloak collection failure summary.'
+    }
+}
+
+function Assert-MultiProjectSummary($producer, $expectedProject, $status, $exitCode, [string[]]$failedMethods = @()) {
+    & $script -CollectionDirectory $scratch -ProducerId $producer -TestProject $projects -OutputPath $report
+    $actual = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json -AsHashtable
+    if ($actual.Count -ne 6 -or $actual.schemaVersion -ne 2 -or $actual.producerId -cne $producer -or
+        $actual.project -cne $expectedProject -or $actual.executionStatus -cne $status -or $actual.exitCode -ne $exitCode -or
+        $actual.failedTestMethods -isnot [array] -or ($actual.failedTestMethods -join ',') -cne ($failedMethods -join ',')) {
+        throw 'Unexpected multi-project Keycloak collection failure summary.'
     }
 }
 
@@ -81,7 +93,36 @@ try {
 
     Remove-Item -LiteralPath $timings
     Assert-Summary 'darwin-arm64-keycloak' 'unavailable' $null
-    Write-Output 'Passed 11 Keycloak native failure summary checks.'
+
+    $coreClass = 'ForgeTrust.AppSurface.Auth.Keycloak.Tests.Tests.InfrastructureTests'
+    $coreMethod = "$coreClass.ReadsCoreConfiguration"
+    $coreJunit = 'junit-coverage-1-ForgeTrust.AppSurface.Auth.Keycloak.Tests-89abcdef.xml'
+    Set-Content -LiteralPath (Join-Path $scratch $coreJunit) -Value @"
+<testsuite>
+  <testcase classname="$coreClass" name="ReadsCoreConfiguration(seedValue: hidden)"><failure message="private detail" /></testcase>
+  <testcase classname="arbitrary.class" name="Ignored"><failure /></testcase>
+</testsuite>
+"@
+    $adapterEntry = @{ project = $project; executionStatus = 'completed'; exitCode = 0 }
+    $coreEntry = @{
+        project = $coreProject
+        executionStatus = 'completed'
+        exitCode = 17
+        testResults = @(@{ format = 'junit'; path = $coreJunit; parserStatus = 'available' })
+    }
+    @{ projects = @($adapterEntry, $coreEntry) } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $timings
+    Assert-MultiProjectSummary 'darwin-arm64-keycloak' $coreProject 'completed' 17 @($coreMethod)
+
+    $adapterEntry.exitCode = 19
+    @{ projects = @($adapterEntry, $coreEntry) } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $timings
+    Assert-MultiProjectSummary 'darwin-arm64-keycloak' $project 'completed' 19
+
+    $adapterEntry.exitCode = 0
+    $coreEntry.exitCode = 0
+    @{ projects = @($adapterEntry, $coreEntry) } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $timings
+    Assert-MultiProjectSummary 'darwin-arm64-keycloak' $project 'completed' 0
+
+    Write-Output 'Passed 14 Keycloak native failure summary checks.'
 } finally {
     Remove-Item -LiteralPath $scratch -Recurse -Force
 }

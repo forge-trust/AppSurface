@@ -194,6 +194,7 @@ internal static partial class CoverageFanInEngine
     {
         if (string.IsNullOrWhiteSpace(r.RepositoryRoot)) throw new ArgumentException("Explicit repository required.");
         if (operation != "verify" && string.IsNullOrWhiteSpace(r.OutputDirectory)) throw new ArgumentException("Explicit output required.");
+        CoverageFanInCompilerSymbols.ValidateRequest(operation, r);
         if (operation == "capture")
         {
             _ = Producer(r);
@@ -234,8 +235,10 @@ internal static partial class CoverageFanInEngine
     private static List<string> InputDirectories(string operation, CoverageFanInEngineRequest r)
     {
         if (operation == "capture") return r.ImportDirectory is not null ? [Full(r.ImportDirectory)] :
-            new[] { r.CoveragePath, r.TimingsPath, r.RawCoveragePath }.Concat(r.RawCoveragePaths?.Values ?? []).Where(x => x is not null)
-                .Select(x => Path.GetDirectoryName(Full(x!))!).Distinct(StringComparer.Ordinal).ToList();
+            new[] { r.CoveragePath, r.TimingsPath, r.RawCoveragePath }.Concat(r.RawCoveragePaths?.Values ?? [])
+                .Concat((r.CompilerSymbolAssemblies ?? []).SelectMany(path => new[] { path, CoverageFanInCompilerSymbols.PdbPath(path) }))
+                .Where(x => x is not null).Select(x => Path.GetDirectoryName(Full(x!))!)
+                .Distinct(StringComparer.Ordinal).ToList();
         var paths = new List<string> { Full(r.PrimaryCaptureDirectory!) };
         paths.AddRange(r.SupplementaryCaptureDirectories!.Select(Full));
         if (r.ComposedOutputDirectory is not null) paths.Add(Full(r.ComposedOutputDirectory));

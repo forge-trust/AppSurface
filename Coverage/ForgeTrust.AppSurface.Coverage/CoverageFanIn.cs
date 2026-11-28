@@ -17,7 +17,9 @@ public static class CoverageFanIn
         return Execute("collect", new(expected, request.RepositoryRoot, request.OutputDirectory, request.ProducerId,
             CollectionDirectory: request.CollectionDirectory, SolutionPath: request.SolutionPath,
             DeadlineSeconds: request.DeadlineSeconds, Parallelism: request.Parallelism,
-            NoRestore: request.NoRestore, NoBuild: request.NoBuild), cancellationToken, progress, diagnostics);
+            NoRestore: request.NoRestore, NoBuild: request.NoBuild)
+        { CompilerSymbolAssemblies = FreezeOptional(request.CompilerSymbolAssemblies) },
+            cancellationToken, progress, diagnostics);
     }
     /// <summary>Validates a successful producer or imports a homogeneous v2 or v3 portable capture into fresh local custody.</summary>
     public static ValueTask<CoverageFanInResult> CaptureAsync(CoverageCaptureRequest request,
@@ -28,7 +30,10 @@ public static class CoverageFanIn
         return Execute("capture", new(Expected(request.Policy), request.RepositoryRoot, request.OutputDirectory,
             request.ProducerId, request.CoveragePath, request.TimingsPath, request.RawCoveragePath,
             request.ImportDirectory, request.OriginalSourceRoot, request.OutputMode == CoverageOutputMode.ReplaceOwned)
-        { RawCoveragePaths = request.RawCoveragePaths is null ? null : new Dictionary<string, string>(request.RawCoveragePaths, StringComparer.Ordinal) },
+        {
+            RawCoveragePaths = request.RawCoveragePaths is null ? null : new Dictionary<string, string>(request.RawCoveragePaths, StringComparer.Ordinal),
+            CompilerSymbolAssemblies = FreezeOptional(request.CompilerSymbolAssemblies)
+        },
             cancellationToken, progress, diagnostics);
     }
     /// <summary>Composes the exact declared capture set conservatively; does not accept coverage.</summary>
@@ -83,6 +88,8 @@ public static class CoverageFanIn
     }
     private static IReadOnlyList<string> Freeze(IReadOnlyList<string> paths) => paths is null
         ? throw CoveragePolicyEncoding.Invalid("supplementaryCaptureDirectories") : Array.AsReadOnly(paths.ToArray());
+    private static IReadOnlyList<string>? FreezeOptional(IReadOnlyList<string>? paths) =>
+        paths is null ? null : Array.AsReadOnly(paths.ToArray());
     private static void ValidateModes(CoverageOutputMode output, CoverageEvaluationIntent intent)
     {
         if (!Enum.IsDefined(output) || !Enum.IsDefined(intent)) throw CoveragePolicyEncoding.Invalid("mode");

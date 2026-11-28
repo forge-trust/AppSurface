@@ -8,6 +8,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../shared/NativeCoverageProducerInventory.cs" Link="Shared/NativeCoverageProducerInventory.cs" />
+    <Compile Include="../shared/KeycloakCoverageCompilerInputs.cs" Link="Shared/KeycloakCoverageCompilerInputs.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Coverage.Dogfood/NativeCoverageTestInventory.cs" Link="Shared/NativeCoverageTestInventory.cs" />
+    <EmbeddedResource Include="../../.github/workflows/native-coverage-test-projects.txt" LogicalName="ForgeTrust.AppSurface.Coverage.Dogfood.native-coverage-test-projects.txt" />
+    <EmbeddedResource Include="../../.github/workflows/native-coverage-test-selectors.txt" LogicalName="ForgeTrust.AppSurface.Coverage.Dogfood.native-coverage-test-selectors.txt" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj" />
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />

@@ -228,9 +228,18 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         {
             Assert.Equal("Arm64", producer.OsArchitecture);
             Assert.Equal("Arm64", producer.ProcessArchitecture);
-            Assert.Equal(NativeCoverageProducerInventory.KeycloakTestProject, producer.TestProject);
             Assert.NotEmpty(producer.Filter);
         });
+        Assert.Equal(
+            [NativeCoverageProducerInventory.KeycloakAdapterTestProject, NativeCoverageProducerInventory.KeycloakCoreTestProject],
+            keycloak.Single(producer => producer.Id == "darwin-arm64-keycloak").TestProjects);
+        Assert.Equal(
+            "FullyQualifiedName~ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests|FullyQualifiedName~ForgeTrust.AppSurface.Auth.Keycloak.Tests",
+            keycloak.Single(producer => producer.Id == "darwin-arm64-keycloak").Filter);
+        Assert.Equal([NativeCoverageProducerInventory.KeycloakAdapterTestProject],
+            keycloak.Single(producer => producer.Id == "linux-arm64-keycloak").TestProjects);
+        Assert.Equal("FullyQualifiedName~AppSurfaceKeycloakLinuxArm64WorkerTests",
+            keycloak.Single(producer => producer.Id == "linux-arm64-keycloak").Filter);
 
         var serialized = JsonDocument.Parse(NativeCoverageProducerInventory.SerializeWorkflowInventory(true));
         Assert.Equal(5, serialized.RootElement.GetProperty("cardinality").GetInt32());
@@ -240,7 +249,8 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         {
             Assert.Equal(keycloak[index].Id, matrix[index].GetProperty("producerId").GetString());
             Assert.Equal(keycloak[index].Runner, matrix[index].GetProperty("runner").GetString());
-            Assert.Equal(keycloak[index].TestProject, matrix[index].GetProperty("testProject").GetString());
+            Assert.Equal(keycloak[index].TestProjects,
+                matrix[index].GetProperty("testProjects").EnumerateArray().Select(project => project.GetString()));
             Assert.Equal(keycloak[index].Filter, matrix[index].GetProperty("filter").GetString());
             Assert.Equal(keycloak[index].Keycloak, matrix[index].GetProperty("keycloak").GetBoolean());
         }
@@ -423,16 +433,19 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("'--native-producer', $producer, '--collection', $collection", capture);
         Assert.Matches("Test-Path -LiteralPath \\$collection[^\\n]*\\n\\s*Add-Content -LiteralPath \\$env:GITHUB_OUTPUT -Value \"collection-path=\\$collection\"", capture);
         Assert.Contains("'--collection-root'", capture);
-        const string restoreCommand = "dotnet restore \"$env:COVERAGE_TEST_PROJECT\" --locked-mode";
         var restoreSteps = securitySteps
             .Where(step => step.AsMapping().Children.TryGetValue(new YamlScalarNode("run"), out var run)
-                && run.AsScalar() == restoreCommand)
+                && run.AsScalar().Contains("ConvertFrom-Json -AsHashtable $env:COVERAGE_TEST_PROJECTS", StringComparison.Ordinal)
+                && run.AsScalar().Contains("dotnet restore $project --locked-mode", StringComparison.Ordinal))
             .ToArray();
         var restore = Assert.Single(restoreSteps).AsMapping();
         Assert.Equal("Restore selected native coverage tests (locked)", restore["name"].AsScalar());
         Assert.Equal("pwsh", restore["shell"].AsScalar());
-        Assert.Equal("${{ matrix.testProject }}", restore["env"].AsMapping()["COVERAGE_TEST_PROJECT"].AsScalar());
+        Assert.Equal("${{ toJSON(matrix.testProjects) }}", restore["env"].AsMapping()["COVERAGE_TEST_PROJECTS"].AsScalar());
         Assert.Equal("${{ matrix.keycloak }}", restore["if"].AsScalar());
+        var setupDotnetCache = FindStep(securitySteps, "Setup .NET SDK")["with"].AsMapping()["cache-dependency-path"].AsScalar();
+        Assert.Contains("Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/packages.*.lock.json", setupDotnetCache);
+        Assert.Contains("Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/packages.*.lock.json", setupDotnetCache);
         var sdkSelection = FindStep(securitySteps, "Select exact coverage SDK");
         Assert.True(IndexOf(securitySteps, sdkSelection) < IndexOf(securitySteps, restore));
         var bundle = FindStep(securitySteps, "Install pinned Aspire bundle for Keycloak coverage");
@@ -467,8 +480,9 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Equal("pwsh", summarizeFailure["shell"].AsScalar());
         var summaryEnvironment = summarizeFailure["env"].AsMapping();
         Assert.Equal("${{ steps.capture-native-coverage.outputs.collection-path }}", summaryEnvironment["COVERAGE_NATIVE_COLLECTION"].AsScalar());
-        Assert.Equal("${{ matrix.testProject }}", summaryEnvironment["COVERAGE_TEST_PROJECT"].AsScalar());
+        Assert.Equal("${{ toJSON(matrix.testProjects) }}", summaryEnvironment["COVERAGE_TEST_PROJECTS"].AsScalar());
         Assert.Contains("write-keycloak-native-failure-summary.ps1 -CollectionDirectory $env:COVERAGE_NATIVE_COLLECTION", summarizeFailure["run"].AsScalar());
+        Assert.Contains("-TestProject $projects", summarizeFailure["run"].AsScalar());
         Assert.Contains("summary-path=$summary", summarizeFailure["run"].AsScalar());
         Assert.True(IndexOf(securitySteps, captureStep) < IndexOf(securitySteps, summarizeFailure));
         var failureUpload = FindStep(securitySteps, "Upload failed native capture result");
@@ -789,6 +803,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("requires_coverage == 'true'", collect["if"].AsScalar());
         Assert.Contains("--operation collect-coverage", collect["run"].AsScalar());
         Assert.Contains("--coverage-cli \"$COVERAGE_CLI_PATH\"", collect["run"].AsScalar());
+        Assert.Equal("${{ needs.coverage-evidence-plan.outputs.requires_keycloak_native_coverage }}",
+            collect["env"].AsMapping()["COVERAGE_INCLUDE_KEYCLOAK"].AsScalar());
+        Assert.Contains("GITHUB_EVENT_NAME\" == \"pull_request\"", collect["run"].AsScalar());
+        Assert.Contains("args+=(--include-keycloak-native true)", collect["run"].AsScalar());
         const string timingFile = "\"$RUNNER_TEMP/coverage-schedule/timings.json\"";
         Assert.Matches(
             $@"if \[\[ -f {Regex.Escape(timingFile)} \]\]; then\s+args\+=\(--coverage-schedule-timings {Regex.Escape(timingFile)}\)",
@@ -816,6 +834,11 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains("--coverage-collection \"$RUNNER_TEMP/solution-coverage-collection\"",
             FindStep(gateSteps, "Run solution coverage and gate")["run"].AsScalar());
         var finalSteps = jobs["coverage-manifest-gate"].AsMapping()["steps"].AsSequence();
+        var qualification = FindStep(gateSteps, "Verify retained v3 fan-in qualification");
+        Assert.Equal("${{ needs.coverage-evidence-plan.outputs.requires_keycloak_native_coverage == 'true' && 'coverlet-collector-cobertura-async-v1' || 'coverlet-collector-cobertura-v1' }}",
+            qualification["env"].AsMapping()["COVERAGE_EXPECTED_REPORT_PROFILE"].AsScalar());
+        Assert.Equal(2, qualification["run"].AsScalar().Split("--arg profile \"$COVERAGE_EXPECTED_REPORT_PROFILE\"",
+            StringSplitOptions.None).Length - 1);
         var failure = FindStep(finalSteps, "Fail unless planning, selected native evidence, and the build passed")["if"].AsScalar();
         Assert.Contains("needs.coverage-collection.result != 'success'", failure);
         Assert.Contains("needs.packed-durable-consumers.result != 'success'", failure);

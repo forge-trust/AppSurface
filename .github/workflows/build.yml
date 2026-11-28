@@ -281,6 +281,7 @@ jobs:
             Aspire/ForgeTrust.AppSurface.Aspire.Tests/packages.lock.json
             Cli/ForgeTrust.AppSurface.Cli.Tests/packages.lock.json
             Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/packages.*.lock.json
+            Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/packages.*.lock.json
             examples/auth-aspire-keycloak-apphost/packages.*.lock.json
 
       - name: Select exact coverage SDK
@@ -294,8 +295,14 @@ jobs:
         if: ${{ matrix.keycloak }}
         shell: pwsh
         env:
-          COVERAGE_TEST_PROJECT: ${{ matrix.testProject }}
-        run: dotnet restore "$env:COVERAGE_TEST_PROJECT" --locked-mode
+          COVERAGE_TEST_PROJECTS: ${{ toJSON(matrix.testProjects) }}
+        run: |
+          $projects = @(ConvertFrom-Json -AsHashtable $env:COVERAGE_TEST_PROJECTS)
+          if ($projects.Count -eq 0) { throw 'Selected native coverage project inventory is empty.' }
+          foreach ($project in $projects) {
+            dotnet restore $project --locked-mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       - name: Install pinned Aspire bundle for Keycloak coverage
         if: ${{ matrix.keycloak }}
@@ -444,11 +451,12 @@ jobs:
         shell: pwsh
         env:
           COVERAGE_NATIVE_COLLECTION: ${{ steps.capture-native-coverage.outputs.collection-path }}
-          COVERAGE_TEST_PROJECT: ${{ matrix.testProject }}
+          COVERAGE_TEST_PROJECTS: ${{ toJSON(matrix.testProjects) }}
         run: |
           $summary = Join-Path $env:RUNNER_TEMP 'coverage-keycloak-failure-summary.json'
+          $projects = @(ConvertFrom-Json -AsHashtable $env:COVERAGE_TEST_PROJECTS)
           & ./.github/scripts/write-keycloak-native-failure-summary.ps1 -CollectionDirectory $env:COVERAGE_NATIVE_COLLECTION `
-            -ProducerId $env:COVERAGE_KEYCLOAK_PRODUCER -TestProject $env:COVERAGE_TEST_PROJECT -OutputPath $summary
+            -ProducerId $env:COVERAGE_KEYCLOAK_PRODUCER -TestProject $projects -OutputPath $summary
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "summary-path=$summary"
 
       - name: Upload failed native capture result
@@ -936,12 +944,16 @@ jobs:
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         env:
           APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
+          COVERAGE_INCLUDE_KEYCLOAK: ${{ needs.coverage-evidence-plan.outputs.requires_keycloak_native_coverage }}
         run: |
           set -euo pipefail
           validation="tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
           dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
           dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
           args=(--operation collect-coverage --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --coverage-cli "$COVERAGE_CLI_PATH" --output "$RUNNER_TEMP/solution-coverage-collection")
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$COVERAGE_INCLUDE_KEYCLOAK" == "true" ]]; then
+            args+=(--include-keycloak-native true)
+          fi
           if [[ -f "$RUNNER_TEMP/coverage-schedule/timings.json" ]]; then
             args+=(--coverage-schedule-timings "$RUNNER_TEMP/coverage-schedule/timings.json")
             echo "Collecting coverage with restored scheduling timings."
@@ -1142,6 +1154,7 @@ jobs:
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
         env:
           COVERAGE_NATIVE_INVENTORY: ${{ needs.coverage-evidence-plan.outputs.native_coverage_inventory }}
+          COVERAGE_EXPECTED_REPORT_PROFILE: ${{ needs.coverage-evidence-plan.outputs.requires_keycloak_native_coverage == 'true' && 'coverlet-collector-cobertura-async-v1' || 'coverlet-collector-cobertura-v1' }}
         run: |
           set -euo pipefail
           native_inputs="$RUNNER_TEMP/coverage-native-inputs"
@@ -1156,9 +1169,9 @@ jobs:
               return 1
             }
             local expected_policy_supplements
-            expected_policy_supplements="$(jq -c '[.producers[] | {id, platform: .nativePlatform, filter, testProjects: [.testProject]}] | sort_by(.id)' <<<"$COVERAGE_NATIVE_INVENTORY")"
+            expected_policy_supplements="$(jq -c '[.producers[] | {id, platform: .nativePlatform, filter, testProjects}] | sort_by(.id)' <<<"$COVERAGE_NATIVE_INVENTORY")"
             jq -e \
-              --arg profile "coverlet-collector-cobertura-v1" \
+              --arg profile "$COVERAGE_EXPECTED_REPORT_PROFILE" \
               --arg base "$COVERAGE_V3_DIFF_BASE" \
               --arg scope "$GITHUB_REPOSITORY" \
               --arg run_id "$GITHUB_RUN_ID" \
@@ -1185,7 +1198,7 @@ jobs:
             local operation="$2"
             local tree="$3"
             jq -e \
-              --arg profile "coverlet-collector-cobertura-v1" \
+              --arg profile "$COVERAGE_EXPECTED_REPORT_PROFILE" \
               --arg base "$COVERAGE_V3_DIFF_BASE" \
               --arg scope "$GITHUB_REPOSITORY" \
               --arg run_id "$GITHUB_RUN_ID" \
