@@ -1,6 +1,6 @@
 # Read package-only pull request evidence
 
-The [package gate](../.github/workflows/package-gate.yml) uses the shared [evidence policy](../.github/evidence.policy.json). For a package-only change, open the package-gate run for the PR head and download its validation diagnostics artifact from the matching attempt.
+The [package gate](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml) uses the shared [evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json). For a package-only change, open the package-gate run for the PR head and download its validation diagnostics artifact from the matching attempt.
 
 - Check that the retained plan selects `package-checks` and that the manifest records `TargetedComplete`. The package producer checks the package index, verifies generated documentation, and validates package archives and installed consumers.
 - Check the sibling coverage and native plans before interpreting their results. A verified `NoEvidenceRequired` manifest means the policy selected no producers for that workflow. The workflow can still run its regular setup and independent checks.
