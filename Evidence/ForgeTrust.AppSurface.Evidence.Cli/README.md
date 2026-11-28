@@ -335,10 +335,11 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <
 | `ASEVD209` | The plan or manifest could not be read as supported JSON within the input limit. | Regenerate the input using the current supported schema. |
 | `ASEVD213` | A listed artifact is missing, linked, outside the artifact root, or has a different length or SHA-256. The message names the artifact, the producer and the status. | Rerun `appsurface evidence run` and verify the plan, manifest and artifacts from that one run. |
 
-**`verify` checks structural integrity.** It exits 0 for an intact manifest whose claim is `None`.
-The reported `ClaimKind` and `Eligibility` describe the manifest. Before using it as gate evidence,
-establish its provenance through the consumer's workflow and apply that workflow's claim and eligibility requirements.
-Use the [manifest JSON](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) for those fields in automation.
+**`verify` proves integrity, not that the gate passed.** It exits 0 for an intact manifest whose claim is `None`. A gate must also read the manifest's `ClaimKind` and `Eligibility`.
+
+Before using the manifest as gate evidence, establish its provenance through the consumer's workflow and
+apply that workflow's claim and eligibility requirements. Use the
+[manifest JSON](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) for those fields in automation.
 
 ## Pitfalls
 
