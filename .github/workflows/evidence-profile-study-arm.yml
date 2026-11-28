@@ -1,0 +1,114 @@
+name: Evidence profile study arm
+
+on:
+  workflow_call:
+    inputs:
+      state:
+        required: true
+        type: string
+      pair:
+        required: true
+        type: number
+      arm:
+        required: true
+        type: string
+      seed:
+        required: true
+        type: string
+      candidate-policy:
+        type: string
+      candidate-plan:
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    name: sample ${{ inputs.state }} ${{ inputs.pair }} ${{ inputs.arm }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ARM: ${{ inputs.arm }}
+      PAIR: ${{ inputs.pair }}
+      STATE: ${{ inputs.state }}
+      WARM_SEED_SHA: ${{ inputs.seed }}
+      CANDIDATE_POLICY_SHA: ${{ inputs.candidate-policy }}
+      CANDIDATE_PLAN_DIGEST: ${{ inputs.candidate-plan }}
+    defaults:
+      run:
+        working-directory: subject
+        shell: bash
+    steps:
+      - name: Checkout study definition
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 8c7f906bc31a56e2f6d0c9eb6bfe531eb91f1ce5
+          path: subject
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
+        with:
+          dotnet-version: 10.0.402
+      - name: Verify immutable source and empty caches
+        run: ../control/.github/studies/issue-780/arm.sh init
+      - name: Download frozen warm seed
+        if: inputs.state == 'warm'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: study-warm-seed-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/seed
+      - name: Establish assigned restore state
+        run: ../control/.github/studies/issue-780/arm.sh restore
+      - name: Build validation tool and collect and plan package checks
+        id: plan
+        run: ../control/.github/studies/issue-780/arm.sh plan
+      - name: Setup pnpm
+        if: steps.plan.outputs.packages == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.1.3
+          package_json_file: subject/package.json
+      - name: Setup Node.js
+        if: steps.plan.outputs.packages == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.22.3
+          package-manager-cache: false
+      - name: Verify web assets
+        if: steps.plan.outputs.packages == 'true'
+        run: ../control/.github/studies/issue-780/arm.sh web
+      - name: Prepare pinned Aspire CLI bundle
+        if: steps.plan.outputs.packages == 'true'
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
+      - name: Run and verify scoped package evidence
+        run: ../control/.github/studies/issue-780/arm.sh evidence
+      - name: Record verified observation
+        run: ../control/.github/studies/issue-780/arm.sh receipt
+      - name: Upload bounded observation
+        if: inputs.pair != 0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sample-${{ inputs.state }}-${{ inputs.pair }}-${{ inputs.arm }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/study/sample.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload untimed qualification
+        if: inputs.pair == 0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: probe-${{ inputs.state }}-${{ inputs.arm }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/study/sample.json
+            ${{ runner.temp }}/study/quality.json
+          if-no-files-found: error
+          retention-days: 7

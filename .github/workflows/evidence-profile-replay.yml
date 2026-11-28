@@ -1,0 +1,180 @@
+name: EvidenceHost untimed package replay
+
+on:
+  workflow_dispatch:
+  # GitHub requires workflow_dispatch definitions on the default branch.
+  # This exact pilot branch allows one hosted rehearsal before merging.
+  push:
+    branches: [codex/issue-780-untimed-replay]
+    paths: [.github/workflows/evidence-profile-replay.yml]
+
+permissions:
+  contents: read
+
+env:
+  FIXTURE_BASE: c3c9b6bd83d8852c37df596fae3339fbc3ae2274
+  FIXTURE_HEAD: 8c7f906bc31a56e2f6d0c9eb6bfe531eb91f1ce5
+  FIXTURE_MERGE: ccd62878fdce4cb2064bc19c8c1898f9b3dc601a
+  FIXTURE_TREE: 1ea6e9c9ddee30c3e892e69575f06c243b35b340
+  ORDINARY_PACKAGE_RUN: '46167211762'
+  ORDINARY_PACKAGE_ATTEMPT: '1'
+  ORDINARY_PACKAGE_WORKFLOW: 6176ee3c3e7eb3bcc13948c1732ba8607b3b3997
+  ORDINARY_POLICY: d5657f5f4acff71c6f240a1ced0bb51431d65ea9
+
+# Keep the package job's execution and uploads aligned with the ordinary gate.
+# The pinned checkout, explicit PR input and replay receipt are the differences.
+jobs:
+  package-gate:
+    if: github.repository == 'forge-trust/AppSurface' && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/codex/issue-780-untimed-replay')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.FIXTURE_HEAD }}
+          fetch-depth: 0 # Packed Cloud Tasks isolation proof archives the pinned baseline commit.
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
+        with:
+          dotnet-version: |
+            10.0.402
+
+      - name: Build repository validation tool
+        run: |
+          dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
+          dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
+
+      - name: Collect and plan package checks
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/package-plan-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          validation="$GITHUB_WORKSPACE/tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
+          test "$(git rev-parse HEAD)" = "$FIXTURE_HEAD"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$FIXTURE_TREE"
+          test "$(git merge-base "$FIXTURE_BASE" "$FIXTURE_HEAD")" = "$FIXTURE_BASE"
+          test "$(git rev-parse "$FIXTURE_BASE:.github/workflows/package-gate.yml")" = "$ORDINARY_PACKAGE_WORKFLOW"
+          test "$(git rev-parse 'HEAD:.github/workflows/package-gate.yml')" = "$ORDINARY_PACKAGE_WORKFLOW"
+          test "$(git rev-parse 'HEAD:.github/evidence.policy.json')" = "$ORDINARY_POLICY"
+          fixture_event="$RUNNER_TEMP/issue-780-pr-event.json"
+          jq -n --arg base "$FIXTURE_BASE" --arg head "$FIXTURE_HEAD" \
+            '{pull_request: {base: {sha: $base}, head: {sha: $head}}}' > "$fixture_event"
+          dotnet "$validation" --operation collect --repository "$GITHUB_WORKSPACE" --event-file "$fixture_event" --event-name pull_request --workflow-sha "$FIXTURE_MERGE" --output "$root/changes"
+          dotnet "$validation" --operation plan --scope packages --policy .github/evidence.policy.json --changed-paths "$root/changes/changed-paths.json" --output "$root/plan"
+          selection="$root/plan/selection.json"
+          jq -e '.profileId == "packages" and .producerIds == ["package-checks"]
+            and .requiresPackageChecks and (.requiresCoverage | not) and (.requiresNativeCoverage | not)' "$selection" > /dev/null
+          required="$(jq -r '.requiresPackageChecks | tostring' "$selection")"
+          echo "requires_package_checks=$required" >> "$GITHUB_OUTPUT"
+          echo "evidence_root=$root" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        if: ${{ steps.plan.outputs.requires_package_checks == 'true' }}
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.1.3
+
+      - name: Setup Node.js
+        if: ${{ steps.plan.outputs.requires_package_checks == 'true' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: Web/pnpm-lock.yaml
+
+      - name: Verify web assets
+        if: ${{ steps.plan.outputs.requires_package_checks == 'true' }}
+        run: |
+          pnpm --dir Web install --frozen-lockfile
+          pnpm --dir Web run assets:typecheck
+          pnpm --dir Web run assets:test
+          pnpm --dir Web run assets:verify
+
+      - name: Prepare pinned Aspire CLI bundle
+        if: ${{ steps.plan.outputs.requires_package_checks == 'true' }}
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
+
+      - name: Run and verify scoped package evidence
+        id: package-evidence
+        env:
+          EVIDENCE_ROOT: ${{ steps.plan.outputs.evidence_root }}
+        run: |
+          set -euo pipefail
+          validation="tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
+          proof="$RUNNER_TEMP/package-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          dotnet "$validation" --operation run --scope packages --policy .github/evidence.policy.json --changed-paths "$EVIDENCE_ROOT/changes/changed-paths.json" --plan "$EVIDENCE_ROOT/plan/evidence-plan.json" --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --output "$proof"
+          dotnet "$validation" --operation verify --scope packages --policy .github/evidence.policy.json --changed-paths "$EVIDENCE_ROOT/changes/changed-paths.json" --plan "$EVIDENCE_ROOT/plan/evidence-plan.json" --manifest "$proof/evidence-manifest.json" --artifact-root "$proof/artifacts"
+          echo "proof=$proof" >> "$GITHUB_OUTPUT"
+
+      - name: Upload package validation diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-package-gate-validation-diagnostics-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/package-evidence-*/evidence-summary.md
+            ${{ runner.temp }}/package-evidence-*/evidence-manifest.json
+            ${{ runner.temp }}/package-evidence-*/artifacts/**
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/package-validation-report.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/durable-template-consumer-proof.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/tailwind-package-consumer-proof.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/cloudtasks-package-consumer-proof.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof.evidence.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/NuGet.tool.config
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/consumer/NuGet.config
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/consumer/.config/dotnet-tools.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/consumer/TestResults/**
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/coverage-cli-consumer-proof/logs/**
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof.md
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/consumer/NuGet.config
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/consumer/Docs.ConsumerProof.csproj
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/consumer/packages.lock.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/consumer/obj/project.assets.json
+            ${{ runner.temp }}/package-evidence-*/package-checks/artifacts/docs-package-consumer-proof/logs/**
+            ${{ runner.temp }}/package-plan-*/changes/**
+            ${{ runner.temp }}/package-plan-*/plan/**
+          if-no-files-found: warn
+
+      - name: Record replay scope and identity
+        env:
+          EVIDENCE_ROOT: ${{ steps.plan.outputs.evidence_root }}
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/issue-780-untimed-replay"
+          mkdir "$receipt"
+          validation="$GITHUB_WORKSPACE/tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
+          for scope in coverage native; do
+            dotnet "$validation" --operation plan --scope "$scope" --policy .github/evidence.policy.json \
+              --changed-paths "$EVIDENCE_ROOT/changes/changed-paths.json" --output "$receipt/$scope"
+            jq -e '.profileId == "packages" and .producerIds == [] and (.requiresCoverage | not)
+              and (.requiresNativeCoverage | not) and (.requiresPackageChecks | not)' "$receipt/$scope/selection.json" > /dev/null
+          done
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg workflow "$GITHUB_WORKFLOW_SHA" --arg base "$FIXTURE_BASE" --arg head "$FIXTURE_HEAD" \
+            --arg merge "$FIXTURE_MERGE" --arg tree "$(git rev-parse 'HEAD^{tree}')" \
+            --arg policy "$(git rev-parse 'HEAD:.github/evidence.policy.json')" \
+            --arg ordinaryRun "$ORDINARY_PACKAGE_RUN" --arg ordinaryAttempt "$ORDINARY_PACKAGE_ATTEMPT" \
+            '{schemaVersion: 1, mode: "untimed", repository: $repository, run: $run, attempt: $attempt,
+              workflow: $workflow, base: $base, head: $head, merge: $merge, tree: $tree, policy: $policy,
+              ordinaryRun: $ordinaryRun, ordinaryAttempt: $ordinaryAttempt, timingSamplesAdmitted: 0}' > "$receipt/identity.json"
+
+      - name: Upload untimed replay identity
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: issue-780-untimed-replay-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/issue-780-untimed-replay/identity.json
+            ${{ runner.temp }}/issue-780-untimed-replay/coverage/evidence-plan.json
+            ${{ runner.temp }}/issue-780-untimed-replay/coverage/selection.json
+            ${{ runner.temp }}/issue-780-untimed-replay/native/evidence-plan.json
+            ${{ runner.temp }}/issue-780-untimed-replay/native/selection.json
+          if-no-files-found: error
+          retention-days: 7
