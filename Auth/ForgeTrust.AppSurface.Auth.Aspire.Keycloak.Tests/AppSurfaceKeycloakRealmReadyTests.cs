@@ -138,10 +138,9 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
         var workerDirectory = TestPathUtils.PathUnder(directory.Path, "appsurface-keycloak-realm-ready");
         Directory.CreateDirectory(workerDirectory);
         var assemblyName = AppSurfaceKeycloakRealmReadyWorker.WorkerAssemblyName;
-        foreach (var extension in new[] { "dll", "deps.json", "runtimeconfig.json" })
+        foreach (var extension in new[] { "dll", "deps.json", "runtimeconfig.json" }.Where(extension => extension != missingExtension))
         {
-            if (extension != missingExtension)
-                File.WriteAllText(TestPathUtils.PathUnder(workerDirectory, $"{assemblyName}.{extension}"), string.Empty);
+            File.WriteAllText(TestPathUtils.PathUnder(workerDirectory, $"{assemblyName}.{extension}"), string.Empty);
         }
 
         if (missingExtension is not null)

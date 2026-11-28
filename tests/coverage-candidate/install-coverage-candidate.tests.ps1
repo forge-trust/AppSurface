@@ -58,6 +58,9 @@ function dotnet {
     if ($args.Count -lt 2 -or $args[0] -ne 'tool' -or $args[1] -ne 'install') {
         throw "Unexpected stub dotnet invocation: $($args -join ' ')"
     }
+    if ($args -contains '--add-source' -or $args -like '--add-source=*') {
+        throw 'The candidate install must use only the isolated NuGet configuration.'
+    }
 
     $script:CoverageCandidateInstallCalls++
     if ($script:CoverageCandidateFailInstall) {

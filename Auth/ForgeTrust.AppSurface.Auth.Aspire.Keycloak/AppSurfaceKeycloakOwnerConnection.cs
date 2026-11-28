@@ -77,7 +77,12 @@ internal sealed class AppSurfaceKeycloakOwnerConnection : IDisposable
                 await RoundAsync(_client.GetStream(), _frame, deadline.Token);
             }
         }
-        catch { if (!_lifetime.IsCancellationRequested) lost(); }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            if (!_lifetime.IsCancellationRequested)
+                lost();
+        }
         finally { _client.Dispose(); }
     }
 

@@ -67,7 +67,8 @@ public sealed class CoverageSolutionScriptTests
                 && artifact.ToString().StartsWith("coverage-cli-candidate", StringComparison.Ordinal));
             Assert.Equal("coverage-cli-candidate-${{ github.run_attempt }}", ((YamlMappingNode)download["with"])["name"].ToString());
         }
-        Assert.Contains("Candidate CLI package source, SDK, or pinned version does not match this lane.", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_SOURCE_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
+            workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_SCOPE: ${{ github.repository }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ID: ${{ github.run_id }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}", workflow, StringComparison.Ordinal);
@@ -78,25 +79,29 @@ public sealed class CoverageSolutionScriptTests
     }
 
     [Fact]
-    public void BothCoverageLanesRequireAnIsolatedFeedAndCheckTheInstalledArchiveBeforeExecution()
+    public void CoverageLanesRunTheVerifiedCandidateInstallerBeforeExecutingTheCandidate()
     {
         var yaml = new YamlStream();
         using var reader = new StringReader(ReadWorkflow());
         yaml.Load(reader);
         var jobs = (YamlMappingNode)((YamlMappingNode)yaml.Documents.Single().RootNode)["jobs"];
-        foreach (var name in new[] { "build", "coverage-security-platform", "coverage-collection" })
+        var consumers = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            var job = (YamlMappingNode)jobs[name];
-            var steps = ((YamlSequenceNode)job["steps"]).OfType<YamlMappingNode>();
+            ["build"] = "Run solution coverage and gate",
+            ["coverage-security-platform"] = "Attest successful native coverage evidence",
+            ["coverage-collection"] = "Collect solution coverage",
+        };
+        foreach (var (jobName, consumerName) in consumers)
+        {
+            var job = (YamlMappingNode)jobs[jobName];
+            var steps = ((YamlSequenceNode)job["steps"]).OfType<YamlMappingNode>().ToList();
             var install = Assert.Single(steps, step => step.Children.TryGetValue("name", out var title)
                 && title is YamlScalarNode { Value: "Verify and install candidate CLI" });
-            var command = Assert.IsType<YamlScalarNode>(install["run"]).Value!;
-            Assert.DoesNotContain("--add-source", command, StringComparison.Ordinal);
-            Assert.Contains("<packageSources><clear />", command, StringComparison.Ordinal);
-            Assert.Contains("--configfile $toolConfig", command, StringComparison.Ordinal);
-            var check = command.IndexOf("Get-FileHash -LiteralPath $installedArchives[0].FullName", StringComparison.Ordinal);
-            var publish = command.IndexOf("COVERAGE_CLI_PATH=$command", StringComparison.Ordinal);
-            Assert.True(check >= 0 && publish > check);
+            var consume = Assert.Single(steps, step => step.Children.TryGetValue("name", out var title)
+                && title is YamlScalarNode name && name.Value == consumerName);
+            Assert.Equal("pwsh", Assert.IsType<YamlScalarNode>(install["shell"]).Value);
+            Assert.Equal("./.github/scripts/install-coverage-candidate.ps1", Assert.IsType<YamlScalarNode>(install["run"]).Value);
+            Assert.True(steps.IndexOf(install) < steps.IndexOf(consume));
         }
     }
 
@@ -310,7 +315,7 @@ public sealed class CoverageSolutionScriptTests
 
         var uploadDiagnostics = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload coverage security diagnostics");
-        Assert.Equal("${{ always() }}", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("if")]).Value);
+        Assert.Equal("${{ always() && !matrix.keycloak }}", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("if")]).Value);
         Assert.Equal("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("uses")]).Value);
         var uploadWith = (YamlMappingNode)uploadDiagnostics.Children[new YamlScalarNode("with")];
         Assert.Equal("coverage-security-diagnostics-${{ matrix.producerId }}", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("name")]).Value);

@@ -10,6 +10,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Keep default build outputs out of source globbing when native coverage relocates them. -->
+  <PropertyGroup Condition="'$(AppSurfaceKeycloakWorkerBuildRoot)' != ''">
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../ForgeTrust.AppSurface.Auth.Keycloak/ForgeTrust.AppSurface.Auth.Keycloak.csproj" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests" />

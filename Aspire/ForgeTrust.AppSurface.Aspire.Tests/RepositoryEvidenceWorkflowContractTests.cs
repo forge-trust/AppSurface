@@ -494,6 +494,28 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
+    public void KeycloakCoverageWorkerRelocationStillExcludesDefaultGeneratedDirectories()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var props = XDocument.Load(TestPathUtils.PathUnder(repository, "Directory.Build.props"));
+        var worker = Assert.Single(props.Descendants("PropertyGroup"), group =>
+            ((string?)group.Attribute("Condition"))?.Contains("AppSurfaceKeycloakWorkerBuildRoot", StringComparison.Ordinal) == true);
+
+        Assert.Contains("ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker", (string)worker.Attribute("Condition")!);
+        Assert.Equal("$(AppSurfaceKeycloakWorkerBuildRoot)/bin/", (string?)worker.Element("BaseOutputPath"));
+        Assert.Equal("$(AppSurfaceKeycloakWorkerBuildRoot)/obj/", (string?)worker.Element("BaseIntermediateOutputPath"));
+        var project = XDocument.Load(TestPathUtils.PathUnder(repository, "Auth", "ForgeTrust.AppSurface.Auth.Aspire.Keycloak",
+            "realm-ready", "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker.csproj"));
+        var relocated = Assert.Single(project.Descendants("PropertyGroup"), group =>
+            (string?)group.Attribute("Condition") == "'$(AppSurfaceKeycloakWorkerBuildRoot)' != ''");
+        var exclusions = ((string?)relocated.Element("DefaultItemExcludes"))?.Split(';');
+        Assert.NotNull(exclusions);
+        Assert.Contains("$(DefaultItemExcludes)", exclusions);
+        Assert.Contains("bin/**", exclusions);
+        Assert.Contains("obj/**", exclusions);
+    }
+
+    [Fact]
     public void CoverageCandidateWorkflowContractsFailBeforePackingAndUploading()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);

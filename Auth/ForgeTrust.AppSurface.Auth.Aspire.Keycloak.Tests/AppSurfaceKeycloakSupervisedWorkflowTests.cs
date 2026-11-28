@@ -815,10 +815,9 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
                 {
                     _fenceRequested = true;
                     SeedWasRunningAtFence = Containers.Values.Any(container => container.Role == "seed-workload" && container.Running);
-                    foreach (var container in Containers.Values)
+                    foreach (var container in Containers.Values.Where(container =>
+                                 !(_scenario.DelayedWebStop && !ObservedWebStillStopping && container.Role == "web-workload")))
                     {
-                        if (_scenario.DelayedWebStop && !ObservedWebStillStopping && container.Role == "web-workload")
-                            continue;
                         container.Running = false;
                         if (container.Status == "running") container.Status = "exited";
                     }

@@ -65,7 +65,7 @@ internal sealed class SupervisedDocker
                 return output.Trim();
             }
             catch (OperationCanceledException) { throw; }
-            catch { throw Failure(); }
+            catch (Exception) { throw Failure(); }
         }
 
         var start = new ProcessStartInfo(_clientExecutable)
@@ -101,7 +101,7 @@ internal sealed class SupervisedDocker
 
             return StrictUtf8.GetString(bytes).Trim();
         }
-        catch
+        catch (Exception)
         {
             if (ct.IsCancellationRequested)
             {
@@ -130,7 +130,7 @@ internal sealed class SupervisedDocker
             return id;
         }
         catch (OperationCanceledException) { throw; }
-        catch { throw Failure(); }
+        catch (Exception) { throw Failure(); }
     }
 
     /// <summary>Reads the local image identifier used in a durable container launch intent.</summary>
@@ -151,7 +151,7 @@ internal sealed class SupervisedDocker
             return id;
         }
         catch (OperationCanceledException) { throw; }
-        catch { throw Failure(); }
+        catch (Exception) { throw Failure(); }
     }
 
     /// <summary>Inspects one full native container identifier and returns its complete Docker JSON document.</summary>

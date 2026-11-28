@@ -20,14 +20,13 @@ public sealed class AppSurfaceKeycloakSupervisedApiTests
 
         Assert.Equal(TestPathUtils.PathUnder(run.Path, "private-workloads", name), workloadPath);
         Assert.Equal("/proof/private", workload.ContainerDirectory);
-        foreach (var reserved in new[]
+        foreach (var reservedPath in new[]
                  {
                      SupervisedKeycloakRunLayout.AnchorPrivate,
                      SupervisedKeycloakRunLayout.ServerPrivate,
                      SupervisedKeycloakRunLayout.WorkerPrivate
-                 })
+                 }.Select(reserved => reserved.HostPath(run.Path)))
         {
-            var reservedPath = reserved.HostPath(run.Path);
             Assert.NotEqual(reservedPath, workloadPath);
             Assert.False(workloadPath.StartsWith(reservedPath + Path.DirectorySeparatorChar, StringComparison.Ordinal));
         }

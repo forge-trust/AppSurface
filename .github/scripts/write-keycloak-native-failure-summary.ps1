@@ -3,8 +3,10 @@
 Projects the failed Keycloak coverage collection into a small CI diagnostic.
 .DESCRIPTION
 Use the collection path selected by this run and the project from the native matrix.
-Only the declared producer and project, a recognized execution status, and an integer
-exit code are published. Missing or unreadable timings produce an unavailable summary.
+The summary contains the declared producer and project, a recognized execution status,
+an integer exit code, and up to twenty distinct failing Keycloak test methods from
+the project's managed JUnit result. Theory arguments and failure text stay local.
+Missing or unreadable inputs leave the corresponding diagnostic fields empty.
 #>
 param(
     [Parameter(Mandatory)] [string] $CollectionDirectory,
@@ -15,11 +17,46 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $summary = [ordered] @{
-    schemaVersion = 1
+    schemaVersion = 2
     producerId = $ProducerId
     project = $TestProject
     executionStatus = 'unavailable'
     exitCode = $null
+    failedTestMethods = @()
+}
+
+function Get-FailedTestMethods($Project) {
+    $reports = @($Project['testResults'] | Where-Object {
+        $_ -is [Collections.IDictionary] -and $_['format'] -ceq 'junit' -and $_['parserStatus'] -cin @('available', 'parsed') -and
+        $_['path'] -is [string] -and $_['path'] -cmatch '\Ajunit-coverage-[0-9]{1,4}-ForgeTrust\.AppSurface\.Auth\.Aspire\.Keycloak\.Tests-[a-f0-9]{8}\.xml\z'
+    })
+    if ($reports.Count -ne 1) { return }
+    $file = Get-Item -LiteralPath (Join-Path $CollectionDirectory $reports[0]['path'])
+    if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        $file.Length -gt 2MB) { return }
+
+    $settings = [Xml.XmlReaderSettings]::new()
+    $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+    $settings.XmlResolver = $null
+    $settings.MaxCharactersInDocument = 2MB
+    $reader = [Xml.XmlReader]::Create($file.FullName, $settings)
+    try {
+        $document = [Xml.XmlDocument]::new()
+        $document.Load($reader)
+    } finally {
+        $reader.Dispose()
+    }
+
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($case in $document.SelectNodes('/testsuites/testsuite/testcase[failure or error] | /testsuite/testcase[failure or error]')) {
+        $className = $case.GetAttribute('classname')
+        if ($className -cnotmatch '\AForgeTrust\.AppSurface\.Auth\.Aspire\.Keycloak\.Tests\.[A-Za-z_][A-Za-z0-9_]{0,95}\z') { continue }
+        if ($case.GetAttribute('name') -cmatch '\A([A-Za-z_][A-Za-z0-9_]{0,95})(?:\(|\z)') {
+            $method = "$className.$($Matches[1])"
+            if ($seen.Add($method)) { $method }
+            if ($seen.Count -eq 20) { return }
+        }
+    }
 }
 
 try {
@@ -39,11 +76,14 @@ try {
             if (($exitCode -is [int] -or $exitCode -is [long]) -and
                 $exitCode -ge [int]::MinValue -and $exitCode -le [int]::MaxValue) {
                 $summary.exitCode = [int] $exitCode
+                if ($summary.exitCode -ne 0) {
+                    $summary.failedTestMethods = @(Get-FailedTestMethods $projects[0])
+                }
             }
         }
     }
 } catch {
-    # A failure can precede the timing report. Keep only fixed fallback values.
+    # A failure can precede either report. Retain only the available bounded fields.
 }
 
 $summary | ConvertTo-Json -Compress | Set-Content -LiteralPath $OutputPath -Encoding utf8NoBOM
