@@ -30,6 +30,22 @@ The current scope is AppSurface dogfooding. Separate downstream consumers and th
 
 The adapter's `--package-proof --feed <candidate-feed> --version <exact> --output <fresh-root> --dotnet <absolute-host>` mode checks the public Coverage and private support candidate package identities, creates an isolated PackageReference application, restores first-party packages only from that candidate feed, and rejects Aspire/CliFx/Planner in the headless graph. It builds and publishes the application and executes capture/composition/acceptance/verification plus altered-output rejection from both layouts. Stage logs and a package-hash-bound proof remain in the explicit output root. It does not publish packages, delete outputs, establish downstream adoption, or replace full source/native gates. The [native validation workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/native-evidence-validation.yml) invokes this proof on all three OSes.
 
+Before creating output, package admission requires exactly one private dependency pin in every declared
+framework group, or one in an ungrouped declaration. Use the canonical package ID casing and the closed
+range `[<exact-version>]`. Identical duplicates and pins outside the framework groups fail admission with
+`coverage.private-dependency-invalid`. The [packed reuse proof](../ForgeTrust.AppSurface.Evidence.Validation/README.md) applies the same pin rule.
+
+The [candidate catalog](../ForgeTrust.AppSurface.Evidence.Validation/PackedCandidatePackages.cs) supplies the
+neutral library set for packing, admission, restored archive verification, and asset checks. Admission reads
+each archive into a snapshot capped at 512 MiB and uses those bytes for both NuSpec validation and SHA-256.
+The shared reader caps decompressed NuSpecs at 1 MiB and prohibits DTDs. A malformed or oversized NuSpec
+is rejected before output creation with `coverage.candidate-nuspec-invalid`. Restore then checks the
+private cache against the recorded archive digests.
+
+Each child stage has a five-minute deadline and a 1 Mi-character capture limit per stream. The shared
+package proof runner observes the child and both streams together, waits for cleanup after interruption,
+and retains up to 2 Mi characters of redacted output in the stage log. A startup marker alone records only the launch attempt.
+
 The build workflow stages all eight candidate archives together on each native runner after the locked restore. The packed reuse journey verifies the archive graph and bundled DLLs, then restores the consumers in isolation. To use a prepared feed in a standalone test, set both `APPSURFACE_PACKED_JOURNEY_FEED` to its absolute path and `APPSURFACE_PACKED_JOURNEY_VERSION` to the exact version in all eight archives. Leave both variables unset to pack a fresh feed in the test.
 
 The installed fixture declares two native test projects, supervises both collections and checks the byte-exact per-project original reports, complete successful timings and ordered index. It exercises existing-artifact indexed capture through the [public API example](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Coverage.Dogfood/examples/CoverageFanInApiExample.cs), then imports the portable native set through both the public API and installed CLI before composition, acceptance and read-only verification. The [native input reference](../../Coverage/ForgeTrust.AppSurface.Coverage/README.md#request-and-result-reference) explains indexed capture selectors for one or more projects and conservative projection. Running the fixture on one host establishes only that host's result; the native matrix must independently pass on each required OS.

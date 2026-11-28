@@ -750,7 +750,8 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                     _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Ineligible, "reuse.inputs_changed",
                         "Repository namespace or prepared input identity changed during execution or cleanup; the fresh result is preserved and no receipt is published.", preparedIdentity.Key);
                     RecordPublicationRefusal(producer.Id, ref auditFailed);
-                    lease.SettleExecutionIfOwned(ExecutionId);
+                    if (SettleKnownExecution(lease) is { } settlementFailure)
+                        ExceptionDispatchInfo.Capture(settlementFailure).Throw();
                     continue;
                 }
                 publicationRequests.Add(new(lease, producer.Id, _artifactRoot(producer), _options.Clock.GetUtcNow())
@@ -806,12 +807,9 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             if (!publication.Published)
             {
                 RecordPublicationRefusal(request.ProducerId, ref auditFailed);
-                try
-                {
-                    _options.BeforeRefusedPublicationSettlementForTests?.Invoke(request.ProducerId);
-                    request.Lease.SettleExecutionIfOwned(ExecutionId);
-                }
-                catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
+                var settlementFailure = SettleKnownExecution(request.Lease,
+                    () => _options.BeforeRefusedPublicationSettlementForTests?.Invoke(request.ProducerId));
+                if (settlementFailure is not null)
                 {
                     decision = decision with
                     {
@@ -868,16 +866,21 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
     }
 
     private bool TrySettleKnownExecution(EvidenceReceiptStore.EvidenceReceiptKeyLease lease)
+        => SettleKnownExecution(lease) is null;
+
+    private Exception? SettleKnownExecution(EvidenceReceiptStore.EvidenceReceiptKeyLease lease,
+        Action? beforeSettle = null)
     {
         try
         {
+            beforeSettle?.Invoke();
             lease.SettleExecutionIfOwned(ExecutionId);
-            return true;
+            return null;
         }
         catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
         {
             // Unconfirmed settlement preserves authority.
-            return false;
+            return exception;
         }
     }
 

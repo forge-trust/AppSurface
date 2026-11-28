@@ -411,8 +411,14 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         var staged = Path.Join(directory.Path, "custody");
         var writer = custody ? new EvidenceArtifactWriter(declaration, staged) : null;
         await using var childLifetime = EvidenceChildLifetimeSession.Start(Guid.NewGuid().ToString("N"));
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer, childLifetime);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: output,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: childLifetime), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         foreach (var file in new[] { "coverage.cobertura.xml", "coverage-gate.json", "coverage-gate.md", "timings.json", "summary.txt" })
             Assert.True(File.Exists(TestPathUtils.PathUnder(output, "coverage", file)), file);
@@ -521,8 +527,14 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         var target = Path.Join(directory.Path, "custody");
         var writer = new EvidenceArtifactWriter(declaration, target);
         await using var childLifetime = EvidenceChildLifetimeSession.Start(Guid.NewGuid().ToString("N"));
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
-            CoverageTextWriters.Create(outputWriter, TextWriter.Null), CancellationToken.None, writer, childLifetime);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: output,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(outputWriter, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: childLifetime), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         if (changesSidecar)
         {

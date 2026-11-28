@@ -465,6 +465,17 @@ public sealed class NativeValidationJsonTests
     }
 
     [Fact]
+    public void ReadBoundedBytes_StopsAfterFirstByteBeyondLimitWhenInputHasGrown()
+    {
+        using var input = new GrowingInputStream("{}    "u8.ToArray());
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidationProof.ReadBoundedBytes(input, 4, CancellationToken.None));
+
+        Assert.Equal(5L, input.Position);
+    }
+
+    [Fact]
     public void GateReportContract_AcceptsBoundedValidCandidateReportAndPreservesBytes()
     {
         using var directory = new TemporaryDirectory();
@@ -509,6 +520,11 @@ public sealed class NativeValidationJsonTests
         Assert.Throws<ArgumentOutOfRangeException>(() => ValidationProof.ReadJsonFile(path, (long)int.MaxValue + 1, CancellationToken.None));
         Assert.Throws<InvalidDataException>(() => ValidationProof.ReadJsonFile(path, 1024, CancellationToken.None));
         Assert.False(File.Exists(path));
+    }
+
+    private sealed class GrowingInputStream(byte[] contents) : MemoryStream(contents)
+    {
+        public override long Length => 2;
     }
 
     private sealed class TemporaryDirectory : IDisposable

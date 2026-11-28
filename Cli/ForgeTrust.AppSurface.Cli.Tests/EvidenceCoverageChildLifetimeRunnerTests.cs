@@ -203,9 +203,14 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         await using var session = EvidenceChildLifetimeSession.Start(Guid.NewGuid().ToString("N"));
         var declaration = Declaration() with { CoverageExecution = new EvidenceCoverageExecutionOptions { CooperativeChildLifetime = cooperative } };
         var custody = new EvidenceArtifactWriter(declaration, Path.Join(directory.Path, "custody"));
-        var result = await adapter.RunWithInventoryAsync(declaration, solution, Path.Join(directory.Path, "run"), null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None,
-            custody, withSession ? session : null);
+        var result = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: TestPathUtils.PathUnder(directory.Path, "run"),
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: custody,
+            ChildLifetime: withSession ? session : null), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Passed, result.Result.Outcome);
         Assert.Equal(1, summaryCount);
         Assert.Equal(1, timingsCount);
@@ -275,8 +280,14 @@ public sealed class EvidenceCoverageChildLifetimeRunnerTests
         var output = Path.Join(directory.Path, "run");
         var custodyRoot = Path.Join(directory.Path, "custody");
         var writer = new EvidenceArtifactWriter(declaration, custodyRoot);
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer, session);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: output,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: session), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Null(execution.Result.Artifacts);
         Assert.Equal("inventory-slot-ineligible", execution.InventoryIneligibilityReason);

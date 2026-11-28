@@ -151,7 +151,7 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
         {
             Directory.CreateDirectory(work);
             var git = PackedProofProcess.CreateStartInfo("git", ["rev-parse", "HEAD"], repository);
-            var source = await PackedProofProcess.RunAsync("source", git, scratch, deadline.Token);
+            var source = await PackedProofProcess.RunAsync("source", git, TestPathUtils.PathUnder(scratch, "source.log"), deadline.Token);
             Assert.True(source.ExitCode == 0, $"Source lookup failed. Retained logs: {scratch}");
             var commit = source.StandardOutput.Trim();
             var feed = Environment.GetEnvironmentVariable(FeedVariable);
@@ -241,9 +241,9 @@ public sealed class EvidencePackedReuseJourneyTests(ITestOutputHelper output)
             Assert.False(File.Exists(rejectedOutput));
             Assert.False(File.Exists(rejectedOutput + ".packed-reuse.claim"));
         });
-        foreach (var mode in new[] { "built", "publish" })
+        var hostModes = proof.GetProperty("host");
+        foreach (var host in new[] { "built", "publish" }.Select(hostModes.GetProperty))
         {
-            var host = proof.GetProperty("host").GetProperty(mode);
             Assert.Equal(1, host.GetProperty("firstFactoryCount").GetInt32());
             Assert.Equal(0, host.GetProperty("secondFactoryCount").GetInt32());
             Assert.Equal(1, host.GetProperty("cleanedApplications").GetInt32());

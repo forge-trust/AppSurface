@@ -22,14 +22,18 @@ another comparison or `--repository /absolute/checkout` from elsewhere. The defa
 archive (`latest.zip`, `latest-failure.zip`, `latest-plan.zip`, or `latest-plan-failure.zip`), so a
 failure keeps the last success available. Runs using the managed output are serialized per worktree.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage
-diagnostics. Extract an archive to verify it using the same relative layout. Scratch is removed
+diagnostics. Archive traversal skips scratch trees outside those retained paths. Extract an archive
+to verify it using the same relative layout. Scratch is removed
 after successful retention and known cleanup. If execution or archiving stops without confirmed
-cleanup, the scratch path is retained for diagnosis. The private `package-restore/` cache keeps the
-package-gate build warm and its worktree restore metadata usable between runs. Installed-consumer and
-cold-cache proofs still have their own isolated restores and feeds.
+cleanup, the scratch path is retained for diagnosis. When a failed run has a proof directory, an
+unreadable or oversized manifest also keeps scratch. Managed runs check the host cleanup outcome
+and observe command cleanup failures before producers format their diagnostics. The private
+`package-restore/` cache keeps the package-gate build warm and its worktree restore metadata usable
+between runs. Installed-consumer and cold-cache proofs still have their own isolated restores and feeds.
 
 Use `--output /absolute/fresh-output` when you need a complete, unpacked run for a specific investigation
-or a script that consumes the raw files. After building the tool once, invoke
+or a script that consumes the raw files. With explicit output, `Local evidence output:` prints that
+directory. After building the tool once, invoke
 its DLL directly or use `dotnet run --no-build --no-restore` with the same configuration to avoid rebuilding
 the driver. Keep the driver current when changing evidence code.
 
@@ -39,6 +43,9 @@ merge conflicts first. Nothing needs to be committed to select evidence. The col
 once without fetching; fetch explicitly when an updated remote comparison is needed. Missing base history
 fails with no claim. An empty local inventory exits successfully without creating an evidence manifest;
 this is distinct from a reviewed documentation change selecting `NoEvidenceRequired`.
+The initial policy digest and the policy used for planning come from the same byte snapshot. The
+snapshot applies the 20 MiB input limit while reading. Local execution hashes the current policy as
+a stream when it checks for drift against the initial digest.
 Local collection rejects tracked `assume-unchanged` or `skip-worktree` index flags, even when those files
 currently match HEAD: Git may otherwise conceal source bytes used by a build. Clear the flags explicitly
 before running evidence; the collector never changes them. The local digest binds the documented Git
@@ -494,11 +501,30 @@ This operation accepts only `--operation`, `--feed`, `--version`, `--source-comm
 
 The output path must be fresh and outside both the checkout and candidate feed. Feed admission happens before output creation. A successful proof requires `proof.json`. For a caught failure after admission, the command prints the original diagnostic and attempts to write `proof.json`. If that write fails, it prints a second diagnostic and still exits with failure. Caller cancellation or external termination can leave only the stage logs. Each `<stage>.log` is first written immediately before process launch as JSON containing `stage`, `state: "starting"`, and `startedAtUtc`. If `Process.Start` fails, that marker is removed. For a launched stage, the marker remains during execution and is replaced with captured, redacted output only after the child exits and its output streams are collected. A starting marker is diagnostic only. It does not prove process settlement or acceptance by a gate. The operation returns zero only after all recorded assertions pass. Its audit journey requires `VerifiedReceiptCompared=true` in the CLI summary: a fresh run without a verified candidate cannot satisfy that assertion, even when its coverage gate passes.
 
+The runner captures up to 4 Mi characters per stream and caps the final redacted transcript at the combined
+8 Mi-character budget. Redaction matches values in the original output and writes one marker for each
+merged span of overlapping matches. If a command is interrupted, a trailing fragment at either stream
+boundary is also masked when it matches the start of a configured sensitive value. Redaction markers
+and truncation apply to the retained transcript.
+
 The best-effort `packed-progress.jsonl` journal flushes each boundary as the proof observes it. It records UTC time, elapsed milliseconds, the stage, and the exit code when available. Read the last complete line after an external kill. Separate process, stdout, and stderr entries show what settled, followed by entries for CLI artifact validation and the final proof write. On interruption, cleanup records the process exit and whether each stream drained, was cancelled, or faulted. A failed tree termination triggers a separate request to stop the owned root. If both requests fail, cleanup keeps waiting for the root to exit. The command reports termination failures after joining the root and its streams. A missing journal or incomplete line conveys no acceptance result.
 
 When a stage is interrupted, its `InterruptedWhile` field in `proof.json` records whether the process was still running or which output stream had yet to finish. A child exit code of zero can appear in a failed proof when output collection was interrupted. If writing a diagnostic log fails as well, the command's original exception or nonzero exit code takes precedence. A successful command still requires its redacted log.
 
 Candidate dependency keys in the installed tool and prepared host must use a nonempty `package-id/version` with a single separator and exact casing. The tool may bundle a coherent build version that differs from the archive version, because the proof also verifies the bundled assembly bytes. The proof checks two mutated feeds through the same admission code before it installs the candidate CLI. Each entry in `proof.json` under `negatives` records the exact contract that rejected the feed.
+
+The [neutral and packed reuse proofs](../ForgeTrust.AppSurface.Coverage.Dogfood/README.md#installed-library-proof)
+both require a single private dependency pin with exact ID casing and a closed version range in each framework
+group, or in the ungrouped declaration. The packed proof checks the gate verdict, zero tolerance, and 95% line
+and 85% branch configured and effective thresholds from the verified report bytes.
+
+The packed proof reads each host proof, dependency document, assets document, CLI summary, gate report,
+timings report, and JUnit report under a 16 MiB limit. The CLI manifest uses the canonical 20 MiB limit.
+The validator checks the recorded length and SHA-256 of the exact gate, timings, and JUnit bytes it parses.
+The verified timings document names one distinct JUnit report per fixture project. Each reference must match
+an exact path in the manifest inventory. Other reports still receive custody checks and do not contribute test cases.
+All CLI report hashes stop after the recorded length and one byte to check for EOF. The validator
+keeps snapshots only for reports it parses. The CLI inventory retains its 128-file and 256 MiB limits.
 
 The native [acceptance workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/native-evidence-validation.yml) runs this proof against its same-source candidate packages. The [packed journey test](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidencePackedReuseJourneyTests.cs) also supports the test-only `APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS` environment variable. When set, its value must be an existing absolute parent physically outside the checkout. The test creates a random child directly under that parent with Unix mode `0700`, or a protected Windows ACL granting the current user FullControl with file and directory inheritance. It does not move the directory from platform temporary storage, so the parent needs no same-filesystem relationship to the temp directory. When unset, the test keeps its existing BCL temporary-directory behavior. Successful journeys delete their scratch child; failed or interrupted journeys preserve it. The existing two-minute VSTest [per-test hang timeout](https://learn.microsoft.com/dotnet/core/tools/dotnet-test-vstest#options) is unchanged.
 
@@ -526,6 +552,9 @@ Pass `--consumer-profile /absolute/profile.json` to run a consumer you own. A pr
 ```
 
 The source repository is read for identity/integrity and cloned into scratch. The original remains caller-owned. External profiles must provide a nonblank `expectedCommit`; the producer compares source HEAD with this explicit pin before cloning. The built-in fixture does not require this field. An explicit project list must contain the complete intended acceptance inventory; otherwise the solution determines it. `testProjects` is a scoped acceptance declaration, so it must list every intended test project for that profile; it does not silently claim full repository coverage. `.sln` and `.slnx` inputs are parsed before execution and must resolve to at least one test project. When `diffBase` is supplied, the consumer also requires 95/85 patch coverage with zero tolerance. Provide required test fragments so a successful exit cannot hide a missing critical suite; required fragments must be present in non-skipped, passing JUnit cases. Skips are rejected by default. External profiles may explicitly allow a skip only when `permittedSkipPatterns` contains a matching testcase attribute fragment and a nonempty rationale; those skips remain part of the declared profile scope. The checked-in fixture has no permitted skips. JUnit acceptance reads exactly one top-level `junit-*.xml` report per declared project, capped at 16 MiB per report, 64 MiB total and 100,000 testcases. Oversized evidence fails acceptance; it never silently drops tests. DTDs are prohibited, and retained testcase summaries omit output bodies and parent-document references to bound memory. For larger applications, compose separate Evidence obligations that together retain the full intended test inventory. These report bounds never waive the repository coverage gate or allow a missing required suite to pass. Resource-backed applications should compose explicit readiness probes through the [Aspire Evidence package](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md); this tool does not infer or provision their databases. Keep secrets out of profile files and durable evidence.
+
+If a Git command cannot confirm that its child process stopped, the installed-consumer journey fails
+even during an optional source probe.
 
 ## Storage and lifetime
 

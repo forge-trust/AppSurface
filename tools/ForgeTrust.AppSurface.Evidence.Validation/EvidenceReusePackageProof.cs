@@ -30,6 +30,9 @@ internal static class EvidenceReusePackageProof
     private const string ToolBundleVersionContract = EvidenceReusePackageAdmission.ToolBundleVersionContract;
     private const string PrivateDependencyContract = EvidenceReusePackageAdmission.PrivateDependencyContract;
     private const int RejectedProofExitCode = 1;
+    private const int MaximumProofDocumentBytes = 16 * 1024 * 1024;
+    private const int MaximumCliArtifacts = 128;
+    private const long MaximumCliArtifactBytes = 256L * 1024 * 1024;
     private static readonly TimeSpan HostRunTimeout = TimeSpan.FromMinutes(1);
     private static readonly EvidenceCoverageGateRequirements CliProofGate = new(95, 85, TolerancePercent: 0);
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -368,7 +371,7 @@ internal static class EvidenceReusePackageProof
     private static async Task<JsonElement> VerifyHostRunAsync(string assemblyRoot, string proofRoot,
         IReadOnlyDictionary<string, PackageProof> packages, CancellationToken token)
     {
-        using var proof = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(proofRoot, "host-proof.json"), token).ConfigureAwait(false));
+        using var proof = ValidationProof.ReadJsonFile(PathUtils.PathUnder(proofRoot, "host-proof.json"), MaximumProofDocumentBytes, token);
         var data = proof.RootElement;
         Require(data.GetProperty("passed").GetBoolean() && data.GetProperty("firstFactoryCount").GetInt32() == 1
             && data.GetProperty("secondFactoryCount").GetInt32() == 0 && data.GetProperty("firstProducerRuns").GetInt32() == 1
@@ -387,7 +390,7 @@ internal static class EvidenceReusePackageProof
                 "independent-host-loaded-candidate-assembly");
             Require(assembly.GetProperty("sha256").GetString() == packages[id].AssemblySha256, "consumer-reported-loaded-sha");
         }
-        using var deps = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(assemblyRoot, "PackedHost.deps.json"), token).ConfigureAwait(false));
+        using var deps = ValidationProof.ReadJsonFile(PathUtils.PathUnder(assemblyRoot, "PackedHost.deps.json"), MaximumProofDocumentBytes, token);
         _ = VerifyPackageClosure(deps.RootElement.GetProperty("libraries"), packages,
             "published-host-exact-package-closure", "published-host-package-only-deps");
         return data.Clone();
@@ -416,7 +419,7 @@ internal static class EvidenceReusePackageProof
 
     private static async Task VerifyAssetsAsync(string path, IReadOnlyDictionary<string, PackageProof> packages, string cache, CancellationToken token)
     {
-        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(path, token).ConfigureAwait(false));
+        using var document = ValidationProof.ReadJsonFile(path, MaximumProofDocumentBytes, token);
         var folders = document.RootElement.GetProperty("packageFolders").EnumerateObject().Select(item => Path.TrimEndingDirectorySeparator(Path.GetFullPath(item.Name))).ToArray();
         Require(folders.Length == 1 && folders[0] == Path.TrimEndingDirectorySeparator(cache), "isolated-package-cache-no-fallback");
         var verifiedPackages = VerifyPackageClosure(document.RootElement.GetProperty("libraries"), packages,
@@ -479,7 +482,7 @@ internal static class EvidenceReusePackageProof
             PathUtils.PathUnder(repository, "Consumer.Alpha.Tests", "OwnedChildTests.cs"));
         await File.WriteAllTextAsync(Path.Join(repository, ".gitignore"), "**/bin/\n**/obj/\n", token).ConfigureAwait(false);
         var producerDeclaration = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], ["coverage/complete@1"],
-            [new EvidenceArtifactSlot("coverage-reports", "coverage", "application/octet-stream", false, 256L * 1024 * 1024) { MaximumFiles = 128 }],
+            [new EvidenceArtifactSlot("coverage-reports", "coverage", "application/octet-stream", false, MaximumCliArtifactBytes) { MaximumFiles = MaximumCliArtifacts }],
             240, CliProofGate)
         {
             Inputs = new(["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/packages.lock.json", "Consumer.slnx", "NuGet.Config", "global.json", "evidence.policy.json"], ["**/bin/**", "**/obj/**"]),
@@ -499,14 +502,18 @@ internal static class EvidenceReusePackageProof
     private static async Task<(object Proof, string CoverageSha)> ValidateCliRunAsync(
         string root, CliProofMode mode, string output, CancellationToken token)
     {
-        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(root, "evidence-manifest.json"), token).ConfigureAwait(false));
+        EvidenceManifest manifest;
+        await using (var input = File.OpenRead(PathUtils.PathUnder(root, "evidence-manifest.json")))
+        {
+            manifest = await EvidenceCanonicalJson.DeserializeAsync<EvidenceManifest>(input, cancellationToken: token).ConfigureAwait(false);
+        }
         Require(manifest.ExecutionVerdict == EvidenceExecutionVerdict.Passed, "cli-manifest-passed");
         var producer = manifest.ProducerResults.Single();
         var expected = mode == CliProofMode.Warm ? EvidenceProducerOutcome.Reused : EvidenceProducerOutcome.Passed;
         Require(producer.Outcome == expected, "cli-fresh-warm-audit-outcome");
         if (mode == CliProofMode.Audit)
         {
-            using var summary = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, "evidence-summary.json"), token).ConfigureAwait(false));
+            using var summary = ValidationProof.ReadJsonFile(PathUtils.PathUnder(root, "evidence-summary.json"), MaximumProofDocumentBytes, token);
             Require(summary.RootElement.GetProperty("reuseDecisions").EnumerateArray().Any(decision =>
                 decision.GetProperty("ProducerId").GetString() == producer.ProducerId
                 && decision.TryGetProperty("VerifiedReceiptCompared", out var compared) && compared.GetBoolean()),
@@ -523,54 +530,125 @@ internal static class EvidenceReusePackageProof
                 "cli-reuse-diagnostic-current-artifacts");
         }
         var artifacts = producer.Artifacts?.ToArray() ?? [];
-        Require(artifacts.Length is > 5 and <= 128, "cli-complete-bounded-custody");
-        long bytes = 0;
-        foreach (var artifact in artifacts)
-        {
-            var relative = artifact.RelativePath;
-            Require(relative.StartsWith("coverage/", StringComparison.Ordinal) && !relative.Split('/').Any(part => part is "." or "..") && !Path.IsPathRooted(relative), "cli-established-coverage-layout");
-            var file = Path.Join(root, relative);
-            Require(File.Exists(file) && new FileInfo(file).Length == artifact.LengthBytes
-                && await HashAsync(file, token).ConfigureAwait(false) == artifact.Sha256, "cli-original-report-custody");
-            bytes += artifact.LengthBytes;
-        }
-        Require(bytes <= 256L * 1024 * 1024, "cli-existing-aggregate-limit");
-        const string coverageReport = "coverage.cobertura.xml";
-        foreach (var required in new[] { coverageReport, "coverage-gate.json", "coverage-gate.md", "timings.json" })
-            Require(artifacts.Any(artifact => artifact.RelativePath == "coverage/" + required)
-                && File.Exists(Path.Join(root, "coverage", required)), "cli-required-managed-reports-in-inventory");
-        using var gate = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, "coverage", "coverage-gate.json"), token).ConfigureAwait(false));
-        static bool MatchesCliGateThresholds(JsonElement thresholds)
-            => thresholds.GetProperty("line").GetDecimal() == CliProofGate.MinLinePercent
-                && thresholds.GetProperty("branch").GetDecimal() == CliProofGate.MinBranchPercent;
-        Require(gate.RootElement.GetProperty("passed").GetBoolean()
-            && gate.RootElement.GetProperty("tolerancePercent").GetDecimal() == CliProofGate.TolerancePercent
-            && MatchesCliGateThresholds(gate.RootElement.GetProperty("thresholds"))
-            && MatchesCliGateThresholds(gate.RootElement.GetProperty("effectiveThresholds")),
-            "unchanged-95-85-coverage-gate");
-        var testCases = 0;
-        foreach (var report in artifacts.Where(artifact => artifact.RelativePath.StartsWith("coverage/junit-coverage-", StringComparison.Ordinal)
-            && artifact.RelativePath.EndsWith(".xml", StringComparison.Ordinal)))
-        {
-            using var xml = XmlReader.Create(Path.Join(root, report.RelativePath), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
-            testCases += XDocument.Load(xml).Descendants().Count(element => element.Name.LocalName == "testcase");
-        }
-        Require(testCases == 6, "actual-five-fixture-tests-and-packed-child-helper");
-        using var timings = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(root, "coverage", "timings.json"), token).ConfigureAwait(false));
-        Require(timings.RootElement.GetProperty("projects").GetArrayLength() == 2, "real-two-test-project-fixture");
-        var coverageSha = artifacts.First(artifact => artifact.RelativePath == "coverage/" + coverageReport).Sha256;
+        var (testCases, testProjects, bytes, coverageSha) = await VerifyCliCoverageReportsAsync(root, artifacts, token).ConfigureAwait(false);
         return (new
         {
             mode = CliModeLabel(mode),
             outcome = expected.ToString(),
             claim = manifest.ClaimKind.ToString(),
             testCaseCount = testCases,
-            testProjectCount = 2,
+            testProjectCount = testProjects,
             artifactCount = artifacts.Length,
             artifactBytes = bytes,
             coverageSha256 = coverageSha,
             inventory = artifacts
         }, coverageSha);
+    }
+
+    /// <summary>Verifies the packed CLI artifact inventory and counts tests in the reports named by the verified timings document.</summary>
+    /// <param name="root">The run output root containing the managed coverage directory.</param>
+    /// <param name="artifacts">The exact coverage artifacts declared by the producer manifest.</param>
+    /// <param name="token">Cancels inventory verification and report reads.</param>
+    /// <returns>Verified test and project counts, total inventory bytes, and the merged coverage SHA-256.</returns>
+    /// <remarks>Each fixture project must name a distinct JUnit report in the manifest. Unreferenced reports are still hashed.</remarks>
+    internal static async Task<(int TestCases, int TestProjects, long ArtifactBytes, string CoverageSha)> VerifyCliCoverageReportsAsync(
+        string root, IReadOnlyList<EvidenceArtifactResult> artifacts, CancellationToken token)
+    {
+        const string coverageReport = "coverage/coverage.cobertura.xml";
+        const string gateReport = "coverage/coverage-gate.json";
+        const string timingsReport = "coverage/timings.json";
+        string[] requiredReports = [coverageReport, gateReport, "coverage/coverage-gate.md", timingsReport];
+        Require(artifacts.Count is > 5 and <= MaximumCliArtifacts, "cli-complete-bounded-custody");
+        var byPath = new Dictionary<string, EvidenceArtifactResult>(artifacts.Count, StringComparer.Ordinal);
+        long bytes = 0;
+        foreach (var artifact in artifacts)
+        {
+            var relative = artifact.RelativePath;
+            Require(relative.StartsWith("coverage/", StringComparison.Ordinal) && !relative.Contains('\\')
+                && !relative.Split('/').Any(part => part is "" or "." or "..") && !Path.IsPathRooted(relative), "cli-established-coverage-layout");
+            Require(byPath.TryAdd(relative, artifact), "cli-unambiguous-coverage-inventory");
+            Require(artifact.LengthBytes >= 0 && artifact.LengthBytes <= MaximumCliArtifactBytes - bytes, "cli-existing-aggregate-limit");
+            bytes += artifact.LengthBytes;
+        }
+        foreach (var required in requiredReports)
+            Require(byPath.ContainsKey(required), "cli-required-managed-reports-in-inventory");
+
+        var timingsBytes = await ReadVerifiedCliReportAsync(PathUtils.PathUnder(root, timingsReport), byPath[timingsReport], token).ConfigureAwait(false);
+        using var timings = JsonDocument.Parse(timingsBytes);
+        var projects = timings.RootElement.GetProperty("projects");
+        var testProjects = projects.GetArrayLength();
+        Require(testProjects == 2, "real-two-test-project-fixture");
+        var junitPaths = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var project in projects.EnumerateArray())
+        {
+            var reports = project.GetProperty("testResults").EnumerateArray()
+                .Where(report => report.GetProperty("format").GetString() == "junit").ToArray();
+            Require(reports.Length == 1, "cli-one-junit-report-per-project");
+            var path = reports[0].GetProperty("path").GetString();
+            var relative = "coverage/" + path;
+            Require(!string.IsNullOrWhiteSpace(path) && byPath.ContainsKey(relative)
+                && !requiredReports.Contains(relative, StringComparer.Ordinal), "cli-junit-report-in-inventory");
+            Require(junitPaths.Add(relative), "cli-distinct-project-junit-reports");
+        }
+
+        var gateBytes = await ReadVerifiedCliReportAsync(PathUtils.PathUnder(root, gateReport), byPath[gateReport], token).ConfigureAwait(false);
+        var testCases = 0;
+        foreach (var (relative, artifact) in byPath)
+        {
+            if (relative == timingsReport || relative == gateReport) continue;
+            var file = PathUtils.PathUnder(root, relative);
+            if (junitPaths.Contains(relative))
+            {
+                var report = await ReadVerifiedCliReportAsync(file, artifact, token).ConfigureAwait(false);
+                testCases += CountCliTestCases(report, token);
+            }
+            else
+                await VerifyCliReportAsync(file, artifact, token).ConfigureAwait(false);
+        }
+        using var gate = JsonDocument.Parse(gateBytes);
+        ValidationProof.RequireOverallCoverageGate(gate.RootElement, CliProofGate, ContractScope + "unchanged-95-85-coverage-gate");
+        Require(testCases == 6, "actual-five-fixture-tests-and-packed-child-helper");
+        return (testCases, testProjects, bytes, byPath[coverageReport].Sha256);
+    }
+
+    /// <summary>Captures one report the packed CLI proof needs to interpret and binds it to its manifest.</summary>
+    /// <param name="path">The report path already resolved within the run output.</param>
+    /// <param name="artifact">The recorded length and SHA-256 of the report.</param>
+    /// <param name="cancellationToken">Cancels the bounded read.</param>
+    /// <returns>The exact original bytes for the caller to parse.</returns>
+    /// <remarks>Gate, timings and JUnit reports are capped at 16 MiB each. Other artifacts are hashed as streams.</remarks>
+    internal static async Task<ReadOnlyMemory<byte>> ReadVerifiedCliReportAsync(
+        string path, EvidenceArtifactResult artifact, CancellationToken cancellationToken)
+    {
+        Require(artifact.LengthBytes is > 0 and <= MaximumProofDocumentBytes, "cli-interpreted-report-byte-limit");
+        using var snapshot = new MemoryStream((int)artifact.LengthBytes);
+        await VerifyCliReportAsync(path, artifact, cancellationToken, snapshot).ConfigureAwait(false);
+        return snapshot.GetBuffer().AsMemory(0, (int)snapshot.Length);
+    }
+
+    private static async Task VerifyCliReportAsync(
+        string path, EvidenceArtifactResult artifact, CancellationToken cancellationToken, Stream? snapshot = null)
+    {
+        Require(File.Exists(path), "cli-original-report-custody");
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var (status, digest) = await EvidenceArtifactStream.HashAsync(input, artifact.LengthBytes, cancellationToken, snapshot)
+            .ConfigureAwait(false);
+        Require(status == EvidenceArtifactLengthStatus.Exact && digest == artifact.Sha256, "cli-original-report-custody");
+    }
+
+    private static int CountCliTestCases(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
+    {
+        using var input = new MemoryStream(bytes.ToArray(), writable: false);
+        using var xml = XmlReader.Create(input, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+        var count = 0;
+        while (xml.Read())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "testcase")
+                count++;
+        }
+        return count;
     }
 
     // These labels also appear in proof.json and the on-disk stage paths.
@@ -693,7 +771,7 @@ internal static class EvidenceReusePackageProof
                 || key.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase)
                 || key.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase)).ToArray()) environment.Remove(key);
             if (syntheticLocal) environment.Remove("GITHUB_ACTIONS");
-            var result = await PackedProofProcess.RunAsync(stage, start, root, cancellationToken,
+            var result = await PackedProofProcess.RunAsync(stage, start, PathUtils.PathUnder(root, stage + ".log"), cancellationToken,
                 stageTimeout ?? TimeSpan.FromMinutes(5), exit =>
                     stages.Add(new(stage, exit.ExitCode, exit.ElapsedMilliseconds, syntheticLocal, exit.InterruptedWhile)),
                 Progress).ConfigureAwait(false);

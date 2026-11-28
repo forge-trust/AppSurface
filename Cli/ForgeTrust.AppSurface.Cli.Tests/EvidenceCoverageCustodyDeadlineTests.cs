@@ -43,9 +43,16 @@ public sealed class EvidenceCoverageCustodyDeadlineTests
             if (cancelCaller) cancellation.Cancel();
             else clock.Advance(TimeSpan.FromSeconds(31));
         }
-        Task<CoverageEvidenceProducerExecutionResult> Run() => adapter.RunWithInventoryAsync(declaration, solution, source,
-            null, CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), cancellation.Token, writer, children,
-            final, ExpireAfterDelivery);
+        Task<CoverageEvidenceProducerExecutionResult> Run() => adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: source,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: children,
+            FinalReportRoot: final,
+            BeforeCustodyForTests: ExpireAfterDelivery), cancellation.Token);
 
         if (cancelCaller)
             await Assert.ThrowsAnyAsync<OperationCanceledException>(Run);

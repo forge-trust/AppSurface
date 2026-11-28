@@ -434,9 +434,15 @@ internal sealed class EvidenceReuseExecutionResolver(CoverageEvidenceProducer co
             if (solutionPath is null)
                 return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Unavailable, [], "reuse.solution_required: The coverage producer requires --solution so it can reuse AppSurface coverage discovery. Register custom solution resolution through the consumer host.");
             var elapsed = Stopwatch.StartNew();
-            var execution = await producer.RunWithInventoryAsync(context.Producer, solutionPath, output.ExecutionRoot,
-                output.DiffSnapshot, output.Writers, cancellationToken, context.Artifacts,
-                childLifetime, output.ArtifactRoot).ConfigureAwait(false);
+            var execution = await producer.RunWithInventoryAsync(new(
+                Producer: context.Producer,
+                SolutionPath: solutionPath,
+                ExecutionRoot: output.ExecutionRoot,
+                DiffSnapshot: output.DiffSnapshot,
+                Writers: output.Writers,
+                ArtifactWriter: context.Artifacts,
+                ChildLifetime: childLifetime,
+                FinalReportRoot: output.ArtifactRoot), cancellationToken).ConfigureAwait(false);
             Volatile.Write(ref _receiptIneligibilityReason, execution.InventoryIneligibilityReason);
             return execution.Result with { ElapsedMilliseconds = elapsed.ElapsedMilliseconds };
         }

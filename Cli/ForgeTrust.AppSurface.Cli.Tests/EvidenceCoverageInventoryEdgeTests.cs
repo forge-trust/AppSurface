@@ -169,9 +169,15 @@ public sealed class EvidenceCoverageInventoryEdgeTests
             runner, new FixtureReportGenerator(), TimeProvider.System)));
         await using var childLifetime = EvidenceChildLifetimeSession.Start("inventory-cap-" + Guid.NewGuid().ToString("N"));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, runRoot, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer,
-            childLifetime, finalReportRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: runRoot,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: childLifetime,
+            FinalReportRoot: finalReportRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Equal(new[] { "coverage/assertion@1" }, execution.Result.SatisfiedAssertionIds);
@@ -217,9 +223,13 @@ public sealed class EvidenceCoverageInventoryEdgeTests
         var adapter = new CoverageEvidenceProducer(new CoverageEvidenceExecutionWorkflow(new CoverageRunWorkflow(
             runner, new FixtureReportGenerator(), TimeProvider.System)));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, runRoot, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None,
-            finalReportRoot: finalRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: runRoot,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            FinalReportRoot: finalRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Failed, execution.Result.Outcome);
         Assert.Empty(execution.Result.SatisfiedAssertionIds);
@@ -253,9 +263,13 @@ public sealed class EvidenceCoverageInventoryEdgeTests
         var adapter = new CoverageEvidenceProducer(new CoverageEvidenceExecutionWorkflow(new CoverageRunWorkflow(
             runner, new FixtureReportGenerator(), TimeProvider.System)));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, runRoot, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None,
-            finalReportRoot: runRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: runRoot,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            FinalReportRoot: runRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Equal(new[] { "coverage/assertion@1" }, execution.Result.SatisfiedAssertionIds);
@@ -306,8 +320,12 @@ public sealed class EvidenceCoverageInventoryEdgeTests
             case "invalid-retention": declaration = declaration with { CoverageArtifactRetention = "unknown" }; break;
         }
 
-        var result = await adapter.RunWithInventoryAsync(declaration, solution, "unused-output", null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+        var result = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: "unused-output",
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null)), CancellationToken.None);
 
         Assert.Equal(outcome, result.Result.Outcome);
         Assert.Empty(result.Result.SatisfiedAssertionIds);
@@ -337,9 +355,14 @@ public sealed class EvidenceCoverageInventoryEdgeTests
         var adapter = new CoverageEvidenceProducer(new CoverageEvidenceExecutionWorkflow(new CoverageRunWorkflow(
             new FixtureProcessRunner("tests/Sample.Tests/Sample.Tests.csproj"), new FixtureReportGenerator(), TimeProvider.System)));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, runRoot, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer,
-            childLifetime: null, finalReportRoot: reportRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: runRoot,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            FinalReportRoot: reportRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Equal(new[] { "coverage/assertion@1" }, execution.Result.SatisfiedAssertionIds);

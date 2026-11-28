@@ -3,6 +3,27 @@ using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Evidence.Cli;
 
+/// <summary>Names the paths and optional custody inputs for one coverage evidence execution.</summary>
+/// <param name="Producer">The declared producer and its coverage requirements.</param>
+/// <param name="SolutionPath">The explicit solution used for coverage discovery.</param>
+/// <param name="ExecutionRoot">The exclusive root that retains the original execution reports.</param>
+/// <param name="DiffSnapshot">The immutable planning snapshot used by patch gates.</param>
+/// <param name="Writers">Caller-owned progress and diagnostic streams.</param>
+/// <param name="ArtifactWriter">Optional bounded receipt-custody writer.</param>
+/// <param name="ChildLifetime">Optional explicitly cooperative child coordinator.</param>
+/// <param name="FinalReportRoot">Optional destination for ordinary current-run reports.</param>
+/// <param name="BeforeCustodyForTests">Optional scheduling seam after required report delivery and before custody.</param>
+internal sealed record CoverageEvidenceProducerRequest(
+    EvidenceProducerDeclaration Producer,
+    string? SolutionPath,
+    string ExecutionRoot,
+    EvidenceDiffSnapshot? DiffSnapshot,
+    CoverageTextWriters Writers,
+    EvidenceArtifactWriter? ArtifactWriter = null,
+    EvidenceChildLifetimeSession? ChildLifetime = null,
+    string? FinalReportRoot = null,
+    Action? BeforeCustodyForTests = null);
+
 /// <summary>
 /// Runs the private AppSurface coverage engine for the first-party Evidence workflow.
 /// </summary>
@@ -74,8 +95,12 @@ internal sealed class CoverageEvidenceProducer
         EvidenceDiffSnapshot? diffSnapshot,
         CoverageTextWriters writers,
         CancellationToken cancellationToken) =>
-        (await RunWithInventoryAsync(producer, solutionPath, outputDirectory, diffSnapshot, writers,
-            cancellationToken).ConfigureAwait(false)).Result;
+        (await RunWithInventoryAsync(new(
+            Producer: producer,
+            SolutionPath: solutionPath,
+            ExecutionRoot: outputDirectory,
+            DiffSnapshot: diffSnapshot,
+            Writers: writers), cancellationToken).ConfigureAwait(false)).Result;
 
     /// <summary>Runs coverage with optional complete custody and returns coordinator-owned eligibility data.</summary>
     /// <remarks>
@@ -88,31 +113,25 @@ internal sealed class CoverageEvidenceProducer
     /// This result makes no SDK child-settlement claim; the coordinator closes enrollment after the whole producer,
     /// joins actual child settlement and applies publication admission. It must not close enrollment per command.
     /// </remarks>
-    /// <param name="producer">Declared coverage producer and its thresholds.</param>
-    /// <param name="solutionPath">Explicit solution passed to the existing coverage engine.</param>
-    /// <param name="outputDirectory">Exclusive execution root retaining the original reports.</param>
-    /// <param name="diffSnapshot">Immutable planning snapshot used by patch gates.</param>
-    /// <param name="writers">Caller-owned progress and diagnostic streams.</param>
+    /// <param name="request">Named execution paths, producer inputs, and optional custody settings.</param>
     /// <param name="cancellationToken">Cancels the entire producer, including report delivery.</param>
-    /// <param name="artifactWriter">Optional bounded receipt-custody writer.</param>
-    /// <param name="childLifetime">Optional explicitly cooperative child coordinator.</param>
-    /// <param name="finalReportRoot">Optional current-run root for ordinary reports; receipt bounds never change the gate outcome.</param>
-    /// <param name="beforeCustodyForTests">Optional scheduling seam after required report delivery and before optional custody; production omits it.</param>
     internal async Task<CoverageEvidenceProducerExecutionResult> RunWithInventoryAsync(
-        EvidenceProducerDeclaration producer,
-        string? solutionPath,
-        string outputDirectory,
-        EvidenceDiffSnapshot? diffSnapshot,
-        CoverageTextWriters writers,
-        CancellationToken cancellationToken,
-        EvidenceArtifactWriter? artifactWriter = null,
-        EvidenceChildLifetimeSession? childLifetime = null,
-        string? finalReportRoot = null,
-        Action? beforeCustodyForTests = null)
+        CoverageEvidenceProducerRequest request,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        var producer = request.Producer;
         ArgumentNullException.ThrowIfNull(producer);
+        var outputDirectory = request.ExecutionRoot;
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
+        var writers = request.Writers;
         ArgumentNullException.ThrowIfNull(writers);
+        var solutionPath = request.SolutionPath;
+        var diffSnapshot = request.DiffSnapshot;
+        var artifactWriter = request.ArtifactWriter;
+        var childLifetime = request.ChildLifetime;
+        var finalReportRoot = request.FinalReportRoot;
+        var beforeCustodyForTests = request.BeforeCustodyForTests;
 
         static CoverageEvidenceProducerExecutionResult Finish(EvidenceProducerResult result)
             => new(result, "inventory-result-not-passed");

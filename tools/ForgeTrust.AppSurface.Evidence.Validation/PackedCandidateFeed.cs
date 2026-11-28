@@ -99,7 +99,8 @@ internal static class PackedCandidateFeed
         };
         if (request.NoRestore) arguments.Add("--no-restore");
         var start = PackedProofProcess.CreateStartInfo(request.Dotnet, arguments, request.Repository);
-        var result = await PackedProofProcess.RunAsync(stage, start, logs, cancellationToken).ConfigureAwait(false);
+        var result = await PackedProofProcess.RunAsync(stage, start, PathUtils.PathUnder(logs, stage + ".log"),
+            cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
             throw new PreparationException($"Candidate stage '{stage}' exited with code {result.ExitCode}.", result.LogPath);
         if (!IsRegularArchive(PathUtils.PathUnder(feed, package.ArchiveName(request.Version))))

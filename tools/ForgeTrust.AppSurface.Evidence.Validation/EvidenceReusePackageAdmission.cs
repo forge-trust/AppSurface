@@ -54,15 +54,18 @@ internal static class EvidenceReusePackageAdmission
             var id = package.Id;
             var path = PathUtils.PathUnder(feed, package.ArchiveName(version));
             Require(File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0
-                && new FileInfo(path).Length <= 512L * 1024 * 1024, "bounded-regular-candidate-archive");
-            var archiveBytes = await ReadArchiveBytesAsync(path, cancellationToken).ConfigureAwait(false);
+                && new FileInfo(path).Length <= PackedCandidateArchive.MaximumBytes, "bounded-regular-candidate-archive");
+            var (capture, archiveBytes) = await PackedCandidateArchive.CaptureAsync(path, cancellationToken).ConfigureAwait(false);
+            Require(capture != PackedCandidateArchive.CaptureStatus.TooLarge, "bounded-regular-candidate-archive");
+            Require(capture == PackedCandidateArchive.CaptureStatus.Complete, "stable-candidate-archive-length");
             using var archiveStream = new MemoryStream(archiveBytes, writable: false);
             using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read, leaveOpen: false);
             Require(archive.Entries.Count <= 10000 && archive.Entries.Select(entry => entry.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Count() == archive.Entries.Count,
                 "bounded-unambiguous-archive");
             var specification = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
-            Require(specification.Length is > 0 and <= 1024 * 1024, "bounded-nuspec");
-            var metadata = ValidationProof.ReadPackageMetadata(specification);
+            var parsedMetadata = PackedCandidateArchive.ReadBoundedMetadata(specification);
+            Require(parsedMetadata is not null, "bounded-nuspec");
+            var metadata = parsedMetadata!;
             string Value(string name) => metadata.Elements().Single(element => element.Name.LocalName == name).Value;
             Require(Value("id") == id && Value("version") == version, "exact-candidate-identity");
             Require((string?)metadata.Elements().Single(element => element.Name.LocalName == "repository").Attribute("commit") == expectedSourceCommit,
@@ -72,14 +75,7 @@ internal static class EvidenceReusePackageAdmission
             if (privateTarget is not null)
             {
                 Require(dependencies is not null, "private-dependency-required");
-                var groups = dependencies!.Elements().Where(element => element.Name.LocalName == "group").ToArray();
-                foreach (var group in groups.Length == 0 ? [dependencies] : groups)
-                {
-                    var edges = group!.Elements().Where(element => element.Name.LocalName == "dependency"
-                        && string.Equals((string?)element.Attribute("id"), privateTarget, StringComparison.OrdinalIgnoreCase)).ToArray();
-                    Require(edges.Length == 1 && (string?)edges[0].Attribute("id") == privateTarget
-                        && (string?)edges[0].Attribute("version") == $"[{version}]", PrivateDependencyContract);
-                }
+                Require(PrivatePackageEdges.HasSingleExactPin(dependencies!, privateTarget, version), PrivateDependencyContract);
             }
             foreach (var dependency in dependencies?.Descendants().Where(element => element.Name.LocalName == "dependency") ?? [])
             {
@@ -154,17 +150,6 @@ internal static class EvidenceReusePackageAdmission
     {
         using var input = entry.Open();
         return Convert.ToHexStringLower(await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false));
-    }
-
-    private static async Task<byte[]> ReadArchiveBytesAsync(string path, CancellationToken cancellationToken)
-    {
-        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        Require(input.Length <= 512L * 1024 * 1024, "bounded-regular-candidate-archive");
-        var bytes = new byte[checked((int)input.Length)];
-        await input.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
-        Require(input.ReadByte() == -1, "stable-candidate-archive-length");
-        return bytes;
     }
 
     private static void Require(bool condition, string contract) => ValidationProof.Require(condition, ContractScope + contract);

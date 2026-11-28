@@ -7,6 +7,10 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PackedCandidateArchive.cs" Link="PackedCandidateArchive.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PackedCandidatePackages.cs" Link="PackedCandidatePackages.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PackedProofProcess.cs" Link="PackedProofProcess.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PackedProofProgress.cs" Link="PackedProofProgress.cs" />
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PrivatePackageEdges.cs" Link="PrivatePackageEdges.cs" />
     <ProjectReference Include="../../Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj" />
     <EmbeddedResource Include="../../.github/workflows/native-coverage-test-projects.txt">

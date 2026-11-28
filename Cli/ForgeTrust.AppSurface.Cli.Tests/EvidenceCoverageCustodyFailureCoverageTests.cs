@@ -35,9 +35,13 @@ public sealed class EvidenceCoverageCustodyFailureCoverageTests
         var adapter = Adapter(out var runner, ChangeMetadata);
         try
         {
-            var execution = await adapter.RunWithInventoryAsync(Declaration(), solution, output, null,
-                CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None,
-                finalReportRoot: finalRoot);
+            var execution = await adapter.RunWithInventoryAsync(new(
+                Producer: Declaration(),
+                SolutionPath: solution,
+                ExecutionRoot: output,
+                DiffSnapshot: null,
+                Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+                FinalReportRoot: finalRoot), CancellationToken.None);
 
             Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
             Assert.Equal(Declaration().AssertionIds, execution.Result.SatisfiedAssertionIds);
@@ -78,8 +82,14 @@ public sealed class EvidenceCoverageCustodyFailureCoverageTests
         var adapter = Adapter(out var runner);
         await using var children = EvidenceChildLifetimeSession.Start("custody-fault-" + Guid.NewGuid().ToString("N"));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer, children);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: output,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: children), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Equal(declaration.AssertionIds, execution.Result.SatisfiedAssertionIds);
@@ -136,9 +146,13 @@ public sealed class EvidenceCoverageCustodyFailureCoverageTests
         }
         var adapter = Adapter(out var runner, ChangeMetadata);
 
-        var execution = await adapter.RunWithInventoryAsync(Declaration(), solution, output, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None,
-            finalReportRoot: finalRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: Declaration(),
+            SolutionPath: solution,
+            ExecutionRoot: output,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            FinalReportRoot: finalRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Failed, execution.Result.Outcome);
         Assert.Empty(execution.Result.SatisfiedAssertionIds);
