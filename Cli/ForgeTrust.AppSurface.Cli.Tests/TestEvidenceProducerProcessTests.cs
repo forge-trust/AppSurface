@@ -274,6 +274,7 @@ public sealed class TestEvidenceProducerProcessTests
         Assert.True(File.Exists(lockFilePath));
 
         var lockBytes = await File.ReadAllBytesAsync(lockFilePath);
+        string lockedXunitAssertVersion;
         using (var lockFile = JsonDocument.Parse(lockBytes))
         {
             var lockedXunitAssert = lockFile.RootElement
@@ -281,16 +282,18 @@ public sealed class TestEvidenceProducerProcessTests
                 .GetProperty("net10.0")
                 .GetProperty("xunit.assert");
             Assert.Equal("Transitive", lockedXunitAssert.GetProperty("type").GetString());
-            Assert.Equal("2.9.3", lockedXunitAssert.GetProperty("resolved").GetString());
+            lockedXunitAssertVersion = Assert.IsType<string>(lockedXunitAssert.GetProperty("resolved").GetString());
         }
 
-        TestEvidenceProducer? lastProducer = null;
+        using var console = new FakeInMemoryConsole();
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+        var planPath = TestPathUtils.PathUnder(output, "evidence-plan.json");
+        var manifestPath = TestPathUtils.PathUnder(output, "evidence-manifest.json");
+        var receiptPath = TestPathUtils.PathUnder(output, "artifacts", "fixture-tests", TestEvidenceProducer.ReceiptRelativePath);
+
         async Task RunEvidenceAsync()
         {
-            using var console = new FakeInMemoryConsole();
-            var command = new EvidenceRunCommand(
-                new EvidenceCliWorkflow(new EvidencePlanner()),
-                CoverageEvidenceProducerTests.CreateUnusedProducer())
+            var command = new EvidenceRunCommand(workflow, CoverageEvidenceProducerTests.CreateUnusedProducer())
             {
                 PolicyPath = policyPath,
                 Paths = ["scripts/build.sh"],
@@ -298,7 +301,7 @@ public sealed class TestEvidenceProducerProcessTests
                 LockedMode = true,
                 RepositoryRootResolver = () => repository,
                 StepSummaryPathResolver = () => null,
-                TestProducerFactory = (id, options) => lastProducer = new TestEvidenceProducer(
+                TestProducerFactory = (id, options) => new TestEvidenceProducer(
                     id,
                     options with
                     {
@@ -310,20 +313,19 @@ public sealed class TestEvidenceProducerProcessTests
             await command.ExecuteAsync(console);
         }
 
+        TestReceiptRow ReadReceipt()
+        {
+            Assert.True(TestEvidenceRunSupport.TryReadReceipt(receiptPath, out var rows));
+            return Assert.Single(rows);
+        }
+
         await RunEvidenceAsync();
 
-        var successfulProducer = Assert.IsType<TestEvidenceProducer>(lastProducer);
-        var successfulProject = Assert.Single(successfulProducer.LastProjects);
-        Assert.Equal(TestRunReason.Complete, successfulProject.Reason);
-        Assert.Equal("reconcile", successfulProject.Phase);
-        Assert.Equal(lockBytes, await File.ReadAllBytesAsync(lockFilePath));
-
-        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
-        var planPath = TestPathUtils.PathUnder(output, "evidence-plan.json");
-        var manifestPath = TestPathUtils.PathUnder(output, "evidence-manifest.json");
         var successfulVerification = await workflow.VerifyAsync(planPath, manifestPath, CancellationToken.None);
         Assert.Equal(EvidenceClaimKind.TargetedComplete, successfulVerification.Manifest.ClaimKind);
         Assert.Equal(["tests-complete"], successfulVerification.Manifest.ClosedObligationIds);
+        Assert.Equal("Complete", ReadReceipt().Reason);
+        Assert.Equal(lockBytes, await File.ReadAllBytesAsync(lockFilePath));
 
         var projectDocument = XDocument.Load(projectPath);
         var xunitReference = projectDocument
@@ -332,23 +334,19 @@ public sealed class TestEvidenceProducerProcessTests
         xunitReference.AddAfterSelf(new XElement(
             "PackageReference",
             new XAttribute("Include", "xunit.assert"),
-            new XAttribute("Version", "2.9.3")));
+            new XAttribute("Version", lockedXunitAssertVersion)));
         projectDocument.Save(projectPath);
 
         var exception = await Assert.ThrowsAsync<CommandException>(RunEvidenceAsync);
 
         Assert.StartsWith("ASEVD211", exception.Message, StringComparison.Ordinal);
-        var failedProducer = Assert.IsType<TestEvidenceProducer>(lastProducer);
-        var failedProject = Assert.Single(failedProducer.LastProjects);
-        Assert.Equal(TestRunReason.RestoreFailed, failedProject.Reason);
-        Assert.Equal("restore", failedProject.Phase);
-        Assert.Equal(TestRunCounts.Zero, failedProject.Counts);
-        Assert.Equal(lockBytes, await File.ReadAllBytesAsync(lockFilePath));
-
         var failedVerification = await workflow.VerifyAsync(planPath, manifestPath, CancellationToken.None);
         Assert.Equal(EvidenceClaimKind.None, failedVerification.Manifest.ClaimKind);
         Assert.Equal(EvidenceClaimEligibility.None, failedVerification.Manifest.Eligibility);
         Assert.Empty(failedVerification.Manifest.ClosedObligationIds);
+        Assert.Equal(new TestReceiptRow(project.Path, 0, 0, 0, 0, 0, "RestoreFailed"), ReadReceipt());
+        Assert.Contains("phase=restore reason=RestoreFailed", console.ReadErrorString(), StringComparison.Ordinal);
+        Assert.Equal(lockBytes, await File.ReadAllBytesAsync(lockFilePath));
     }
 
     private static async Task<(EvidenceProducerResult Result, IReadOnlyList<TestProjectOutcome> Projects, string Progress, string Scratch)> RunAsync(
