@@ -35,10 +35,29 @@ internal sealed class LocalEvidenceRun(string outputDirectory, string? packageRe
         }
         catch (EvidenceCommandException exception) when (exception.CleanupUnconfirmed)
         {
-            Interlocked.Exchange(ref _commandCleanupFailed, 1);
+            RecordCommandCleanupFailure();
             throw;
         }
     }
+
+    /// <summary>Binds a source verifier to this run so every checkpoint records unconfirmed Git cleanup.</summary>
+    /// <remarks>Pass the returned callback to producers that may translate a verification exception into a diagnostic.</remarks>
+    /// <param name="verify">Checks the original source and policy snapshot.</param>
+    /// <returns>The tracked verifier to use at every checkpoint.</returns>
+    internal Func<CancellationToken, Task> TrackSourceVerification(Func<CancellationToken, Task> verify) => async cancellationToken =>
+    {
+        try
+        {
+            await verify(cancellationToken).ConfigureAwait(false);
+        }
+        catch (EvidenceCommandException exception) when (exception.CleanupUnconfirmed)
+        {
+            RecordCommandCleanupFailure();
+            throw;
+        }
+    };
+
+    private void RecordCommandCleanupFailure() => Interlocked.Exchange(ref _commandCleanupFailed, 1);
 }
 
 /// <summary>The plan and, for an executed run, the verified manifest. Empty inventories return no result.</summary>
@@ -54,12 +73,6 @@ internal sealed record LocalEvidenceRunResult(
 /// <param name="Sha256">The SHA-256 digest of the original input.</param>
 internal sealed record LocalEvidenceReplayInput(string RelativePath, long LengthBytes, string Sha256)
 {
-    /// <summary>The root-relative name of the changed-path inventory supplied to the verifier.</summary>
-    internal const string ChangedPathsFileName = "changed-paths.json";
-
-    /// <summary>The root-relative name of the resolved local policy supplied to the verifier.</summary>
-    internal const string PolicyFileName = "local-policy.json";
-
     /// <summary>Binds a replay input to the original bytes written by the local workflow.</summary>
     internal static LocalEvidenceReplayInput Snapshot(string relativePath, ReadOnlySpan<byte> content) =>
         new(relativePath, content.Length, EvidenceDigest.Sha256(content));

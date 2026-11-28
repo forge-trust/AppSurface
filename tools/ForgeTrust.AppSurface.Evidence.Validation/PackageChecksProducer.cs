@@ -85,7 +85,7 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
 
             stage = Gate;
             await RunAsync(stage, ["run", "--project", project, "--configuration", "Release",
-                "--property:RestoreConfigFile=" + Path.Join(_settings.RepositoryRoot, "NuGet.package-gate.config"), "--", stage], environment, commands, cancellationToken).ConfigureAwait(false);
+                "--property:RestoreConfigFile=" + PathUtils.PathUnder(_settings.RepositoryRoot, "NuGet.package-gate.config"), "--", stage], environment, commands, cancellationToken).ConfigureAwait(false);
             stage = Verify;
             await RunAsync(stage, ["run", "--project", project, "--configuration", "Release", "--no-build", "--no-restore", "--", stage], environment, commands, cancellationToken).ConfigureAwait(false);
             stage = VerifyPackages;

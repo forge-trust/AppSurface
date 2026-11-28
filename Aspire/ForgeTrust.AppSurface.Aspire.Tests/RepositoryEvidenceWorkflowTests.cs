@@ -385,6 +385,57 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
     }
 
     [Fact]
+    public async Task RunLocalAsync_RejectsPlanBeforeCreatingOutput()
+    {
+        var paths = await WritePathsAsync([new NormalizedDiffPath("README.md")]);
+        var output = NewPath("rejected-local-plan");
+        var options = PlanOptions(paths, CheckedInPolicyPath, output);
+
+        var failure = await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunLocalAsync(
+            options, CancellationToken.None, static _ => Task.CompletedTask, new LocalEvidenceRun(output, null)));
+
+        Assert.Contains("--operation run", failure.Message, StringComparison.Ordinal);
+        Assert.False(Path.Exists(output));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LocalRun_KeepsObservationUntilManifestPromotion(bool cancelPromotion)
+    {
+        var planned = await PlanAsync(["README.md"]);
+        var output = NewPath("local-run");
+        var manifestPath = TestPathUtils.PathUnder(output, "evidence-manifest.json");
+        var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
+            ("--plan", TestPathUtils.PathUnder(planned.Output, "evidence-plan.json")),
+            ("--output", output));
+        using var cancellation = new CancellationTokenSource();
+
+        var run = RepositoryEvidenceWorkflow.RunLocalAsync(options, cancellation.Token, async token =>
+        {
+            var provisional = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath, token));
+            Assert.Equal(EvidenceClaimKind.ObservationOnly, provisional.ClaimKind);
+            Assert.Equal(EvidenceClaimEligibility.Informational, provisional.Eligibility);
+            if (cancelPromotion)
+                cancellation.Cancel();
+        }, new LocalEvidenceRun(output, null));
+
+        if (cancelPromotion)
+        {
+            var failure = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+            Assert.Equal(cancellation.Token, failure.CancellationToken);
+        }
+        else
+        {
+            Assert.Equal(EvidenceClaimKind.NoEvidenceRequired, (await run).ClaimKind);
+        }
+
+        var retained = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
+        Assert.Equal(cancelPromotion ? EvidenceClaimKind.ObservationOnly : EvidenceClaimKind.NoEvidenceRequired, retained.ClaimKind);
+        Assert.Empty(Directory.EnumerateFiles(output, ".manifest-*.tmp"));
+    }
+
+    [Fact]
     public async Task Run_RegistersCoverageAndPackageProducersForMinimalRepository()
     {
         var repository = Path.Join(_temporaryRoot, "minimal-repository");

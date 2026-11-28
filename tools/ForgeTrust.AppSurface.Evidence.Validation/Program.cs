@@ -141,10 +141,10 @@ internal static class Program
             var policy = new EvidencePolicy("appsurface-native-validation-" + inputDigest, "1.0.0", selected.Id, [selected], []);
             var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("tools/ForgeTrust.AppSurface.Evidence.Validation/Program.cs")]);
             Directory.CreateDirectory(output);
-            await File.WriteAllBytesAsync(Path.Join(output, "evidence-plan.json"), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
+            await File.WriteAllBytesAsync(PathUtils.PathUnder(output, RepositoryEvidenceLayout.PlanFile), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
             Console.WriteLine("Native package journeys selected: " + string.Join(", ", declarations.Select(d => d.Id)));
             var receipt = await NativeValidationExecution.ExecuteAsync(
-                plan, producers, PathUtils.PathUnder(output, "artifacts"), inputDigest, cancellationToken);
+                plan, producers, PathUtils.PathUnder(output, RepositoryEvidenceLayout.ArtifactsDirectory), inputDigest, cancellationToken);
             var receiptPath = PathUtils.PathUnder(output, "native-validation-receipt.json");
             await File.WriteAllBytesAsync(receiptPath, NativeValidationReceiptCodec.Serialize(receipt), CancellationToken.None);
             ValidationProof.Require(NativeValidationReceiptCodec.Verify(plan, receipt), "native validation receipt verification");
@@ -213,8 +213,8 @@ internal static class Program
         var changes = await new RepositoryGitChanges().CollectEventAsync(Path.GetFullPath(Required(options, "--repository")),
             Required(options, "--event-file"), Required(options, "--event-name"), options.GetValueOrDefault("--workflow-sha"), cancellationToken);
         Directory.CreateDirectory(output);
-        await File.WriteAllBytesAsync(Path.Join(output, "changed-paths.json"), EvidenceCanonicalJson.Serialize(changes.Paths), cancellationToken);
-        await File.WriteAllTextAsync(Path.Join(output, "source-state.json"), JsonSerializer.Serialize(changes, JsonOptions), cancellationToken);
+        await File.WriteAllBytesAsync(PathUtils.PathUnder(output, RepositoryEvidenceLayout.ChangedPathsFile), EvidenceCanonicalJson.Serialize(changes.Paths), cancellationToken);
+        await File.WriteAllTextAsync(PathUtils.PathUnder(output, RepositoryEvidenceLayout.SourceStateFile), JsonSerializer.Serialize(changes, JsonOptions), cancellationToken);
         Console.WriteLine($"Collected {changes.Paths.Count} changed paths at {changes.HeadCommit}.");
         return 0;
     }

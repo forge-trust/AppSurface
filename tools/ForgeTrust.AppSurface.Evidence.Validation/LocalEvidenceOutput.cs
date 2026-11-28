@@ -11,6 +11,8 @@ internal static class LocalEvidenceOutput
 {
     private const string PendingCleanupFileName = "run.pending-cleanup";
 
+    private sealed record RequiredArchiveEntry(long LengthBytes, string Sha256);
+
     private static readonly EnumerationOptions OutputFiles = new()
     {
         RecurseSubdirectories = true,
@@ -64,10 +66,11 @@ internal static class LocalEvidenceOutput
         var output = workspace.GetPath("run");
         var localRun = new LocalEvidenceRun(output, packageCache);
         Console.WriteLine("Local evidence scratch: " + output);
-        LocalEvidenceRunResult? proof;
         try
         {
-            proof = await RunWithRetryGuardAsync(localRun, pendingCleanup, run);
+            var proof = await RunWithRetryGuardAsync(localRun, pendingCleanup, run);
+            if (proof is not null)
+                Publish(workspace, output, root, archive + ".zip", "Validation completed.", proof);
         }
         catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
         {
@@ -99,8 +102,6 @@ internal static class LocalEvidenceOutput
             throw;
         }
 
-        if (proof is not null)
-            Publish(workspace, output, root, archive + ".zip", "Validation completed.", proof);
         await workspace.DisposeAsync();
     }
 
@@ -162,10 +163,10 @@ internal static class LocalEvidenceOutput
     {
         if (CleanupUnconfirmed(run, failure))
             return false;
-        var proof = PathUtils.PathUnder(run.OutputDirectory, "proof");
+        var proof = PathUtils.PathUnder(run.OutputDirectory, RepositoryEvidenceLayout.ProofDirectory);
         if (!Directory.Exists(proof))
             return true;
-        var manifest = PathUtils.PathUnder(proof, "evidence-manifest.json");
+        var manifest = PathUtils.PathUnder(proof, RepositoryEvidenceLayout.ManifestFile);
         if (!File.Exists(manifest))
             return false;
         return EvidenceCanonicalJson.Deserialize<EvidenceManifest>(File.ReadAllBytes(manifest)).Metrics.CleanupCompleted;
@@ -174,7 +175,9 @@ internal static class LocalEvidenceOutput
     private static void Publish(EvidenceWorkspace workspace, string output, string root, string name, string status,
         LocalEvidenceRunResult? proof = null)
     {
-        var temporary = workspace.GetPath("retained.zip");
+        // A rejected success ZIP must not occupy the staging path for its failure archive.
+        var temporary = workspace.GetPath(name + ".staging");
+        var requiredEntries = proof is null ? null : BuildRequiredEntries(proof);
         using (var archive = ZipFile.Open(temporary, ZipArchiveMode.Create))
         {
             using (var writer = new StreamWriter(archive.CreateEntry("run-status.txt").Open()))
@@ -185,14 +188,14 @@ internal static class LocalEvidenceOutput
                 foreach (var file in Directory.EnumerateFiles(output, "*", OutputFiles))
                 {
                     var relative = Path.GetRelativePath(output, file).Replace(Path.DirectorySeparatorChar, '/');
-                    if (ShouldRetain(relative))
+                    if (ShouldRetain(relative, requiredEntries))
                         archive.CreateEntryFromFile(file, relative, CompressionLevel.Fastest);
                 }
             }
         }
 
-        if (proof is not null)
-            VerifyArchivedProof(temporary, proof);
+        if (requiredEntries is not null)
+            VerifyRequiredEntries(temporary, requiredEntries);
 
         var destination = PathUtils.PathUnder(root, name);
         RequirePlainPath(destination);
@@ -200,58 +203,73 @@ internal static class LocalEvidenceOutput
         Console.WriteLine("Local evidence output: " + destination);
     }
 
-    private static void VerifyArchivedProof(string path, LocalEvidenceRunResult proof)
+    private static Dictionary<string, RequiredArchiveEntry> BuildRequiredEntries(LocalEvidenceRunResult proof)
     {
-        using var archive = ZipFile.OpenRead(path);
+        var requiredEntries = new Dictionary<string, RequiredArchiveEntry>(StringComparer.Ordinal);
         foreach (var input in proof.ReplayInputs)
-            VerifyEntry(archive, input.RelativePath, input.LengthBytes, input.Sha256);
+            requiredEntries.Add(input.RelativePath, new(input.LengthBytes, input.Sha256));
+
         var planBytes = EvidenceCanonicalJson.Serialize(proof.Plan);
-        VerifyEntry(archive, "plan/evidence-plan.json", planBytes.LongLength, EvidenceDigest.Sha256(planBytes));
+        requiredEntries.Add(RepositoryEvidenceLayout.PlanEntry,
+            new(planBytes.LongLength, EvidenceDigest.Sha256(planBytes)));
         if (proof.Manifest is not { } manifest)
-            return;
+            return requiredEntries;
 
         var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
-        VerifyEntry(archive, "proof/evidence-manifest.json", manifestBytes.LongLength, EvidenceDigest.Sha256(manifestBytes));
+        requiredEntries.Add(RepositoryEvidenceLayout.ManifestEntry,
+            new(manifestBytes.LongLength, EvidenceDigest.Sha256(manifestBytes)));
         foreach (var producer in manifest.ProducerResults)
         {
             foreach (var artifact in producer.Artifacts ?? [])
             {
-                var entry = $"proof/artifacts/{producer.ProducerId}/{artifact.RelativePath}";
-                VerifyEntry(archive, entry, artifact.LengthBytes, artifact.Sha256);
+                var entry = RepositoryEvidenceLayout.ArtifactEntry(producer.ProducerId, artifact.RelativePath);
+                requiredEntries.Add(entry, new(artifact.LengthBytes, artifact.Sha256));
             }
         }
+
+        return requiredEntries;
     }
 
-    private static void VerifyEntry(ZipArchive archive, string name, long length, string sha256)
+    private static void VerifyRequiredEntries(string path, IReadOnlyDictionary<string, RequiredArchiveEntry> requiredEntries)
     {
-        var entry = archive.GetEntry(name);
-        if (entry is null || entry.Length != length)
-            throw new InvalidDataException($"Local evidence archive is missing the verified content for {name}.");
-        using var stream = entry.Open();
-        var archivedSha256 = Convert.ToHexString(SHA256.HashData(stream));
-        if (!string.Equals(archivedSha256, sha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException($"Local evidence archive digest mismatch for {name}.");
+        using var archive = ZipFile.OpenRead(path);
+        foreach (var (name, required) in requiredEntries)
+        {
+            var entry = archive.GetEntry(name);
+            if (entry is null || entry.Length != required.LengthBytes)
+                throw new InvalidDataException($"Local evidence archive is missing the verified content for {name}.");
+            using var stream = entry.Open();
+            var archivedSha256 = Convert.ToHexString(SHA256.HashData(stream));
+            if (!string.Equals(archivedSha256, required.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Local evidence archive digest mismatch for {name}.");
+        }
     }
 
     private static readonly HashSet<string> EvidenceFiles =
     [
-        LocalEvidenceReplayInput.ChangedPathsFileName, LocalEvidenceReplayInput.PolicyFileName,
-        "changed.patch", "source-state.json", "package-build.log",
-        "evidence-summary.md", "proof/evidence-plan.json", "proof/evidence-manifest.json", "proof/evidence-summary.md",
-        "proof/selection.json",
+        RepositoryEvidenceLayout.PatchFile, RepositoryEvidenceLayout.SourceStateFile, RepositoryEvidenceLayout.PackageBuildLog,
+        RepositoryEvidenceLayout.SummaryFile,
+        RepositoryEvidenceLayout.ProofPrefix + RepositoryEvidenceLayout.PlanFile,
+        RepositoryEvidenceLayout.ProofPrefix + RepositoryEvidenceLayout.SummaryFile,
+        RepositoryEvidenceLayout.ProofPrefix + RepositoryEvidenceLayout.SelectionFile,
     ];
 
-    private static bool ShouldRetain(string path)
+    private static bool ShouldRetain(string path, IReadOnlyDictionary<string, RequiredArchiveEntry>? requiredEntries)
     {
-        if (path.StartsWith("plan/", StringComparison.Ordinal) || path.StartsWith("proof/artifacts/", StringComparison.Ordinal))
+        if (requiredEntries?.ContainsKey(path) == true
+            || path.StartsWith(RepositoryEvidenceLayout.PlanPrefix, StringComparison.Ordinal)
+            || path.StartsWith(RepositoryEvidenceLayout.ArtifactPrefix, StringComparison.Ordinal))
+            return true;
+        // Failure and cancellation can have partial proof files without a verified inventory.
+        if (requiredEntries is null
+            && path is RepositoryEvidenceLayout.ChangedPathsFile or RepositoryEvidenceLayout.LocalPolicyFile or RepositoryEvidenceLayout.ManifestEntry)
             return true;
         if (EvidenceFiles.Contains(path))
             return true;
-        const string proofPrefix = "proof/";
-        if (!path.StartsWith(proofPrefix, StringComparison.Ordinal))
+        if (!path.StartsWith(RepositoryEvidenceLayout.ProofPrefix, StringComparison.Ordinal))
             return false;
 
-        var proofRelativePath = path[proofPrefix.Length..];
+        var proofRelativePath = path[RepositoryEvidenceLayout.ProofPrefix.Length..];
         return PackageChecksProducer.RetainsLocalDiagnostic(proofRelativePath)
             || SolutionCoverageProducer.RetainsLocalDiagnostic(proofRelativePath);
     }

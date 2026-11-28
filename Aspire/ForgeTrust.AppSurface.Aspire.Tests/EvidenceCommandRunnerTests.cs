@@ -206,7 +206,7 @@ public sealed class EvidenceCommandRunnerTests
             : new EvidenceCommandRequest("sh", ["-c", command], Environment.CurrentDirectory, TimeSpan.FromSeconds(10));
 
     [Fact]
-    public async Task RunAsync_ReportsCaptureFailureOnlyAfterBothCapturesHaveStopped()
+    public async Task RunAsync_ReportsUnconfirmedCleanupWhenCaptureFailsBeforeEndOfStream()
     {
         var reads = 0;
         var completed = 0;
@@ -217,6 +217,7 @@ public sealed class EvidenceCommandRunnerTests
             CreateShellRequest("printf output; printf error >&2", "[Console]::Out.Write('output'); [Console]::Error.Write('error')")));
 
         Assert.Equal("capture_failed", exception.Code);
+        Assert.True(exception.CleanupUnconfirmed);
         Assert.Equal(2, completed);
     }
 
@@ -326,6 +327,7 @@ public sealed class EvidenceCommandRunnerTests
 
             var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => runner.RunAsync(request));
             Assert.Equal("capture_failed", exception.Code);
+            Assert.False(exception.CleanupUnconfirmed);
             Assert.True(pid > 0, "The child must report its process identity before capture fails.");
             try
             {
@@ -373,6 +375,7 @@ public sealed class EvidenceCommandRunnerTests
             CreateShellRequest("printf done", "[Console]::Write('done')")));
 
         Assert.Equal("drain_timeout", exception.Code);
+        Assert.True(exception.CleanupUnconfirmed);
         Assert.Equal(2, stopped);
     }
 
@@ -416,7 +419,7 @@ public sealed class EvidenceCommandRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_CancellationDuringDrainStopsBothCaptureTasks()
+    public async Task RunAsync_CancellationDuringUnsettledDrainReportsCleanupFailureAndStopsCaptureTasks()
     {
         var started = 0;
         var stopped = 0;
@@ -431,8 +434,9 @@ public sealed class EvidenceCommandRunnerTests
         await capturesStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+        var failure = await Assert.ThrowsAsync<EvidenceCommandException>(() => running);
 
+        Assert.Equal(EvidenceCommandException.CleanupFailedCode, failure.Code);
         Assert.Equal(2, stopped);
     }
 
@@ -465,7 +469,7 @@ public sealed class EvidenceCommandRunnerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task RunAsync_ObservesCaptureCloseFailuresDuringTimeoutCleanup(bool disposed)
+    public async Task RunAsync_ObservesCaptureCloseFailuresAfterUnconfirmedTimeoutCleanup(bool disposed)
     {
         var capturesStopped = 0;
         var runner = new EvidenceCommandRunner(_ => new CloseFailingCaptureStream(disposed,
@@ -477,7 +481,7 @@ public sealed class EvidenceCommandRunnerTests
 
         var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => runner.RunAsync(request));
 
-        Assert.Equal("timeout", exception.Code);
+        Assert.Equal(EvidenceCommandException.CleanupFailedCode, exception.Code);
         Assert.Equal(2, capturesStopped);
     }
 

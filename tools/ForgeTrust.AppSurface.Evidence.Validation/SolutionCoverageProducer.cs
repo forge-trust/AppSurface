@@ -269,7 +269,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         runArgs.AddRange(["--logger", "console;verbosity=normal", "--test-results", "junit", "--slow-test-diagnostics", "--require-non-sandbox"]);
         await ExecuteAsync("coverage-run", runArgs, root, proof, cancellationToken,
             installedCli ?? _settings.DotnetPath).ConfigureAwait(false);
-        ValidateTimings(PathUtils.PathUnder(coverage, TimingsName), ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx")));
+        ValidateTimings(PathUtils.PathUnder(coverage, TimingsName), ReadInventory(PathUtils.PathUnder(root, "ForgeTrust.AppSurface.slnx")));
         var report = PathUtils.PathUnder(coverage, CoverageReportName);
         if (!File.Exists(report) || new FileInfo(report).Length == 0)
             throw new InvalidDataException("The merged solution coverage report is missing.");

@@ -31,7 +31,9 @@ policy, changed-path inventory, plan and any verified manifest and bound files. 
 extract the archive and use `local-policy.json`, `changed-paths.json`, `plan/evidence-plan.json`,
 `proof/evidence-manifest.json`, and `proof/artifacts/` with the same scope that produced the proof.
 Scratch is removed after successful retention and known cleanup. The validator tracks
-subprocess cleanup and the EvidenceHost cleanup result. Each `local` execution creates
+subprocess cleanup and the EvidenceHost cleanup result. Subprocess cleanup requires process
+exit and end-of-stream on both output pipes. The Git collector keeps draining excess output
+within the cleanup deadline after it stops retaining bytes. Each `local` execution creates
 `appsurface-local-evidence/run.pending-cleanup` beside the lock before starting and clears it after
 confirmed cleanup. If cleanup is unconfirmed or the validator exits abruptly, the marker blocks
 another `local` execution in that worktree, including one using `--output`. A blocked retry prints
@@ -93,8 +95,10 @@ The [C# Git collector](https://github.com/forge-trust/AppSurface/blob/main/tools
 `source-state.json` alongside `changed-paths.json`. Its `sourceDigest` is included in the derived
 `local-policy.json` policy ID, so the canonical plan and resulting manifest bind the exact local source
 state while preserving the checked-in rules and producer contracts. Local execution rechecks source and policy before the
-candidate build, after it, and after producer completion. Edits during execution fail the local gate; if
-producers already returned a manifest, its claim is downgraded to `ObservationOnly`. Keep output under
+candidate build, after it, and after producer completion. A completed producer claim starts as
+`ObservationOnly` on disk. The validator atomically replaces it with the gate-eligible manifest after
+checking cleanup, the artifact bytes, and the final source and policy state. Cancellation or failure
+before replacement leaves any written observation available for diagnosis. Keep output under
 ignored `TestResults` or outside the checkout: writing output into an unignored source directory changes
 the inventory and correctly invalidates the run. A local pass covers only the current OS; CI still owns
 its selected native supplement. The recorded source digest describes dirty local inputs; package source metadata
@@ -443,11 +447,9 @@ exercise real Git repositories and malformed inputs, and the
 [workflow contract tests](https://github.com/forge-trust/AppSurface/blob/main/Aspire/ForgeTrust.AppSurface.Aspire.Tests/RepositoryEvidenceWorkflowContractTests.cs)
 verify the CI integration using the existing .NET test project. This path requires only Git and .NET.
 
-`LocalEvidenceWorkflow` has internal package-command and execution delegates for deterministic orchestration
-tests. The execution delegate replaces only the `run` operation: policy planning, source snapshots and the
-final canonical manifest/artifact verification remain real. A nonzero delegate result fails the workflow;
-source drift after a completed execution downgrades its manifest to `ObservationOnly`. These seams do not
-change the executable's command-line inputs or permit production callers to supply their own claims.
+`LocalEvidenceWorkflow` has internal package-command and producer execution delegates for deterministic
+orchestration tests. The producer delegate writes artifacts and returns an unpublished manifest. Policy
+planning, source snapshots, artifact verification, and final manifest publication use the production path.
 
 Plans bind policy and normalized changed paths, not independent commit attestation. The workflow obtains
 the checkout, event inputs, candidate package and manifests within the current run; verification detects

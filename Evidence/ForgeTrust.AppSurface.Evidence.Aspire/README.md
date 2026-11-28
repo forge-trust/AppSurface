@@ -93,9 +93,11 @@ Cleanup clears a file's read-only attribute only after verifying the owned root 
 
 `EvidenceCommandRunner.RunAsync` launches explicit argv with an absolute working directory, optional environment overrides and a positive timeout of at most 4,294,967,294 milliseconds (the cancellation timer limit). Unsupported bounds are rejected before starting a process. Combined stdout/stderr capture defaults to 1 MiB (maximum 256 MiB). `EvidenceCommandResult.OutputTruncated` must prevent assertions that require complete output. Timeout and cancellation use the operating system's process-tree termination through .NET; stable `EvidenceCommandException.Code` values identify start, timeout, budget, capture, drain or cleanup failure without echoing argv, output or environment values. Commands must run in the foreground and keep their children within that lifetime. Deliberately detached daemons are unsupported: once a parent has exited, portable process-tree termination cannot guarantee recovery of escaped descendants. Inherited pipes that remain open fail the bounded drain and cannot produce a complete claim.
 
-Use `EvidenceCommandException.CleanupUnconfirmed` to recognize the stable `CleanupFailedCode`
-classification when command shutdown or output capture could not be confirmed. Keep resources the
-command may still use and report incomplete cleanup to the caller.
+Use `EvidenceCommandException.CleanupUnconfirmed` when command exit or output pipe closure could
+not be confirmed. The runner requires EOF on both pipes before it cancels capture. A faulted or
+canceled reader leaves cleanup unconfirmed even when the process has exited. The exception keeps
+the applicable diagnostic code, including `capture_failed` or `drain_timeout`. Keep resources
+the command may still use when this flag is set and report incomplete cleanup to the caller.
 
 Bind a workspace check to the request to enforce capacity while work runs:
 

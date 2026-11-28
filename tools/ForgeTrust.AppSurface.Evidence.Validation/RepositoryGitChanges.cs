@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
@@ -14,6 +15,7 @@ internal sealed class RepositoryGitChanges
 {
     private const int MaximumOutputBytes = 16 * 1024 * 1024;
     private const int MaximumErrorBytes = 64 * 1024;
+    private static readonly TimeSpan GitShutdownTimeout = TimeSpan.FromSeconds(5);
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     /// <summary>
@@ -312,15 +314,17 @@ internal sealed class RepositoryGitChanges
         process.StartInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
         if (!process.Start()) throw new InvalidOperationException("Could not start Git.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var captureCancellation = new CancellationTokenSource();
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
-        var output = ReadBounded(process.StandardOutput.BaseStream, MaximumOutputBytes, timeout);
-        var error = ReadBounded(process.StandardError.BaseStream, MaximumErrorBytes, timeout);
-        process.StandardInput.Close();
+        // Reader cancellation must not manufacture a successful drain while a child still holds a pipe.
+        var output = ReadBoundedAsync(process.StandardOutput.BaseStream, MaximumOutputBytes, timeout, captureCancellation.Token);
+        var error = ReadBoundedAsync(process.StandardError.BaseStream, MaximumErrorBytes, timeout, captureCancellation.Token);
+        var capture = Task.WhenAll(output, error);
         try
         {
+            process.StandardInput.Close();
             await process.WaitForExitAsync(timeout.Token);
-            var bytes = await output;
-            var stderr = await error;
+            var (bytes, stderr) = RequireCompleteOutput(await capture.WaitAsync(timeout.Token));
             if (process.ExitCode != 0) throw new InvalidOperationException("Git command failed: " + StrictUtf8.GetString(stderr));
             return bytes;
         }
@@ -328,49 +332,60 @@ internal sealed class RepositoryGitChanges
         {
             var deadlineExpired = timeout.IsCancellationRequested;
             timeout.Cancel();
-            if (!process.HasExited)
-            {
-                try { process.Kill(entireProcessTree: true); }
-                catch (InvalidOperationException) when (process.HasExited)
-                {
-                    // The owned process exited between HasExited and Kill; no process remains to terminate.
-                }
-            }
-            await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-            // Observe both readers even if one exceeded its budget. The original capture failure
-            // takes precedence over the cancellation used to terminate the owned Git process.
-            try { await Task.WhenAll(output, error).WaitAsync(TimeSpan.FromSeconds(5)); }
-            catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
-            {
-                // WhenAll observes both readers. Below, surface their original faults or the capture
-                // deadline rather than replacing that failure with the cancellation used for cleanup.
-            }
+            await EvidenceProcessShutdown.ConfirmAsync(process, [output, error], GitShutdownTimeout);
             ct.ThrowIfCancellationRequested();
-            if (output.IsFaulted) await output;
-            if (error.IsFaulted) await error;
+            RequireCompleteOutput(await capture);
             if (failure is OperationCanceledException && deadlineExpired)
                 throw new TimeoutException("Git collection exceeded its 30-second deadline.", failure);
             throw;
         }
+        finally
+        {
+            captureCancellation.Cancel();
+        }
     }
-    private static async Task<byte[]> ReadBounded(Stream stream, int maximumBytes, CancellationTokenSource lifetime)
+
+    private static (byte[] Output, byte[] Error) RequireCompleteOutput(byte[]?[] capture)
+    {
+        var output = capture[0];
+        var error = capture[1];
+        if (output is null || error is null)
+            throw new InvalidOperationException("Git output exceeded its configured size limit.");
+        return (output, error);
+    }
+
+    /// <summary>Captures bounded Git output, continuing to discard excess bytes until end-of-stream.</summary>
+    /// <param name="stream">The redirected Git output stream.</param>
+    /// <param name="maximumBytes">Maximum accepted payload size.</param>
+    /// <param name="commandLifetime">Command deadline canceled when reading fails.</param>
+    /// <param name="captureCancellationToken">Independent capture cancellation after cleanup is checked.</param>
+    /// <returns>The captured bytes, or null when the limit was exceeded and the pipe has closed.</returns>
+    internal static async Task<byte[]?> ReadBoundedAsync(Stream stream, int maximumBytes,
+        CancellationTokenSource commandLifetime, CancellationToken captureCancellationToken)
     {
         using var bytes = new MemoryStream();
         var buffer = ArrayPool<byte>.Shared.Rent(8192);
+        var limitExceeded = false;
         try
         {
             while (true)
             {
-                var length = Math.Min(buffer.Length, maximumBytes + 1 - (int)bytes.Length);
-                var read = await stream.ReadAsync(buffer.AsMemory(0, length), lifetime.Token);
-                if (read == 0) return bytes.ToArray();
-                if (bytes.Length + read > maximumBytes) throw new InvalidOperationException("Git output exceeded its configured size limit.");
+                var read = await stream.ReadAsync(buffer.AsMemory(), captureCancellationToken);
+                if (read == 0) return limitExceeded ? null : bytes.ToArray();
+                if (limitExceeded) continue;
+                if (bytes.Length + read > maximumBytes)
+                {
+                    // Preserve the overflow failure while leaving the reader alive to observe closure.
+                    limitExceeded = true;
+                    commandLifetime.Cancel();
+                    continue;
+                }
                 bytes.Write(buffer, 0, read);
             }
         }
-        catch
+        catch when (!captureCancellationToken.IsCancellationRequested)
         {
-            lifetime.Cancel();
+            commandLifetime.Cancel();
             throw;
         }
         finally { ArrayPool<byte>.Shared.Return(buffer); }
