@@ -208,6 +208,14 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     [CommandOption("solution", Description = "Solution supplied to the built-in coverage producer when the selected profile requires coverage.")]
     public string? SolutionPath { get; set; }
 
+    /// <summary>Gets or sets the built-in test producer configuration. Defaults to Release.</summary>
+    [CommandOption("configuration", Description = "Built-in test producer configuration (Release or Debug). Defaults to Release.")]
+    public string? Configuration { get; set; }
+
+    /// <summary>Gets or sets whether the built-in test producer restores with NuGet locked mode.</summary>
+    [CommandOption("locked-mode", Description = "Use NuGet locked mode when restoring projects for the built-in test producer.")]
+    public bool LockedMode { get; set; }
+
     /// <summary>Gets or sets a value indicating whether the run is informative only and cannot satisfy a gate.</summary>
     [CommandOption("observation-only", Description = "Emit an informational observation claim instead of a gate-eligible claim.")]
     public bool ObservationOnly { get; set; }
@@ -260,6 +268,16 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             EvidenceReuseCommandOptions.ValidateContext(Reuse, plan);
             TestEvidenceRunSupport.ValidateSelection(plan);
             var hasTestProducer = plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer);
+            if ((LockedMode || Configuration is not null) && !hasTestProducer)
+            {
+                throw new CommandException("--locked-mode and --configuration require a selected built-in test producer.");
+            }
+
+            if (Configuration is not (null or "Release" or "Debug"))
+            {
+                throw new CommandException("--configuration must be Release or Debug.");
+            }
+
             var testReports = new List<string>();
             string outputDirectory;
             try
@@ -390,6 +408,8 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             declaration.Id,
             new TestEvidenceProducerOptions(RepositoryRootResolver())
             {
+                Configuration = Configuration ?? TestEvidenceProducerOptions.DefaultConfiguration,
+                LockedMode = LockedMode,
                 DiagnosticsDirectory = Path.Join(OutputDirectory, "diagnostics"),
                 Progress = console.Error,
             });

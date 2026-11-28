@@ -348,7 +348,7 @@ internal static class TestEvidenceRunSupport
         TestRunReason.MultiTargetUnsupported => "This preview runs single-target projects only; declare a single-target test project. Rerunning unchanged cannot help.",
         TestRunReason.RunSettingsUnsupported => "Remove RunSettingsFilePath and VSTestSetting for this project or use other evidence; a run-settings file can select tests the policy does not name. Rerunning unchanged cannot help.",
         TestRunReason.UnsupportedRunner => "Microsoft.Testing.Platform is not supported in this preview (tracked in TODOS.md); use a VSTest project. Rerunning unchanged cannot help.",
-        TestRunReason.RestoreFailed => "Run the printed dotnet restore command and fix the feed or package error. Rerunning unchanged can help after an outage.",
+        TestRunReason.RestoreFailed => "Run the printed dotnet restore command and fix the feed, package, or lockfile error. Rerunning unchanged can help after an outage.",
         TestRunReason.BuildFailed => "Run the printed command and fix the build errors. Rerunning unchanged cannot help.",
         TestRunReason.DiscoveryFailed => "Run the printed listing command and compare its output with the documented shape. Rerunning unchanged can help only for a transient exit code.",
         TestRunReason.RunAborted => "The test host stopped without reporting a failed test; run the printed command to see why. Rerunning unchanged can help.",

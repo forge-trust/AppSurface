@@ -67,6 +67,12 @@ The built-in `test` producer runs the test projects a policy declares and closes
 
 **When to use it.** Use it for paths that have no production code to cover, such as workflows, scripts and release tooling, where the truthful evidence is that the tests exercising them ran. Use the `coverage` kind when a coverage threshold is the evidence. For resource-backed or browser tests, register your own producer in an [EvidenceHost](../ForgeTrust.AppSurface.Evidence.Aspire/README.md); the `test` kind is not available through a resource-backed profile.
 
+### Build configuration and locked restore
+
+The test producer defaults to `Release`. Use `appsurface evidence run --configuration Debug` for a project that needs Debug. The producer uses the same configuration for project evaluation, restore, build, discovery, and execution.
+
+For CI with committed NuGet lockfiles, add `--locked-mode` to `evidence run`. The test producer uses `dotnet restore --locked-mode`, then builds with `--no-restore` and discovers and executes tests with `--no-build`. If the project dependencies and lockfile disagree, restore fails before the project builds or tests, and the producer cannot close its assertion. Prepare and commit the applicable lockfiles before opting in. These options require a selected built-in `test` producer and apply to that producer's projects. See [NuGet lockfile behavior](https://learn.microsoft.com/en-us/nuget/consume-packages/package-references-in-project-files#restore-behavior-with-lock-file).
+
 ### First run
 
 Add this profile to `profiles` and this rule to `rules` in your [evidence policy](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#test-producer-declaration-preview). The only value to change is the project path.
@@ -171,7 +177,7 @@ evidence run: test producer 'tooling-tests' is incomplete for tests/Tooling.Test
       test
       Tooling.Tests.csproj
       ...
-  as one POSIX shell line: dotnet test Tooling.Tests.csproj -c Debug --no-build --nologo --disable-build-servers -nodeReuse:false -tl:off
+  as one POSIX shell line: dotnet test Tooling.Tests.csproj -c Release --no-build --nologo --disable-build-servers -nodeReuse:false -tl:off
 ```
 
 Compiler and test output are not shown and not kept, because they can contain test names. The one-line shell form is printed only when every argument can be quoted safely.
@@ -207,7 +213,7 @@ Each project gets exactly one reason: the first in this table that applies. `Una
 | <a id="reason-multitargetunsupported"></a>`MultiTargetUnsupported` | `Unavailable` | The project evaluates to more than one target framework. | This preview runs single-target projects only; declare a single-target test project. Rerunning unchanged cannot help. |
 | <a id="reason-runsettingsunsupported"></a>`RunSettingsUnsupported` | `Unavailable` | The project evaluates `RunSettingsFilePath` or `VSTestSetting`. | Remove RunSettingsFilePath and VSTestSetting for this project or use other evidence; a run-settings file can select tests the policy does not name. Rerunning unchanged cannot help. |
 | <a id="reason-unsupportedrunner"></a>`UnsupportedRunner` | `Unavailable` | The nearest `global.json` or `TestingPlatformDotnetTestSupport` selects a runner other than VSTest. | Microsoft.Testing.Platform is not supported in this preview (tracked in TODOS.md); use a VSTest project. Rerunning unchanged cannot help. |
-| <a id="reason-restorefailed"></a>`RestoreFailed` | `Unavailable` | `dotnet restore` failed. | Run the printed dotnet restore command and fix the feed or package error. Rerunning unchanged can help after an outage. |
+| <a id="reason-restorefailed"></a>`RestoreFailed` | `Unavailable` | `dotnet restore` failed. | Run the printed dotnet restore command and fix the feed, package, or lockfile error. Rerunning unchanged can help after an outage. |
 | <a id="reason-buildfailed"></a>`BuildFailed` | `Failed` | `dotnet build` failed, or the project could not be evaluated. | Run the printed command and fix the build errors. Rerunning unchanged cannot help. |
 | <a id="reason-discoveryfailed"></a>`DiscoveryFailed` | `Unavailable` | The listing exited non-zero (`ExitCode`), had an unrecognized shape (`ListingShapeUnrecognized`), or exceeded 8 MiB (`OutputTooLarge`). | Run the printed listing command and compare its output with the documented shape. Rerunning unchanged can help only for a transient exit code. |
 | <a id="reason-runaborted"></a>`RunAborted` | `Failed` | The test host stopped, or the run exited non-zero without reporting a failed test. | The test host stopped without reporting a failed test; run the printed command to see why. Rerunning unchanged can help. |
@@ -277,8 +283,8 @@ jq -e '.ClaimKind == "TargetedComplete" and .Eligibility == "PullRequestGate"' T
 `AmbiguousIdentity`, `MissingResult` and `UnexpectedResult` name no test, by design. To find it, run the two printed commands from the project directory and compare:
 
 ```bash
-dotnet test My.Tests.csproj -c Debug --no-build --list-tests --filter "<your filter>" | sort > listed.txt
-dotnet test My.Tests.csproj -c Debug --no-build --filter "<your filter>" --logger "trx;LogFileName=local.trx"
+dotnet test My.Tests.csproj -c Release --no-build --list-tests --filter "<your filter>" | sort > listed.txt
+dotnet test My.Tests.csproj -c Release --no-build --filter "<your filter>" --logger "trx;LogFileName=local.trx"
 ```
 
 A name that appears twice in `listed.txt` is ambiguous. A `testName` in the TRX file that is not in `listed.txt`, or the reverse, is the unexpected or missing one. The usual causes are theory rows with non-serializable data and long string arguments that xunit shortens to the same text.

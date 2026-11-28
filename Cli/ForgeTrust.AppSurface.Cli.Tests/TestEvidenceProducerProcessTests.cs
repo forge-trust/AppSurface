@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Xml.Linq;
+using CliFx;
+using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -234,6 +237,120 @@ public sealed class TestEvidenceProducerProcessTests
         Assert.Equal("discover", none.Projects[0].Phase);
     }
 
+    [Fact]
+    public async Task EvidenceRun_ShouldHonorLockedRestoreAndInvalidatePriorEvidenceOnLockDrift()
+    {
+        using var directory = TestDirectory.Create();
+        var repository = TestPathUtils.PathUnder(directory.Path, "repo");
+        var output = TestPathUtils.PathUnder(directory.Path, "evidence");
+        var projectPath = TestPathUtils.PathUnder(repository, "tests", "Fixture.Tests", "Fixture.Tests.csproj");
+        var projectDirectory = Path.GetDirectoryName(projectPath)!;
+        var lockFilePath = TestPathUtils.PathUnder(projectDirectory, "packages.lock.json");
+        var policyPath = TestPathUtils.PathUnder(directory.Path, "evidence.policy.json");
+        WriteFixtureProject(repository);
+
+        var project = new EvidenceTestProject("tests/Fixture.Tests/Fixture.Tests.csproj")
+        {
+            Filter = "FullyQualifiedName~Fixture.Tests.Sample.Pass|FullyQualifiedName~Hidden_marker_case",
+            MinimumTests = 3,
+        };
+        var policy = Policy(project);
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(policy));
+
+        var dotnetPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+        if (string.IsNullOrWhiteSpace(dotnetPath))
+        {
+            dotnetPath = "dotnet";
+        }
+
+        var lockResult = await new BoundedChildProcessRunner().RunAsync(
+            new ChildProcessRequest(
+                dotnetPath,
+                ["restore", Path.GetFileName(projectPath), "-property:RestorePackagesWithLockFile=true", "-property:Configuration=Release"],
+                projectDirectory),
+            CancellationToken.None);
+        Assert.True(lockResult.Started, lockResult.StandardError);
+        Assert.True(lockResult.ExitCode == 0, lockResult.StandardOutput + lockResult.StandardError);
+        Assert.True(File.Exists(lockFilePath));
+
+        var lockBytes = await File.ReadAllBytesAsync(lockFilePath);
+        using (var lockFile = JsonDocument.Parse(lockBytes))
+        {
+            var lockedXunitAssert = lockFile.RootElement
+                .GetProperty("dependencies")
+                .GetProperty("net10.0")
+                .GetProperty("xunit.assert");
+            Assert.Equal("Transitive", lockedXunitAssert.GetProperty("type").GetString());
+            Assert.Equal("2.9.3", lockedXunitAssert.GetProperty("resolved").GetString());
+        }
+
+        TestEvidenceProducer? lastProducer = null;
+        async Task RunEvidenceAsync()
+        {
+            using var console = new FakeInMemoryConsole();
+            var command = new EvidenceRunCommand(
+                new EvidenceCliWorkflow(new EvidencePlanner()),
+                CoverageEvidenceProducerTests.CreateUnusedProducer())
+            {
+                PolicyPath = policyPath,
+                Paths = ["scripts/build.sh"],
+                OutputDirectory = output,
+                LockedMode = true,
+                RepositoryRootResolver = () => repository,
+                StepSummaryPathResolver = () => null,
+                TestProducerFactory = (id, options) => lastProducer = new TestEvidenceProducer(
+                    id,
+                    options with
+                    {
+                        DotnetPath = dotnetPath,
+                        ScratchRoot = TestPathUtils.PathUnder(directory.Path, "scratch"),
+                    }),
+            };
+
+            await command.ExecuteAsync(console);
+        }
+
+        await RunEvidenceAsync();
+
+        var successfulProducer = Assert.IsType<TestEvidenceProducer>(lastProducer);
+        var successfulProject = Assert.Single(successfulProducer.LastProjects);
+        Assert.Equal(TestRunReason.Complete, successfulProject.Reason);
+        Assert.Equal("reconcile", successfulProject.Phase);
+        Assert.Equal(lockBytes, await File.ReadAllBytesAsync(lockFilePath));
+
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+        var planPath = TestPathUtils.PathUnder(output, "evidence-plan.json");
+        var manifestPath = TestPathUtils.PathUnder(output, "evidence-manifest.json");
+        var successfulVerification = await workflow.VerifyAsync(planPath, manifestPath, CancellationToken.None);
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, successfulVerification.Manifest.ClaimKind);
+        Assert.Equal(["tests-complete"], successfulVerification.Manifest.ClosedObligationIds);
+
+        var projectDocument = XDocument.Load(projectPath);
+        var xunitReference = projectDocument
+            .Descendants("PackageReference")
+            .Single(element => (string?)element.Attribute("Include") == "xunit");
+        xunitReference.AddAfterSelf(new XElement(
+            "PackageReference",
+            new XAttribute("Include", "xunit.assert"),
+            new XAttribute("Version", "2.9.3")));
+        projectDocument.Save(projectPath);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(RunEvidenceAsync);
+
+        Assert.StartsWith("ASEVD211", exception.Message, StringComparison.Ordinal);
+        var failedProducer = Assert.IsType<TestEvidenceProducer>(lastProducer);
+        var failedProject = Assert.Single(failedProducer.LastProjects);
+        Assert.Equal(TestRunReason.RestoreFailed, failedProject.Reason);
+        Assert.Equal("restore", failedProject.Phase);
+        Assert.Equal(TestRunCounts.Zero, failedProject.Counts);
+        Assert.Equal(lockBytes, await File.ReadAllBytesAsync(lockFilePath));
+
+        var failedVerification = await workflow.VerifyAsync(planPath, manifestPath, CancellationToken.None);
+        Assert.Equal(EvidenceClaimKind.None, failedVerification.Manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, failedVerification.Manifest.Eligibility);
+        Assert.Empty(failedVerification.Manifest.ClosedObligationIds);
+    }
+
     private static async Task<(EvidenceProducerResult Result, IReadOnlyList<TestProjectOutcome> Projects, string Progress, string Scratch)> RunAsync(
         string repository,
         string output,
@@ -263,7 +380,13 @@ public sealed class TestEvidenceProducerProcessTests
     private static EvidenceProducerContext Context(string repository, string output, EvidenceTestProject project)
     {
         _ = repository;
-        var declaration = new EvidenceProducerDeclaration(
+        var declaration = Declaration(project);
+        var plan = new EvidencePlanner().Resolve(Policy(declaration), [new NormalizedDiffPath("scripts/build.sh")]);
+        return new EvidenceProducerContext(plan, declaration, TimeProvider.System, new EvidenceArtifactWriter(declaration, Path.Join(output, "artifacts", "fixture-tests")));
+    }
+
+    private static EvidenceProducerDeclaration Declaration(EvidenceTestProject project) =>
+        new(
             "fixture-tests",
             EvidenceTestProducerContract.Kind,
             "1.0.0",
@@ -274,7 +397,11 @@ public sealed class TestEvidenceProducerProcessTests
         {
             Test = new EvidenceTestDeclaration([project]),
         };
-        var policy = new EvidencePolicy(
+
+    private static EvidencePolicy Policy(EvidenceTestProject project) => Policy(Declaration(project));
+
+    private static EvidencePolicy Policy(EvidenceProducerDeclaration declaration) =>
+        new(
             "sample",
             "1",
             "tests",
@@ -287,9 +414,6 @@ public sealed class TestEvidenceProducerProcessTests
                     [new EvidenceObligation("tests-complete", "tooling", "Selected tests ran and passed.", ["fixture-tests"], EvidenceTestProducerContract.AssertionId)]),
             ],
             []);
-        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("scripts/build.sh")]);
-        return new EvidenceProducerContext(plan, declaration, TimeProvider.System, new EvidenceArtifactWriter(declaration, Path.Join(output, "artifacts", "fixture-tests")));
-    }
 
     private static ChildProcessRequest Shell(string workingDirectory, string script) => new("/bin/sh", ["-c", script], workingDirectory);
 

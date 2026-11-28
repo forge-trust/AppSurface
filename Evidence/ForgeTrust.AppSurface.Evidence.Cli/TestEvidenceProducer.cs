@@ -12,12 +12,18 @@ namespace ForgeTrust.AppSurface.Evidence.Cli;
 /// <param name="RepositoryRoot">Repository root that declared project paths are relative to and must stay inside.</param>
 internal sealed record TestEvidenceProducerOptions(string RepositoryRoot)
 {
+    /// <summary>The default build configuration for the built-in test producer.</summary>
+    public const string DefaultConfiguration = "Release";
+
     /// <summary>Gets the private scratch directory; <see langword="null"/> means a new unique directory under the system temporary directory.</summary>
     /// <remarks>Results files hold test names, so scratch is never placed under the evidence output and is deleted on every exit.</remarks>
     public string? ScratchRoot { get; init; }
 
-    /// <summary>Gets the build configuration. Defaults to <c>Debug</c>.</summary>
-    public string Configuration { get; init; } = "Debug";
+    /// <summary>Gets the build configuration. Defaults to <c>Release</c>.</summary>
+    public string Configuration { get; init; } = DefaultConfiguration;
+
+    /// <summary>Gets whether NuGet restore uses locked mode. Defaults to <see langword="false"/>.</summary>
+    public bool LockedMode { get; init; }
 
     /// <summary>Gets the <c>dotnet</c> host used for every child process. Defaults to <c>dotnet</c> on PATH.</summary>
     public string DotnetPath { get; init; } = "dotnet";
@@ -92,7 +98,7 @@ internal sealed class TestEvidenceProducer : IEvidenceProducer
     /// <param name="id">The producer declaration id this instance handles.</param>
     /// <param name="options">Host options.</param>
     public TestEvidenceProducer(string id, TestEvidenceProducerOptions options)
-        : this(id, options, new DotnetCliTestRunSource(new BoundedChildProcessRunner(), options.DotnetPath, options.Configuration))
+        : this(id, options, new DotnetCliTestRunSource(new BoundedChildProcessRunner(), options.DotnetPath, options.Configuration, options.LockedMode))
     {
     }
 
