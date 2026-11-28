@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 from threading import Timer
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 REPO = "forge-trust/AppSurface"
 WORKFLOW = ".github/workflows/evidence-profile-replay.yml"
@@ -362,20 +362,21 @@ def main():
     parser.add_argument("--workflow-sha", required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
+    valid_workflow_sha = re.fullmatch(r"[a-f0-9]{40}", args.workflow_sha) is not None
     report = {
         "schemaVersion": 1, "mode": "untimed", "replayRun": args.run, "replayAttempt": args.attempt,
-        "workflowRevision": args.workflow_sha, "parityVerified": False,
+        "workflowRevision": args.workflow_sha if valid_workflow_sha else None, "parityVerified": False,
         "timingSamplesAdmitted": 0, "timingAdmission": "blocked",
     }
     try:
         require(args.run > 0 and args.attempt > 0, "run-and-attempt")
-        require(re.fullmatch(r"[a-f0-9]{40}", args.workflow_sha) is not None, "workflow-sha")
+        require(valid_workflow_sha, "workflow-sha")
         require(re.fullmatch(r"[a-f0-9]{64}", args.ordinary_sha256) is not None, "ordinary-sha")
         reference = read_reference(args.ordinary_reference, args.ordinary_sha256)
         report.update(verify(reference, args.run, args.attempt, args.workflow_sha))
     except InvalidEvidence as error:
         report["error"] = str(error)
-    except (KeyError, ValueError, OSError, subprocess.SubprocessError):
+    except (BadZipFile, KeyError, TypeError, ValueError, OSError, RecursionError, subprocess.SubprocessError):
         report["error"] = "invalid-or-unavailable-evidence"
     with args.report.open("x", encoding="utf-8") as output:
         json.dump(report, output, indent=2)
