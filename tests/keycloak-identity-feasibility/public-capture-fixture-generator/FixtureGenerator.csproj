@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ForgeTrust.AppSurface.Auth.Keycloak.Tests</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/ForgeTrust.AppSurface.Auth.Keycloak.csproj" />
+    <Compile Include="../../../Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/Tests/SecurityRecipeFixture.cs" Link="SecurityRecipeFixture.cs" />
+    <Compile Include="../../../Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/Tests/CompleteRecipeFixture.cs" Link="CompleteRecipeFixture.cs" />
+  </ItemGroup>
+</Project>

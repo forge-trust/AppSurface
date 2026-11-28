@@ -1,0 +1,74 @@
+[
+  {
+    "id": "source-index",
+    "file": "blobs/bb011d4aef9347ca02ddf024fc8275e279c7d9480dc5b13c9451f31b32bf9dc9",
+    "sha256": "bb011d4aef9347ca02ddf024fc8275e279c7d9480dc5b13c9451f31b32bf9dc9",
+    "maxBytes": 299
+  },
+  {
+    "id": "source-archive",
+    "file": "blobs/0c44f0d5dedfa976000ca2abf332d8f5ee9b93dc153a1ea98b61d2a23d3827d5",
+    "sha256": "0c44f0d5dedfa976000ca2abf332d8f5ee9b93dc153a1ea98b61d2a23d3827d5",
+    "maxBytes": 12800
+  },
+  {
+    "id": "runtime-index",
+    "file": "blobs/bb011d4aef9347ca02ddf024fc8275e279c7d9480dc5b13c9451f31b32bf9dc9",
+    "sha256": "bb011d4aef9347ca02ddf024fc8275e279c7d9480dc5b13c9451f31b32bf9dc9",
+    "maxBytes": 299
+  },
+  {
+    "id": "runtime-archive",
+    "file": "blobs/0c44f0d5dedfa976000ca2abf332d8f5ee9b93dc153a1ea98b61d2a23d3827d5",
+    "sha256": "0c44f0d5dedfa976000ca2abf332d8f5ee9b93dc153a1ea98b61d2a23d3827d5",
+    "maxBytes": 12800
+  },
+  {
+    "id": "frontend-index",
+    "file": "blobs/bb011d4aef9347ca02ddf024fc8275e279c7d9480dc5b13c9451f31b32bf9dc9",
+    "sha256": "bb011d4aef9347ca02ddf024fc8275e279c7d9480dc5b13c9451f31b32bf9dc9",
+    "maxBytes": 299
+  },
+  {
+    "id": "frontend-archive",
+    "file": "blobs/0c44f0d5dedfa976000ca2abf332d8f5ee9b93dc153a1ea98b61d2a23d3827d5",
+    "sha256": "0c44f0d5dedfa976000ca2abf332d8f5ee9b93dc153a1ea98b61d2a23d3827d5",
+    "maxBytes": 12800
+  },
+  {
+    "id": "release",
+    "file": "blobs/c0b432c2de46e07a0b7e49297a891e23e9c50b56dff5362a7cfd773c63b2540c",
+    "sha256": "c0b432c2de46e07a0b7e49297a891e23e9c50b56dff5362a7cfd773c63b2540c",
+    "maxBytes": 880
+  },
+  {
+    "id": "keyring",
+    "file": "blobs/ac6ea6ec5aced52fa598272ddf94719aa2e6aaa77b2d866c6a03d13f316e7ec7",
+    "sha256": "ac6ea6ec5aced52fa598272ddf94719aa2e6aaa77b2d866c6a03d13f316e7ec7",
+    "maxBytes": 586
+  },
+  {
+    "id": "package-index",
+    "file": "blobs/ba7510d9b3e5bf21d51b72ccf74c9d6c830ac0169f6eb8381124bcb6d9171ab1",
+    "sha256": "ba7510d9b3e5bf21d51b72ccf74c9d6c830ac0169f6eb8381124bcb6d9171ab1",
+    "maxBytes": 330
+  },
+  {
+    "id": "openssl",
+    "file": "blobs/09eae5b6e4f6f3cdda7f020a4de3d0be08f853cc0b99925417a619dd83ad9e98",
+    "sha256": "09eae5b6e4f6f3cdda7f020a4de3d0be08f853cc0b99925417a619dd83ad9e98",
+    "maxBytes": 424
+  },
+  {
+    "id": "openssl-provider-legacy",
+    "file": "blobs/c77fef535c34eb5aa6dfa57201b4751290d81f9a502dea306b78ae55744f3d06",
+    "sha256": "c77fef535c34eb5aa6dfa57201b4751290d81f9a502dea306b78ae55744f3d06",
+    "maxBytes": 614
+  },
+  {
+    "id": "libssl3t64",
+    "file": "blobs/800cfa8d91cf5f979a487ec3c936c2aa17c50d32caf713093474fc868fc34019",
+    "sha256": "800cfa8d91cf5f979a487ec3c936c2aa17c50d32caf713093474fc868fc34019",
+    "maxBytes": 584
+  }
+]

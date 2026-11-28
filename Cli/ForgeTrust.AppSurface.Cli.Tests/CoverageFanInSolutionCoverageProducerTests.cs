@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Coverage;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Validation;
@@ -140,6 +142,133 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             Assert.Single(commands, command => command.Arguments.Contains("gate"));
             Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
         });
+    }
+
+    [Fact]
+    public async Task CollectAsync_BindsExactKeycloakCompilerSymbolsToSameRunReceipt()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            await fixture.CreateKeycloakCompilerInputsAsync();
+            var collection = TestPathUtils.PathUnder(fixture.Root, "collection");
+            var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, collection)
+            { IncludeKeycloakNativeCoverage = true };
+            var collector = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            await collector.CollectAsync(CancellationToken.None);
+
+            var symbolsDirectory = TestPathUtils.PathUnder(collection, "coverage", "compiler-symbols");
+            var assemblyPaths = global::KeycloakCoverageCompilerInputs.AssemblyPaths(symbolsDirectory);
+            Assert.All(assemblyPaths, assembly =>
+            {
+                Assert.True(File.Exists(assembly));
+                Assert.True(File.Exists(Path.ChangeExtension(assembly, ".pdb")));
+            });
+            Assert.Equal(6, Directory.EnumerateFileSystemEntries(symbolsDirectory).Count());
+            using var receipt = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                TestPathUtils.PathUnder(collection, "coverage", "collection-receipt.json")));
+            Assert.Equal(2, receipt.RootElement.GetProperty("SchemaVersion").GetInt32());
+            var hashes = receipt.RootElement.GetProperty("CompilerSymbols");
+            Assert.Equal(6, hashes.EnumerateObject().Count());
+            foreach (var source in Directory.EnumerateFiles(symbolsDirectory))
+            {
+                var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(source)));
+                Assert.Equal(digest, hashes.GetProperty(Path.GetFileName(source)).GetString());
+            }
+
+            var run = new[] { "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT" }
+                .ToDictionary(key => key, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
+            await SolutionCoverageHandoff.ImportAsync(collection, TestPathUtils.PathUnder(fixture.Root, "imported", "coverage"),
+                new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
+                requireKeycloakNativeCoverage: true);
+            Assert.Equal(6, Directory.EnumerateFileSystemEntries(
+                TestPathUtils.PathUnder(fixture.Root, "imported", "coverage", "compiler-symbols")).Count());
+
+            await File.AppendAllTextAsync(TestPathUtils.PathUnder(symbolsDirectory, Path.GetFileName(assemblyPaths[0])), "changed");
+            await Assert.ThrowsAsync<InvalidDataException>(() => SolutionCoverageHandoff.ImportAsync(collection,
+                TestPathUtils.PathUnder(fixture.Root, "tampered", "coverage"),
+                new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
+                requireKeycloakNativeCoverage: true));
+        });
+    }
+
+    [Theory]
+    [InlineData("missing-entry")]
+    [InlineData("extra-entry")]
+    [InlineData("linked-file")]
+    [InlineData("oversized-file")]
+    [InlineData("legacy-v1")]
+    [InlineData("missing-hashes")]
+    [InlineData("unbound-legacy-symbols")]
+    public async Task ImportAsync_RejectsInvalidCompilerSymbolHandoff(string defect)
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            await fixture.CreateKeycloakCompilerInputsAsync();
+            var collection = TestPathUtils.PathUnder(fixture.Root, "collection");
+            var coverage = TestPathUtils.PathUnder(collection, "coverage");
+            Directory.CreateDirectory(coverage);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(coverage, "coverage.cobertura.xml"), "<coverage />");
+            await fixture.WriteCoverageAsync(TestPathUtils.PathUnder(coverage, "timings.json"));
+            await SolutionCoverageHandoff.StageCompilerSymbolsAsync(fixture.Root, coverage, "Release", CancellationToken.None);
+            var run = new[] { "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT" }
+                .ToDictionary(key => key, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
+            await SolutionCoverageHandoff.WriteAsync(coverage,
+                new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
+                includeKeycloakNativeCoverage: true);
+
+            var symbols = TestPathUtils.PathUnder(coverage, "compiler-symbols");
+            var first = Directory.EnumerateFiles(symbols).First();
+            switch (defect)
+            {
+                case "missing-entry": File.Delete(first); break;
+                case "extra-entry": await File.WriteAllTextAsync(TestPathUtils.PathUnder(symbols, "extra.dll"), "extra"); break;
+                case "linked-file":
+                    File.Delete(first);
+                    File.CreateSymbolicLink(first, TestPathUtils.PathUnder(fixture.Root, "linked-target"));
+                    await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture.Root, "linked-target"), "linked");
+                    break;
+                case "oversized-file": await File.WriteAllBytesAsync(first, new byte[1024 * 1024 + 1]); break;
+                case "legacy-v1":
+                case "missing-hashes":
+                case "unbound-legacy-symbols":
+                    var receiptPath = TestPathUtils.PathUnder(coverage, "collection-receipt.json");
+                    var receipt = JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!.AsObject();
+                    if (defect != "missing-hashes") receipt["SchemaVersion"] = 1;
+                    if (defect != "legacy-v1") receipt.Remove("CompilerSymbols");
+                    await File.WriteAllTextAsync(receiptPath, receipt.ToJsonString());
+                    break;
+            }
+
+            await Assert.ThrowsAsync<InvalidDataException>(() => SolutionCoverageHandoff.ImportAsync(collection,
+                TestPathUtils.PathUnder(fixture.Root, "imported", "coverage"),
+                new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
+                requireKeycloakNativeCoverage: defect != "unbound-legacy-symbols"));
+        });
+    }
+
+    [Fact]
+    public async Task StageCompilerSymbolsAsync_LeavesAnExistingSymbolDirectoryUntouched()
+    {
+        using var fixture = new Fixture();
+        await fixture.CreateKeycloakCompilerInputsAsync();
+        var coverage = TestPathUtils.PathUnder(fixture.Root, "coverage");
+        var symbols = TestPathUtils.PathUnder(coverage, "compiler-symbols");
+        Directory.CreateDirectory(symbols);
+        var sentinel = TestPathUtils.PathUnder(symbols, "retained.txt");
+        await File.WriteAllTextAsync(sentinel, "caller owned");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            SolutionCoverageHandoff.StageCompilerSymbolsAsync(fixture.Root, coverage, "Release", CancellationToken.None));
+
+        Assert.Equal(sentinel, Assert.Single(Directory.EnumerateFileSystemEntries(symbols)));
+        Assert.Equal("caller owned", await File.ReadAllTextAsync(sentinel));
     }
 
     [Fact]
@@ -871,6 +1000,31 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     }
 
     [Fact]
+    public async Task ProduceAsync_RejectsBaselineOnlyCapturesWhenKeycloakIsSelected()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            await fixture.CreateKeycloakCompilerInputsAsync();
+            var settings = fixture.NativeSettings(NativeV3DiffBase) with { NativeCoverageContractVersion = 3 };
+            fixture.CreateNativeCaptureDirectories(settings);
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(settings with { IncludeKeycloakNativeCoverage = true }, async (request, _) =>
+            {
+                commands.Add(request);
+                await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            await AssertFailedWithoutClaimsAsync(fixture, result, "native-fan-in");
+            Assert.Single(commands, command => command.Arguments.Contains("gate"));
+            Assert.DoesNotContain(commands, command => command.Arguments.Contains("fanin"));
+        });
+    }
+
+    [Fact]
     public async Task ProduceAsync_RejectsIncompleteNativeWorkflowProvenanceBeforeCapture()
     {
         using var fixture = new Fixture();
@@ -991,18 +1145,24 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     }
 
     [Theory]
-    [InlineData("measured")]
-    [InlineData("both-not-applicable")]
-    [InlineData("mixed")]
-    [InlineData("exact-thresholds")]
-    [InlineData("repeating-ratio")]
-    [InlineData("primary-below-threshold")]
-    public async Task ProduceAsync_AcceptsVerifiedNativeV3ApplicabilityAndComposedThresholds(string scenario)
+    [InlineData("measured", false)]
+    [InlineData("measured", true)]
+    [InlineData("both-not-applicable", false)]
+    [InlineData("mixed", false)]
+    [InlineData("exact-thresholds", false)]
+    [InlineData("repeating-ratio", false)]
+    [InlineData("primary-below-threshold", false)]
+    public async Task ProduceAsync_AcceptsVerifiedNativeV3ApplicabilityAndComposedThresholds(string scenario, bool includeKeycloak)
     {
         using var fixture = new Fixture();
         await WithWorkflowAsync(async () =>
         {
-            var settings = fixture.NativeSettings(NativeV3DiffBase) with { NativeCoverageContractVersion = 3 };
+            var settings = fixture.NativeSettings(NativeV3DiffBase) with
+            {
+                NativeCoverageContractVersion = 3,
+                IncludeKeycloakNativeCoverage = includeKeycloak,
+            };
+            if (includeKeycloak) await fixture.CreateKeycloakCompilerInputsAsync();
             fixture.CreateNativeCaptureDirectories(settings);
             var commands = new List<EvidenceCommandRequest>();
             var producer = fixture.CreateWithSettings(settings, async (request, _) =>
@@ -1016,7 +1176,10 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                     Assert.Equal(settings.NativeCoverageDirectory, ValueAfter(request.Arguments, "--native-inputs"));
                     Assert.Equal("3", ValueAfter(request.Arguments, "--contract-version"));
                     Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(request.Arguments, "--diff-policy-id"));
-                    await fixture.WriteNativeV3ProofAsync(ValueAfter(request.Arguments, "--output"), scenario);
+                    await fixture.WriteNativeV3ProofAsync(ValueAfter(request.Arguments, "--output"), scenario,
+                        includeKeycloak
+                            ? CoverageFanInReportProfiles.CoverletCoberturaAsync
+                            : CoverageFanInReportProfiles.CoverletCobertura);
                 }
                 else await fixture.CompleteCommandAsync(request);
                 return Success();
@@ -1026,19 +1189,26 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
 
             Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
             Assert.Equal(["coverage/solution-complete@1", "coverage/thresholds@1"], result.SatisfiedAssertionIds);
-            Assert.Equal(3, Directory.GetDirectories(settings.NativeCoverageDirectory!).Length);
+            Assert.Equal(includeKeycloak ? 5 : 3, Directory.GetDirectories(settings.NativeCoverageDirectory!).Length);
             Assert.Single(commands, command => command.Arguments.Contains("--solution"));
             var fanIn = Assert.Single(commands, command => command.Arguments.Contains("fanin"));
             Assert.Equal("3", ValueAfter(fanIn.Arguments, "--contract-version"));
             Assert.Equal(NativeV3DiffBase, ValueAfter(fanIn.Arguments, "--diff-base"));
             Assert.Equal("appsurface-visual-baseline-png-v1", ValueAfter(fanIn.Arguments, "--diff-policy-id"));
+            if (includeKeycloak)
+                Assert.Equal("true", ValueAfter(fanIn.Arguments, "--include-keycloak-native"));
+            else
+                Assert.DoesNotContain("--include-keycloak-native", fanIn.Arguments);
 
             var fanInOutput = Path.Join(fixture.Output, "coverage-fanin");
             using var applicability = JsonDocument.Parse(await File.ReadAllBytesAsync(
                 Path.Join(fanInOutput, "accepted", "patch-applicability.json")));
             var claim = applicability.RootElement;
             Assert.Equal(3, claim.GetProperty("schemaVersion").GetInt32());
-            Assert.Equal("coverlet-collector-cobertura-v1", claim.GetProperty("reportProfileId").GetString());
+            Assert.Equal(includeKeycloak
+                    ? CoverageFanInReportProfiles.CoverletCoberturaAsync
+                    : CoverageFanInReportProfiles.CoverletCobertura,
+                claim.GetProperty("reportProfileId").GetString());
             using (var metadata = JsonDocument.Parse(await File.ReadAllBytesAsync(
                 Path.Join(fanInOutput, "accepted", "diff-metadata.json"))))
                 Assert.Equal("appsurface-visual-baseline-png-v1", metadata.RootElement.GetProperty("diffPolicyId").GetString());
@@ -1273,6 +1443,60 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         finally { foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value); }
     }
 
+    [Fact]
+    public async Task ProduceAsync_PassesImportedKeycloakCompilerSymbolsAndRequiresAsyncReportProfile()
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            await fixture.CreateKeycloakCompilerInputsAsync();
+            var collection = TestPathUtils.PathUnder(fixture.Root, "collection");
+            var collectionCoverage = TestPathUtils.PathUnder(collection, "coverage");
+            Directory.CreateDirectory(collectionCoverage);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(collectionCoverage, "coverage.cobertura.xml"), "<coverage />");
+            await fixture.WriteCoverageAsync(TestPathUtils.PathUnder(collectionCoverage, "timings.json"));
+            await SolutionCoverageHandoff.StageCompilerSymbolsAsync(fixture.Root, collectionCoverage, "Release", CancellationToken.None);
+            var run = new[] { "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT" }
+                .ToDictionary(key => key, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
+            await SolutionCoverageHandoff.WriteAsync(collectionCoverage,
+                new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
+                includeKeycloakNativeCoverage: true);
+
+            var settings = fixture.NativeSettings(NativeV3DiffBase) with
+            {
+                NativeCoverageContractVersion = 3,
+                IncludeKeycloakNativeCoverage = true,
+                CoverageCollectionDirectory = collection,
+            };
+            fixture.CreateNativeCaptureDirectories(settings);
+            var commands = new List<EvidenceCommandRequest>();
+            var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+            {
+                commands.Add(request);
+                if (request.Arguments.Contains("fanin"))
+                {
+                    Assert.Equal("true", ValueAfter(request.Arguments, "--include-keycloak-native"));
+                    Assert.Equal(TestPathUtils.PathUnder(fixture.Output, "coverage", "compiler-symbols"),
+                        ValueAfter(request.Arguments, "--primary-compiler-symbols"));
+                    await fixture.WriteNativeV3ProofAsync(ValueAfter(request.Arguments, "--output"), "success",
+                        CoverageFanInReportProfiles.CoverletCoberturaAsync);
+                }
+                else await fixture.CompleteCommandAsync(request);
+                return Success();
+            });
+
+            var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+            Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+            var fanIn = Assert.Single(commands, command => command.Arguments.Contains("fanin"));
+            Assert.Equal("3", ValueAfter(fanIn.Arguments, "--contract-version"));
+            using var applicability = JsonDocument.Parse(await File.ReadAllBytesAsync(
+                TestPathUtils.PathUnder(fixture.Output, "coverage-fanin", "accepted", "patch-applicability.json")));
+            Assert.Equal(CoverageFanInReportProfiles.CoverletCoberturaAsync,
+                applicability.RootElement.GetProperty("reportProfileId").GetString());
+        });
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("relative-cli")]
@@ -1377,13 +1601,28 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         public RepositoryCheckSettings NativeSettings(string? diffBase, string? diffFile = null) =>
             new(_root, _dotnet, _output, diffBase, TestPathUtils.PathUnder(_root, "native-captures"), diffFile, _dotnet);
 
-        public void CreateNativeCaptureDirectories(RepositoryCheckSettings settings)
+        public async Task CreateKeycloakCompilerInputsAsync()
         {
-            foreach (var platform in new[] { "linux", "windows", "darwin" })
-                Directory.CreateDirectory(TestPathUtils.PathUnder(settings.NativeCoverageDirectory!, platform));
+            var testOutput = global::KeycloakCoverageCompilerInputs.TestOutput(_root, "Release");
+            Directory.CreateDirectory(testOutput);
+            foreach (var assembly in global::KeycloakCoverageCompilerInputs.AssemblyPaths(testOutput))
+            {
+                await File.WriteAllBytesAsync(assembly, [1, 2, 3, 4]);
+                await File.WriteAllBytesAsync(Path.ChangeExtension(assembly, ".pdb"), [5, 6, 7, 8]);
+            }
         }
 
-        public async Task WriteNativeV3ProofAsync(string output, string scenario)
+        public void CreateNativeCaptureDirectories(RepositoryCheckSettings settings)
+        {
+            string[] producers = settings.IncludeKeycloakNativeCoverage
+                ? ["linux", "windows", "darwin", "darwin-arm64-keycloak", "linux-arm64-keycloak"]
+                : ["linux", "windows", "darwin"];
+            foreach (var producer in producers)
+                Directory.CreateDirectory(TestPathUtils.PathUnder(settings.NativeCoverageDirectory!, producer));
+        }
+
+        public async Task WriteNativeV3ProofAsync(string output, string scenario,
+            string reportProfileId = "coverlet-collector-cobertura-v1")
         {
             // This command-orchestration fixture supplies the installed adapter's retained v3 receipt shape.
             var accepted = Path.Join(output, "accepted");
@@ -1523,7 +1762,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             var applicabilityBytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
                 schemaVersion = scenario == "applicability-schema-version" ? 2 : 3,
-                reportProfileId = scenario == "applicability-report-profile" ? "another-profile" : "coverlet-collector-cobertura-v1",
+                reportProfileId = scenario == "applicability-report-profile" ? "another-profile" : reportProfileId,
                 policyDigest = scenario == "applicability-policy-digest" ? "another-policy" : "policy",
                 source = claimSource,
                 run = claimRun,

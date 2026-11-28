@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.Auth.Keycloak;
+
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 /// <summary>
@@ -8,7 +10,7 @@ public static class AppSurfaceKeycloakDiagnosticCodes
     /// <summary>
     /// The configured realm, client, user, path, URI, or port option is invalid.
     /// </summary>
-    public const string InvalidOptions = "ASKEYC001";
+    public const string InvalidOptions = KeycloakBaselineDiagnosticCodes.InvalidOptions;
 
     /// <summary>
     /// A fixed local port is already occupied before the AppHost graph starts.
@@ -18,22 +20,22 @@ public static class AppSurfaceKeycloakDiagnosticCodes
     /// <summary>
     /// Keycloak OpenID metadata could not be reached before the bounded timeout.
     /// </summary>
-    public const string MetadataUnavailable = "ASKEYC003";
+    public const string MetadataUnavailable = KeycloakBaselineDiagnosticCodes.MetadataUnavailable;
 
     /// <summary>
     /// Keycloak OpenID metadata was reachable but did not match the expected realm.
     /// </summary>
-    public const string MetadataInvalid = "ASKEYC004";
+    public const string MetadataInvalid = KeycloakBaselineDiagnosticCodes.MetadataInvalid;
 
     /// <summary>
     /// Generated realm import evidence is missing expected client, redirect, or user data.
     /// </summary>
-    public const string RealmEvidenceInvalid = "ASKEYC005";
+    public const string RealmEvidenceInvalid = KeycloakBaselineDiagnosticCodes.RealmEvidenceInvalid;
 
     /// <summary>
     /// The Keycloak authorization endpoint rejected the configured public client or redirect URI.
     /// </summary>
-    public const string AuthorizationChallengeInvalid = "ASKEYC006";
+    public const string AuthorizationChallengeInvalid = KeycloakBaselineDiagnosticCodes.AuthorizationChallengeInvalid;
 
     /// <summary>
     /// Login-theme configuration or its immutable image reference is invalid.
@@ -109,4 +111,40 @@ public static class AppSurfaceKeycloakDiagnosticCodes
     /// A local seed name, predecessor, factory result, or secret binding is invalid.
     /// </summary>
     public const string LocalSeedInvalid = "ASKEYC024";
+
+    /// <summary>Local Keycloak registration was requested for an unsupported Aspire operation.</summary>
+    public const string UnsupportedOperation = "ASKEYC025";
+
+    /// <summary>The AppHost environment was not explicitly permitted for local identity execution.</summary>
+    public const string UnsupportedEnvironment = "ASKEYC026";
+
+    /// <summary>Typed administrator, client or provider bindings do not match the frozen declaration.</summary>
+    public const string InvalidCredentialBinding = "ASKEYC027";
+
+    /// <summary>The daemon, volume or private ownership identity cannot be established safely.</summary>
+    public const string OwnershipUnavailable = "ASKEYC028";
+
+    /// <summary>Another owner or a retained active record prevents starting this local volume.</summary>
+    public const string OwnershipConflict = "ASKEYC029";
+
+    /// <summary>A required private captured credential cannot be read or verified for this run.</summary>
+    public const string CredentialUnavailable = "ASKEYC030";
+
+    /// <summary>Generic realm reconciliation or effective readback did not establish readiness.</summary>
+    public const string ReconciliationFailed = "ASKEYC031";
+
+    /// <summary>A bounded local identity operation exhausted its deadline.</summary>
+    public const string OperationTimedOut = "ASKEYC032";
+
+    /// <summary>A no-start recovery request could not prove the expected owner safely stopped.</summary>
+    public const string RecoveryRejected = "ASKEYC033";
+
+    /// <summary>Owned stop or verification is incomplete, so private material and active state are retained.</summary>
+    public const string OwnedShutdownUnverified = "ASKEYC034";
+
+    /// <summary>An unexpected failure interrupted local identity execution without a safe readiness result.</summary>
+    public const string UnexpectedFailure = "ASKEYC035";
+
+    /// <summary>Zero scaffold users were declared without an actual required application identity seed.</summary>
+    public const string IdentitySeedRequired = "ASKEYC036";
 }

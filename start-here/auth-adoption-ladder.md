@@ -43,6 +43,16 @@ These public source guides remain discoverable and harvested while publication i
 - [ForgeTrust.AppSurface.Auth.Keycloak](../Auth/ForgeTrust.AppSurface.Auth.Keycloak/README.md) — source-only Keycloak security recipe and evidence boundary; use its guide when reviewing the held implementation or its host-owned integration seam.
 - [ForgeTrust.AppSurface.Auth.Aspire.Keycloak](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) — source-only local Keycloak proof guide; keep runtime web authentication and production provider ownership in the host application.
 
+### Choosing the Keycloak rung
+
+Use DevAuth when the question is whether local UI and policy behavior work with a clearly fake persona. Use Auth.Testing for deterministic integration-test personas. Use the OIDC adapter when the host has already selected and configured a provider. The held Aspire Keycloak package is for a real provider in a local AppHost proof; the held Keycloak package supplies source-only recipe tooling. Neither is a production identity host or a direct-install choice while its publication hold remains.
+
+The existing local default is a disposable public-client proof with loopback callbacks and no broker. Keep that default when it answers the development question. Configured confidential clients, brokers, persistent data, seeds, and the supervised seed-plus-web composition are explicit local proof choices; they do not follow from adding the default registration. The current supervised candidate is qualified only for its recorded macOS ARM64 AppHost and Linux ARM64 Docker profile. Read the [candidate profile and recovery contract](../docs/supervised-keycloak-execution.md) before opting in.
+
+For configured identity, migrate deliberately: use the typed configuration and credential bindings required by the selected overload, retain the exact existing named volume when preserving data, and make any new volume name explicit. Register local-only Keycloak work under the supported Aspire Run/local environment policy. Publish/manifest generation and production hosting are not enabled by adding an environment name. Keep seed-owned application users, provider credentials, external-provider policy, and production OIDC configuration in the host. The [Keycloak reference and migration guide](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) documents overloads and volume migration details.
+
+Sharp edges: a healthy Keycloak container is not proof that the intended realm, client secret, callbacks, or post-seed identity are ready. Do not put secrets in public inputs, command arguments, or ordinary environment values. A failed or uncertain supervised run can intentionally retain its owner marker and volume; follow the guarded [recovery steps](../docs/supervised-keycloak-execution.md) instead of deleting persistent data. This candidate does not establish consumer adoption, a real external-provider/broker flow, or adoption through a tunnel-shaped browser route.
+
 ## Adopt Without Changing Enforcement
 
 For an existing ASP.NET Core app, the safest adoption path is:

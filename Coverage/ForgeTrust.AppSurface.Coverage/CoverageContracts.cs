@@ -167,7 +167,15 @@ public sealed record CoverageCaptureRequest(CoverageFanInPolicy Policy, string R
     string OutputDirectory, string ProducerId, string? CoveragePath = null, string? TimingsPath = null,
     string? RawCoveragePath = null, string? ImportDirectory = null, string? OriginalSourceRoot = null,
     CoverageOutputMode OutputMode = CoverageOutputMode.Fresh,
-    IReadOnlyDictionary<string, string>? RawCoveragePaths = null);
+    IReadOnlyDictionary<string, string>? RawCoveragePaths = null)
+{
+    /// <summary>Absolute assembly paths whose adjacent PDBs are retained for async compiler-symbol matching.</summary>
+    /// <remarks>Supported only by the v3 <c>coverlet-collector-cobertura-async-v1</c> profile, with at most eight
+    /// assemblies. A primary capture requires at least one pair. Imported captures must carry pairs in their
+    /// already-hashed payload instead of supplying filesystem paths.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? CompilerSymbolAssemblies { get; init; }
+}
 /// <summary>Collect the complete explicit inventory or declared native filter through the existing supervised engine.</summary>
 /// <remarks>Observed collection rebuilds before testing. <c>NoBuild</c> must be false.
 /// Declared test projects must be regular tracked files in the pinned Git source, including pinned submodules.
@@ -175,7 +183,14 @@ public sealed record CoverageCaptureRequest(CoverageFanInPolicy Policy, string R
 /// <c>NoRestore</c> may be true when trusted restore has already completed; this does not skip the rebuild.</remarks>
 public sealed record CoverageCollectRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string OutputDirectory, string CollectionDirectory, string ProducerId, int DeadlineSeconds,
-    string? SolutionPath = null, int Parallelism = 1, bool NoRestore = false, bool NoBuild = false);
+    string? SolutionPath = null, int Parallelism = 1, bool NoRestore = false, bool NoBuild = false)
+{
+    /// <summary>Absolute assembly paths whose adjacent PDBs are read after successful test execution.</summary>
+    /// <remarks>Supported only by the v3 <c>coverlet-collector-cobertura-async-v1</c> profile, with at most eight
+    /// assemblies. A primary collection requires at least one pair.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? CompilerSymbolAssemblies { get; init; }
+}
 /// <summary>Conservatively compose exactly one primary plus the policy's exact supplementary set.</summary>
 public sealed record CoverageComposeRequest(CoverageFanInPolicy Policy, string RepositoryRoot,
     string PrimaryCaptureDirectory, IReadOnlyList<string> SupplementaryCaptureDirectories, string OutputDirectory,

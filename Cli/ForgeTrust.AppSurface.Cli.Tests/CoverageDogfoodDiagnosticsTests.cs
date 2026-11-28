@@ -281,6 +281,8 @@ public sealed class CoverageDogfoodDiagnosticsTests
     [InlineData("fanin", null)]
     [InlineData("native", "--raw-index")]
     [InlineData("native", "--timings")]
+    [InlineData("native", "--collection")]
+    [InlineData("native", "--native-producer")]
     public async Task CollectionRootRejectsFanInAndConflictingReplayInputs(string operation, string? conflictingOption)
     {
         using var temp = TestDirectory.Create();

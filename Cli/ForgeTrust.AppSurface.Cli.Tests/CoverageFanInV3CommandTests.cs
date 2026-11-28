@@ -39,6 +39,47 @@ public sealed class CoverageFanInV3CommandTests
         Assert.Equal(version == 3, policyElement.TryGetProperty("reportProfileId", out _));
     }
 
+    [Theory]
+    [InlineData("capture")]
+    [InlineData("collect")]
+    public void Compiler_symbols_require_the_async_profile_and_explicit_assembly_paths(string operation)
+    {
+        using var root = TestDirectory.Create();
+        var envelope = JsonNode.Parse(Envelope(operation, RequestFor(operation, root.Path, 3), 3))!;
+        var request = envelope["request"]!;
+        var policy = request["policy"]!;
+        var assembly = TestPathUtils.PathUnder(root.Path, "Fixture.dll");
+        request["compilerSymbolAssemblies"] = new JsonArray(JsonValue.Create(assembly));
+
+        ParsedCoverageFanInRequest Parse() => CoverageFanInRequestReader.Parse(JsonSerializer.SerializeToUtf8Bytes(envelope));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(Parse()));
+
+        var legacy = JsonNode.Parse(Envelope(operation, RequestFor(operation, root.Path, 2), 2))!;
+        legacy["request"]!["compilerSymbolAssemblies"] = new JsonArray(JsonValue.Create(assembly));
+        Assert.Throws<CoverageFanInCliInputException>(() =>
+            CoverageFanInRequestReader.Parse(JsonSerializer.SerializeToUtf8Bytes(legacy)));
+
+        policy["reportProfileId"] = CoverageFanInReportProfiles.CoverletCoberturaAsync;
+        var parsed = Parse();
+        CoverageFanInRequestReader.ValidateOperationRequest(parsed);
+        CoverageFanInRequestReader.ValidateCanonicalPolicy(parsed);
+        var assemblies = parsed.Request switch
+        {
+            CoverageCaptureRequest capture => capture.CompilerSymbolAssemblies,
+            CoverageCollectRequest collect => collect.CompilerSymbolAssemblies,
+            _ => throw new InvalidOperationException()
+        };
+        Assert.Equal(assembly, Assert.Single(assemblies!));
+
+        request["compilerSymbolAssemblies"] = new JsonArray(JsonValue.Create("relative.dll"));
+        Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(Parse()));
+        ((JsonObject)request).Remove("compilerSymbolAssemblies");
+        if (operation == "capture")
+            Assert.Throws<CoverageFanInCliInputException>(() => CoverageFanInRequestReader.ValidateOperationRequest(Parse()));
+        else
+            CoverageFanInRequestReader.ValidateOperationRequest(Parse());
+    }
+
     [Fact]
     public void ScreenshotPolicyIsAcceptedOnlyInV3Requests()
     {

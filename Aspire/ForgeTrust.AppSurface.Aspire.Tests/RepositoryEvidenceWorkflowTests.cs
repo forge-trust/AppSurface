@@ -73,6 +73,28 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
     }
 
     [Theory]
+    [InlineData("Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/AppSurfaceKeycloakSupervisedRun.cs", null, true)]
+    [InlineData("Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/AppSurfaceKeycloakLinuxArm64WorkerTests.cs", null, true)]
+    [InlineData("Auth/ForgeTrust.AppSurface.Auth.Keycloak/KeycloakVolumeIncarnation.cs", null, true)]
+    [InlineData("Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/RealmClientCaptureTests.cs", null, true)]
+    [InlineData("examples/auth-aspire-keycloak-apphost/Program.cs", null, true)]
+    [InlineData("src/Relocated.cs", "Auth/ForgeTrust.AppSurface.Auth.Keycloak/Relocated.cs", true)]
+    [InlineData("Auth/ForgeTrust.AppSurface.Auth.KeycloakLegacy/Worker.cs", null, false)]
+    [InlineData("Other/Worker.Tests/WorkerTests.cs", null, false)]
+    public async Task CoverageSelectionAddsArm64LanesOnlyForKeycloakPaths(string path, string? previousPath, bool expected)
+    {
+        var inventory = await WritePathsAsync([new(path, previousPath is null ? "modified" : "renamed", previousPath)]);
+        var planned = await PlanAsync(inventory, CheckedInPolicyPath, "coverage");
+        using var selection = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(planned.Output, "selection.json")));
+
+        Assert.True(selection.RootElement.GetProperty("requiresCoverage").GetBoolean());
+        Assert.Equal(expected, selection.RootElement.GetProperty("requiresKeycloakNativeCoverage").GetBoolean());
+        if (expected) Assert.True(selection.RootElement.GetProperty("requiresNativeCoverage").GetBoolean());
+        var coverage = Assert.Single(planned.Plan.Profile.Producers);
+        Assert.Equal(new EvidenceCoverageGateRequirements(95, 85, 95, 85, "codecov", 0.5m), coverage.CoverageGate);
+    }
+
+    [Theory]
     [InlineData("all")]
     [InlineData("coverage")]
     [InlineData("native")]
@@ -643,6 +665,34 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
 
         await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
         Assert.False(Directory.Exists(output));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("2")]
+    public async Task CoverageRunPreflight_KeycloakPullRequestRejectsOlderNativeContracts(string? contract)
+    {
+        var planned = await PlanAsync(["Auth/ForgeTrust.AppSurface.Auth.Keycloak/KeycloakVolumeIncarnation.cs"], scope: "coverage");
+        var output = NewPath("keycloak-native-contract-output");
+        var options = WorkflowOptions("run", planned.Paths, CheckedInPolicyPath,
+            ("--scope", "coverage"), ("--plan", TestPathUtils.PathUnder(planned.Output, "evidence-plan.json")),
+            ("--output", output), ("--native-coverage-directory", NewPath("native")));
+        if (contract is not null)
+            options["--native-coverage-contract-version"] = contract;
+
+        const string eventName = "GITHUB_EVENT_NAME";
+        var previous = Environment.GetEnvironmentVariable(eventName);
+        try
+        {
+            Environment.SetEnvironmentVariable(eventName, "pull_request");
+            var error = await Assert.ThrowsAsync<ArgumentException>(() => RepositoryEvidenceWorkflow.RunAsync(options, CancellationToken.None));
+            Assert.Equal("Selected Keycloak pull-request coverage requires native v3 captures.", error.Message);
+            Assert.False(Directory.Exists(output));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(eventName, previous);
+        }
     }
 
     [Theory]

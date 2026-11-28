@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Coverage.NativeInventory;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -58,7 +59,7 @@ internal static class Program
 
                 CI coverage collection: --operation collect-coverage --repository <checkout>
                 --output <fresh-directory> --dotnet <absolute-host> [--coverage-cli <absolute-installed-appsurface>]
-                [--coverage-schedule-timings <prior-timings.json>]
+                [--coverage-schedule-timings <prior-timings.json>] [--include-keycloak-native true]
                 Collection alone never closes coverage obligations.
                 verify: --manifest <proof/evidence-manifest.json> --artifact-root <proof/artifacts>
 
@@ -94,6 +95,17 @@ internal static class Program
                 throw new ArgumentException("--no-restore requires --operation pack-candidate-feed.");
             if (operation is not null)
             {
+                if (operation == "native-coverage-inventory")
+                {
+                    var includeKeycloak = options.TryGetValue("--include-keycloak-native", out var include)
+                        && include == "true";
+                    if (options.Keys.Any(key => key is not ("--operation" or "--include-keycloak-native"))
+                        || options.ContainsKey("--include-keycloak-native") && !includeKeycloak)
+                        throw new ArgumentException("Native inventory accepts only its optional true Keycloak selector.");
+                    Console.WriteLine(System.Text.Encoding.UTF8.GetString(
+                        NativeCoverageProducerInventory.SerializeWorkflowInventory(includeKeycloak)));
+                    return 0;
+                }
                 if (operation == "pack-candidate-feed")
                     return await PackCandidateFeedAsync(options, cancellationToken);
                 if (operation == "reuse-package-proof")
@@ -192,7 +204,7 @@ internal static class Program
 
     private static Dictionary<string, string> Parse(string[] args)
     {
-        string[] allowed = ["--package", "--feed", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings", "--no-restore"];
+        string[] allowed = ["--package", "--feed", "--version", "--source-commit", "--dotnet", "--output", "--repository", "--scratch-parent", "--mode", "--consumer-profile", "--maximum-scratch-bytes", "--minimum-free-bytes", "--fan-in-request", "--operation", "--policy", "--changed-paths", "--plan", "--manifest", "--artifact-root", "--base", "--event-file", "--event-name", "--workflow-sha", "--scope", "--diff-base", "--diff-file", "--native-coverage-directory", "--native-coverage-contract-version", "--coverage-cli", "--report", "--raw-report", "--coverage-collection", "--coverage-schedule-timings", "--include-keycloak-native", "--no-restore"];
         if (args.Length % 2 != 0) throw new ArgumentException("Options require values.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < args.Length; i += 2)
@@ -246,8 +258,12 @@ internal static class Program
     private static async Task<int> CollectCoverageAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
         Func<RepositoryCheckSettings, CancellationToken, Task>? collectCoverage)
     {
-        string[] allowed = ["--operation", "--repository", "--output", "--dotnet", "--coverage-cli", "--coverage-schedule-timings"];
+        string[] allowed = ["--operation", "--repository", "--output", "--dotnet", "--coverage-cli", "--coverage-schedule-timings", "--include-keycloak-native"];
         if (options.Keys.Except(allowed, StringComparer.Ordinal).Any()) throw new ArgumentException("Unsupported coverage collection option.");
+        var includeKeycloakNativeCoverage = options.TryGetValue("--include-keycloak-native", out var includeKeycloakNative)
+            && includeKeycloakNative == "true";
+        if (options.ContainsKey("--include-keycloak-native") && !includeKeycloakNativeCoverage)
+            throw new ArgumentException("Keycloak native coverage selection accepts only true.");
         string? coverageCli = null;
         if (options.TryGetValue("--coverage-cli", out var selectedCoverageCli))
         {
@@ -259,6 +275,7 @@ internal static class Program
             Required(options, "--dotnet"), Path.GetFullPath(Required(options, "--output")))
         {
             CoverageCliPath = coverageCli,
+            IncludeKeycloakNativeCoverage = includeKeycloakNativeCoverage,
             CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
         };
         if (collectCoverage is null) await new SolutionCoverageProducer(settings).CollectAsync(cancellationToken);

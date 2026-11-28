@@ -57,24 +57,21 @@ internal static partial class CoverageFanInIndependentVerifier
     internal static void VerifyComposition(
         IReadOnlyList<(XDocument Document, string SourceRoot)> inputs,
         XDocument composed,
-        XDocument primaryPaths)
+        XDocument primaryPaths,
+        IReadOnlyList<IReadOnlyList<CoverageAsyncMethod>>? compilerMethods = null)
     {
         try
         {
             Require(inputs is { Count: > 0 } && inputs.All(x => x.Document is not null && !string.IsNullOrWhiteSpace(x.SourceRoot)), CompositionError);
             var expected = new SortedDictionary<ClassId, ClassFacts>(ClassIdComparer.Instance);
-            Snapshot? primary = null;
-            foreach (var input in inputs)
-            {
-                var current = ReadSnapshot(input.Document, input.SourceRoot);
-                primary ??= current;
-                Merge(expected, current);
-            }
+            var projected = compilerMethods is null ? inputs : CoverageAsyncPairing.Project(inputs, compilerMethods);
+            foreach (var input in projected)
+                Merge(expected, ReadSnapshot(input.Document, input.SourceRoot));
 
             var actual = ReadSnapshot(composed, null);
             Require(SnapshotsEqual(expected, actual.Classes), CompositionError);
             CheckRootTotals(composed, actual, CompositionError);
-            Require(primary is not null, CompositionError);
+            var primary = ReadSnapshot(inputs[0].Document, inputs[0].SourceRoot);
             var primaryActual = ReadSnapshot(primaryPaths, null);
             Require(SnapshotsEqual(primary.Classes, primaryActual.Classes), CompositionError);
             // The original normalizer's summary can include compiler points absent from its

@@ -62,7 +62,8 @@ internal static partial class CoverageFanInEngine
             CoveragePath = rawSet is null ? result.CoveragePath : null,
             TimingsPath = producer is null || rawSet is not null ? Path.Join(collection, "timings.json") : null,
             RawCoveragePath = null,
-            RawCoveragePaths = rawSet
+            RawCoveragePaths = rawSet,
+            CompilerSymbolAssemblies = r.CompilerSymbolAssemblies
         };
         using var io = new CoverageFanInIO(r.Expected.Bounds, token, r.Budget);
         io.Acquire(InputDirectories("capture", captureRequest).Select(x => (x, false)), requireCoordination: false);

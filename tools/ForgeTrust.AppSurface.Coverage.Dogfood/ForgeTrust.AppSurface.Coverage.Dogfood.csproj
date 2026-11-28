@@ -7,6 +7,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../shared/NativeCoverageProducerInventory.cs" Link="Shared/NativeCoverageProducerInventory.cs" />
+    <Compile Include="../shared/KeycloakCoverageCompilerInputs.cs" Link="Shared/KeycloakCoverageCompilerInputs.cs" />
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PackedCandidateArchive.cs" Link="PackedCandidateArchive.cs" />
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PackedCandidatePackages.cs" Link="PackedCandidatePackages.cs" />
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Validation/PackedProofProcess.cs" Link="PackedProofProcess.cs" />

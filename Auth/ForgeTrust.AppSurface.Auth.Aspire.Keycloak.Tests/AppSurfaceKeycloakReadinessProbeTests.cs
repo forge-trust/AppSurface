@@ -35,52 +35,6 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         Assert.Equal("appsurface-dev", result.Realm);
     }
 
-    [Fact]
-    public async Task CheckOnceAsync_WhenTheRealmReadyWorkerSuppliesExplicitEvidenceInputs_UsesThoseInputs()
-    {
-        using var directory = new TempDirectory();
-        var options = CreateOptionsWithTheme(directory.Path);
-        var realmImport = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
-        var realm = JsonNode.Parse(File.ReadAllText(realmImport))!.AsObject();
-        realm["loginTheme"] = "application";
-        File.WriteAllText(realmImport, realm.ToJsonString());
-        using var client = new HttpClient(new StubHandler(MetadataThenOk));
-
-        var probe = new AppSurfaceKeycloakReadinessProbe(
-            options,
-            client,
-            File.ReadAllText,
-            "application",
-            ["admin", "viewer"]);
-
-        var result = await probe.CheckOnceAsync();
-
-        Assert.Equal("appsurface-dev", result.Realm);
-    }
-
-    [Fact]
-    public async Task CheckOnceAsync_WhenExplicitRealmReadyEvidenceDoesNotMatch_ThrowsRealmDiagnostic()
-    {
-        using var directory = new TempDirectory();
-        var options = CreateOptionsWithTheme(directory.Path);
-        var realmImport = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
-        var realm = JsonNode.Parse(File.ReadAllText(realmImport))!.AsObject();
-        realm["loginTheme"] = "application";
-        File.WriteAllText(realmImport, realm.ToJsonString());
-        using var client = new HttpClient(new StubHandler(MetadataThenOk));
-        var probe = new AppSurfaceKeycloakReadinessProbe(
-            options,
-            client,
-            File.ReadAllText,
-            "other-theme",
-            ["admin", "viewer"]);
-
-        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
-
-        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
-        Assert.Contains("login theme", exception.Message, StringComparison.Ordinal);
-    }
-
     [Theory]
     [InlineData(null)]
     [InlineData("other-theme")]
@@ -150,7 +104,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
 
-        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid, exception.Code);
+        Assert.Equal("ASKEYC004", exception.Code);
     }
 
     [Fact]
@@ -286,7 +240,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
 
-        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.AuthorizationChallengeInvalid, exception.Code);
+        Assert.Equal("ASKEYC006", exception.Code);
         Assert.DoesNotContain("appsurface-admin-local-only", exception.Message, StringComparison.Ordinal);
     }
 

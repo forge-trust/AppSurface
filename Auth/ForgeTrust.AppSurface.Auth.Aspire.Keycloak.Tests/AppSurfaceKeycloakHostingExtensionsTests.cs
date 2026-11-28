@@ -6,6 +6,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Publishing;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
+using ForgeTrust.AppSurface.Auth.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
 
@@ -15,7 +16,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     public void AddAppSurfaceKeycloak_WritesRealmImportAndReturnsSecretSafeWrapper()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
 
         var (resource, keycloakPort) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: true);
 
@@ -27,11 +28,124 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         Assert.NotNull(resource.Readiness);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AddAppSurfaceKeycloak_WhenPublishing_RejectsDefaultAndConfiguredRegistrationBeforeWritingImport(bool configure)
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = ["--operation", "publish", "--environment", "Development"],
+            DisableDashboard = true,
+        });
+        var realmDirectory = Path.Join(directory.Path, "realms");
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() =>
+        {
+            if (configure)
+            {
+                builder.AddAppSurfaceKeycloak("keycloak-publish", options => options.RealmImportDirectory = realmDirectory);
+            }
+            else
+            {
+                builder.AddAppSurfaceKeycloak("keycloak-publish");
+            }
+        });
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.LocalSeedNotAllowed, exception.Code);
+        Assert.False(Directory.Exists(realmDirectory));
+        Assert.Empty(builder.Resources);
+    }
+
+    [Fact]
+    public void AddAppSurfaceKeycloak_WhenLocalEnvironmentIsExplicitlyAllowed_WritesOriginalDevelopmentProof()
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = ["--environment", "LocalProof"],
+            DisableDashboard = true,
+        });
+
+        var (resource, keycloakPort) = WithAvailablePorts(
+            (keycloak, web) =>
+            {
+                var registered = builder.AddAppSurfaceKeycloak("keycloak-local-proof", options =>
+                {
+                    options.KeycloakPort = keycloak;
+                    options.WebProofPort = web;
+                    options.RealmImportDirectory = directory.Path;
+                    options.AdditionalLocalEnvironmentNames.Add("LocalProof");
+                });
+                return (registered, keycloak);
+            },
+            "Could not reserve distinct local ports for the local-environment registration test.");
+
+        Assert.Equal($"https://localhost:{keycloakPort}/realms/appsurface-dev", resource.Configuration.Authority);
+        Assert.Equal("appsurface-web", resource.Configuration.ClientId);
+        Assert.True(File.Exists(resource.RealmImportFile));
+        Assert.DoesNotContain(builder.Resources, item => item is ExecutableResource);
+    }
+
+    [Fact]
+    public void AddAppSurfaceKeycloak_WhenEnvironmentIsNotAllowed_RejectsBeforeWritingImport()
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = ["--environment", "Staging"],
+            DisableDashboard = true,
+        });
+        var realmDirectory = Path.Join(directory.Path, "realms");
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => builder.AddAppSurfaceKeycloak(
+            "keycloak-staging",
+            options => options.RealmImportDirectory = realmDirectory));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.LocalSeedNotAllowed, exception.Code);
+        Assert.False(Directory.Exists(realmDirectory));
+        Assert.Empty(builder.Resources);
+    }
+
+    [Theory]
+    [InlineData("execution")]
+    [InlineData("volume")]
+    [InlineData("confidential")]
+    [InlineData("mapper")]
+    [InlineData("broker")]
+    [InlineData("required-seed")]
+    public void LegacyRegistrationRejectsOptionsThatNeedTheSupervisedContract(string option)
+    {
+        using var directory = new TempDirectory();
+        var builder = CreateLocalBuilder();
+        var import = TestPathUtils.PathUnder(directory.Path, "import");
+
+        var error = Assert.Throws<AppSurfaceKeycloakException>(() => builder.AddAppSurfaceKeycloak(
+            "qualified-registration", options =>
+            {
+                options.RealmImportDirectory = import;
+                switch (option)
+                {
+                    case "execution": options.SupervisedExecution = new(); break;
+                    case "volume": options.PersistentVolumeName = "retained-keycloak-data"; break;
+                    case "confidential": options.ClientMode = KeycloakClientMode.Confidential; break;
+                    case "mapper": options.Mappers.Add(new("fixture-role", "fixture_role", "viewer")); break;
+                    case "broker": options.IdentityProviders.Add(new("google", "fixture-google-client")); break;
+                    case "required-seed": options.RequireIdentitySeed = true; break;
+                }
+            }));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidCredentialBinding, error.Code);
+        Assert.Empty(builder.Resources);
+        Assert.False(Directory.Exists(import));
+    }
+
     [Fact]
     public void AddAppSurfaceKeycloak_WhenPersistentVolumeDisabled_StillWritesRealmImport()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
 
         var (resource, _) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: false);
 
@@ -42,7 +156,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     public void AddAppSurfaceKeycloak_WhenExplicitAdministratorParametersAreProvided_UsesOnlyATypedSecretPassword()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var username = builder.AddParameter("keycloak-admin-username", "admin", secret: false);
         var password = builder.AddParameter("keycloak-admin-password", "LOCAL_TEST_SECRET_SENTINEL", secret: true);
 
@@ -56,7 +170,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     public void AddAppSurfaceKeycloak_WhenExplicitAdministratorPasswordIsNotSecret_ThrowsInvalidOptions()
     {
         using var directory = new TempDirectory();
-        var nonSecretBuilder = DistributedApplication.CreateBuilder([]);
+        var nonSecretBuilder = CreateLocalBuilder();
         var nonSecretUsername = nonSecretBuilder.AddParameter("keycloak-admin-username", "admin", secret: false);
         var nonSecretPassword = nonSecretBuilder.AddParameter("keycloak-admin-password", "not-secret", secret: false);
         var exception = Assert.Throws<AppSurfaceKeycloakException>(() =>
@@ -75,7 +189,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         File.WriteAllText(Path.Join(source, "login", "theme.properties"), "parent=keycloak\n");
         File.WriteAllText(Path.Join(source, "login", "resources", "site.css"), "body { color: black; }");
         File.WriteAllText(Path.Join(source, "login", "resources", "dev-only.css"), "body { outline-color: black; }");
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloakPort = GetAvailablePort();
         var webProofPort = GetAvailablePort();
         var image = AppSurfaceKeycloakImageReference.Parse($"quay.io/keycloak/keycloak:26.6@sha256:{new string('a', 64)}");
@@ -134,7 +248,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         Directory.CreateDirectory(Path.Join(source, "login", "resources"));
         File.WriteAllText(Path.Join(source, "login", "theme.properties"), "parent=keycloak\n");
         File.WriteAllText(Path.Join(source, "login", "resources", "site.css"), "body { color: black; }");
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloakPort = GetAvailablePort();
         var webProofPort = GetAvailablePort();
         var image = AppSurfaceKeycloakImageReference.Parse($"quay.io/keycloak/keycloak:26.6@sha256:{new string('b', 64)}");
@@ -178,7 +292,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     [Fact]
     public async Task Projection_ApplyToAddsAllowlistedEnvironmentVariablesToProjectResource()
     {
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var project = builder.AddProject(
             "web",
             GetCurrentTestProjectPath());
@@ -207,7 +321,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     public void AspireCompletionSpike_UsesTheDocumentedHealthyThenSuccessfulCompletionGraph()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var (keycloak, _) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: false);
         var gate = builder
             .AddProject("readiness-gate", GetCurrentTestProjectPath())
@@ -228,7 +342,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     public async Task AspireSecretBindingSpike_EmitsOnlyAParameterReferenceForItsDeclaredProject()
     {
         const string sentinel = "LOCAL_TEST_SECRET_SENTINEL";
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var secret = builder.AddParameter("seed-admin-secret", sentinel, secret: true);
         var seed = builder
             .AddProject("seed-worker", GetCurrentTestProjectPath())
@@ -255,7 +369,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     [Fact]
     public void ResourceConstructor_StoresWrapperValues()
     {
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = builder.AddKeycloak("keycloak-wrapper", GetAvailablePort());
         var projection = new AppSurfaceKeycloakOptions().CreateConfigurationProjection();
         var readiness = new AppSurfaceKeycloakReadinessProbe(new AppSurfaceKeycloakOptions());
@@ -271,7 +385,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     [Fact]
     public void ResourceConstructor_WhenArgumentsInvalid_Throws()
     {
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = builder.AddKeycloak("keycloak-wrapper", GetAvailablePort());
         var projection = new AppSurfaceKeycloakOptions().CreateConfigurationProjection();
         var readiness = new AppSurfaceKeycloakReadinessProbe(new AppSurfaceKeycloakOptions());
@@ -281,6 +395,13 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         Assert.Throws<ArgumentNullException>(() => new AppSurfaceKeycloakResource(keycloak, projection, null!, "/tmp/appsurface-dev-realm.json"));
         Assert.Throws<ArgumentException>(() => new AppSurfaceKeycloakResource(keycloak, projection, readiness, " "));
     }
+
+    private static IDistributedApplicationBuilder CreateLocalBuilder() =>
+        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = ["--environment", "Development"],
+            DisableDashboard = true,
+        });
 
     private static int GetAvailablePort()
     {

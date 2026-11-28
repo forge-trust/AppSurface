@@ -439,16 +439,21 @@ public sealed class NativeEvidenceProgramTests
         Assert.False(Directory.Exists(output));
     }
 
-    [Fact]
-    public async Task CollectCoverage_ForwardsTheInstalledCliWithoutClosingAcceptance()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CollectCoverage_ForwardsTheInstalledCliAndNativeSelectionWithoutClosingAcceptance(bool includeKeycloak)
     {
         using var fixture = new NativeCaptureFixture();
         var output = Path.Join(fixture.Root, "collection");
         var host = TestDotnetHost.Resolve();
         RepositoryCheckSettings? observed = null;
 
-        var result = await Program.RunAsync(["--operation", "collect-coverage", "--repository", fixture.Repository,
-            "--dotnet", host, "--coverage-cli", host, "--output", output], collectCoverage: (settings, _) =>
+        var args = new List<string> { "--operation", "collect-coverage", "--repository", fixture.Repository,
+            "--dotnet", host, "--coverage-cli", host, "--output", output };
+        if (includeKeycloak) args.AddRange(["--include-keycloak-native", "true"]);
+
+        var result = await Program.RunAsync(args.ToArray(), collectCoverage: (settings, _) =>
         {
             observed = settings;
             return Task.CompletedTask;
@@ -457,6 +462,7 @@ public sealed class NativeEvidenceProgramTests
         Assert.Equal(0, result);
         Assert.NotNull(observed);
         Assert.Equal(host, observed.CoverageCliPath);
+        Assert.Equal(includeKeycloak, observed.IncludeKeycloakNativeCoverage);
         Assert.False(Directory.Exists(output));
     }
 
@@ -465,6 +471,7 @@ public sealed class NativeEvidenceProgramTests
     [InlineData("missing-repository")]
     [InlineData("missing-host")]
     [InlineData("missing-output")]
+    [InlineData("invalid-keycloak-selection")]
     public async Task CollectCoverage_RejectsInvalidOptionsBeforeDispatch(string failure)
     {
         using var fixture = new NativeCaptureFixture();
@@ -474,6 +481,7 @@ public sealed class NativeEvidenceProgramTests
         if (failure != "missing-host") args.AddRange(["--dotnet", TestDotnetHost.Resolve()]);
         if (failure != "missing-output") args.AddRange(["--output", output]);
         if (failure == "unsupported-option") args.AddRange(["--diff-file", "local.patch"]);
+        if (failure == "invalid-keycloak-selection") args.AddRange(["--include-keycloak-native", "false"]);
 
         var result = await Program.RunAsync(args.ToArray(), collectCoverage: (_, _) =>
             throw new Xunit.Sdk.XunitException("Invalid input must not start collection."));

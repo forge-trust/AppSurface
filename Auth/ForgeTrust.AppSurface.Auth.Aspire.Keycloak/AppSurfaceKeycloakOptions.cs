@@ -1,5 +1,7 @@
+using System.Collections.Immutable;
 using System.Linq;
 using System.Text.RegularExpressions;
+using ForgeTrust.AppSurface.Auth.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -55,6 +57,57 @@ public sealed class AppSurfaceKeycloakOptions
     /// </remarks>
     public bool UsePersistentDataVolume { get; set; }
 
+    /// <summary>Gets or sets an explicit persistent volume name, preserving the named volume across runs.</summary>
+    /// <remarks>
+    /// An explicit name selects persistent execution. It must be 1–128 characters, start with an ASCII letter or digit,
+    /// and contain only ASCII letters, digits, periods, underscores, or hyphens. The legacy boolean never authorizes replacing missing data.
+    /// </remarks>
+    public string? PersistentVolumeName { get; set; }
+
+    /// <summary>Gets or sets the explicit supervised execution profile; null retains the existing local proof path.</summary>
+    /// <remarks>Use the typed-credential overload and returned SupervisedRun helper. Host ProjectResource seeds are not admitted into this profile.</remarks>
+    public AppSurfaceKeycloakSupervisedOptions? SupervisedExecution { get; set; }
+
+    /// <summary>Gets or sets the OIDC client authentication mode. The default is a public client.</summary>
+    /// <remarks>Confidential mode requires a separate typed client-secret binding; no secret belongs in these options.</remarks>
+    public KeycloakClientMode ClientMode { get; set; }
+
+    /// <summary>Gets or sets the exact HTTPS realm issuer. The default is the configured loopback Keycloak origin.</summary>
+    /// <remarks>Public origins must also appear in <see cref="ApprovedHttpsOrigins"/>. Administrator transport stays local.</remarks>
+    public Uri? Authority { get; set; }
+
+    /// <summary>Gets the exact additional HTTPS origins approved for issuer, callback, logout and web-origin declarations.</summary>
+    /// <remarks>The default is empty. Wildcards and nondefault public HTTPS ports are rejected.</remarks>
+    public IList<Uri> ApprovedHttpsOrigins { get; } = [];
+
+    /// <summary>Gets exact browser origins. An empty list derives distinct origins from the callback declarations.</summary>
+    public IList<Uri> WebOrigins { get; } = [];
+
+    /// <summary>Gets the generic claim mappers that must converge before readiness and application seeds.</summary>
+    public IList<KeycloakClaimMapper> Mappers { get; } = [];
+
+    /// <summary>Gets explicitly enabled Google provider declarations, without their credential values.</summary>
+    /// <remarks>Omission preserves an existing provider. Removal requires <see cref="RemovedIdentityProviderAliases"/>.</remarks>
+    public IList<KeycloakIdentityProviderConfiguration> IdentityProviders { get; } = [];
+
+    /// <summary>Gets the explicitly managed mapper names to remove before readiness.</summary>
+    public IList<string> RemovedMapperNames { get; } = [];
+
+    /// <summary>Gets provider aliases to remove explicitly before readiness, including the consumer's disabled-provider policy.</summary>
+    public IList<string> RemovedIdentityProviderAliases { get; } = [];
+
+    /// <summary>Gets or sets whether an existing confidential client may explicitly become public. The default is false.</summary>
+    /// <remarks>Default public configuration alone never permits a confidential-client downgrade.</remarks>
+    public bool AllowPublicClientDowngrade { get; set; }
+
+    /// <summary>Gets or sets whether a required application identity seed must complete before dependent web startup.</summary>
+    /// <remarks>Set this before clearing <see cref="SeededUsers"/>. A required seed must actually be registered before execution.</remarks>
+    public bool RequireIdentitySeed { get; set; }
+
+    /// <summary>Gets additional explicitly local environment names permitted for Run registration.</summary>
+    /// <remarks>Development, Test and Testing remain defaults; no environment entry enables Publish.</remarks>
+    public ISet<string> AdditionalLocalEnvironmentNames { get; } = new HashSet<string>(StringComparer.Ordinal);
+
     /// <summary>
     /// Gets or sets the directory that receives generated Keycloak realm import JSON.
     /// </summary>
@@ -92,7 +145,9 @@ public sealed class AppSurfaceKeycloakOptions
     /// <summary>
     /// Validates all local Keycloak proof options and populates default redirect URIs when needed.
     /// </summary>
-    public void Validate()
+    public void Validate() => _ = ValidateCore(out _);
+
+    private KeycloakDesiredConfiguration ValidateCore(out AppSurfaceKeycloakThemeRegistrationState? theme)
     {
         ValidateRealm();
         ValidateClient();
@@ -100,7 +155,9 @@ public sealed class AppSurfaceKeycloakOptions
         ValidatePath(SignedOutCallbackPath, nameof(SignedOutCallbackPath));
         ValidatePort(KeycloakPort, nameof(KeycloakPort));
         ValidatePort(WebProofPort, nameof(WebProofPort));
-        LoginTheme?.Validate();
+        theme = SupervisedExecution is null
+            ? LoginTheme?.CreateRegistration(AppContext.BaseDirectory)
+            : CreateSupervisedThemeRegistration(AppContext.BaseDirectory);
 
         if (string.IsNullOrWhiteSpace(RealmImportDirectory))
         {
@@ -108,10 +165,19 @@ public sealed class AppSurfaceKeycloakOptions
         }
 
         EnsureDefaultUris();
+        if (ApprovedHttpsOrigins.Any(origin => origin is null))
+            throw Invalid(nameof(ApprovedHttpsOrigins), "approved origins cannot contain null entries.");
         ValidateUris(RedirectUris, CallbackPath, nameof(RedirectUris));
         ValidateUris(PostLogoutRedirectUris, SignedOutCallbackPath, nameof(PostLogoutRedirectUris));
 
-        if (SeededUsers.Count == 0)
+        if (!Enum.IsDefined(ClientMode)) throw Invalid(nameof(ClientMode), "client mode is unsupported.");
+        if (PersistentVolumeName is not null && !SupervisedDocker.IsSupportedVolumeName(PersistentVolumeName))
+            throw Invalid(nameof(PersistentVolumeName),
+                "an explicit volume name must be 1–128 characters, start with an ASCII letter or digit, and use only ASCII letters, digits, periods, underscores, or hyphens.");
+        if (AdditionalLocalEnvironmentNames.Any(string.IsNullOrWhiteSpace))
+            throw Invalid(nameof(AdditionalLocalEnvironmentNames), "local environment names cannot be blank.");
+
+        if (SeededUsers.Count == 0 && !RequireIdentitySeed)
         {
             throw Invalid(nameof(SeededUsers), "at least one local proof user is required.");
         }
@@ -120,6 +186,7 @@ public sealed class AppSurfaceKeycloakOptions
         var subjects = new HashSet<string>(StringComparer.Ordinal);
         foreach (var user in SeededUsers)
         {
+            if (user is null) throw Invalid(nameof(SeededUsers), "local proof users cannot contain null entries.");
             user.Validate();
             if (!usernames.Add(user.Username))
             {
@@ -131,6 +198,14 @@ public sealed class AppSurfaceKeycloakOptions
                 throw Invalid(nameof(SeededUsers), $"duplicate subject '{user.Subject}'.");
             }
         }
+
+        try
+        {
+            var desired = CreateDesiredConfigurationCore();
+            desired.Validate();
+            return desired;
+        }
+        catch (ArgumentException) { throw Invalid("identity configuration", "the declared issuer, origins, mappers or providers are invalid."); }
     }
 
     /// <summary>
@@ -140,18 +215,50 @@ public sealed class AppSurfaceKeycloakOptions
     public AppSurfaceKeycloakConfigurationProjection CreateConfigurationProjection()
     {
         Validate();
-        return new AppSurfaceKeycloakConfigurationProjection(
-            AppSurfaceKeycloakDefaults.Authority(Realm, KeycloakPort),
+        return CreateProjection((Authority ?? new Uri(AppSurfaceKeycloakDefaults.Authority(Realm, KeycloakPort))).AbsoluteUri);
+    }
+
+    private AppSurfaceKeycloakConfigurationProjection CreateProjection(string authority) => new(
+            authority,
             ClientId,
             CallbackPath,
             SignedOutCallbackPath,
-            requireClientSecret: false);
+            requireClientSecret: ClientMode == KeycloakClientMode.Confidential);
+
+    /// <summary>Builds the validated immutable nonsecret declaration used by reconciliation and readiness.</summary>
+    /// <returns>The same canonical realm/client/mapper/provider policy represented by these options.</returns>
+    public KeycloakDesiredConfiguration CreateDesiredConfiguration() => ValidateCore(out _);
+
+    private KeycloakDesiredConfiguration CreateDesiredConfigurationCore() => new(
+        Realm, ClientId, Authority ?? new Uri(AppSurfaceKeycloakDefaults.Authority(Realm, KeycloakPort)), ClientMode,
+        RedirectUris.ToImmutableArray(), PostLogoutRedirectUris.ToImmutableArray(),
+        WebOrigins.Count == 0 ? RedirectUris.Select(uri => new Uri(uri.GetLeftPart(UriPartial.Authority))).Distinct().ToImmutableArray() : WebOrigins.ToImmutableArray(),
+        Mappers.ToImmutableArray(), IdentityProviders.ToImmutableArray(), RemovedMapperNames.ToImmutableArray(), RemovedIdentityProviderAliases.ToImmutableArray())
+    {
+        AllowPublicDowngrade = AllowPublicClientDowngrade,
+        TransportOrigin = new Uri($"https://localhost:{KeycloakPort}"),
+        ApprovedHttpsOrigins = ApprovedHttpsOrigins.ToImmutableArray(),
+        LoginThemeName = LoginTheme?.Name,
+    };
+
+    internal AppSurfaceKeycloakThemeRegistrationState? CreateSupervisedThemeRegistration(string sourceBaseDirectory)
+    {
+        var supervisedExecution = SupervisedExecution?.Snapshot()
+            ?? throw Invalid(nameof(SupervisedExecution), "supervised execution options are required for supervised theme registration.");
+        return LoginTheme?.CreateSupervisedRegistration(sourceBaseDirectory, supervisedExecution);
     }
 
-    internal AppSurfaceKeycloakThemeRegistrationState? CreateThemeRegistration(string sourceBaseDirectory) =>
-        LoginTheme?.CreateRegistration(sourceBaseDirectory);
+    /// <summary>Copies consumer options and derives the registration projections and theme manifest in one validation pass.</summary>
+    internal AppSurfaceKeycloakRegistrationSnapshot CreateRegistrationSnapshot()
+    {
+        var options = CopyOptions();
+        var desired = options.ValidateCore(out var theme);
+        return new(options, desired, options.CreateProjection(desired.Authority.AbsoluteUri), theme);
+    }
 
-    internal AppSurfaceKeycloakOptions CreateValidatedSnapshot()
+    internal AppSurfaceKeycloakOptions CreateValidatedSnapshot() => CreateRegistrationSnapshot().Options;
+
+    private AppSurfaceKeycloakOptions CopyOptions()
     {
         var snapshot = new AppSurfaceKeycloakOptions
         {
@@ -163,9 +270,23 @@ public sealed class AppSurfaceKeycloakOptions
             KeycloakPort = KeycloakPort,
             WebProofPort = WebProofPort,
             UsePersistentDataVolume = UsePersistentDataVolume,
+            PersistentVolumeName = PersistentVolumeName,
+            SupervisedExecution = SupervisedExecution?.Snapshot(),
+            ClientMode = ClientMode,
+            Authority = Authority,
+            AllowPublicClientDowngrade = AllowPublicClientDowngrade,
+            RequireIdentitySeed = RequireIdentitySeed,
             RealmImportDirectory = RealmImportDirectory,
             LoginTheme = LoginTheme?.CreateSnapshot(),
         };
+
+        foreach (var value in ApprovedHttpsOrigins) snapshot.ApprovedHttpsOrigins.Add(value);
+        foreach (var value in WebOrigins) snapshot.WebOrigins.Add(value);
+        foreach (var value in Mappers) snapshot.Mappers.Add(value);
+        foreach (var value in IdentityProviders) snapshot.IdentityProviders.Add(value);
+        foreach (var value in RemovedMapperNames) snapshot.RemovedMapperNames.Add(value);
+        foreach (var value in RemovedIdentityProviderAliases) snapshot.RemovedIdentityProviderAliases.Add(value);
+        foreach (var value in AdditionalLocalEnvironmentNames) snapshot.AdditionalLocalEnvironmentNames.Add(value);
 
         snapshot.RedirectUris.Clear();
         foreach (var redirectUri in RedirectUris)
@@ -185,7 +306,6 @@ public sealed class AppSurfaceKeycloakOptions
             snapshot.SeededUsers.Add(CreateUserSnapshot(user));
         }
 
-        snapshot.Validate();
         return snapshot;
     }
 
@@ -204,7 +324,7 @@ public sealed class AppSurfaceKeycloakOptions
 
     private void ValidateRealm()
     {
-        if (!RealmPattern.IsMatch(Realm))
+        if (Realm is null || !RealmPattern.IsMatch(Realm))
         {
             throw Invalid(nameof(Realm), "realm must match ^[a-z][a-z0-9-]{2,62}$.");
         }
@@ -212,7 +332,7 @@ public sealed class AppSurfaceKeycloakOptions
 
     private void ValidateClient()
     {
-        if (!ClientPattern.IsMatch(ClientId))
+        if (ClientId is null || !ClientPattern.IsMatch(ClientId))
         {
             throw Invalid(nameof(ClientId), "client id must match ^[a-z][a-z0-9._-]{2,63}$.");
         }
@@ -241,18 +361,18 @@ public sealed class AppSurfaceKeycloakOptions
         }
     }
 
-    private static void ValidateUris(IEnumerable<Uri> uris, string expectedPath, string optionName)
+    private void ValidateUris(IEnumerable<Uri> uris, string expectedPath, string optionName)
     {
-        var invalidUri = uris.Where(uri => !IsSafeLocalhostUri(uri, expectedPath)).FirstOrDefault();
-        if (invalidUri is not null)
+        if (uris.Any(uri => !IsSafeLocalhostUri(uri, expectedPath)))
         {
-            throw Invalid(optionName, $"URI '{invalidUri}' must be absolute localhost HTTP/HTTPS with path '{expectedPath}' and no query, fragment, user info, encoded slash, or encoded backslash.");
+            throw Invalid(optionName, $"URI must be absolute loopback HTTP/HTTPS or an explicitly approved HTTPS origin, with path '{expectedPath}' and no query, fragment, user info, encoded slash, or encoded backslash.");
         }
     }
 
-    private static bool IsSafeLocalhostUri(Uri uri, string expectedPath) =>
-        uri.IsAbsoluteUri
-        && IsAllowedLocalhost(uri)
+    private bool IsSafeLocalhostUri(Uri? uri, string expectedPath) =>
+        uri is not null && uri.IsAbsoluteUri
+        && (IsAllowedLocalhost(uri) || uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort
+            && ApprovedHttpsOrigins.Any(origin => origin.IsAbsoluteUri && origin.GetLeftPart(UriPartial.Authority) == uri.GetLeftPart(UriPartial.Authority)))
         && string.Equals(uri.AbsolutePath, expectedPath, StringComparison.Ordinal)
         && string.IsNullOrEmpty(uri.Query)
         && string.IsNullOrEmpty(uri.Fragment)
@@ -281,7 +401,7 @@ public sealed class AppSurfaceKeycloakOptions
 
     private static AppSurfaceKeycloakUserOptions CreateUserSnapshot(AppSurfaceKeycloakUserOptions user)
     {
-        ArgumentNullException.ThrowIfNull(user);
+        if (user is null) throw Invalid(nameof(SeededUsers), "local proof users cannot contain null entries.");
         var snapshot = new AppSurfaceKeycloakUserOptions(user.Username, user.Password, user.Subject, user.DisplayName);
         foreach (var claim in user.Claims)
         {
@@ -295,4 +415,17 @@ public sealed class AppSurfaceKeycloakOptions
         new(
             AppSurfaceKeycloakDiagnosticCodes.InvalidOptions,
             $"Problem: AppSurface Keycloak option {optionName} is invalid. Cause: {detail} Fix: use deterministic localhost proof values or override the matching option. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.InvalidOptions}.");
+}
+
+/// <summary>Owns the copied options and the projections produced by a single registration validation.</summary>
+/// <remarks>Consumers can edit the theme files after registration. The recorded manifest describes the registration-time source.</remarks>
+internal sealed record AppSurfaceKeycloakRegistrationSnapshot(
+    AppSurfaceKeycloakOptions Options,
+    KeycloakDesiredConfiguration Desired,
+    AppSurfaceKeycloakConfigurationProjection Projection,
+    AppSurfaceKeycloakThemeRegistrationState? Theme)
+{
+    /// <summary>Gets the validated loopback transport origin with its explicit port in the original URI text.</summary>
+    internal Uri TransportOrigin => Desired.TransportOrigin
+        ?? throw new InvalidOperationException("The Keycloak registration is missing its transport origin.");
 }

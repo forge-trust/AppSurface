@@ -69,6 +69,9 @@ jobs:
     outputs:
       requires_coverage: ${{ steps.plan.outputs.requires_coverage }}
       requires_native_coverage: ${{ steps.plan.outputs.requires_native_coverage }}
+      requires_keycloak_native_coverage: ${{ steps.plan.outputs.requires_keycloak_native_coverage }}
+      native_coverage_matrix: ${{ steps.plan.outputs.native_coverage_matrix }}
+      native_coverage_inventory: ${{ steps.plan.outputs.native_coverage_inventory }}
       diff_base: ${{ steps.plan.outputs.diff_base }}
       v3_diff_base: ${{ steps.plan.outputs.v3_diff_base }}
     steps:
@@ -116,6 +119,17 @@ jobs:
           "requires_coverage=$required" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
           $nativeRequired = if ([bool]$selection.requiresNativeCoverage) { 'true' } else { 'false' }
           "requires_native_coverage=$nativeRequired" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          $keycloakNativeRequired = if ([bool]$selection.requiresKeycloakNativeCoverage) { 'true' } else { 'false' }
+          "requires_keycloak_native_coverage=$keycloakNativeRequired" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          $inventoryArgs = @('--operation', 'native-coverage-inventory')
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request' -and $keycloakNativeRequired -eq 'true') {
+            $inventoryArgs += @('--include-keycloak-native', 'true')
+          }
+          $inventoryLines = dotnet $validation @inventoryArgs
+          if ($LASTEXITCODE -ne 0) { throw 'Native coverage producer inventory could not be resolved.' }
+          $inventory = ($inventoryLines -join "`n") | ConvertFrom-Json
+          "native_coverage_matrix=$($inventory.matrix | ConvertTo-Json -Compress -Depth 8)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          "native_coverage_inventory=$($inventory | ConvertTo-Json -Compress -Depth 8)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
           $diffBase = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $source.baseCommit } else { '' }
           "diff_base=$diffBase" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
           $v3DiffBase = ''
@@ -151,6 +165,13 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Test coverage candidate workflow contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./tests/coverage-candidate/install-coverage-candidate.tests.ps1
+          & ./tests/coverage-native-failure/contracts.ps1
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -202,27 +223,41 @@ jobs:
           retention-days: 1
 
   coverage-security-platform:
-    name: Coverage security contracts (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Coverage security contracts (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
     needs: [coverage-evidence-plan, coverage-cli-candidate]
     if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' }}
     # Leave time for the native suite, candidate installation, and evidence upload.
-    # The test command still uses a separate two-minute hang detector.
-    timeout-minutes: ${{ (matrix.os == 'macos-latest' || matrix.os == 'windows-latest') && 40 || 20 }}
+    # CLI tests retain their two-minute hang detector. Keycloak collection has its own deadline.
+    timeout-minutes: ${{ (matrix.nativePlatform == 'Darwin' || matrix.nativePlatform == 'Windows') && 40 || 20 }}
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+      matrix: ${{ fromJSON(needs.coverage-evidence-plan.outputs.native_coverage_matrix) }}
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
       BUILD_CONFIGURATION: Release
       COVERAGE_GATE_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.diff_base }}
       COVERAGE_V3_DIFF_BASE: ${{ needs.coverage-evidence-plan.outputs.v3_diff_base }}
+      COVERAGE_KEYCLOAK_LANE: ${{ matrix.keycloak }}
+      COVERAGE_INCLUDE_KEYCLOAK: ${{ needs.coverage-evidence-plan.outputs.requires_keycloak_native_coverage }}
+      COVERAGE_KEYCLOAK_PRODUCER: ${{ matrix.producerId }}
+      COVERAGE_NATIVE_PLATFORM: ${{ matrix.nativePlatform }}
       COVERAGE_RUN_SCOPE: ${{ github.repository }}
       COVERAGE_RUN_ID: ${{ github.run_id }}
       COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}
 
     steps:
+      - name: Configure Keycloak coverage directories
+        if: ${{ matrix.keycloak }}
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'coverage-keycloak-packages'
+          $workerBuildRoot = Join-Path $env:RUNNER_TEMP 'coverage-keycloak-worker-build'
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value @(
+            "NUGET_PACKAGES=$packages"
+            "AppSurfaceKeycloakWorkerBuildRoot=$workerBuildRoot"
+          )
+
       - name: Preserve committed bytes on Windows
         if: ${{ runner.os == 'Windows' }}
         shell: pwsh
@@ -245,6 +280,9 @@ jobs:
           cache-dependency-path: |
             Aspire/ForgeTrust.AppSurface.Aspire.Tests/packages.lock.json
             Cli/ForgeTrust.AppSurface.Cli.Tests/packages.lock.json
+            Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/packages.*.lock.json
+            Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/packages.*.lock.json
+            examples/auth-aspire-keycloak-apphost/packages.*.lock.json
 
       - name: Select exact coverage SDK
         shell: pwsh
@@ -253,7 +291,26 @@ jobs:
           $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) "global.json")
           if ((dotnet --version) -ne "${{ env.COVERAGE_SDK_VERSION }}") { throw "Coverage SDK selection failed" }
 
+      - name: Restore selected native coverage tests (locked)
+        if: ${{ matrix.keycloak }}
+        shell: pwsh
+        env:
+          COVERAGE_TEST_PROJECTS: ${{ toJSON(matrix.testProjects) }}
+        run: |
+          $projects = @(ConvertFrom-Json -AsHashtable $env:COVERAGE_TEST_PROJECTS)
+          if ($projects.Count -eq 0) { throw 'Selected native coverage project inventory is empty.' }
+          foreach ($project in $projects) {
+            dotnet restore $project --locked-mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Install pinned Aspire bundle for Keycloak coverage
+        if: ${{ matrix.keycloak }}
+        shell: bash
+        run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
+
       - name: Restore coverage security tests (locked)
+        if: ${{ !matrix.keycloak }}
         shell: pwsh
         run: |
           $projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')
@@ -280,44 +337,10 @@ jobs:
 
       - name: Verify and install candidate CLI
         shell: pwsh
-        run: |
-          $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
-          $manifest = Get-Content -Raw -Path (Join-Path $feed "candidate.json") | ConvertFrom-Json
-          $commit = (git rev-parse HEAD).Trim()
-          $tree = (git rev-parse "HEAD^{tree}").Trim()
-          $sdk = (dotnet --version).Trim()
-          $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
-          if ($manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
-              $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
-              $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
-            throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
-          }
-          if ((Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Candidate CLI package hash does not match its same-run manifest."
-          }
-          $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
-          $toolConfig = Join-Path $feed "candidate.nuget.config"
-          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
-          @"
-          <configuration>
-            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
-            <fallbackPackageFolders><clear /></fallbackPackageFolders>
-          </configuration>
-          "@ | Set-Content -LiteralPath $toolConfig
-          dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
-            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
-          if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
-          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
-            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
-          if ($installedArchives.Count -ne 1 -or
-              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Installed CLI archive does not match the same-run candidate."
-          }
-          $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
-          if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
-          Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
+        run: ./.github/scripts/install-coverage-candidate.ps1
 
       - name: Prepare generated docs stylesheet for coverage security tests
+        if: ${{ !matrix.keycloak }}
         shell: pwsh
         run: |
           $docsStylesheet = "Web/ForgeTrust.AppSurface.Docs/wwwroot/css/site.gen.css"
@@ -325,6 +348,7 @@ jobs:
           Set-Content -NoNewline -Path $docsStylesheet -Value ""
 
       - name: Prepare packed reuse journey feed
+        if: ${{ !matrix.keycloak }}
         shell: pwsh
         run: |
           $feed = Join-Path $env:RUNNER_TEMP 'packed-reuse-journey-feed'
@@ -337,6 +361,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "APPSURFACE_PACKED_JOURNEY_VERSION=$env:COVERAGE_CLI_CANDIDATE_VERSION"
 
       - name: Run coverage security contracts
+        if: ${{ !matrix.keycloak }}
         shell: pwsh
         env:
           APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS: ${{ runner.temp }}/packed-reuse-diagnostics
@@ -364,20 +389,32 @@ jobs:
         id: capture-native-coverage
         shell: pwsh
         env:
-          COVERAGE_DOGFOOD_OUTPUT: ${{ runner.temp }}/coverage-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          COVERAGE_DOGFOOD_OUTPUT: ${{ runner.temp }}/coverage-native-${{ matrix.producerId }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           if (Test-Path -LiteralPath $env:COVERAGE_DOGFOOD_OUTPUT) { throw "Native coverage output path is not fresh." }
-          $platform = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "Darwin" } else { "Linux" }
+          $platform = $env:COVERAGE_NATIVE_PLATFORM
           $contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }
           $diffBase = if ($contractVersion -eq '3') { $env:COVERAGE_V3_DIFF_BASE } else { $env:COVERAGE_GATE_DIFF_BASE }
           if ($contractVersion -eq '3' -and $diffBase -cnotmatch '^[0-9a-f]{40}$') {
             throw "Native v3 coverage requires the full immutable pull-request base SHA-1 commit ID."
           }
+          $keycloakLane = $env:GITHUB_EVENT_NAME -eq 'pull_request' -and $env:COVERAGE_KEYCLOAK_LANE -eq 'true'
           $adapter = @('--operation', 'native', '--contract-version', $contractVersion,
             '--repository', $PWD.Path, '--cli', $env:COVERAGE_CLI_PATH,
             '--output', $env:COVERAGE_DOGFOOD_OUTPUT, '--configuration', 'Release', '--native-platform', $platform,
-            '--collection-root', "${{ runner.temp }}/coverage-native-results",
             '--run-scope', $env:COVERAGE_RUN_SCOPE, '--run-id', $env:COVERAGE_RUN_ID, '--attempt', $env:COVERAGE_RUN_ATTEMPT)
+          if ($contractVersion -eq '3' -and $env:COVERAGE_INCLUDE_KEYCLOAK -eq 'true') {
+            $adapter += @('--include-keycloak-native', 'true')
+          }
+          if ($keycloakLane) {
+            $producer = $env:COVERAGE_KEYCLOAK_PRODUCER
+            $collection = Join-Path $env:RUNNER_TEMP "coverage-native-collection-$producer-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            if (Test-Path -LiteralPath $collection) { throw "Keycloak native collection path is not fresh." }
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "collection-path=$collection"
+            $adapter += @('--native-producer', $producer, '--collection', $collection)
+          } else {
+            $adapter += @('--collection-root', "${{ runner.temp }}/coverage-native-results")
+          }
           if ($contractVersion -eq '3') { $adapter += @('--diff-policy-id', 'appsurface-visual-baseline-png-v1') }
           if ($diffBase) { $adapter += @('--diff-base', $diffBase) }
           $command = @('run', '--project', 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj',
@@ -403,27 +440,42 @@ jobs:
       - name: Upload attested native coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coverage-native-${{ matrix.os }}-${{ github.run_attempt }}
+          name: coverage-native-${{ matrix.producerId }}-${{ github.run_attempt }}
           path: ${{ steps.capture-native-coverage.outputs.capture-path }}
           if-no-files-found: error
           retention-days: 7
+
+      - name: Summarize failed Keycloak native collection
+        id: summarize-native-collection-failure
+        if: ${{ !cancelled() && matrix.keycloak && steps.capture-native-coverage.outcome == 'failure' && steps.capture-native-coverage.outputs.collection-path != '' }}
+        shell: pwsh
+        env:
+          COVERAGE_NATIVE_COLLECTION: ${{ steps.capture-native-coverage.outputs.collection-path }}
+          COVERAGE_TEST_PROJECTS: ${{ toJSON(matrix.testProjects) }}
+        run: |
+          $summary = Join-Path $env:RUNNER_TEMP 'coverage-keycloak-failure-summary.json'
+          $projects = @(ConvertFrom-Json -AsHashtable $env:COVERAGE_TEST_PROJECTS)
+          & ./.github/scripts/write-keycloak-native-failure-summary.ps1 -CollectionDirectory $env:COVERAGE_NATIVE_COLLECTION `
+            -ProducerId $env:COVERAGE_KEYCLOAK_PRODUCER -TestProject $projects -OutputPath $summary
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "summary-path=$summary"
 
       - name: Upload failed native capture result
         if: ${{ !cancelled() && steps.capture-native-coverage.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coverage-capture-failure-${{ matrix.os }}-${{ github.run_attempt }}
+          name: coverage-capture-failure-${{ matrix.producerId }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/coverage-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}/native-result.json
-            ${{ runner.temp }}/coverage-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}.time.log
+            ${{ runner.temp }}/coverage-native-${{ matrix.producerId }}-${{ github.run_id }}-${{ github.run_attempt }}/native-result.json
+            ${{ runner.temp }}/coverage-native-${{ matrix.producerId }}-${{ github.run_id }}-${{ github.run_attempt }}.time.log
+            ${{ steps.summarize-native-collection-failure.outputs.summary-path }}
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload coverage security diagnostics
-        if: ${{ always() }}
+        if: ${{ always() && !matrix.keycloak }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coverage-security-diagnostics-${{ matrix.os }}
+          name: coverage-security-diagnostics-${{ matrix.producerId }}
           path: |
             ${{ runner.temp }}/coverage-native-results
             ${{ runner.temp }}/packed-reuse-journey-feed/pack-logs/pack-*.log
@@ -461,11 +513,19 @@ jobs:
             Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/packages.lock.json
             Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/packages.lock.json
 
+      - name: Verify offline worker consumer upgrade and clean
+        shell: bash
+        run: python3 -B tests/keycloak-identity-feasibility/verify-worker-consumer.py --dotnet "$(command -v dotnet)"
+
       - name: Restore focused Keycloak proof (locked)
         run: dotnet restore Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj --locked-mode
 
       - name: Verify theme lifecycle contracts
         run: dotnet test Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj --configuration Release --no-restore
+
+      - name: Verify packed single-file worker resolution
+        shell: bash
+        run: python3 -B tests/keycloak-identity-feasibility/verify-packed-worker-single-file.py --dotnet "$(command -v dotnet)"
 
       - name: Prove the pinned sample theme image and disposable realm
         run: |
@@ -822,42 +882,7 @@ jobs:
       - name: Verify and install candidate CLI
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         shell: pwsh
-        run: |
-          $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
-          $manifest = Get-Content -Raw -Path (Join-Path $feed "candidate.json") | ConvertFrom-Json
-          $commit = (git rev-parse HEAD).Trim()
-          $tree = (git rev-parse "HEAD^{tree}").Trim()
-          $sdk = (dotnet --version).Trim()
-          $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
-          if ($manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
-              $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
-              $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
-            throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
-          }
-          if ((Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Candidate CLI package hash does not match its same-run manifest."
-          }
-          $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
-          $toolConfig = Join-Path $feed "candidate.nuget.config"
-          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
-          @"
-          <configuration>
-            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
-            <fallbackPackageFolders><clear /></fallbackPackageFolders>
-          </configuration>
-          "@ | Set-Content -LiteralPath $toolConfig
-          dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
-            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
-          if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
-          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
-            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
-          if ($installedArchives.Count -ne 1 -or
-              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Installed CLI archive does not match the same-run candidate."
-          }
-          $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
-          if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
-          Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
+        run: ./.github/scripts/install-coverage-candidate.ps1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -919,12 +944,16 @@ jobs:
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         env:
           APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
+          COVERAGE_INCLUDE_KEYCLOAK: ${{ needs.coverage-evidence-plan.outputs.requires_keycloak_native_coverage }}
         run: |
           set -euo pipefail
           validation="tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll"
           dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
           dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
           args=(--operation collect-coverage --repository "$GITHUB_WORKSPACE" --dotnet "$(command -v dotnet)" --coverage-cli "$COVERAGE_CLI_PATH" --output "$RUNNER_TEMP/solution-coverage-collection")
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$COVERAGE_INCLUDE_KEYCLOAK" == "true" ]]; then
+            args+=(--include-keycloak-native true)
+          fi
           if [[ -f "$RUNNER_TEMP/coverage-schedule/timings.json" ]]; then
             args+=(--coverage-schedule-timings "$RUNNER_TEMP/coverage-schedule/timings.json")
             echo "Collecting coverage with restored scheduling timings."
@@ -1080,42 +1109,7 @@ jobs:
       - name: Verify and install candidate CLI
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         shell: pwsh
-        run: |
-          $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
-          $manifest = Get-Content -Raw -Path (Join-Path $feed "candidate.json") | ConvertFrom-Json
-          $commit = (git rev-parse HEAD).Trim()
-          $tree = (git rev-parse "HEAD^{tree}").Trim()
-          $sdk = (dotnet --version).Trim()
-          $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
-          if ($manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
-              $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
-              $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
-            throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
-          }
-          if ((Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Candidate CLI package hash does not match its same-run manifest."
-          }
-          $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
-          $toolConfig = Join-Path $feed "candidate.nuget.config"
-          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
-          @"
-          <configuration>
-            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
-            <fallbackPackageFolders><clear /></fallbackPackageFolders>
-          </configuration>
-          "@ | Set-Content -LiteralPath $toolConfig
-          dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
-            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
-          if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
-          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
-            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
-          if ($installedArchives.Count -ne 1 -or
-              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Installed CLI archive does not match the same-run candidate."
-          }
-          $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
-          if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
-          Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
+        run: ./.github/scripts/install-coverage-candidate.ps1
 
       - name: Verify generated package chooser
         run: |
@@ -1158,6 +1152,9 @@ jobs:
 
       - name: Verify retained v3 fan-in qualification
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
+        env:
+          COVERAGE_NATIVE_INVENTORY: ${{ needs.coverage-evidence-plan.outputs.native_coverage_inventory }}
+          COVERAGE_EXPECTED_REPORT_PROFILE: ${{ needs.coverage-evidence-plan.outputs.requires_keycloak_native_coverage == 'true' && 'coverlet-collector-cobertura-async-v1' || 'coverlet-collector-cobertura-v1' }}
         run: |
           set -euo pipefail
           native_inputs="$RUNNER_TEMP/coverage-native-inputs"
@@ -1171,19 +1168,29 @@ jobs:
               echo "Required v3 capture manifest is missing: $manifest_path" >&2
               return 1
             }
+            local expected_policy_supplements
+            expected_policy_supplements="$(jq -c '[.producers[] | {id, platform: .nativePlatform, filter, testProjects}] | sort_by(.id)' <<<"$COVERAGE_NATIVE_INVENTORY")"
             jq -e \
-              --arg profile "coverlet-collector-cobertura-v1" \
+              --arg profile "$COVERAGE_EXPECTED_REPORT_PROFILE" \
               --arg base "$COVERAGE_V3_DIFF_BASE" \
               --arg scope "$GITHUB_REPOSITORY" \
               --arg run_id "$GITHUB_RUN_ID" \
               --arg attempt "$GITHUB_RUN_ATTEMPT" \
               --arg source "$COVERAGE_SOURCE_COMMIT" \
+              --arg sdk "$COVERAGE_SDK_VERSION" \
               --arg producer "$producer" \
+              --argjson inventory "$COVERAGE_NATIVE_INVENTORY" \
+              --argjson expected_supplements "$expected_policy_supplements" \
               '.schemaVersion == 3 and .producerId == $producer
                and .policy.contractVersion == 3 and .policy.reportProfileId == $profile
                and .policy.gate.diffBase == $base and .source.commit == $source
+               and .source.sdk == $sdk and .source.configuration == "Release"
                and .run.runScope == $scope and .run.runId == $run_id
-               and .run.attempt == ($attempt | tonumber)' \
+               and .run.attempt == ($attempt | tonumber)
+               and .policy.gate.patchLineMode == "codecov"
+               and ([.policy.supplements[]] | sort_by(.id)) == $expected_supplements
+               and (.filter == ($inventory.producers[] | select(.id == $producer) | .filter))
+               and (.platform == ($inventory.producers[] | select(.id == $producer) | .nativePlatform))' \
               "$manifest_path" >/dev/null
           }
           check_v3_proof() {
@@ -1191,7 +1198,7 @@ jobs:
             local operation="$2"
             local tree="$3"
             jq -e \
-              --arg profile "coverlet-collector-cobertura-v1" \
+              --arg profile "$COVERAGE_EXPECTED_REPORT_PROFILE" \
               --arg base "$COVERAGE_V3_DIFF_BASE" \
               --arg scope "$GITHUB_REPOSITORY" \
               --arg run_id "$GITHUB_RUN_ID" \
@@ -1218,26 +1225,36 @@ jobs:
               "$proof_path" >/dev/null
           }
           mapfile -d '' -t native_capture_manifests < <(find "$native_inputs" -type f -path '*/capture/manifest.json' -print0)
-          [[ "${#native_capture_manifests[@]}" -eq 3 ]] || {
-            echo "Expected exactly three fresh v3 native capture manifests." >&2
+          expected_count="$(jq -er '.cardinality' <<<"$COVERAGE_NATIVE_INVENTORY")"
+          expected_producers="$(jq -er '.producers[].id' <<<"$COVERAGE_NATIVE_INVENTORY")"
+          [[ "${#native_capture_manifests[@]}" -eq "$expected_count" ]] || {
+            echo "Expected exactly $expected_count fresh v3 native capture manifests." >&2
             exit 1
           }
+          actual_producers="$(printf '%s\n' "${native_capture_manifests[@]}" | xargs -r -n1 jq -r '.producerId' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+          expected_sorted="$(printf '%s\n' $expected_producers | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+          [[ "$actual_producers" == "$expected_sorted" ]] || { echo "Unexpected or duplicate native producer set: $actual_producers" >&2; exit 1; }
           for manifest_path in "${native_capture_manifests[@]}"; do
             producer="$(jq -er '.producerId' "$manifest_path")"
-            case "$producer" in linux|windows|darwin) ;; *) echo "Unexpected native producer: $producer" >&2; exit 1 ;; esac
             check_v3_manifest "$manifest_path" "$producer"
             native_root="${manifest_path%/capture/manifest.json}"
             [[ -s "$native_root/shadow-proof.json" ]] || {
               echo "Required v3 native proof is missing for $producer." >&2
               exit 1
             }
-            native_tree="$(jq -er '.source.tree' "$manifest_path")"
-            check_v3_proof "$native_root/shadow-proof.json" native "$native_tree"
-            if [[ "$producer" == darwin ]]; then
+            [[ "$(jq -er '.source.tree' "$manifest_path")" == "$source_tree" ]]
+            check_v3_proof "$native_root/shadow-proof.json" native "$source_tree"
+            expected_platform="$(jq -er --arg producer "$producer" '.producers[] | select(.id == $producer) | .nativePlatform' <<<"$COVERAGE_NATIVE_INVENTORY")"
+            if [[ "$expected_platform" == Darwin ]]; then
               jq -e '.maximumResidentSetBytes | type == "number" and . > 0' "$native_root/darwin-rss.json" >/dev/null
             else
               jq -e '.process.peakWorkingSetBytes | type == "number" and . > 0' "$native_root/shadow-proof.json" >/dev/null
             fi
+            expected_os_arch="$(jq -er --arg producer "$producer" '.producers[] | select(.id == $producer) | .osArchitecture' <<<"$COVERAGE_NATIVE_INVENTORY")"
+            expected_process_arch="$(jq -er --arg producer "$producer" '.producers[] | select(.id == $producer) | .processArchitecture' <<<"$COVERAGE_NATIVE_INVENTORY")"
+            jq -e --arg platform "$expected_platform" --arg os_arch "$expected_os_arch" --arg process_arch "$expected_process_arch" \
+              '.host.platform == $platform and ($os_arch == "" or .host.osArchitecture == $os_arch) and ($process_arch == "" or .host.processArchitecture == $process_arch)' \
+              "$native_root/shadow-proof.json" >/dev/null
           done
 
           check_v3_proof "$fanin/shadow-proof.json" fanin "$source_tree"

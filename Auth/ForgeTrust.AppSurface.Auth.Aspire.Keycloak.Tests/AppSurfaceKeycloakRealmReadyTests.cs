@@ -10,7 +10,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     public async Task RealmReady_CachesOneExecutableGateWithSafeEnvironmentAndHealthyDependency()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var (keycloak, _) = AddWithAvailablePorts(builder, directory.Path);
 
         var first = keycloak.RealmReady();
@@ -33,9 +33,9 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
             await annotation.Callback(context);
         }
 
-        Assert.Equal(keycloak.Configuration.Authority, environment[AppSurfaceKeycloakRealmReadyEnvironment.Authority]);
-        Assert.Equal(keycloak.Configuration.ClientId, environment[AppSurfaceKeycloakRealmReadyEnvironment.ClientId]);
-        Assert.Equal("admin;viewer", environment[AppSurfaceKeycloakRealmReadyEnvironment.SeededUserNames]);
+        Assert.Equal(keycloak.Configuration.Authority, environment["APPSURFACE_KEYCLOAK_REALM_READY_AUTHORITY"]);
+        Assert.Equal(keycloak.Configuration.ClientId, environment["APPSURFACE_KEYCLOAK_REALM_READY_CLIENT_ID"]);
+        Assert.Equal("admin;viewer", environment["APPSURFACE_KEYCLOAK_REALM_READY_SEEDED_USER_NAMES"]);
         Assert.DoesNotContain(
             environment.Values.OfType<string>(),
             value => value.Contains("appsurface-admin-local-only", StringComparison.Ordinal)
@@ -49,7 +49,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
         var themeDirectory = TestPathUtils.PathUnder(directory.Path, "theme");
         Directory.CreateDirectory(TestPathUtils.PathUnder(themeDirectory, "login", "resources"));
         File.WriteAllText(TestPathUtils.PathUnder(themeDirectory, "login", "theme.properties"), "parent=keycloak\n");
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var (keycloak, _) = AddWithAvailablePorts(
             builder,
             directory.Path,
@@ -70,13 +70,13 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
             await annotation.Callback(context);
         }
 
-        Assert.Equal("application", environment[AppSurfaceKeycloakRealmReadyEnvironment.LoginThemeName]);
+        Assert.Equal("application", environment["APPSURFACE_KEYCLOAK_REALM_READY_LOGIN_THEME_NAME"]);
     }
 
     [Fact]
     public void RealmReady_WhenTheWrapperWasNotCreatedByTheHostingExtension_FailsWithTheStableWorkerDiagnostic()
     {
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var resource = builder.AddKeycloak("external-keycloak", GetAvailablePort());
         var wrapper = new AppSurfaceKeycloakResource(
             resource,
@@ -127,145 +127,40 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
         Assert.Contains(TestPathUtils.PathUnder(workerDirectory, $"{workerAssemblyName}.dll"), worker.Arguments, StringComparer.Ordinal);
     }
 
-    [Fact]
-    public async Task RealmReadyRunner_WhenConfigurationIsSafe_UsesOnlyNonsecretInputsAndReturnsSuccess()
-    {
-        var environment = CreateEnvironment();
-        using var output = new StringWriter();
-
-        var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
-            name => environment.TryGetValue(name, out var value) ? value : null,
-            output,
-            (configuration, _) =>
-            {
-                Assert.Equal("appsurface-dev", configuration.Options.Realm);
-                Assert.Equal("appsurface-web", configuration.Options.ClientId);
-                Assert.Equal(["admin", "viewer"], configuration.SeededUserNames);
-                Assert.Equal("application", configuration.LoginThemeName);
-                Assert.All(configuration.Options.SeededUsers, user => Assert.Equal("not-used", user.Password));
-                return Task.CompletedTask;
-            },
-            CancellationToken.None);
-
-        Assert.Equal(AppSurfaceKeycloakRealmReadyRunner.SuccessExitCode, exitCode);
-        Assert.Contains("completed", output.ToString(), StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task RealmReadyRunner_WhenTheProbeFails_RedactsTheExceptionAndReturnsFailure()
-    {
-        const string sentinel = "LOCAL_TEST_SECRET_SENTINEL";
-        using var output = new StringWriter();
-
-        var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
-            name =>
-            {
-                var environment = CreateEnvironment();
-                return environment.TryGetValue(name, out var value) ? value : null;
-            },
-            output,
-            (_, _) => throw new AppSurfaceKeycloakException(AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid, sentinel),
-            CancellationToken.None);
-
-        Assert.Equal(AppSurfaceKeycloakRealmReadyRunner.FailureExitCode, exitCode);
-        Assert.Contains(AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid, output.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(sentinel, output.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task RealmReadyRunner_WhenAnUnexpectedExceptionOccurs_RedactsItAndReturnsFailure()
-    {
-        const string sentinel = "LOCAL_TEST_SECRET_SENTINEL";
-        using var output = new StringWriter();
-
-        var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
-            name => CreateEnvironment().GetValueOrDefault(name),
-            output,
-            (_, _) => throw new InvalidOperationException(sentinel),
-            CancellationToken.None);
-
-        Assert.Equal(AppSurfaceKeycloakRealmReadyRunner.FailureExitCode, exitCode);
-        Assert.Contains(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, output.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(sentinel, output.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task RealmReadyRunner_WhenCancelled_ReturnsTheCancellationExitCode()
-    {
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-        using var output = new StringWriter();
-
-        var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
-            name =>
-            {
-                var environment = CreateEnvironment();
-                return environment.TryGetValue(name, out var value) ? value : null;
-            },
-            output,
-            (_, token) => Task.FromCanceled(token),
-            cancellation.Token);
-
-        Assert.Equal(AppSurfaceKeycloakRealmReadyRunner.CancellationExitCode, exitCode);
-        Assert.Contains("cancelled", output.ToString(), StringComparison.OrdinalIgnoreCase);
-    }
-
     [Theory]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.Authority)]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.SeededUserNames)]
-    public async Task RealmReadyRunner_WhenARequiredValueIsMissing_ReturnsTheStableInvalidOptionsDiagnostic(string missingName)
+    [InlineData(null)]
+    [InlineData("dll")]
+    [InlineData("deps.json")]
+    [InlineData("runtimeconfig.json")]
+    public void WorkerResolver_BundledAppRequiresTheExternalWorkerFiles(string? missingExtension)
     {
-        var environment = CreateEnvironment();
-        environment.Remove(missingName);
-        using var output = new StringWriter();
+        using var directory = new TempDirectory();
+        var workerDirectory = TestPathUtils.PathUnder(directory.Path, "appsurface-keycloak-realm-ready");
+        Directory.CreateDirectory(workerDirectory);
+        var assemblyName = AppSurfaceKeycloakRealmReadyWorker.WorkerAssemblyName;
+        foreach (var extension in new[] { "dll", "deps.json", "runtimeconfig.json" }.Where(extension => extension != missingExtension))
+        {
+            File.WriteAllText(TestPathUtils.PathUnder(workerDirectory, $"{assemblyName}.{extension}"), string.Empty);
+        }
 
-        var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
-            name => environment.TryGetValue(name, out var value) ? value : null,
-            output,
-            (_, _) => Task.CompletedTask,
-            CancellationToken.None);
+        if (missingExtension is not null)
+        {
+            var error = Assert.Throws<AppSurfaceKeycloakException>(
+                () => AppSurfaceKeycloakRealmReadyWorker.ResolveBundled(directory.Path));
+            Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmReadyWorkerUnavailable, error.Code);
+            return;
+        }
 
-        Assert.Equal(AppSurfaceKeycloakRealmReadyRunner.FailureExitCode, exitCode);
-        Assert.Contains(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, output.ToString(), StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.RedirectUris, "not-json")]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.RedirectUris, "[]")]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.RedirectUris, "[\"https://keycloak.example.test:5059/signin-appsurface-oidc\"]")]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.RedirectUris, "[\"http://localhost:5059/not-the-callback\"]")]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.SeededUserNames, "admin;admin")]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.Authority, "http://localhost:8080/realms/appsurface-dev")]
-    [InlineData(AppSurfaceKeycloakRealmReadyEnvironment.Authority, "https://localhost:8080/not-a-realm")]
-    public async Task RealmReadyRunner_WhenAProjectedConfigurationValueIsInvalid_ReturnsTheStableDiagnostic(
-        string name,
-        string value)
-    {
-        var environment = CreateEnvironment();
-        environment[name] = value;
-        using var output = new StringWriter();
-        var probeCalled = false;
-
-        var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
-            environment.GetValueOrDefault,
-            output,
-            (_, _) =>
-            {
-                probeCalled = true;
-                return Task.CompletedTask;
-            },
-            CancellationToken.None);
-
-        Assert.Equal(AppSurfaceKeycloakRealmReadyRunner.FailureExitCode, exitCode);
-        Assert.False(probeCalled);
-        Assert.Contains(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, output.ToString(), StringComparison.Ordinal);
+        var worker = AppSurfaceKeycloakRealmReadyWorker.ResolveBundled(directory.Path);
+        Assert.Equal(workerDirectory, worker.WorkingDirectory);
+        Assert.Contains(TestPathUtils.PathUnder(workerDirectory, $"{assemblyName}.dll"), worker.Arguments, StringComparer.Ordinal);
     }
 
     [Fact]
     public async Task RealmReady_WhenCalledConcurrently_CachesOneWorkerResource()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var (keycloak, _) = AddWithAvailablePorts(builder, directory.Path);
 
         var workers = await Task.WhenAll(
@@ -273,6 +168,13 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
 
         Assert.All(workers, worker => Assert.Same(workers[0], worker));
     }
+
+    private static IDistributedApplicationBuilder CreateLocalBuilder() =>
+        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = ["--environment", "Development"],
+            DisableDashboard = true,
+        });
 
     private static (AppSurfaceKeycloakResource Resource, int KeycloakPort) AddWithAvailablePorts(
         IDistributedApplicationBuilder builder,
@@ -309,20 +211,6 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
 
         throw new InvalidOperationException("Could not reserve ports for the realm-ready test.");
     }
-
-    private static Dictionary<string, string?> CreateEnvironment() =>
-        new(StringComparer.Ordinal)
-        {
-            [AppSurfaceKeycloakRealmReadyEnvironment.Authority] = "https://localhost:8080/realms/appsurface-dev",
-            [AppSurfaceKeycloakRealmReadyEnvironment.CallbackPath] = "/signin-appsurface-oidc",
-            [AppSurfaceKeycloakRealmReadyEnvironment.ClientId] = "appsurface-web",
-            [AppSurfaceKeycloakRealmReadyEnvironment.LoginThemeName] = "application",
-            [AppSurfaceKeycloakRealmReadyEnvironment.PostLogoutRedirectUris] = "[\"http://localhost:5059/signout-callback-appsurface-oidc\"]",
-            [AppSurfaceKeycloakRealmReadyEnvironment.RealmImportDirectory] = "/tmp/appsurface-keycloak-realms",
-            [AppSurfaceKeycloakRealmReadyEnvironment.RedirectUris] = "[\"http://localhost:5059/signin-appsurface-oidc\"]",
-            [AppSurfaceKeycloakRealmReadyEnvironment.SeededUserNames] = "admin;viewer",
-            [AppSurfaceKeycloakRealmReadyEnvironment.SignedOutCallbackPath] = "/signout-callback-appsurface-oidc",
-        };
 
     private static int GetAvailablePort()
     {

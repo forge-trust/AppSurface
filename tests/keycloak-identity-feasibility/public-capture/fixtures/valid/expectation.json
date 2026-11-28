@@ -1,0 +1,13 @@
+{
+  "variant": "valid",
+  "recipeDigest": "53fc058e16595686abb8a4d835d42ed44bca65ef5f2c6ce0f184af114cf6ab6a",
+  "policyDigest": "97c43016c273c9ec4a1270b269bdbf888cfa40462b35c25cf478995091771d32",
+  "platform": "linux/amd64",
+  "mode": "Security",
+  "materialCount": 12,
+  "uniqueBlobs": 8,
+  "opensslDataCompression": "zstd",
+  "expectedCapture": true,
+  "signingFingerprint": "679AE6300C39F87475E2459F955C25AC57A100F1",
+  "outerBindingsVerified": true
+}

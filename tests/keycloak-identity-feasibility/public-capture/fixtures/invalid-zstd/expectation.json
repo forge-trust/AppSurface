@@ -1,0 +1,13 @@
+{
+  "variant": "invalid-zstd",
+  "recipeDigest": "cadd017c3a283002aed15e88bb72b7394b398201467f210f17b0c2942ab31121",
+  "policyDigest": "8f0c8e50100199cf89b0b0ab56b992f634c39ee325d63f584a67c8a3946eecd6",
+  "platform": "linux/amd64",
+  "mode": "Security",
+  "materialCount": 12,
+  "uniqueBlobs": 8,
+  "opensslDataCompression": "zstd",
+  "expectedCapture": false,
+  "signingFingerprint": "7593673EC43A70D6DEA137752158FB9BB62EB739",
+  "outerBindingsVerified": true
+}

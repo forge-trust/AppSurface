@@ -19,7 +19,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
     private readonly ICoverageFanInResultDeliveryFactory _deliveryFactory = deliveryFactory ?? SafeCoverageFanInResultDeliveryFactory.Instance;
 
     /// <summary>Gets or sets the required strict schema-version 2 request document.</summary>
-    [CommandOption("request", Description = "Required UTF-8 JSON envelope: schemaVersion:2 (legacy) or schemaVersion:3 (report applicability). The schema version must match policy.contractVersion; v2 omits that policy field, while v3 requires contractVersion=3 and reportProfileId=coverlet-collector-cobertura-v1. Exact camelCase fields, string enums, duplicate/unknown rejection, lossless values, and the 1 MiB bound apply. The file and its ancestors must be regular, link-free filesystem objects.")]
+    [CommandOption("request", Description = "Required UTF-8 JSON envelope: schemaVersion:2 (legacy) or schemaVersion:3 (report applicability). The schema version must match policy.contractVersion; v2 omits that policy field, while v3 requires contractVersion=3 and a supported Coverlet reportProfileId. Exact camelCase fields, string enums, duplicate/unknown rejection, lossless values, and the 1 MiB bound apply. The file and its ancestors must be regular, link-free filesystem objects.")]
     public string? Request { get; set; }
 
     /// <summary>Gets or sets the new result-file destination for this operation.</summary>
@@ -273,7 +273,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
         or UnauthorizedAccessException or JsonException or InvalidDataException or InvalidOperationException;
 
     private static string InputRecovery(int contractVersion) => contractVersion == 3
-        ? "Use schemaVersion=3 with policy.contractVersion=3 and reportProfileId=coverlet-collector-cobertura-v1; correct the request before execution."
+        ? "Use schemaVersion=3 with policy.contractVersion=3 and a supported Coverlet reportProfileId."
         : "Supply a valid schemaVersion 2 request and a fresh result path in an existing link-free directory.";
 
     private static string StatusFor(CoverageOperationOutcome outcome) => outcome switch
@@ -402,7 +402,7 @@ internal abstract partial class CoverageFanInCommandBase(string operation, bool 
     }
 }
 
-[Command("coverage fan-in capture", Description = "Capture validated producer evidence (fresh output is the default); requires a clean Git source and complete primary or declared supplementary producer artifacts. Use homogeneous schemaVersion/policy contractVersion 2 for legacy behavior or 3 with reportProfileId=coverlet-collector-cobertura-v1 for report-based applicability. Next run compose with the exact policy supplement set. --collect runs the complete declared inventory and requires the .NET SDK, test projects, and collector prerequisites; it defaults to one worker with restore and build enabled.")]
+[Command("coverage fan-in capture", Description = "Capture validated producer evidence (fresh output is the default); requires a clean Git source and complete primary or declared supplementary producer artifacts. Use homogeneous schemaVersion/policy contractVersion 2 for legacy behavior or 3 with a supported Coverlet profile for report-based applicability. Next run compose with the exact policy supplement set. --collect runs the complete declared inventory and requires the .NET SDK, test projects, and collector prerequisites; it defaults to one worker with restore and build enabled.")]
 internal sealed partial class CoverageFanInCaptureCommand : CoverageFanInCommandBase
 {
     public CoverageFanInCaptureCommand() : base("capture", requiresResult: true) { }
@@ -567,7 +567,7 @@ internal sealed class CoverageFanInCliInputException(string field = "request", s
 
 internal static class CoverageFanInCliCodec
 {
-    private const string ReportProfileId = "coverlet-collector-cobertura-v1";
+    private const string ReportProfileId = CoverageFanInReportProfiles.CoverletCobertura;
     private const string Documentation = "https://appsurface.dev/guides/coverage-fan-in#diagnostics";
     private static readonly string[] ContextKeys =
     ["baseCommit", "contractVersion", "diffPolicyId", "exceptionType", "gitExitCode", "gitVersion", "headCommit", "reportProfileId"];
@@ -749,7 +749,7 @@ internal static class CoverageFanInCliCodec
         return key switch
         {
             "contractVersion" => value == "3",
-            "reportProfileId" => value == ReportProfileId,
+            "reportProfileId" => value is ReportProfileId or CoverageFanInReportProfiles.CoverletCoberturaAsync,
             "baseCommit" or "headCommit" => (value.Length is 40 or 64) && value.All(Uri.IsHexDigit),
             "gitExitCode" => int.TryParse(value, System.Globalization.NumberStyles.AllowLeadingSign,
                 System.Globalization.CultureInfo.InvariantCulture, out _),
@@ -931,10 +931,13 @@ internal static class CoverageFanInRequestReader
         {
             case CoverageCaptureRequest capture:
                 RequireProducer(capture.Policy, capture.ProducerId);
+                ValidateCompilerSymbols(capture.Policy, capture.CompilerSymbolAssemblies,
+                    required: capture.ProducerId == "primary" && capture.ImportDirectory is null);
                 if (capture.ImportDirectory is not null)
                 {
                     if (!HasText(capture.OriginalSourceRoot) || capture.CoveragePath is not null
-                        || capture.TimingsPath is not null || capture.RawCoveragePath is not null || capture.RawCoveragePaths is not null)
+                        || capture.TimingsPath is not null || capture.RawCoveragePath is not null || capture.RawCoveragePaths is not null
+                        || capture.CompilerSymbolAssemblies is not null)
                         throw new CoverageFanInCliInputException();
                 }
                 else if (capture.OriginalSourceRoot is not null
@@ -951,6 +954,7 @@ internal static class CoverageFanInRequestReader
                 break;
             case CoverageCollectRequest collect:
                 RequireProducer(collect.Policy, collect.ProducerId);
+                ValidateCompilerSymbols(collect.Policy, collect.CompilerSymbolAssemblies, required: false);
                 if (!HasText(collect.CollectionDirectory) || collect.DeadlineSeconds is < 1 or > 86400
                     || collect.Parallelism < 1)
                     throw new CoverageFanInCliInputException();
@@ -977,6 +981,19 @@ internal static class CoverageFanInRequestReader
                 throw new CoverageFanInCliInputException();
         }
 
+        static void ValidateCompilerSymbols(CoverageFanInPolicy policy, IReadOnlyList<string>? assemblies, bool required)
+        {
+            if (policy.ReportProfileId != CoverageFanInReportProfiles.CoverletCoberturaAsync)
+            {
+                if (assemblies is not null) throw new CoverageFanInCliInputException();
+                return;
+            }
+            if ((required && assemblies is null) || assemblies is { Count: 0 or > 8 }
+                || (assemblies is not null && assemblies.Any(path => !Path.IsPathFullyQualified(path)
+                    || !path.EndsWith(".dll", StringComparison.Ordinal))))
+                throw new CoverageFanInCliInputException();
+        }
+
         static void RequireCaptureInventory(CoverageFanInPolicy policy, string primary,
             IReadOnlyList<string> supplementary)
         {
@@ -993,24 +1010,26 @@ internal static class CoverageFanInRequestReader
                 {
                     var fields = ReadObject(element,
                         ["policy", "repositoryRoot", "outputDirectory", "producerId"],
-                        ["coveragePath", "timingsPath", "rawCoveragePath", "importDirectory", "originalSourceRoot", "outputMode", "rawCoveragePaths"]);
+                        ["coveragePath", "timingsPath", "rawCoveragePath", "importDirectory", "originalSourceRoot", "outputMode", "rawCoveragePaths", "compilerSymbolAssemblies"]);
                     return new CoverageCaptureRequest(ReadPolicy(fields["policy"], version), ReadString(fields["repositoryRoot"]),
                         ReadString(fields["outputDirectory"]), ReadString(fields["producerId"]),
                         ReadOptionalString(fields, "coveragePath"), ReadOptionalString(fields, "timingsPath"),
                         ReadOptionalString(fields, "rawCoveragePath"), ReadOptionalString(fields, "importDirectory"),
                         ReadOptionalString(fields, "originalSourceRoot"), ReadOptionalEnum(fields, "outputMode", CoverageOutputMode.Fresh),
-                        ReadOptionalStringDictionary(fields, "rawCoveragePaths"));
+                        ReadOptionalStringDictionary(fields, "rawCoveragePaths"))
+                    { CompilerSymbolAssemblies = ReadCompilerSymbolAssemblies(fields, version) };
                 }
             case "collect":
                 {
                     var fields = ReadObject(element,
                         ["policy", "repositoryRoot", "outputDirectory", "collectionDirectory", "producerId", "deadlineSeconds"],
-                        ["solutionPath", "parallelism", "noRestore", "noBuild"]);
+                        ["solutionPath", "parallelism", "noRestore", "noBuild", "compilerSymbolAssemblies"]);
                     return new CoverageCollectRequest(ReadPolicy(fields["policy"], version), ReadString(fields["repositoryRoot"]),
                         ReadString(fields["outputDirectory"]), ReadString(fields["collectionDirectory"]),
                         ReadString(fields["producerId"]), ReadInt32(fields["deadlineSeconds"]),
                         ReadOptionalString(fields, "solutionPath"), ReadOptionalInt32(fields, "parallelism", 1),
-                        ReadOptionalBoolean(fields, "noRestore", false), ReadOptionalBoolean(fields, "noBuild", false));
+                        ReadOptionalBoolean(fields, "noRestore", false), ReadOptionalBoolean(fields, "noBuild", false))
+                    { CompilerSymbolAssemblies = ReadCompilerSymbolAssemblies(fields, version) };
                 }
             case "compose":
                 {
@@ -1066,9 +1085,9 @@ internal static class CoverageFanInRequestReader
                 throw new CoverageFanInCliInputException("policy", "unsupported-version",
                     "Use contractVersion=3 when schemaVersion=3.");
             var profile = ReadString(fields["reportProfileId"]);
-            if (profile != "coverlet-collector-cobertura-v1")
+            if (profile is not (CoverageFanInReportProfiles.CoverletCobertura or CoverageFanInReportProfiles.CoverletCoberturaAsync))
                 throw new CoverageFanInCliInputException("policy", "unsupported-profile",
-                    "Set reportProfileId to the supported coverlet-collector-cobertura-v1 profile.");
+                    "Select the supported original Coverlet profile or the compiler-qualified async profile.");
         }
 
         var policy = new CoverageFanInPolicy(ReadSource(fields["source"]), ReadRun(fields["run"]),
@@ -1156,6 +1175,13 @@ internal static class CoverageFanInRequestReader
                 throw new CoverageFanInCliInputException();
         }
         return values;
+    }
+
+    private static string[]? ReadCompilerSymbolAssemblies(Dictionary<string, JsonElement> fields, int version)
+    {
+        if (!fields.TryGetValue("compilerSymbolAssemblies", out var assemblies)) return null;
+        if (version != 3) throw new CoverageFanInCliInputException();
+        return ReadStringArray(assemblies);
     }
 
     private static string[] ReadStringArray(JsonElement element)

@@ -19,6 +19,59 @@ public sealed class AppSurfaceKeycloakOptionsTests
         Assert.False(options.UsePersistentDataVolume);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData(".volume")]
+    [InlineData("_volume")]
+    [InlineData("-volume")]
+    [InlineData("skoolit/identity")]
+    [InlineData("skoolit:identity")]
+    [InlineData("skoolit identity")]
+    [InlineData("skoolit-identity-ä")]
+    public void ValidateRejectsUnusableNamedVolumes(string volumeName)
+    {
+        var options = new AppSurfaceKeycloakOptions { PersistentVolumeName = volumeName };
+
+        var error = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, error.Code);
+        Assert.Contains(nameof(AppSurfaceKeycloakOptions.PersistentVolumeName), error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(128, true)]
+    [InlineData(129, false)]
+    public void ValidateBoundsNamedVolumeLength(int length, bool accepted)
+    {
+        var name = "fixture.keycloak_" + new string('7', length - "fixture.keycloak_".Length);
+        var options = new AppSurfaceKeycloakOptions { PersistentVolumeName = name };
+
+        if (accepted)
+        {
+            options.Validate();
+            Assert.Equal(name, options.PersistentVolumeName);
+        }
+        else
+        {
+            var error = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+            Assert.Contains(nameof(AppSurfaceKeycloakOptions.PersistentVolumeName), error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ValidateRejectsABlankAdditionalLocalEnvironment()
+    {
+        var options = new AppSurfaceKeycloakOptions();
+        options.AdditionalLocalEnvironmentNames.Add("TestingFixture");
+        options.AdditionalLocalEnvironmentNames.Add(" ");
+
+        var error = Assert.Throws<AppSurfaceKeycloakException>(options.Validate);
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, error.Code);
+        Assert.Contains(nameof(AppSurfaceKeycloakOptions.AdditionalLocalEnvironmentNames), error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RealmImportDirectory_DefaultUsesSafeResourceNameSegment()
     {
@@ -45,6 +98,15 @@ public sealed class AppSurfaceKeycloakOptionsTests
         var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath("/tmp/appsurface/realms", "/appsurface-dev");
 
         Assert.Equal(Path.Join("/tmp/appsurface/realms", "appsurface-dev-realm.json"), path);
+    }
+
+    [Fact]
+    public void RealmImportPaths_GetRealmImportFilePathPreservesRelativeDirectory()
+    {
+        var directory = TestPathUtils.RelativePath("imports", "local");
+        var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(directory, "appsurface-dev");
+
+        Assert.Equal(TestPathUtils.RelativePath("imports", "local", "appsurface-dev-realm.json"), path);
     }
 
     [Theory]
@@ -325,6 +387,22 @@ public sealed class AppSurfaceKeycloakOptionsTests
     }
 
     [Fact]
+    public void ProjectionPreservesAnExplicitApprovedIssuer()
+    {
+        var origin = new Uri("https://identity.example.test");
+        var options = new AppSurfaceKeycloakOptions
+        {
+            Authority = new Uri(origin, "/realms/" + AppSurfaceKeycloakDefaults.Realm)
+        };
+        options.ApprovedHttpsOrigins.Add(origin);
+
+        var projection = options.CreateConfigurationProjection();
+
+        Assert.Equal(options.Authority.AbsoluteUri, projection.Authority);
+        Assert.Equal(projection.Authority, projection.EnvironmentVariables["Authentication__Oidc__Authority"]);
+    }
+
+    [Fact]
     public void RealmGenerator_EmitsExpectedPublicClientUsersAndNoAdminCredentials()
     {
         var options = new AppSurfaceKeycloakOptions();
@@ -351,6 +429,19 @@ public sealed class AppSurfaceKeycloakOptionsTests
         Assert.Equal(["appsurface-admin", "appsurface-viewer"], subjects);
         Assert.DoesNotContain(AppSurfaceKeycloakDefaults.AdminPasswordParameterName, json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("clientSecret", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RealmGenerator_EmitsPostLogoutUrisInDeclarationOrder()
+    {
+        var options = new AppSurfaceKeycloakOptions();
+        options.PostLogoutRedirectUris.Add(new Uri("http://localhost:5059/signout-callback-appsurface-oidc"));
+        options.PostLogoutRedirectUris.Add(new Uri("http://127.0.0.1:5059/signout-callback-appsurface-oidc"));
+
+        using var document = JsonDocument.Parse(AppSurfaceKeycloakRealmGenerator.Generate(options));
+        var attributes = document.RootElement.GetProperty("clients")[0].GetProperty("attributes");
+        Assert.Equal("http://localhost:5059/signout-callback-appsurface-oidc##http://127.0.0.1:5059/signout-callback-appsurface-oidc",
+            attributes.GetProperty("post.logout.redirect.uris").GetString());
     }
 
     [Fact]

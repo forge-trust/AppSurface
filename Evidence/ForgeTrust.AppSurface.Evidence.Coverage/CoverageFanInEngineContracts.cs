@@ -38,6 +38,8 @@ internal sealed record CoverageFanInEngineRequest(CoverageFanInExpected Expected
     internal ICoverageRunProcessRunner? IdentityRunner { get; init; }
     /// <summary>Exact native project-to-original-report mapping, with complete successful timings.</summary>
     internal IReadOnlyDictionary<string, string>? RawCoveragePaths { get; init; }
+    /// <summary>Frozen absolute assembly paths for bounded adjacent PE/PDB retention.</summary>
+    internal IReadOnlyList<string>? CompilerSymbolAssemblies { get; init; }
     /// <summary>Optional lowercase SHA-256 that the exact patch used by acceptance must match.</summary>
     internal string? ExpectedPatchSha256 { get; init; }
     /// <summary>V3-only invocation budget, created before the first source probe and shared through all IO/process work.</summary>
@@ -67,4 +69,8 @@ internal sealed record CoverageFanInEngineResult(string Operation, string Outcom
 }
 /// <summary>Validated retained capture bytes. No semantic oracle is shared by composer and verifier.</summary>
 internal sealed record CoverageFanInBundle(string Directory, JsonElement Manifest, string ManifestHash,
-    XDocument Document, byte[] CoverageBytes, IReadOnlyDictionary<string, byte[]> AuxiliaryFiles);
+    XDocument Document, byte[] CoverageBytes, IReadOnlyDictionary<string, byte[]> AuxiliaryFiles)
+{
+    /// <summary>Methods derived from manifest-verified retained compiler symbol pairs.</summary>
+    internal IReadOnlyList<CoverageAsyncMethod> CompilerMethods { get; init; } = Array.Empty<CoverageAsyncMethod>();
+}

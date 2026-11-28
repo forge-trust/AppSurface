@@ -39,6 +39,8 @@ internal static class RepositoryEvidenceWorkflow
         var policy = Read<EvidencePolicy>(Required(options, "--policy"), cancellationToken);
         var paths = Read<NormalizedDiffPath[]>(Required(options, "--changed-paths"), cancellationToken);
         var rootPlan = new EvidencePlanner().Resolve(policy, paths);
+        var requiresKeycloakNativeCoverage = rootPlan.Profile.Producers.Any(producer => producer.Id == "solution-coverage")
+            && rootPlan.ChangedPaths.Any(path => IsKeycloakCoveragePath(path.Path) || IsKeycloakCoveragePath(path.PreviousPath));
         foreach (var profile in policy.Profiles) ValidateProfile(profile);
         var conservative = policy.Profiles.Single(profile => profile.Id == policy.ConservativeProfileId);
         ValidationProof.Require(new[] { "packed-storage", "installed-consumer", "solution-coverage", "package-checks" }.All(id =>
@@ -77,6 +79,11 @@ internal static class RepositoryEvidenceWorkflow
                 throw new ArgumentException("Select native coverage contract 2 or 3 only for a selected solution coverage producer with native captures.");
             nativeCoverageContractVersion = nativeContract == "3" ? 3 : 2;
         }
+        if (operation == "run" && requiresKeycloakNativeCoverage
+            && plan.Profile.Producers.Any(producer => producer.Id == "solution-coverage")
+            && Environment.GetEnvironmentVariable("GITHUB_EVENT_NAME") == "pull_request"
+            && localExecution?.VerifySourceAsync is null && nativeCoverageContractVersion != 3)
+            throw new ArgumentException("Selected Keycloak pull-request coverage requires native v3 captures.");
         ValidationSettings? settings = null;
         RepositoryCheckSettings? checks = null;
         var managedRun = localExecution?.ManagedRun;
@@ -102,6 +109,7 @@ internal static class RepositoryEvidenceWorkflow
                 options.GetValueOrDefault("--diff-base"), nativeCoverageDirectory, options.GetValueOrDefault("--diff-file"), coverageCli)
             {
                 NativeCoverageContractVersion = nativeCoverageContractVersion,
+                IncludeKeycloakNativeCoverage = nativeCoverageContractVersion == 3 && requiresKeycloakNativeCoverage,
                 VerifyLocalSourceAsync = localExecution?.VerifySourceAsync,
                 PackageRestoreCache = managedRun?.PackageRestoreCache,
                 CoverageCollectionDirectory = options.GetValueOrDefault("--coverage-collection"),
@@ -118,9 +126,11 @@ internal static class RepositoryEvidenceWorkflow
             requiresPackage = RequiresPackage(plan.Profile),
             hasProducers = plan.Profile.Producers.Count > 0,
             requiresCoverage = plan.Profile.Producers.Any(producer => producer.Id == "solution-coverage"),
-            requiresNativeCoverage = rootPlan.Profile.Producers.Any(producer => producer.Id == "solution-coverage")
-                && rootPlan.Profile.Producers.Any(producer => producer.Id != "solution-coverage")
-                && !IsToolManifestOnlyChange(rootPlan.ChangedPaths),
+            requiresKeycloakNativeCoverage,
+            requiresNativeCoverage = requiresKeycloakNativeCoverage
+                || (rootPlan.Profile.Producers.Any(producer => producer.Id == "solution-coverage")
+                    && rootPlan.Profile.Producers.Any(producer => producer.Id != "solution-coverage")
+                    && !IsToolManifestOnlyChange(rootPlan.ChangedPaths)),
             requiresPackageChecks = plan.Profile.Producers.Any(producer => producer.Id == "package-checks"),
             producerIds = plan.Profile.Producers.Select(producer => producer.Id).ToArray(),
         }, Program.JsonOptions), cancellationToken);
@@ -230,6 +240,13 @@ internal static class RepositoryEvidenceWorkflow
     /// <summary>Whether the selected profile needs the separately packed CLI used by native acceptance journeys.</summary>
     internal static bool RequiresPackage(EvidenceProfile profile) =>
         profile.Producers.Any(producer => producer.Id is "packed-storage" or "installed-consumer");
+
+    private static bool IsKeycloakCoveragePath(string? path) => path is not null
+        && (path.StartsWith("Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("Auth/ForgeTrust.AppSurface.Auth.Keycloak/", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("Auth/ForgeTrust.AppSurface.Auth.Keycloak.Tests/", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("examples/auth-aspire-keycloak-", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Identifies an existing local tool manifest update with optional new, direct Markdown release entries.

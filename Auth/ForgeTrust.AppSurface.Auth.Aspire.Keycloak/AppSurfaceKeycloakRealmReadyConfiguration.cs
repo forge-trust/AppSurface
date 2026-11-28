@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using RealmReadyEnvironment = ForgeTrust.AppSurface.Auth.Keycloak.KeycloakWorkerProtocol.RealmReadyEnvironment;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -20,14 +21,14 @@ internal sealed class AppSurfaceKeycloakRealmReadyConfiguration
     private readonly string _signedOutCallbackPath;
 
     internal AppSurfaceKeycloakRealmReadyConfiguration(
-        AppSurfaceKeycloakOptions snapshot,
-        string realmImportFile,
-        AppSurfaceKeycloakThemeRegistration? theme)
+        AppSurfaceKeycloakRegistrationSnapshot registration,
+        string realmImportFile)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(registration);
         ArgumentException.ThrowIfNullOrWhiteSpace(realmImportFile);
 
-        var projection = snapshot.CreateConfigurationProjection();
+        var snapshot = registration.Options;
+        var projection = registration.Projection;
         _authority = projection.Authority;
         _clientId = projection.ClientId;
         _callbackPath = projection.CallbackPath;
@@ -37,7 +38,7 @@ internal sealed class AppSurfaceKeycloakRealmReadyConfiguration
         _redirectUris = JsonSerializer.Serialize(snapshot.RedirectUris.Select(uri => uri.ToString()));
         _postLogoutRedirectUris = JsonSerializer.Serialize(snapshot.PostLogoutRedirectUris.Select(uri => uri.ToString()));
         _seededUserNames = string.Join(';', snapshot.SeededUsers.Select(user => user.Username));
-        _loginThemeName = theme?.Name;
+        _loginThemeName = registration.Theme?.Registration.Name;
     }
 
     internal AppSurfaceKeycloakRealmReady Create(IResourceBuilder<KeycloakResource> keycloak)
@@ -51,19 +52,19 @@ internal sealed class AppSurfaceKeycloakRealmReadyConfiguration
                 command: "dotnet",
                 workingDirectory: worker.WorkingDirectory,
                 args: worker.Arguments)
-            .WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.Authority, _authority)
-            .WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.ClientId, _clientId)
-            .WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.CallbackPath, _callbackPath)
-            .WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.SignedOutCallbackPath, _signedOutCallbackPath)
-            .WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.RedirectUris, _redirectUris)
-            .WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.PostLogoutRedirectUris, _postLogoutRedirectUris)
-            .WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.RealmImportDirectory, _realmImportDirectory)
-            .WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.SeededUserNames, _seededUserNames)
+            .WithEnvironment(RealmReadyEnvironment.Authority, _authority)
+            .WithEnvironment(RealmReadyEnvironment.ClientId, _clientId)
+            .WithEnvironment(RealmReadyEnvironment.CallbackPath, _callbackPath)
+            .WithEnvironment(RealmReadyEnvironment.SignedOutCallbackPath, _signedOutCallbackPath)
+            .WithEnvironment(RealmReadyEnvironment.RedirectUris, _redirectUris)
+            .WithEnvironment(RealmReadyEnvironment.PostLogoutRedirectUris, _postLogoutRedirectUris)
+            .WithEnvironment(RealmReadyEnvironment.RealmImportDirectory, _realmImportDirectory)
+            .WithEnvironment(RealmReadyEnvironment.SeededUserNames, _seededUserNames)
             .WaitFor(keycloak);
 
         if (_loginThemeName is not null)
         {
-            gate.WithEnvironment(AppSurfaceKeycloakRealmReadyEnvironment.LoginThemeName, _loginThemeName);
+            gate.WithEnvironment(RealmReadyEnvironment.LoginThemeName, _loginThemeName);
         }
 
         return new AppSurfaceKeycloakRealmReady(gate);

@@ -1,15 +1,67 @@
 <Project>
 
-  <Target Name="CopyAppSurfaceKeycloakRealmReadyWorker" AfterTargets="CopyFilesToOutputDirectory">
+  <Target Name="ResolveAppSurfaceKeycloakRealmReadyWorker">
+    <PropertyGroup>
+      <_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory>$(MSBuildThisFileDirectory)..\tools\net10.0\any\realm-ready\</_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory>
+      <_AppSurfaceKeycloakRealmReadyWorkerAssemblyName>ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker</_AppSurfaceKeycloakRealmReadyWorkerAssemblyName>
+    </PropertyGroup>
+
     <ItemGroup>
-      <_AppSurfaceKeycloakRealmReadyWorker Include="$(MSBuildThisFileDirectory)..\tools\net10.0\any\realm-ready\*" />
+      <_AppSurfaceKeycloakRealmReadyWorker Include="$(_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory)**\*" />
     </ItemGroup>
 
+    <Error
+      Condition="'@(_AppSurfaceKeycloakRealmReadyWorker)' == ''"
+      Code="ASKEYC022"
+      Text="The installed AppSurface Keycloak package does not contain a realm-ready worker publish closure." />
+    <Error
+      Condition="!Exists('$(_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory)$(_AppSurfaceKeycloakRealmReadyWorkerAssemblyName).dll')"
+      Code="ASKEYC022"
+      Text="The installed AppSurface Keycloak package is missing the realm-ready worker assembly." />
+    <Error
+      Condition="!Exists('$(_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory)$(_AppSurfaceKeycloakRealmReadyWorkerAssemblyName).deps.json')"
+      Code="ASKEYC022"
+      Text="The installed AppSurface Keycloak package is missing the realm-ready worker dependency manifest." />
+    <Error
+      Condition="!Exists('$(_AppSurfaceKeycloakRealmReadyWorkerPayloadDirectory)$(_AppSurfaceKeycloakRealmReadyWorkerAssemblyName).runtimeconfig.json')"
+      Code="ASKEYC022"
+      Text="The installed AppSurface Keycloak package is missing the realm-ready worker runtime configuration." />
+
+  </Target>
+
+  <Target Name="CopyAppSurfaceKeycloakRealmReadyWorker"
+          DependsOnTargets="ResolveAppSurfaceKeycloakRealmReadyWorker"
+          AfterTargets="CopyFilesToOutputDirectory">
+    <PropertyGroup>
+      <_AppSurfaceKeycloakWorkerOutput>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)', 'appsurface-keycloak-realm-ready'))</_AppSurfaceKeycloakWorkerOutput>
+    </PropertyGroup>
+
+    <!-- Replace the package-owned tree after validating the new payload. Older packages did not track their copied files. -->
+    <RemoveDir Directories="$(_AppSurfaceKeycloakWorkerOutput)" />
     <Copy
       SourceFiles="@(_AppSurfaceKeycloakRealmReadyWorker)"
-      DestinationFolder="$(OutDir)appsurface-keycloak-realm-ready\"
-      SkipUnchangedFiles="true"
-      Condition="'@(_AppSurfaceKeycloakRealmReadyWorker)' != ''" />
+      DestinationFiles="@(_AppSurfaceKeycloakRealmReadyWorker->'$(_AppSurfaceKeycloakWorkerOutput)\%(RecursiveDir)%(Filename)%(Extension)')">
+      <Output TaskParameter="CopiedFiles" ItemName="FileWrites" />
+    </Copy>
+  </Target>
+
+  <Target Name="PublishAppSurfaceKeycloakRealmReadyWorker"
+          DependsOnTargets="ResolveAppSurfaceKeycloakRealmReadyWorker"
+          BeforeTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(_AppSurfaceKeycloakRealmReadyWorker)">
+        <RelativePath>appsurface-keycloak-realm-ready\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="RefreshAppSurfaceKeycloakRealmReadyWorkerPublishOutput"
+          DependsOnTargets="ResolveAppSurfaceKeycloakRealmReadyWorker"
+          BeforeTargets="_IncrementalCleanPublishDirectory">
+    <!-- NuGet preserves archive timestamps, so the SDK's publish copy can skip changed files across versions. -->
+    <RemoveDir Directories="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(PublishDir)', 'appsurface-keycloak-realm-ready'))" />
   </Target>
 
 </Project>

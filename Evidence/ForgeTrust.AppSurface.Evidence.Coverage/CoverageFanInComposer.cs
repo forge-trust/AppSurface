@@ -388,7 +388,7 @@ internal static class CoverageFanInComposer
         return count;
     }
 
-    private static (long Covered, long Valid) ReadBranchCounts(XElement line)
+    internal static (long Covered, long Valid) ReadBranchCounts(XElement line)
     {
         var conditionCoverage = line.Attribute("condition-coverage")?.Value;
         if (conditionCoverage is null)
@@ -440,6 +440,16 @@ internal static class CoverageFanInComposer
             .SelectMany(package => package.Elements("classes"))
             .SelectMany(classes => classes.Elements("class"));
     }
+
+    /// <summary>Resolves an absolute compiler document against the producer's recorded source root.</summary>
+    internal static string GetRepositoryRelativePath(string path, string sourceRoot)
+    {
+        if (GetRootKind(path.Replace('\\', '/')) == RootKind.Relative) throw InvalidCoveragePath();
+        var relative = NormalizeFilename(path, ParseSourceRoot(sourceRoot));
+        return relative.Length > 0 ? relative : throw InvalidCoveragePath();
+    }
+
+    internal static void ValidateRepositoryRoot(string sourceRoot) => _ = ParseSourceRoot(sourceRoot);
 
     private static PortableRoot ParseSourceRoot(string sourceRoot)
     {

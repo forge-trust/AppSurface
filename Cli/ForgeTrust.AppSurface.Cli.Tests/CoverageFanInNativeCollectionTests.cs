@@ -440,6 +440,32 @@ public sealed class CoverageFanInNativeCollectionTests
     }
 
     [Fact]
+    public async Task Async_profile_retains_compiler_symbols_in_both_captures_and_rejects_tampered_transport()
+    {
+        using var fixture = await Fixture.Create();
+        var symbols = fixture.PrepareCompilerSymbols();
+        await fixture.CapturePrimary(symbols);
+        AssertSuccess(await CoverageFanIn.CaptureAsync(fixture.NativeRequest() with { CompilerSymbolAssemblies = symbols }));
+        var transport = fixture.Transport();
+        var retainedAssembly = TestPathUtils.PathUnder(transport, "compiler-0000.dll");
+        var retainedPdb = TestPathUtils.PathUnder(transport, "compiler-0000.pdb");
+        Assert.Equal(File.ReadAllBytes(symbols[0]), File.ReadAllBytes(retainedAssembly));
+        var original = await File.ReadAllBytesAsync(retainedPdb);
+        Assert.Equal(await File.ReadAllBytesAsync(Path.ChangeExtension(symbols[0], ".pdb")), original);
+
+        await File.AppendAllTextAsync(retainedPdb, "altered");
+        var rejected = await CoverageFanIn.CaptureAsync(fixture.Import(transport));
+        Assert.NotEqual(CoverageOperationOutcome.Succeeded, rejected.Outcome);
+        Assert.False(Directory.Exists(fixture.Receiving));
+
+        await File.WriteAllBytesAsync(retainedPdb, original);
+        AssertSuccess(await CoverageFanIn.CaptureAsync(fixture.Import(transport)));
+        AssertSuccess(await CoverageFanIn.ComposeAsync(fixture.Compose()));
+        Assert.Equal(original, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(fixture.Primary, "compiler-0000.pdb")));
+        Assert.Equal(original, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(fixture.Receiving, "compiler-0000.pdb")));
+    }
+
+    [Fact]
     public async Task TwoPartialOriginalsCannotInventFullBranchCoverage()
     {
         using var fixture = await Fixture.Create();
@@ -694,8 +720,23 @@ public sealed class CoverageFanInNativeCollectionTests
 
         internal CoverageCaptureRequest NativeRequest() => new(Policy, Repository, Native, "native",
             TimingsPath: Timings, RawCoveragePaths: RawPaths);
-        internal async Task CapturePrimary() => AssertSuccess(await CoverageFanIn.CaptureAsync(
-            new(Policy, Repository, Primary, "primary", RawPaths[Projects[0]], Timings)));
+        internal string[] PrepareCompilerSymbols()
+        {
+            Policy = Policy with
+            {
+                ContractVersion = 3,
+                ReportProfileId = CoverageFanInReportProfiles.CoverletCoberturaAsync
+            };
+            const string source = "using System.Threading.Tasks; public class TestFixture { public async Task RunAsync() { await Task.Yield(); } }";
+            var compiled = CoverageFanInAsyncMethodMetadataTests.Compile("TestFixture", source, "/_/src/SymbolFixture.cs");
+            var directory = _temp.CreateDirectory("compiler-input");
+            var assembly = TestPathUtils.PathUnder(directory, "TestFixture.dll");
+            File.WriteAllBytes(assembly, compiled.Assembly);
+            File.WriteAllBytes(Path.ChangeExtension(assembly, ".pdb"), compiled.Pdb);
+            return [assembly];
+        }
+        internal async Task CapturePrimary(IReadOnlyList<string>? symbols = null) => AssertSuccess(await CoverageFanIn.CaptureAsync(
+            new(Policy, Repository, Primary, "primary", RawPaths[Projects[0]], Timings) { CompilerSymbolAssemblies = symbols }));
         internal CoverageCaptureRequest Import(string transport) => new(Policy, Repository, Receiving, "native",
             ImportDirectory: transport, OriginalSourceRoot: CoverageRunOutputLease.NormalizePlatformPath(Repository));
         internal CoverageComposeRequest Compose() => new(Policy, Repository, Primary, [Receiving], Composed);

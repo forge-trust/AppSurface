@@ -1,5 +1,10 @@
 # API and JSON contract
 
+The separate #888 identity declarations are documented in the [immutable identity configuration reference](../../../docs/identity-configuration.md).
+The [run-scoped credential-reference reference](../../../docs/client-credential-reference.md) covers guarded client reads,
+including the qualified platform and custody limits. Supported adapter lifecycle acceptance remains pending the
+[lifecycle gate](../../../docs/plans/issue-888-keycloak-identity-readiness.md#feasibility-results).
+
 ## Public entry points
 
 `KeycloakCanonicalJson.ReadRecipe(ReadOnlySpan<byte>)` and `ReadPolicy` reject unknown, duplicate, missing, trailing, or incorrectly typed JSON properties and validate the closed schema. `Write` emits the canonical bytes used for recipe and policy identities. Canonical bytes, rather than formatting or file paths, produce the recipe SHA256.

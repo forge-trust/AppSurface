@@ -53,6 +53,15 @@
     <Compile Include="Tests/MaterializationTests.cs" />
     <Compile Include="StageEventsTests.cs" />
     <Compile Include="BoundedExportTests.cs" />
+    <Compile Include="RealmBaselineVerifierTests.cs" />
+    <Compile Include="RealmReconciliationTests.cs" />
+    <Compile Include="RealmClientCaptureTests.cs" />
+    <Compile Include="KeycloakClientCredentialReferenceTests.cs" />
+    <Compile Include="KeycloakClientCredentialMemoryCaptureTests.cs" />
+    <Compile Include="KeycloakVolumeIncarnationTests.cs" />
+    <Compile Include="KeycloakWorkerContractsTests.cs" />
+    <Compile Include="KeycloakOwnerHeartbeatTests.cs" />
+    <Compile Include="KeycloakDesiredConfigurationTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

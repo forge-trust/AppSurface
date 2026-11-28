@@ -14,7 +14,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     public void WithLocalSeed_RegistersALinearCompletionChainAndScopedSafeContext()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = AddKeycloak(builder, directory.Path);
         AppSurfaceKeycloakLocalSeedContext? firstContext = null;
         AppSurfaceKeycloakLocalSeedContext? secondContext = null;
@@ -59,7 +59,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     {
         const string sentinel = "LOCAL_TEST_SECRET_SENTINEL";
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = AddKeycloak(builder, directory.Path);
         var secret = builder.AddParameter("seed-admin-secret", sentinel, secret: true);
         var seed = keycloak.WithLocalSeed(
@@ -87,7 +87,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     public void WithLocalSeed_WhenANameOrPredecessorIsInvalid_DoesNotInvokeTheRejectedFactoryOrAppendAStage()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = AddKeycloak(builder, directory.Path);
         var first = keycloak.WithLocalSeed(
             "identity-bootstrap",
@@ -147,7 +147,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     public void WithLocalSeed_WhenTheFirstStageHasAPredecessorOrANameIsReused_RejectsItBeforeTheFactoryRuns()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = AddKeycloak(builder, directory.Path);
         var first = keycloak.WithLocalSeed(
             "identity-bootstrap",
@@ -168,7 +168,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
                 options.After(first);
             }));
 
-        var isolatedBuilder = DistributedApplication.CreateBuilder([]);
+        var isolatedBuilder = CreateLocalBuilder();
         var isolatedKeycloak = AddKeycloak(isolatedBuilder, directory.Path);
         var firstStageWithPredecessor = Assert.Throws<AppSurfaceKeycloakException>(() => isolatedKeycloak.WithLocalSeed(
             "identity-bootstrap",
@@ -192,7 +192,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     public void WithLocalSeed_WhenTheFactoryThrowsReturnsNullOrCreatesTheWrongResource_FailsWithoutAppendingTheRejectedStage()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = AddKeycloak(builder, directory.Path);
 
         Assert.Throws<InvalidOperationException>(() => keycloak.WithLocalSeed(
@@ -220,7 +220,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     [Fact]
     public void WithLocalSeed_WhenTheRealmReadyWorkerCannotBeResolved_DoesNotMaterializeTheConsumerProject()
     {
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = builder.AddKeycloak("external-keycloak", GetAvailablePort());
         var wrapper = new AppSurfaceKeycloakResource(
             keycloak,
@@ -246,7 +246,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     public void WithLocalSeed_WhenASecretBindingIsNonsecretDuplicatedOrReused_FailsBeforeTheRejectedFactory()
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = AddKeycloak(builder, directory.Path);
         var nonsecret = builder.AddParameter("nonsecret", "local", secret: false);
         var secret = builder.AddParameter("secret", "local-secret", secret: true);
@@ -336,7 +336,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     public void WithLocalSeed_WhenTheConfigurationAuthorityDoesNotContainARealm_ThrowsLocalSeedDiagnostic(string authority)
     {
         using var directory = new TempDirectory();
-        var builder = DistributedApplication.CreateBuilder([]);
+        var builder = CreateLocalBuilder();
         var keycloak = AddKeycloak(builder, directory.Path);
         var invalidAuthorityKeycloak = new AppSurfaceKeycloakResource(
             keycloak.Resource,
@@ -362,6 +362,13 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.LocalSeedInvalid, exception.Code);
         Assert.False(factoryCalled);
     }
+
+    private static IDistributedApplicationBuilder CreateLocalBuilder() =>
+        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = ["--environment", "Development"],
+            DisableDashboard = true,
+        });
 
     private static AppSurfaceKeycloakResource AddKeycloak(IDistributedApplicationBuilder builder, string importDirectory)
     {

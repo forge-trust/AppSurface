@@ -28,7 +28,7 @@ internal static partial class CoveragePolicyEncoding
     internal const string Version = "coverage-policy-c14n-1";
     internal const int LegacyContractVersion = 2;
     internal const int ReportApplicabilityContractVersion = 3;
-    internal const string InitialReportProfileId = "coverlet-collector-cobertura-v1";
+    internal const string InitialReportProfileId = CoverageFanInReportProfiles.CoverletCobertura;
     internal static readonly JsonSerializerOptions Json = CreateJson();
 
     private static JsonSerializerOptions CreateJson()
@@ -197,7 +197,7 @@ internal static partial class CoveragePolicyEncoding
         }
 
         if (policy.ContractVersion != ReportApplicabilityContractVersion) throw Invalid("contractVersion");
-        if (!StringComparer.Ordinal.Equals(policy.ReportProfileId, InitialReportProfileId))
+        if (policy.ReportProfileId is not (InitialReportProfileId or CoverageFanInReportProfiles.CoverletCoberturaAsync))
             throw Invalid("reportProfileId");
         if (policy.DiffPolicyId is not null
             && !StringComparer.Ordinal.Equals(policy.DiffPolicyId, CoverageFanInPolicy.VisualBaselinePngDiffPolicyId))

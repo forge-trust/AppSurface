@@ -1,0 +1,13 @@
+{
+  "variant": "invalid-signature",
+  "recipeDigest": "471244ff465c436a49d144e8770ee2fe38eb5fbf98992056f9f25710c29a26a6",
+  "policyDigest": "bd47418e915ede37b88fa0b4c98d7843240cad30525644cc7791fd760d911542",
+  "platform": "linux/amd64",
+  "mode": "Security",
+  "materialCount": 12,
+  "uniqueBlobs": 8,
+  "opensslDataCompression": "zstd",
+  "expectedCapture": false,
+  "signingFingerprint": "D89E838B67A9ACAFB317B0713FF29E5D6819B5B3",
+  "outerBindingsVerified": true
+}

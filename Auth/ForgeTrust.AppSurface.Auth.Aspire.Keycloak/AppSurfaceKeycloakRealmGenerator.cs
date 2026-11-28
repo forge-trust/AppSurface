@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ForgeTrust.AppSurface.Auth.Keycloak;
+using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -38,7 +40,11 @@ public static class AppSurfaceKeycloakRealmGenerator
     {
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
+        return GenerateValidated(options);
+    }
 
+    private static string GenerateValidated(AppSurfaceKeycloakOptions options)
+    {
         var realm = new JsonObject
         {
             ["realm"] = options.Realm,
@@ -63,13 +69,20 @@ public static class AppSurfaceKeycloakRealmGenerator
     {
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
+        return WriteValidatedRealmImport(options);
+    }
 
+    /// <summary>Writes the realm import from the previously validated registration options.</summary>
+    internal static string WriteRealmImport(AppSurfaceKeycloakRegistrationSnapshot registration) => WriteValidatedRealmImport(registration.Options);
+
+    private static string WriteValidatedRealmImport(AppSurfaceKeycloakOptions options)
+    {
         var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm);
-        var temporaryPath = Path.Join(options.RealmImportDirectory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        var temporaryPath = PathUtils.PathUnder(options.RealmImportDirectory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         try
         {
             Directory.CreateDirectory(options.RealmImportDirectory);
-            File.WriteAllText(temporaryPath, Generate(options));
+            File.WriteAllText(temporaryPath, GenerateValidated(options));
             BeforeMoveForTesting?.Invoke(path);
             File.Move(temporaryPath, path, overwrite: true);
         }
@@ -107,7 +120,8 @@ public static class AppSurfaceKeycloakRealmGenerator
             ["webOrigins"] = new JsonArray(JsonValue.Create("+")),
             ["attributes"] = new JsonObject
             {
-                ["post.logout.redirect.uris"] = string.Join("##", options.PostLogoutRedirectUris.Select(uri => uri.ToString())),
+                [KeycloakPostLogoutRedirectUris.AttributeName] =
+                    KeycloakPostLogoutRedirectUris.Format(options.PostLogoutRedirectUris.Select(uri => uri.ToString())),
             },
             ["protocolMappers"] = new JsonArray(CreateRoleMapper()),
         };

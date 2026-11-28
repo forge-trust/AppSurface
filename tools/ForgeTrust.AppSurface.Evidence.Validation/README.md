@@ -61,7 +61,7 @@ is left intact.
 
 Planning happens before the CLI candidate build, full solution coverage and package validation.
 Reviewed documentation-only changes avoid all four producers. Test-only changes collect full solution
-coverage and use its direct Codecov-mode patch gate without native fan-in. Ordinary source changes collect
+coverage. Keycloak test changes select the required ARM64 supplements on CI pull requests. Other test-only changes use the direct Codecov-mode patch gate. Ordinary source changes collect
 coverage and package checks; on CI pull requests this producer union also selects the native coverage
 supplement. Package metadata changes collect package checks.
 The Durable template's packaged test directory selects both coverage and package checks: repository
@@ -151,8 +151,7 @@ selects coverage and another producer require native Linux/Windows/macOS supplem
 Native PR captures and the receiving producer select the [screenshot diff policy](../../guides/coverage-fan-in.md#screenshot-baseline-updates). The producer checks its ID in the verified diff metadata before it closes the coverage obligation.
 The checked-in `build.yml` PR-native path explicitly selects v3 with
 `--native-coverage-contract-version 3`, paired with the full pinned event PR base in AppSurface's 40-digit
-lowercase SHA-1 format and exactly three Linux,
-Windows and macOS captures from the current workflow attempt. The installed CLI must accept the fan-in and
+lowercase SHA-1 format and the selected current-attempt capture set. One closed shared producer inventory defines the Linux, Windows and macOS CLI baseline plus the two optional Keycloak ARM64 captures; it supplies the workflow matrix and expected IDs/cardinality as well as Dogfood project/filter policy. The installed CLI must accept the fan-in and
 then verify it independently in read-only mode. The validator checks and retains the typed primary and
 composed patch applicability with its bound diff and acceptance proof under the producer evidence. The
 acceptance receipt must use the same schema version as the verified CLI result. For v3, the retained diff
@@ -168,7 +167,7 @@ historical behavior. See the [v3 rollout section](../../guides/coverage-fan-in.m
 Main baseline runs enforce aggregate coverage without inventing a PR patch. Reports and diagnostics live
 under `coverage/`, with optional `coverage-fanin/` request/result files and `primary/`, `native-*`, `composed/` and `accepted/` children. Test-only PRs and qualifying tool updates
 run the direct patch gate and do not produce those fan-in directories; source-code-plus-package PRs require
-the three native captures and fan-in verification.
+the selected native captures and fan-in verification.
 The native producer requires the adapter's delivered `accept-result.json` and separate
 `verify-result.json` to report current-run patch acceptance and independent verification with completed
 cleanup. Its `nativeFanInProofSha256` result field hashes the retained acceptance receipt, which binds
@@ -205,6 +204,14 @@ It checks unchanged source before and after collection and writes `coverage/coll
 after every test project and coverage artifact passes validation. It does **not** evaluate gates, write an
 acceptance manifest or close any obligation. It requires `GITHUB_REPOSITORY`, `GITHUB_RUN_ID` and
 `GITHUB_RUN_ATTEMPT`; local patches continue through the normal local workflow.
+
+Selected Keycloak pull-request lanes pass `--include-keycloak-native true` during collection. After the
+complete Release suite succeeds and the checkout is rechecked, collection copies the three fixed Keycloak
+assemblies and matching PDBs from the `Auth.Aspire.Keycloak.Tests` output into
+`coverage/compiler-symbols`. The schema-v2 collection receipt binds the six file hashes directly to
+the successful same-run collection. Import requires the exact files and hashes in an unlinked directory
+when the Keycloak profile is selected. The final fan-in receives that imported directory through
+`--primary-compiler-symbols` and validates the `coverlet-collector-cobertura-async-v1` proof profile.
 
 `run --scope coverage --coverage-collection <downloaded-directory>` imports that collection into fresh
 producer output. The schema-v1 receipt binds source commit/tree, SDK, Release configuration, repository,
@@ -602,7 +609,7 @@ A verified `TargetedComplete` result or an explicitly selected `NoEvidenceRequir
 
 `--fan-in-request /absolute/trusted-request.json` adds a required producer using [native fan-in verification](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#verified-coverage-fan-in). Supply the trusted expected source commit/tree, SDK, Release/Debug configuration, workflow run and attempt, full solution project inventory, primary capture, exactly three native captures, composed reports and gate JSON. The request is trusted configuration, not an automatically authenticated attestation.
 
-The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and historical v1 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. This `--fan-in-request` option retains the historical schema-v1 compatibility contract. For the checked-in [build.yml PR-native path](../../guides/coverage-fan-in.md#rollout-qualification), the repository validator selects v3 with `--native-coverage-contract-version 3` and pairs it with the full pinned event PR base and three current-attempt native captures. The installed CLI acceptance and separate read-only verification must agree on the complete typed applicability and retained diff proof. The validator option defaults to v2 for compatibility callers; the installed CLI and Dogfood defaults and historical v1/v2 behavior also remain unchanged. V1, v2 and v3 captures cannot mix or be relabeled.
+The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and historical v1 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. This `--fan-in-request` option retains the historical schema-v1 compatibility contract. For the checked-in [build.yml PR-native path](../../guides/coverage-fan-in.md#rollout-qualification), the repository validator selects v3 with `--native-coverage-contract-version 3` and pairs it with the full pinned event PR base and the selected current-attempt native captures. Keycloak coverage requires the three CLI captures and two ARM64 captures. The installed CLI acceptance and separate read-only verification must agree on the complete typed applicability and retained diff proof. The validator option defaults to v2 for compatibility callers; the installed CLI and Dogfood defaults and historical v1/v2 behavior also remain unchanged. V1, v2 and v3 captures cannot mix or be relabeled.
 
 The packed-storage fixture writes its explicit retention policy with owner-only access: mode `0600` on Unix and a protected current-user ACL on Windows. This satisfies the existing [private storage contract](../../guides/coverage-storage.md); it does not relax policy-file access validation. Failure artifacts redact the owned workspace path and retain at most 16 KiB of UTF-8 bytes per captured output stream, keeping the most recent complete UTF-8 text. External consumer output remains withheld. A size cap is not general secret redaction: do not pass secrets to fixture commands, because other failure details can appear in CI logs. Installed CLI assembly identity is checked only beneath the installed tool path private `.store`; at least one candidate must exist and every matching assembly must match the package archive hash, so workspace decoys cannot mask a mismatch.
 

@@ -51,12 +51,14 @@ internal static partial class CoverageFanInEngine
 
     /// <summary>Loads exact project-indexed original bytes. Transport hashes cannot replace independent coverage semantics.</summary>
     private static Dictionary<string, byte[]> LoadNativeSet(CoverageFanInEngineRequest request, CoverageFanInIO io,
-        string directory, XDocument document, string sourceRoot, JsonElement files)
+        string directory, XDocument document, string sourceRoot, JsonElement files,
+        IReadOnlyList<string> compilerSymbolFiles)
     {
         var projects = NativeProjects(request);
         if (projects.Length < 1) throw new InvalidDataException("Indexed native capture requires a nonempty project inventory.");
         var expected = new[] { CoverageName, "collector-inventory.json", "timings.json" }
-            .Concat(Enumerable.Range(0, projects.Length).Select(CollectorName)).ToArray();
+            .Concat(Enumerable.Range(0, projects.Length).Select(CollectorName))
+            .Concat(compilerSymbolFiles).ToArray();
         ExactProperties(files, expected);
         var auxiliary = expected.Where(name => name != CoverageName).ToDictionary(name => name,
             name => io.Read(Path.Join(directory, name), xml: name.EndsWith(".xml", StringComparison.Ordinal)), StringComparer.Ordinal);
