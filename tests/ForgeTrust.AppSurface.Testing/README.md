@@ -4,18 +4,19 @@
 
 ## Resolve dotnet for test subprocesses
 
-Use [`TestDotnetHost.Resolve()`](TestDotnetHost.cs) when a test needs the SDK host executable. The shared
-resolver prefers a fully qualified `DOTNET_HOST_PATH`, then a host under `DOTNET_ROOT`,
-then the first existing candidate in `PATH`. Empty `PATH` entries resolve against the
-current directory. The preferred host and root candidates are returned without
-checking that a file exists; `PATH` candidates are
-checked in order. Root and `PATH` candidates are returned as fully qualified paths.
+Use `Resolve()` when configured SDK hints must remain authoritative. It prefers a fully qualified
+`DOTNET_HOST_PATH`, then a host under `DOTNET_ROOT`, then the first existing candidate in `PATH`.
+It accepts explicit host and root candidates even when the file is missing. Empty `PATH` entries
+refer to the current directory. [Resolver implementation](TestDotnetHost.cs)
 
-Its explicit-input overload is internal and is covered by
-[`TestDotnetHostTests`](../ForgeTrust.AppSurface.Testing.Tests/TestDotnetHostTests.cs).
-Those tests use temporary files and supplied environment values instead of changing
-process-wide environment variables or the current directory. Keep this helper limited
-to test subprocess host selection; production command validation has different rules.
+Use `ResolveExisting()` when the subprocess needs a host that exists on disk. It checks the same
+three sources in order, skips missing candidates, and returns a fully qualified path. Relative
+host hints, roots, and `PATH` entries resolve against the current directory. The host name under
+`DOTNET_ROOT` and `PATH` is `dotnet.exe` on Windows and `dotnet` on other platforms.
+
+The tests exercise both internal explicit-input overloads with temporary files and supplied
+environment values. Keep these helpers limited to test subprocess host selection. Production
+command validation follows its own rules. [Resolver tests](../ForgeTrust.AppSurface.Testing.Tests/TestDotnetHostTests.cs)
 
 ## Use `PathUnder` for full fixture paths
 

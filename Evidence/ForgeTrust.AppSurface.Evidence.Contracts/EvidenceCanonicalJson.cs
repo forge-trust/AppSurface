@@ -42,8 +42,8 @@ public static class EvidenceCanonicalJson
     /// Object properties must be unique under ordinal, case-insensitive comparison at every depth. Enum values must
     /// be known strings. Required constructor members must be present and non-null, and contract collections must
     /// not contain null items. Optional nullable members and constructor defaults remain supported.
-    /// Unknown properties are ignored for additive compatibility, and plan and manifest values
-    /// must declare the currently supported contract version (<c>1.0</c>).
+    /// Unknown properties are ignored for additive compatibility. Plans and manifests must declare
+    /// contract version <c>1.0</c> or <c>1.1</c>. An explicit manifest reuse count must match its producer results.
     /// These checks also apply to typed contract values nested in caller-owned collections or wrapper objects.
     /// </summary>
     /// <typeparam name="TValue">Value type to deserialize.</typeparam>

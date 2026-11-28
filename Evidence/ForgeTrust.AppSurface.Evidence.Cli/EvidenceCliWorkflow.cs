@@ -2,7 +2,9 @@ using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Evidence.Cli;
@@ -13,6 +15,7 @@ namespace ForgeTrust.AppSurface.Evidence.Cli;
 internal sealed class EvidenceCliWorkflow
 {
     private const string GeneratedMarker = "appsurface-evidence-starter-v1";
+    private const string LocalReusedNextAction = "Local reused evidence is complete for this invocation, but it is informational and cannot satisfy a gate. Run fresh evidence for gate admission.";
     private readonly EvidencePlanner _planner;
     private readonly IEvidenceInputFileAccess _inputFileAccess;
 
@@ -149,13 +152,36 @@ internal sealed class EvidenceCliWorkflow
         return new EvidencePlanningResolution(plan, inputs.Snapshot);
     }
 
+    /// <summary>Builds the CLI refusal for a profile whose resources require a consumer-owned host.</summary>
+    /// <param name="plan">The selected resource-backed plan.</param>
+    /// <param name="observationOnly">Whether the command requested observation-only execution.</param>
+    /// <returns>The manifest with every resource and producer marked unavailable.</returns>
+    internal static EvidenceManifest BuildResourceBackedRefusal(EvidencePlan plan, bool observationOnly)
+    {
+        var resources = plan.Profile.Resources.Select(resource => new EvidenceResourceResult(resource.Id,
+            EvidenceResourceOutcome.Unavailable, 0,
+            "Resource-backed evidence requires an explicitly registered consumer EvidenceHost; the CLI does not provision or infer consumer resources.")).ToArray();
+        var producers = plan.Profile.Producers.Select(producer => new EvidenceProducerResult(producer.Id,
+            EvidenceProducerOutcome.Unavailable, [],
+            "The selected profile requires consumer-owned resources. Run it through ForgeTrust.AppSurface.Evidence.Aspire with explicit registrations.")).ToArray();
+        return EvidenceManifestBuilder.Build(plan, producers, observationOnly, resourceResults: resources);
+    }
+
     /// <summary>
     /// Writes the canonical plan and its human-readable summary to <paramref name="outputDirectory"/>.
     /// </summary>
     /// <remarks>Replaces <c>evidence-plan.json</c> and <c>evidence-summary.json</c> when they already exist.</remarks>
+    /// <param name="plan">The resolved plan.</param>
+    /// <param name="outputDirectory">The directory that receives the plan and summary.</param>
+    /// <param name="cancellationToken">Cancels writing the outputs.</param>
+    /// <param name="reuseDecisions">Optional reuse decisions to include in the human-readable summary.</param>
     /// <exception cref="EvidenceCliException">The generated plan exceeds the JSON input ceiling (<c>ASEVD217</c>).</exception>
-    public Task WritePlanAsync(EvidencePlan plan, string outputDirectory, CancellationToken cancellationToken) =>
-        WritePlanAsync(plan, outputDirectory, retirePreviousRun: false, cancellationToken);
+    public Task WritePlanAsync(
+        EvidencePlan plan,
+        string outputDirectory,
+        CancellationToken cancellationToken,
+        IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions = null) =>
+        WritePlanAsync(plan, outputDirectory, retirePreviousRun: false, cancellationToken, reuseDecisions);
 
     /// <summary>
     /// Validates the canonical plan size, retires earlier run output, and writes the new plan and summary.
@@ -166,13 +192,14 @@ internal sealed class EvidenceCliWorkflow
     /// (<c>ASEVD216</c>).
     /// </exception>
     public Task WriteRunPlanAsync(EvidencePlan plan, string outputDirectory, CancellationToken cancellationToken) =>
-        WritePlanAsync(plan, outputDirectory, retirePreviousRun: true, cancellationToken);
+        WritePlanAsync(plan, outputDirectory, retirePreviousRun: true, cancellationToken, reuseDecisions: null);
 
     private static async Task WritePlanAsync(
         EvidencePlan plan,
         string outputDirectory,
         bool retirePreviousRun,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions)
     {
         ArgumentNullException.ThrowIfNull(plan);
         var json = SerializeBoundedOutput(plan, "plan");
@@ -185,7 +212,7 @@ internal sealed class EvidenceCliWorkflow
             outputDirectory,
             Path.Join(outputDirectory, "evidence-plan.json"),
             json,
-            () => CreateSummary(plan),
+            () => CreateSummary(plan, reuseDecisions),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -193,15 +220,23 @@ internal sealed class EvidenceCliWorkflow
     /// Writes the canonical manifest and its human-readable summary to <paramref name="outputDirectory"/>.
     /// </summary>
     /// <remarks>Replaces <c>evidence-manifest.json</c> and <c>evidence-summary.json</c> when they already exist.</remarks>
+    /// <param name="manifest">The completed run manifest.</param>
+    /// <param name="outputDirectory">The directory that receives the manifest and summary.</param>
+    /// <param name="cancellationToken">Cancels writing the outputs.</param>
+    /// <param name="reuseDecisions">Optional reuse decisions to include in the human-readable summary.</param>
     /// <exception cref="EvidenceCliException">The generated manifest exceeds the JSON input ceiling (<c>ASEVD217</c>).</exception>
-    public async Task WriteManifestAsync(EvidenceManifest manifest, string outputDirectory, CancellationToken cancellationToken)
+    public async Task WriteManifestAsync(
+        EvidenceManifest manifest,
+        string outputDirectory,
+        CancellationToken cancellationToken,
+        IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         await WriteOutputAsync(
             outputDirectory,
             Path.Join(outputDirectory, "evidence-manifest.json"),
             SerializeBoundedOutput(manifest, "manifest"),
-            () => CreateSummary(manifest),
+            () => CreateSummary(manifest, reuseDecisions),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -215,8 +250,9 @@ internal sealed class EvidenceCliWorkflow
     public Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyAsync(
         string planPath,
         string manifestPath,
-        CancellationToken cancellationToken) =>
-        VerifyAsync(planPath, manifestPath, artifactRoot: null, cancellationToken);
+        CancellationToken cancellationToken,
+        bool requireGateAdmission = false) =>
+        VerifyAsync(planPath, manifestPath, artifactRoot: null, cancellationToken, requireGateAdmission);
 
     /// <summary>
     /// Verifies the plan and manifest binding, then checks every manifest-listed artifact on disk.
@@ -228,6 +264,7 @@ internal sealed class EvidenceCliWorkflow
     /// directory beside the manifest file.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="requireGateAdmission">Whether to also require a gate-eligible manifest.</param>
     /// <returns>The verified plan and manifest.</returns>
     /// <remarks>
     /// Adds <c>ASEVD213</c> to the codes of the three-argument overload: a listed artifact is missing, linked, outside
@@ -239,22 +276,28 @@ internal sealed class EvidenceCliWorkflow
         string planPath,
         string manifestPath,
         string? artifactRoot,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requireGateAdmission = false)
     {
-        var verified = await VerifyBindingAsync(planPath, manifestPath, cancellationToken).ConfigureAwait(false);
-        var root = string.IsNullOrWhiteSpace(artifactRoot)
-            ? Path.Join(Path.GetDirectoryName(Path.GetFullPath(manifestPath))!, "artifacts")
-            : artifactRoot;
+        var verified = await VerifyBindingAsync(planPath, manifestPath, cancellationToken, requireGateAdmission).ConfigureAwait(false);
+        var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(manifestPath))!;
+        var useDefaultRoot = string.IsNullOrWhiteSpace(artifactRoot);
+        var root = useDefaultRoot ? Path.Join(outputDirectory, "artifacts") : artifactRoot!;
         foreach (var producer in verified.Manifest.ProducerResults)
         {
             foreach (var artifact in producer.Artifacts ?? [])
             {
-                var status = await EvidenceArtifactFileValidation.CheckAsync(root, producer.ProducerId, artifact, cancellationToken).ConfigureAwait(false);
+                var usesCoverageCustody = useDefaultRoot && artifact.LogicalName == CoverageEvidenceInventory.LogicalName
+                    && verified.Plan.Profile.Producers.Any(declaration => declaration.Id == producer.ProducerId
+                        && declaration.IsCoverageProducer());
+                var status = usesCoverageCustody
+                    ? await CheckCoverageCustodyAsync(outputDirectory, verified.Plan, producer.ProducerId, artifact, cancellationToken).ConfigureAwait(false)
+                    : await EvidenceArtifactFileValidation.CheckAsync(root, producer.ProducerId, artifact, cancellationToken).ConfigureAwait(false);
                 if (status != EvidenceArtifactFileStatus.Valid)
                 {
                     throw new EvidenceCliException(
                         "ASEVD213",
-                        $"Evidence artifact '{artifact.LogicalName}' of producer '{producer.ProducerId}' failed its on-disk check ({status}) under '{root}'.",
+                        $"Evidence artifact '{artifact.LogicalName}' of producer '{producer.ProducerId}' failed its on-disk check ({status}) under '{(usesCoverageCustody ? outputDirectory : root)}'.",
                         "Rerun appsurface evidence run and verify the plan, manifest, and artifacts directory from that one run; pass --artifact-root if the artifacts were moved.");
                 }
             }
@@ -263,10 +306,22 @@ internal sealed class EvidenceCliWorkflow
         return verified;
     }
 
+    private static Task<EvidenceArtifactFileStatus> CheckCoverageCustodyAsync(
+        string outputDirectory,
+        EvidencePlan plan,
+        string producerId,
+        EvidenceArtifactResult artifact,
+        CancellationToken cancellationToken)
+    {
+        var producerPath = EvidenceReuseOutput.GetCustodyComponents(producerId, plan.Profile.Producers.Count == 1);
+        return EvidenceArtifactFileValidation.CheckUnderRootAsync(outputDirectory, producerPath, artifact, cancellationToken);
+    }
+
     private async Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyBindingAsync(
         string planPath,
         string manifestPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requireGateAdmission)
     {
         var plan = await ReadJsonInputAsync<EvidencePlan>(planPath, JsonInputKind.Plan, cancellationToken)
             .ConfigureAwait(false);
@@ -283,14 +338,7 @@ internal sealed class EvidenceCliWorkflow
         EvidencePlan resolvedPlan;
         try
         {
-            resolvedPlan = _planner.Resolve(plan.PolicySnapshot, plan.ChangedPaths);
-            if (plan.PatchSha256 is not null)
-            {
-                // The original raw patch is not part of the plan artifact. Check its recorded
-                // digest in the canonical binding, then recompute selection from normalized paths.
-                var bound = resolvedPlan with { PatchSha256 = plan.PatchSha256, PlanDigest = string.Empty };
-                resolvedPlan = bound with { PlanDigest = EvidenceDigest.CanonicalSha256(bound) };
-            }
+            resolvedPlan = _planner.ResolveRecordedPlan(plan.PolicySnapshot, plan.ChangedPaths, plan.PatchSha256);
         }
         catch (EvidencePlanningException exception)
         {
@@ -298,12 +346,18 @@ internal sealed class EvidenceCliWorkflow
         }
 
         if (!string.Equals(resolvedPlan.PlanDigest, plan.PlanDigest, StringComparison.Ordinal)
-            || !EvidenceManifestBuilder.Verify(plan, manifest))
+            || !(requireGateAdmission
+                ? EvidenceManifestBuilder.VerifyForGate(plan, manifest)
+                : EvidenceManifestBuilder.Verify(plan, manifest)))
         {
             throw new EvidenceCliException(
                 "ASEVD203",
-                "Evidence manifest does not bind to the supplied plan or canonical manifest content.",
-                "Use the plan and manifest from the same evidence output directory; do not edit generated evidence files.");
+                requireGateAdmission
+                    ? "Evidence manifest does not bind to the supplied plan, canonical content, or gate-admission requirements. Reused results are informational and cannot be admitted as gate evidence."
+                    : "Evidence manifest does not bind to the supplied plan or canonical manifest content.",
+                requireGateAdmission
+                    ? "Use fresh evidence for gate admission; use ordinary evidence verify when checking integrity of a local reused manifest."
+                    : "Use the plan and manifest from the same evidence output directory; do not edit generated evidence files.");
         }
 
         return (plan, manifest);
@@ -332,27 +386,49 @@ internal sealed class EvidenceCliWorkflow
         return string.Join(Environment.NewLine, lines);
     }
 
+    internal static string FormatSummary(EvidencePlan plan, IReadOnlyList<EvidenceReuseSummaryDecision> decisions)
+    {
+        ArgumentNullException.ThrowIfNull(decisions);
+        return string.Join(Environment.NewLine, new[] { FormatSummary(plan) }.Concat(
+            decisions.Select(decision => $"Reuse {decision.ProducerId}: {decision.Status} ({decision.Reason}) {decision.Diagnostic}")));
+    }
+
     /// <summary>
     /// Formats a deterministic, human-readable summary of an evidence claim and any remaining obligations.
     /// </summary>
     public static string FormatSummary(EvidenceManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
-        var action = manifest.ClaimKind switch
-        {
-            EvidenceClaimKind.ReleaseComplete => "Release evidence is complete.",
-            EvidenceClaimKind.TargetedComplete => "Targeted evidence is complete.",
-            EvidenceClaimKind.NoEvidenceRequired => "No evidence is required by the matched policy rule.",
-            EvidenceClaimKind.ObservationOnly => "Observation recorded; it is not gate eligible.",
-            _ => "Evidence is incomplete. Review unmediated obligations and producer diagnostics.",
-        };
+        var guidance = GetManifestGuidance(manifest.ClaimKind);
         return string.Join(
             Environment.NewLine,
             $"Evidence result: {manifest.ClaimKind}",
             $"Execution: {manifest.ExecutionVerdict}",
             $"Closed obligations: {FormatIds(manifest.ClosedObligationIds)}",
             $"Unmediated obligations: {FormatIds(manifest.UnmediatedObligationIds)}",
-            $"Next: {action}");
+            $"Next: {guidance.Console}");
+    }
+
+    internal static string FormatSummary(EvidenceManifest manifest, IReadOnlyList<EvidenceReuseSummaryDecision> decisions)
+    {
+        ArgumentNullException.ThrowIfNull(decisions);
+        var baseSummary = FormatSummary(manifest);
+        var rows = decisions.Select(decision =>
+        {
+            var result = manifest.ProducerResults.SingleOrDefault(item => item.ProducerId == decision.ProducerId);
+            var reused = result?.Outcome == EvidenceProducerOutcome.Reused;
+            var originAge = decision.OriginCompletedAt is { } completed
+                ? Math.Max(0, (DateTimeOffset.UtcNow - completed).TotalSeconds).ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "s ago"
+                : "n/a";
+            var restore = reused ? $"; invocation restore {manifest.Metrics.ArtifactRestoreMilliseconds}ms" : string.Empty;
+            var historical = reused ? decision.OriginElapsedMilliseconds is { } elapsed
+                ? $"; historical elapsed {elapsed}ms" : "; historical elapsed unavailable" : string.Empty;
+            var publication = string.IsNullOrWhiteSpace(decision.Publication) ? string.Empty : $"; receipt {decision.Publication}";
+            var roots = decision.ArtifactRoot is null ? string.Empty
+                : $"; artifact root {decision.ArtifactRoot}" + (decision.ExecutionRoot is null ? string.Empty : $"; execution root {decision.ExecutionRoot}");
+            return $"Reuse {decision.ProducerId}: {decision.Status} ({decision.Reason}) {decision.Diagnostic}{(reused ? $"; origin {originAge}{historical}{restore}" : publication)}{roots}";
+        });
+        return string.Join(Environment.NewLine, new[] { baseSummary }.Concat(rows));
     }
 
     private async Task<(IReadOnlyList<NormalizedDiffPath> Paths, EvidenceDiffSnapshot? Snapshot)> ReadPathsAndSnapshotAsync(
@@ -379,11 +455,10 @@ internal sealed class EvidenceCliWorkflow
 
     private async Task<EvidenceDiffSnapshot> ReadDiffSnapshotAsync(string path, CancellationToken cancellationToken)
     {
-        const long maximumDiffBytes = 20L * 1024 * 1024;
         try
         {
             await using var stream = _inputFileAccess.OpenRead(path);
-            var bytes = await ReadBoundedBytesAsync(stream, maximumDiffBytes, path, cancellationToken).ConfigureAwait(false);
+            var bytes = await ReadBoundedBytesAsync(stream, EvidencePlan.MaximumCapturedPatchBytes, path, cancellationToken).ConfigureAwait(false);
 
             return new EvidenceDiffSnapshot(bytes, Path.GetFileName(path), Convert.ToHexString(SHA256.HashData(bytes)));
         }
@@ -548,29 +623,57 @@ internal sealed class EvidenceCliWorkflow
 
     private static bool ContainsGeneratedMarker(string path) => File.ReadAllText(path).Contains(GeneratedMarker, StringComparison.Ordinal);
 
-    private static object CreateSummary(EvidencePlan plan)
+    private static PlanSummary CreateSummary(EvidencePlan plan, IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions)
     {
-        const string next = "Run 'appsurface evidence run' only when the selected producer capabilities are ready.";
         var obligations = plan.Profile.Obligations.Select(static obligation => obligation.Id).ToArray();
-        var testProducers = TestEvidenceRunSupport.DescribePlan(plan);
+        var testProducers = reuseDecisions is null ? TestEvidenceRunSupport.DescribePlan(plan) : null;
 
-        // The testProducers property is added only when a test producer is selected, so other summaries keep their shape.
-        return testProducers.Length == 0
-            ? new { kind = "plan", profile = plan.Profile.Id, scope = plan.Profile.Scope.ToString(), matchedRules = plan.MatchedRuleIds, obligations, next }
-            : new { kind = "plan", profile = plan.Profile.Id, scope = plan.Profile.Scope.ToString(), matchedRules = plan.MatchedRuleIds, obligations, testProducers, next };
+        return new("plan", plan.Profile.Id, plan.Profile.Scope.ToString(), plan.MatchedRuleIds, obligations,
+            testProducers is { Length: > 0 } ? testProducers : null, reuseDecisions,
+            "Run 'appsurface evidence run' only when the selected producer capabilities are ready.");
     }
 
-    private static object CreateSummary(EvidenceManifest manifest) => new
+    private static ManifestSummary CreateSummary(EvidenceManifest manifest, IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions)
+        => new("manifest", manifest.ClaimKind.ToString(), manifest.ExecutionVerdict.ToString(),
+            manifest.Eligibility.ToString(), manifest.EnvelopeStatus.ToString(), manifest.ClosedObligationIds,
+            manifest.UnmediatedObligationIds, reuseDecisions, GetManifestGuidance(manifest.ClaimKind).Json);
+
+    private sealed record PlanSummary(
+        [property: JsonPropertyName("kind")] string Kind,
+        [property: JsonPropertyName("profile")] string Profile,
+        [property: JsonPropertyName("scope")] string Scope,
+        [property: JsonPropertyName("matchedRules")] IReadOnlyList<string> MatchedRules,
+        [property: JsonPropertyName("obligations")] IReadOnlyList<string> Obligations,
+        [property: JsonPropertyName("testProducers"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] object[]? TestProducers,
+        [property: JsonPropertyName("reuseDecisions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EvidenceReuseSummaryDecision>? ReuseDecisions,
+        [property: JsonPropertyName("next")] string Next);
+
+    private sealed record ManifestSummary(
+        [property: JsonPropertyName("kind")] string Kind,
+        [property: JsonPropertyName("claim")] string Claim,
+        [property: JsonPropertyName("verdict")] string Verdict,
+        [property: JsonPropertyName("eligibility")] string Eligibility,
+        [property: JsonPropertyName("envelopeStatus")] string EnvelopeStatus,
+        [property: JsonPropertyName("closedObligations")] IReadOnlyList<string> ClosedObligations,
+        [property: JsonPropertyName("unmediatedObligations")] IReadOnlyList<string> UnmediatedObligations,
+        [property: JsonPropertyName("reuseDecisions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EvidenceReuseSummaryDecision>? ReuseDecisions,
+        [property: JsonPropertyName("next")] string Next);
+
+    private static (string Console, string Json) GetManifestGuidance(EvidenceClaimKind claim)
     {
-        kind = "manifest",
-        claim = manifest.ClaimKind.ToString(),
-        verdict = manifest.ExecutionVerdict.ToString(),
-        eligibility = manifest.Eligibility.ToString(),
-        envelopeStatus = manifest.EnvelopeStatus.ToString(),
-        closedObligations = manifest.ClosedObligationIds,
-        unmediatedObligations = manifest.UnmediatedObligationIds,
-        next = manifest.ClaimKind == EvidenceClaimKind.None ? "Resolve the listed producer or obligation failure before gating." : "Evidence claim is ready for its declared eligible consumer.",
-    };
+        const string gateReady = "Evidence claim is ready for its declared eligible consumer.";
+        return claim switch
+        {
+            EvidenceClaimKind.ReleaseComplete => ("Release evidence is complete.", gateReady),
+            EvidenceClaimKind.TargetedComplete => ("Targeted evidence is complete.", gateReady),
+            EvidenceClaimKind.NoEvidenceRequired => ("No evidence is required by the matched policy rule.", gateReady),
+            EvidenceClaimKind.ObservationOnly => ("Observation recorded; it is not gate eligible.",
+                "Observation recorded as informational evidence. Run fresh evidence without --observation-only for gate admission."),
+            EvidenceClaimKind.LocalReusedComplete => (LocalReusedNextAction, LocalReusedNextAction),
+            _ => ("Evidence is incomplete. Review unmediated obligations and producer diagnostics.",
+                "Resolve the listed producer or obligation failure before gating."),
+        };
+    }
 
     private static string FormatIds(IEnumerable<string> ids)
     {

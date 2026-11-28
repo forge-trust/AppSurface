@@ -121,6 +121,23 @@ public sealed class DurableTemplateTestObservationTests : IDisposable
         Assert.DoesNotContain(Secret, json, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Docker_cause_crosses_only_a_failed_identity_matched_first_work_result()
+    {
+        var marker = FirstWorkMarker("postgresql-fixture-setup", "InvalidOperationException",
+            location: "<RequireDockerAsync>d__49.MoveNext", cause: "docker-probe-timeout");
+        var path = Write(Report(3, 3, 1, 2,
+            [ResultWithOutput("failed", "Failed", marker), ResultWithOutput("passed", "Passed", marker), ResultWithOutput("unrelated", "Failed", marker)],
+            [Definition("failed", FirstWorkClass, FirstWorkMethod), Definition("passed", FirstWorkClass, FirstWorkMethod), Definition("unrelated", "Unrelated.Tests", FirstWorkMethod)]));
+
+        var result = DurableTemplateTestObservation.Read(path);
+        var diagnostic = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<DurableTemplateFirstWorkDiagnostic>>(result.FirstWorkFailures));
+        Assert.Equal("docker-probe-timeout", diagnostic.DockerPrerequisiteCause);
+        Assert.Equal(2, result.Failed);
+        Assert.Equal(1, result.Passed);
+        Assert.DoesNotContain(Secret, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("Unrelated.Tests", FirstWorkMethod)]
     [InlineData(FirstWorkClass + "Extra", FirstWorkMethod)]
@@ -408,8 +425,8 @@ public sealed class DurableTemplateTestObservationTests : IDisposable
         return result;
     }
 
-    private static string FirstWorkMarker(string phase = "initial-readiness", string code = "TimeoutException", string cleanup = "none", string location = Secret) =>
-        $"[FirstDurableWork] failure phase={phase} code={code} at={location} cause={Secret}; cleanup={cleanup}; retry={Secret}";
+    private static string FirstWorkMarker(string phase = "initial-readiness", string code = "TimeoutException", string cleanup = "none", string location = Secret, string cause = Secret) =>
+        $"[FirstDurableWork] failure phase={phase} code={code} at={location} cause={cause}; cleanup={cleanup}; retry={Secret}";
 
     private static XElement Definition(string id, string className, string name) => new(Namespace + "UnitTest",
         new XAttribute("id", id), new XAttribute("name", Secret), new XElement(Namespace + "TestMethod",

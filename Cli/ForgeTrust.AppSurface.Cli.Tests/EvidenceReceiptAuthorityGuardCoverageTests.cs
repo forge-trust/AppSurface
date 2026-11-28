@@ -1,0 +1,405 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Evidence.Planner;
+using ForgeTrust.AppSurface.Testing;
+
+namespace ForgeTrust.AppSurface.Cli.Tests;
+
+public sealed class EvidenceReceiptAuthorityGuardCoverageTests
+{
+    [Theory]
+    [InlineData("ascii")]
+    [InlineData("two-byte")]
+    [InlineData("surrogate-pair")]
+    public async Task AssertionByteLimitIsEnforcedBeforeAuthorityMutationAndAcceptsTheExactBoundary(string shape)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var exact = shape switch
+        {
+            "ascii" => new string('a', 4096),
+            "two-byte" => new string('é', 2048),
+            _ => string.Concat(Enumerable.Repeat("😀", 1024))
+        };
+        Assert.Equal(4096, Encoding.UTF8.GetByteCount(exact));
+        var original = fixture.IndexBytes();
+
+        Assert.Throws<InvalidDataException>(() => fixture.Lease.EstablishAuthority("audit", auditIntent: true,
+            expectedAssertions: exact + "x"));
+        Assert.Null(fixture.Lease.ReadState());
+        Assert.Equal(original, fixture.IndexBytes());
+
+        fixture.Lease.EstablishAuthority("audit", auditIntent: true, expectedAssertions: exact);
+        fixture.Lease.SettleExecution("audit");
+        var beforeMismatch = fixture.Lease.ReadState();
+        var beforeIndex = fixture.IndexBytes();
+        Assert.Throws<InvalidDataException>(() => fixture.Lease.MarkAuditMismatch("audit", exact + "x"));
+        Assert.Equal(beforeMismatch, fixture.Lease.ReadState());
+        Assert.Equal(beforeIndex, fixture.IndexBytes());
+
+        fixture.Lease.MarkAuditMismatch("audit", exact);
+        var state = fixture.Lease.ReadState()!;
+        Assert.True(state.AuditMismatch);
+        Assert.Equal("audit", state.AuditIntentExecutionId);
+        Assert.Equal(exact, state.AuditExpectedAssertions);
+        Assert.Null(state.InFlightExecutionId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task MissingExecutionIdentifierCannotCreateOrQuarantineAuthority(string? execution)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var original = fixture.IndexBytes();
+
+        Assert.ThrowsAny<ArgumentException>(() => fixture.Lease.EstablishAuthority(execution!));
+        Assert.ThrowsAny<ArgumentException>(() => fixture.Lease.MarkAuditMismatch(execution!, "[]"));
+
+        Assert.Null(fixture.Lease.ReadState());
+        Assert.Equal(original, fixture.IndexBytes());
+    }
+
+    [Fact]
+    public async Task RecordStateRejectsOversizedAuthorityWithoutChangingIndex()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("original-owner");
+        var original = fixture.Lease.ReadState()!;
+        var indexBefore = fixture.IndexBytes();
+        var oversized = original with { InFlightExecutionId = new string('x', EvidenceReceiptState.MaximumSerializedBytes) };
+
+        Assert.Throws<IOException>(() => EvidenceReceiptQuota.RecordState(fixture.Root, fixture.Repository,
+            fixture.Lease.Key, oversized));
+
+        Assert.Equal(original, fixture.Lease.ReadState());
+        Assert.Equal(indexBefore, fixture.IndexBytes());
+    }
+
+    [Fact]
+    public async Task EstablishAuthorityCannotReplaceAnUnresolvedExecutionOwner()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("first-execution");
+        var originalState = fixture.Lease.ReadState();
+        var originalIndex = fixture.IndexBytes();
+
+        Assert.Throws<InvalidOperationException>(() => fixture.Lease.EstablishAuthority("second-execution"));
+
+        Assert.Equal(originalState, fixture.Lease.ReadState());
+        Assert.Equal(originalIndex, fixture.IndexBytes());
+        Assert.Equal("first-execution", fixture.Lease.ReadState()?.InFlightExecutionId);
+    }
+
+    [Fact]
+    public async Task SettleExecutionCannotClearAnotherExecutionsAuthority()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("current-execution");
+        var originalState = fixture.Lease.ReadState();
+        var originalIndex = fixture.IndexBytes();
+
+        Assert.Throws<InvalidOperationException>(() => fixture.Lease.SettleExecution("different-execution"));
+        fixture.Lease.SettleExecutionIfOwned("different-execution");
+
+        Assert.Equal(originalState, fixture.Lease.ReadState());
+        Assert.Equal(originalIndex, fixture.IndexBytes());
+        Assert.Equal("current-execution", fixture.Lease.ReadState()?.InFlightExecutionId);
+    }
+
+    [Theory]
+    [InlineData("digest-null", "invocation-not-complete-and-passed")]
+    [InlineData("digest-short", "invocation-not-complete-and-passed")]
+    [InlineData("digest-nonhex", "invocation-not-complete-and-passed")]
+    [InlineData("future-origin", "payload-publication-failed")]
+    [InlineData("missing-producer", "producer-not-reusable-passed-result")]
+    [InlineData("record-oversized", "producer-result-too-large")]
+    public async Task InvalidPublicationCannotReplaceOrSettleTheCurrentExecution(string defect, string expectedReason)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("execution");
+        var state = fixture.Lease.ReadState();
+        var original = fixture.IndexBytes();
+        var (plan, manifest, sourceRoot) = CreatePublication(fixture.DirectoryPath,
+            defect == "record-oversized" ? new string('x', EvidenceReceiptState.MaximumPassedProducerBase64Characters + 1) : null);
+        manifest = defect switch
+        {
+            "digest-null" => manifest with { ManifestDigest = null! },
+            "digest-short" => manifest with { ManifestDigest = "abcd" },
+            "digest-nonhex" => manifest with { ManifestDigest = new string('g', 64) },
+            _ => manifest,
+        };
+        var completed = fixture.Clock.GetUtcNow() + (defect == "future-origin" ? TimeSpan.FromTicks(1) : TimeSpan.Zero);
+        var producerId = defect == "missing-producer" ? "missing" : "producer";
+        var publication = await fixture.Lease.PublishAsync("execution", plan, manifest, producerId, sourceRoot, completed,
+            CancellationToken.None);
+
+        Assert.False(publication.Published);
+        Assert.Equal(expectedReason, publication.Reason);
+        Assert.Equal(state, fixture.Lease.ReadState());
+        Assert.Equal(original, fixture.IndexBytes());
+        Assert.Equal("execution", fixture.Lease.ReadState()!.InFlightExecutionId);
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Lease.DirectoryPath, "payload-*"));
+    }
+
+    [Fact]
+    public async Task BatchCommitRejectsAnEscapingPayloadNameWithoutChangingAuthority()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("execution");
+        var state = fixture.Lease.ReadState()!;
+        var before = fixture.IndexBytes();
+        var completedAt = fixture.Clock.GetUtcNow();
+        var settled = state with { InFlightExecutionId = null, OriginCompletedAt = completedAt, PayloadDirectoryName = "../outside" };
+
+        Assert.Throws<InvalidDataException>(() =>
+            EvidenceReceiptQuota.CommitInvocation(fixture.Root,
+                [new(fixture.Repository, state.Key, "producer", "execution", settled,
+                    "../outside", completedAt, 0, 0,
+                    fixture.Lease.EssentialReservationId)]));
+
+        Assert.Equal(state, fixture.Lease.ReadState());
+        Assert.Equal(before, fixture.IndexBytes());
+        var escaped = TestPathUtils.PathUnder(Path.GetDirectoryName(fixture.Lease.DirectoryPath)!, "outside");
+        Assert.False(File.Exists(escaped));
+        Assert.False(Directory.Exists(escaped));
+    }
+
+    [Fact]
+    public async Task QuarantinedFreshPublicationCannotClearAnotherExecutionsAuditIntent()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("audit", auditIntent: true, expectedAssertions: "[\"expected\"]");
+        fixture.Lease.MarkAuditMismatch("audit", "[\"expected\"]");
+        fixture.Lease.SettleExecution("audit");
+        fixture.Lease.EstablishAuthority("fresh", allowQuarantinedFresh: true);
+        var state = fixture.Lease.ReadState();
+        var original = fixture.IndexBytes();
+
+        var (plan, manifest, sourceRoot) = CreatePublication(fixture.DirectoryPath);
+        var publication = await fixture.Lease.PublishAsync("fresh", plan, manifest, "producer", sourceRoot,
+            fixture.Clock.GetUtcNow(), CancellationToken.None);
+
+        Assert.False(publication.Published);
+        Assert.Equal("audit-intent-owner-mismatch", publication.Reason);
+        Assert.Equal(state, fixture.Lease.ReadState());
+        Assert.Equal(original, fixture.IndexBytes());
+        Assert.Equal("audit", fixture.Lease.ReadState()!.AuditIntentExecutionId);
+        Assert.Equal("fresh", fixture.Lease.ReadState()!.InFlightExecutionId);
+        Assert.True(fixture.Lease.ReadState()!.AuditMismatch);
+    }
+
+    [Theory]
+    [InlineData("payload-dir/child")]
+    [InlineData("")]
+    [InlineData("payload-stage-owned")]
+    [InlineData("payload-STAGE-owned")]
+    public async Task InvalidationRefusesMalformedActivePayloadComponentWithoutChangingCustody(string malformedPayloadName)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var completedAt = fixture.Clock.GetUtcNow();
+        var outsideSentinel = TestPathUtils.PathUnder(fixture.DirectoryPath, "operator-sentinel.txt");
+        var sentinelBytes = Encoding.UTF8.GetBytes("outside receipt custody");
+        await File.WriteAllBytesAsync(outsideSentinel, sentinelBytes);
+        var settled = new EvidenceReceiptState(1, fixture.Lease.Key, null, null, new string('b', 64), completedAt,
+            malformedPayloadName, null, completedAt, false, null);
+        var original = fixture.IndexBytes();
+        Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.RecordState(fixture.Lease, settled));
+        Assert.Equal(original, fixture.IndexBytes());
+        Assert.Null(EvidenceReceiptQuota.ReadAuthority(fixture.Root, fixture.Repository, fixture.Lease.Key, readOnly: true));
+        var corrupt = JsonNode.Parse(original)!;
+        var entry = corrupt["Entries"]!.AsArray().Single()!;
+        entry["PayloadDirectoryName"] = malformedPayloadName;
+        entry["AuthorityState"] = JsonSerializer.SerializeToNode(settled);
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(fixture.Root, "quota-index.json"),
+            Encoding.UTF8.GetBytes(corrupt.ToJsonString()));
+        var before = fixture.IndexBytes();
+        var invalidated = new EvidenceReceiptState(1, fixture.Lease.Key, null, null, null, null, null);
+
+        try
+        {
+            var failure = Assert.Throws<InvalidDataException>(() =>
+                EvidenceReceiptQuota.InvalidatePayload(fixture.Lease, settled, invalidated));
+            Assert.Equal("Receipt quota index contains unsupported or invalid authority.", failure.Message);
+            Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.ReadAuthority(
+                fixture.Root, fixture.Repository, fixture.Lease.Key, readOnly: true));
+            Assert.Equal(before, fixture.IndexBytes());
+            Assert.Equal(sentinelBytes, await File.ReadAllBytesAsync(outsideSentinel));
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(fixture.Root, "quota-index.json"), original);
+        }
+    }
+
+    [Theory]
+    [InlineData("in-flight")]
+    [InlineData("audit-intent")]
+    [InlineData("quarantine")]
+    public async Task MissingAuthorityCannotEraseRetainedExecutionOrAuditFlags(string mode)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("old", auditIntent: mode != "in-flight");
+        if (mode == "audit-intent") fixture.Lease.SettleExecution("old");
+        if (mode == "quarantine") fixture.Lease.MarkAuditMismatch("old", "[]");
+        var original = fixture.IndexBytes();
+        var index = JsonNode.Parse(original)!;
+        index["Entries"]!.AsArray().Single()!["AuthorityState"] = null;
+        var indexPath = TestPathUtils.PathUnder(fixture.Root, "quota-index.json");
+        await File.WriteAllBytesAsync(indexPath, Encoding.UTF8.GetBytes(index.ToJsonString()));
+        var before = fixture.IndexBytes();
+        try
+        {
+            Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.ReadAuthority(
+                fixture.Root, fixture.Repository, fixture.Lease.Key, readOnly: true));
+            Assert.Throws<InvalidDataException>(() => EvidenceReceiptQuota.ReadAuthority(
+                fixture.Root, fixture.Repository, fixture.Lease.Key));
+            Assert.Throws<InvalidDataException>(() => fixture.Lease.EstablishAuthority("new"));
+            Assert.Equal(before, fixture.IndexBytes());
+        }
+        finally { await File.WriteAllBytesAsync(indexPath, original); }
+    }
+
+
+    [Fact]
+    public async Task DisposedKeyLeaseCannotReadOrRewriteRetainedExecutionAuthority()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Lease.EstablishAuthority("execution");
+        fixture.Lease.Dispose();
+        var afterDisposal = fixture.IndexBytes();
+
+        Assert.Throws<ObjectDisposedException>(() => fixture.Lease.ReadState());
+        Assert.Throws<ObjectDisposedException>(() => fixture.Lease.VerifyBinding());
+        Assert.Throws<ObjectDisposedException>(() => fixture.Lease.EstablishAuthority("another"));
+        Assert.Throws<ObjectDisposedException>(() => fixture.Lease.MarkAuditMismatch("execution", "[]"));
+        fixture.Lease.Dispose();
+
+        Assert.Equal(afterDisposal, fixture.IndexBytes());
+        var state = EvidenceReceiptQuota.ReadAuthority(fixture.Root, new string('a', 64), new string('c', 64));
+        Assert.Equal("execution", state!.InFlightExecutionId);
+    }
+
+    [Fact]
+    public async Task RetiredPayloadChargeRequiresConfirmedDeletionAndExactName()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var repository = fixture.Repository;
+        var key = fixture.Lease.Key;
+        var reservationId = Guid.NewGuid().ToString("N");
+        var payloadName = "payload-" + reservationId;
+        var completedAt = fixture.Clock.GetUtcNow();
+        var sentinelPath = TestPathUtils.PathUnder(fixture.DirectoryPath, "operator-sentinel.txt");
+        await File.WriteAllTextAsync(sentinelPath, "preserve outside receipt custody");
+        Assert.True(EvidenceReceiptQuota.TryReservePayload(fixture.Root, repository, key, completedAt,
+            EvidenceReceiptPayloadReservation.Create(reservationId, 3)));
+        using (var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(fixture.Lease.DirectoryPath,
+            createMissing: false, requirePrivate: true)!)
+        using (var payload = keyRoot.CreateArtifactDirectory(payloadName))
+        using (var file = payload.OpenArtifactFile("owned.bin", createNew: true))
+        {
+            file.Write(new byte[] { 2, 4, 6 });
+            file.Flush(flushToDisk: true);
+        }
+        var settled = new EvidenceReceiptState(1, key, null, null, new string('b', 64), completedAt,
+            payloadName, null, completedAt, false, null);
+        fixture.Lease.EstablishAuthority("retirement-fixture");
+        EvidenceReceiptQuota.CommitInvocation(fixture.Root,
+            [new(repository, key, "producer", "retirement-fixture", settled,
+                payloadName, completedAt, 3, 3, fixture.Lease.EssentialReservationId)]);
+        var invalidated = new EvidenceReceiptState(1, key, null, null, null, null, null);
+        EvidenceReceiptQuota.InvalidatePayload(fixture.Lease, settled, invalidated);
+
+        Assert.Equal(new[] { payloadName }, EvidenceReceiptQuota.ReadRetiredPayloadNames(fixture.Root, repository, key));
+        AssertRetiredPayloadCharge(fixture.IndexBytes(), payloadName, 3);
+        var beforeUnconfirmedRelease = fixture.IndexBytes();
+        EvidenceReceiptQuota.ReleaseRetiredPayload(fixture.Root, repository, key, payloadName, deletionConfirmed: false);
+        Assert.Equal(beforeUnconfirmedRelease, fixture.IndexBytes());
+        EvidenceReceiptQuota.ReleaseRetiredPayload(fixture.Root, repository, key, "payload-unrelated",
+            deletionConfirmed: true);
+        Assert.Equal(beforeUnconfirmedRelease, fixture.IndexBytes());
+
+        using (var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(fixture.Lease.DirectoryPath,
+            createMissing: false, requirePrivate: true)!)
+            keyRoot.DeleteArtifactEntry(payloadName, 16);
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(fixture.Lease.DirectoryPath, payloadName)));
+        AssertRetiredPayloadCharge(fixture.IndexBytes(), payloadName, 3);
+        EvidenceReceiptQuota.ReleaseRetiredPayload(fixture.Root, repository, key, payloadName, deletionConfirmed: true);
+
+        Assert.Empty(EvidenceReceiptQuota.ReadRetiredPayloadNames(fixture.Root, repository, key));
+        using var index = JsonDocument.Parse(fixture.IndexBytes());
+        var entry = Assert.Single(index.RootElement.GetProperty("Entries").EnumerateArray());
+        Assert.Empty(entry.GetProperty("RetiredPayloads").EnumerateArray());
+        Assert.Equal("preserve outside receipt custody", await File.ReadAllTextAsync(sentinelPath));
+    }
+
+    private static (EvidencePlan Plan, EvidenceManifest Manifest, string SourceRoot) CreatePublication(string root,
+        string? diagnostic = null)
+    {
+        var producer = new EvidenceProducerDeclaration("producer", "unit", "1", [], ["assertion"], [], 30)
+        { Inputs = new EvidenceProducerInputs(["src/**"], []) };
+        var profile = new EvidenceProfile("targeted", EvidenceProfileScope.Targeted, [], [producer],
+            [new EvidenceObligation("check", "risk", "reason", [producer.Id], "assertion")]);
+        var plan = new EvidencePlanner().Resolve(new EvidencePolicy("policy", "1", profile.Id, [profile], []),
+            [new NormalizedDiffPath("src/fixture.cs")]);
+        var manifest = EvidenceManifestBuilder.Build(plan,
+            [new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, ["assertion"], diagnostic)]);
+        var sourceRoot = TestPathUtils.PathUnder(root, "source");
+        Directory.CreateDirectory(sourceRoot);
+        return (plan, manifest, sourceRoot);
+    }
+
+    private static void AssertRetiredPayloadCharge(byte[] indexBytes, string payloadName, long expectedBytes)
+    {
+        using var index = JsonDocument.Parse(indexBytes);
+        var entry = Assert.Single(index.RootElement.GetProperty("Entries").EnumerateArray());
+        var retired = Assert.Single(entry.GetProperty("RetiredPayloads").EnumerateArray());
+        Assert.Equal(payloadName, retired.GetProperty("DirectoryName").GetString());
+        Assert.Equal(expectedBytes, retired.GetProperty("Bytes").GetInt64());
+    }
+
+    private sealed class FixedClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    }
+
+    private sealed class Fixture(TestDirectory directory, string root, TimeProvider clock,
+        EvidenceReceiptStore.EvidenceReceiptKeyLease lease) : IDisposable
+    {
+        internal string Root => root;
+        internal string Repository => new string('a', 64);
+        internal string DirectoryPath => directory.Path;
+        internal TimeProvider Clock => clock;
+        internal EvidenceReceiptStore.EvidenceReceiptKeyLease Lease => lease;
+        internal byte[] IndexBytes() => File.ReadAllBytes(TestPathUtils.PathUnder(root, "quota-index.json"));
+        internal static async Task<Fixture> CreateAsync()
+        {
+            var directory = TestDirectory.Create();
+            IReadOnlyList<EvidenceReceiptStore.EvidenceReceiptKeyLease>? leases = null;
+            try
+            {
+                var root = TestPathUtils.PathUnder(directory.Path, "receipts");
+                var clock = new FixedClock();
+                var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+                { RootDirectory = root, RepositoryNamespace = new string('a', 64), Clock = clock });
+                leases = await store.AcquireAsync([new string('c', 64)], CancellationToken.None);
+                var lease = Assert.Single(leases);
+                return new(directory, root, clock, lease);
+            }
+            catch
+            {
+                try { if (leases is not null) foreach (var acquired in leases) acquired.Dispose(); }
+                finally { directory.Dispose(); }
+                throw;
+            }
+        }
+        public void Dispose()
+        {
+            try { lease.Dispose(); }
+            finally { directory.Dispose(); }
+        }
+    }
+}

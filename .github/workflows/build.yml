@@ -278,6 +278,7 @@ jobs:
           dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
           cache-dependency-path: |
+            Aspire/ForgeTrust.AppSurface.Aspire.Tests/packages.lock.json
             Cli/ForgeTrust.AppSurface.Cli.Tests/packages.lock.json
             Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/packages.*.lock.json
             examples/auth-aspire-keycloak-apphost/packages.*.lock.json
@@ -290,6 +291,7 @@ jobs:
           if ((dotnet --version) -ne "${{ env.COVERAGE_SDK_VERSION }}") { throw "Coverage SDK selection failed" }
 
       - name: Restore selected native coverage tests (locked)
+        if: ${{ matrix.keycloak }}
         shell: pwsh
         env:
           COVERAGE_TEST_PROJECT: ${{ matrix.testProject }}
@@ -300,8 +302,25 @@ jobs:
         shell: bash
         run: dnx --yes aspire.cli@13.6.5 -- setup --install-path "$HOME/.aspire" --non-interactive
 
-      - name: Restore dogfood adapter (locked)
-        run: dotnet restore tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj --locked-mode
+      - name: Restore coverage security tests (locked)
+        if: ${{ !matrix.keycloak }}
+        shell: pwsh
+        run: |
+          $projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')
+          if ($projects.Count -eq 0) { throw 'Native coverage project inventory is empty.' }
+          foreach ($project in $projects) {
+            dotnet restore $project --locked-mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Restore and build dogfood adapter (locked)
+        shell: pwsh
+        run: |
+          $project = 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj'
+          dotnet restore $project --locked-mode
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build $project --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Download same-source CLI candidate package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -321,26 +340,43 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Split-Path -Parent $docsStylesheet)
           Set-Content -NoNewline -Path $docsStylesheet -Value ""
 
+      - name: Prepare packed reuse journey feed
+        if: ${{ !matrix.keycloak }}
+        shell: pwsh
+        run: |
+          $feed = Join-Path $env:RUNNER_TEMP 'packed-reuse-journey-feed'
+          dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release --no-restore -- `
+            --operation pack-candidate-feed --mode reuse --repository $env:GITHUB_WORKSPACE --output $feed `
+            --version $env:COVERAGE_CLI_CANDIDATE_VERSION --source-commit $env:COVERAGE_SOURCE_COMMIT `
+            --dotnet (Get-Command dotnet).Source --no-restore true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:GITHUB_ENV -Value "APPSURFACE_PACKED_JOURNEY_FEED=$feed"
+          Add-Content -Path $env:GITHUB_ENV -Value "APPSURFACE_PACKED_JOURNEY_VERSION=$env:COVERAGE_CLI_CANDIDATE_VERSION"
+
       - name: Run coverage security contracts
         if: ${{ !matrix.keycloak }}
         shell: pwsh
         env:
-          COVERAGE_TEST_PROJECT: ${{ matrix.testProject }}
-          COVERAGE_TEST_FILTER: ${{ matrix.filter }}
-        run: >-
-          dotnet test "$env:COVERAGE_TEST_PROJECT"
-          --configuration Release
-          --no-restore
-          /p:TailwindEnabled=false
-          --filter "$env:COVERAGE_TEST_FILTER"
-          --logger "console;verbosity=detailed"
-          --results-directory "${{ runner.temp }}/coverage-native-results"
-          --collect:"XPlat Code Coverage"
-          --blame-hang
-          --blame-hang-timeout 2m
-          --blame-hang-dump-type mini
-          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
-          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.IntegrationTests]*"
+          APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS: ${{ runner.temp }}/packed-reuse-diagnostics
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS | Out-Null
+          $dogfood = 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/Release/net10.0/ForgeTrust.AppSurface.Coverage.Dogfood.dll'
+          $filter = & dotnet $dogfood --print-test-filter native
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')
+          if ($projects.Count -eq 0) { throw 'Native coverage project inventory is empty.' }
+          $arguments = @('coverage', 'run')
+          foreach ($project in $projects) {
+            $arguments += @('--test-project', $project)
+          }
+          $arguments += @('--configuration', 'Release', '--no-restore',
+            '--output', "${{ runner.temp }}/coverage-native-results", '--test-results', 'junit', '--artifact-retention', 'full',
+            '--logger', 'console;verbosity=detailed', '--test-argument', '/p:TailwindEnabled=false',
+            '--test-argument', '--filter', '--test-argument', $filter,
+            '--test-argument', '--blame-hang', '--test-argument', '--blame-hang-timeout', '--test-argument', '2m',
+            '--test-argument', '--blame-hang-dump-type', '--test-argument', 'mini')
+          & $env:COVERAGE_CLI_PATH @arguments
+          if ($LASTEXITCODE -ne 0) { throw "Native coverage collection failed" }
 
       - name: Attest successful native coverage evidence
         id: capture-native-coverage
@@ -370,11 +406,7 @@ jobs:
             Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "collection-path=$collection"
             $adapter += @('--native-producer', $producer, '--collection', $collection)
           } else {
-            $reports = @(Get-ChildItem -Path "${{ runner.temp }}/coverage-native-results" -Recurse -Filter coverage.cobertura.xml)
-            if ($reports.Count -ne 1) { throw "Expected exactly one fresh native coverage report" }
-            & $env:COVERAGE_CLI_PATH coverage merge --source "${{ runner.temp }}/coverage-native-results" --output "${{ runner.temp }}/coverage-native-canonical"
-            if ($LASTEXITCODE -ne 0) { throw "Native coverage normalization failed" }
-            $adapter += @('--report', "${{ runner.temp }}/coverage-native-canonical/coverage.cobertura.xml", '--raw', $reports[0].FullName)
+            $adapter += @('--collection-root', "${{ runner.temp }}/coverage-native-results")
           }
           if ($contractVersion -eq '3') { $adapter += @('--diff-policy-id', 'appsurface-visual-baseline-png-v1') }
           if ($diffBase) { $adapter += @('--diff-base', $diffBase) }
@@ -436,7 +468,15 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-security-diagnostics-${{ matrix.producerId }}
-          path: ${{ runner.temp }}/coverage-native-results
+          path: |
+            ${{ runner.temp }}/coverage-native-results
+            ${{ runner.temp }}/packed-reuse-journey-feed/pack-logs/pack-*.log
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/pack-*.log
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/source.log
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/proof/proof.json
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/proof/packed-progress.jsonl
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/fixture-progress.jsonl
           if-no-files-found: warn
           retention-days: 7
 

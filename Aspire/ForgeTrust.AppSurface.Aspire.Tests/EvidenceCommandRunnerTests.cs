@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Globalization;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
@@ -29,8 +32,10 @@ public sealed class EvidenceCommandRunnerTests
             Assert.True(int.TryParse(await File.ReadAllTextAsync(pidPath), out var pid));
             Assert.True(pid > 0);
             Assert.False(File.Exists(pidPath + ".pending"));
+            using var child = Process.GetProcessById(pid);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+            await AssertDescendantTerminatedAsync(child);
         }
         finally
         {
@@ -45,6 +50,29 @@ public sealed class EvidenceCommandRunnerTests
                 // Teardown observes runner failures without masking an earlier assertion.
             }
             Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    private static async Task AssertDescendantTerminatedAsync(Process child)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        if (OperatingSystem.IsWindows())
+        {
+            await child.WaitForExitAsync(deadline.Token);
+            Assert.True(child.HasExited);
+            return;
+        }
+
+        while (!child.HasExited)
+        {
+            // A Unix descendant can terminate before its adopting parent reaps it.
+            var result = await ProcessUtils.ExecuteProcessAsync("ps",
+                ["-o", "stat=", "-p", child.Id.ToString(CultureInfo.InvariantCulture)],
+                Directory.GetCurrentDirectory(), NullLogger.Instance, deadline.Token);
+            if (result.ExitCode == 0 && result.Stdout.TrimStart().StartsWith('Z')) return;
+            Assert.True(result.ExitCode is 0 or 1,
+                $"ps exited {result.ExitCode}. stdout: {result.Stdout} stderr: {result.Stderr}");
+            await Task.Delay(20, deadline.Token);
         }
     }
 

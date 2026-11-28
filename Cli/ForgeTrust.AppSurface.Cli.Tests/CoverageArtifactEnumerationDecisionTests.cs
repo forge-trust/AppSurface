@@ -81,4 +81,81 @@ public sealed class CoverageArtifactEnumerationDecisionTests
         Assert.Throws<UnauthorizedAccessException>(() => CoverageRunOutputLease.ReadArtifactWindowsNames(retained, 2, _ => throw new UnauthorizedAccessException()));
         Assert.False(retained.IsClosed);
     }
+
+    [Fact]
+    public void WindowsNameCollectionStopsAndDisposesEnumeratorWhenCancelledDuringIteration()
+    {
+        using var retained = new SafeFileHandle(123, false);
+        using var cancellation = new CancellationTokenSource();
+        var disposed = false;
+        var advancedPastCancelledEntry = false;
+
+        IEnumerable<string> Enumerate()
+        {
+            try
+            {
+                yield return Path.Join("parent", "first.xml");
+                cancellation.Cancel();
+                yield return Path.Join("parent", "second.xml");
+                advancedPastCancelledEntry = true;
+                yield return Path.Join("parent", "third.xml");
+            }
+            finally { disposed = true; }
+        }
+
+        Assert.ThrowsAny<OperationCanceledException>(() => CoverageRunOutputLease.ReadArtifactWindowsNames(
+            retained, 1, _ => Enumerate(), cancellation.Token));
+
+        Assert.True(disposed);
+        Assert.False(advancedPastCancelledEntry);
+        Assert.False(retained.IsClosed);
+    }
+
+    [Fact]
+    public void UnixNameCollectionStopsAndClosesOwnedStreamWhenCancelledDuringNativeRead()
+    {
+        using var retained = new SafeFileHandle(123, false);
+        using var cancellation = new CancellationTokenSource();
+        var pointers = new List<nint>();
+        var reads = 0;
+        var streamCloses = 0;
+        try
+        {
+            static nint Entry(string name, List<nint> pointers)
+            {
+                var offset = OperatingSystem.IsMacOS() ? 21 : 19;
+                var bytes = Encoding.UTF8.GetBytes(name + "\0");
+                var pointer = Marshal.AllocHGlobal(offset + bytes.Length);
+                Marshal.Copy(bytes, 0, pointer + offset, bytes.Length);
+                pointers.Add(pointer);
+                return pointer;
+            }
+
+            var first = Entry("first.xml", pointers);
+            var second = Entry("second.xml", pointers);
+            var calls = new Calls
+            {
+                Duplicate = _ => 456,
+                Seek = (_, _, _) => 0,
+                OpenDirectory = _ => 789,
+                ReadDirectory = _ =>
+                {
+                    Marshal.SetLastPInvokeError(0);
+                    reads++;
+                    if (reads == 2) cancellation.Cancel();
+                    return reads == 1 ? first : second;
+                },
+                Close = _ => throw new InvalidOperationException("The directory stream owns the duplicated descriptor."),
+                CloseDirectory = _ => { streamCloses++; return 0; }
+            };
+
+            Assert.ThrowsAny<OperationCanceledException>(() => CoverageRunOutputLease.ReadArtifactUnixNames(
+                retained, 1, calls, cancellation.Token));
+
+            Assert.Equal(2, reads);
+            Assert.Equal(1, streamCloses);
+            Assert.False(retained.IsClosed);
+        }
+        finally { foreach (var pointer in pointers) Marshal.FreeHGlobal(pointer); }
+    }
 }

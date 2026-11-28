@@ -19,6 +19,21 @@ public static class TestDotnetHost
         Environment.CurrentDirectory,
         OperatingSystem.IsWindows());
 
+    /// <summary>Resolves the first existing dotnet host from the current process environment.</summary>
+    /// <remarks>
+    /// Unlike <see cref="Resolve()"/>, stale host hints and root candidates are skipped so the next
+    /// existing candidate can be used. Relative candidates are resolved from the current directory.
+    /// </remarks>
+    /// <returns>The first existing host candidate, as a fully qualified path.</returns>
+    /// <exception cref="InvalidOperationException">No existing host candidate is available.</exception>
+    public static string ResolveExisting() => ResolveCore(
+        Environment.GetEnvironmentVariable("DOTNET_HOST_PATH"),
+        Environment.GetEnvironmentVariable("DOTNET_ROOT"),
+        Environment.GetEnvironmentVariable("PATH"),
+        Environment.CurrentDirectory,
+        OperatingSystem.IsWindows(),
+        requireExisting: true);
+
     /// <summary>Resolves a dotnet host from explicit environment values and a current directory.</summary>
     /// <param name="dotnetHostPath">The <c>DOTNET_HOST_PATH</c> value, if set.</param>
     /// <param name="dotnetRoot">The <c>DOTNET_ROOT</c> value, if set.</param>
@@ -33,7 +48,31 @@ public static class TestDotnetHost
         string? dotnetRoot,
         string? path,
         string currentDirectory,
-        bool isWindows)
+        bool isWindows) => ResolveCore(dotnetHostPath, dotnetRoot, path, currentDirectory, isWindows, requireExisting: false);
+
+    /// <summary>Resolves an existing host from explicit environment values and a supplied current directory.</summary>
+    /// <param name="dotnetHostPath">The <c>DOTNET_HOST_PATH</c> value, if set.</param>
+    /// <param name="dotnetRoot">The <c>DOTNET_ROOT</c> value, if set.</param>
+    /// <param name="path">The <c>PATH</c> value, if set. Empty entries refer to <paramref name="currentDirectory"/>.</param>
+    /// <param name="currentDirectory">The absolute directory used to resolve relative candidates.</param>
+    /// <param name="isWindows">Whether to search for <c>dotnet.exe</c> instead of <c>dotnet</c>.</param>
+    /// <returns>The first existing host candidate, as a fully qualified path.</returns>
+    /// <exception cref="ArgumentException"><paramref name="currentDirectory"/> is not fully qualified.</exception>
+    /// <exception cref="InvalidOperationException">No existing host candidate is available.</exception>
+    internal static string ResolveExisting(
+        string? dotnetHostPath,
+        string? dotnetRoot,
+        string? path,
+        string currentDirectory,
+        bool isWindows) => ResolveCore(dotnetHostPath, dotnetRoot, path, currentDirectory, isWindows, requireExisting: true);
+
+    private static string ResolveCore(
+        string? dotnetHostPath,
+        string? dotnetRoot,
+        string? path,
+        string currentDirectory,
+        bool isWindows,
+        bool requireExisting)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(currentDirectory);
         if (!Path.IsPathFullyQualified(currentDirectory))
@@ -41,20 +80,26 @@ public static class TestDotnetHost
             throw new ArgumentException("The current directory must be fully qualified.", nameof(currentDirectory));
         }
 
-        if (!string.IsNullOrWhiteSpace(dotnetHostPath) && Path.IsPathFullyQualified(dotnetHostPath))
+        if (!string.IsNullOrWhiteSpace(dotnetHostPath))
         {
-            return dotnetHostPath;
+            var host = Path.IsPathFullyQualified(dotnetHostPath)
+                ? dotnetHostPath
+                : requireExisting ? Path.GetFullPath(dotnetHostPath, currentDirectory) : null;
+            if (host is not null && (!requireExisting || File.Exists(host))) return host;
         }
 
         var executable = isWindows ? "dotnet.exe" : "dotnet";
         if (!string.IsNullOrWhiteSpace(dotnetRoot))
         {
             // Environment paths may be rooted or contain parent segments; resolve their OS semantics before containment.
-            var root = Path.GetFullPath(dotnetRoot, currentDirectory);
-            return TestPathUtils.PathUnder(root, executable);
+            var rootCandidate = TestPathUtils.PathUnder(Path.GetFullPath(dotnetRoot, currentDirectory), executable);
+            if (!requireExisting || File.Exists(rootCandidate)) return rootCandidate;
         }
 
-        return (path ?? string.Empty)
+        return GetPathCandidates(path, currentDirectory, executable).First(File.Exists);
+    }
+
+    private static IEnumerable<string> GetPathCandidates(string? path, string currentDirectory, string executable) => (path ?? string.Empty)
             .Split(Path.PathSeparator)
             .Select(entry =>
             {
@@ -63,7 +108,5 @@ public static class TestDotnetHost
                     ? currentDirectory
                     : Path.GetFullPath(entry, currentDirectory);
                 return TestPathUtils.PathUnder(root, executable);
-            })
-            .First(File.Exists);
-    }
+            });
 }

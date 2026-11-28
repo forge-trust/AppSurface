@@ -125,14 +125,16 @@ assertion’s failure message. Use `System.Diagnostics.Process` directly when th
 
 ## Local verification
 
-Build and test the full solution before pushing substantive changes:
+For routine edit and review cycles, run the build and focused tests for the affected projects. Reuse their worktree-local build outputs and the shared developer package caches for ordinary restores. Keep the isolated restores and feeds required by packaging and compatibility checks.
+
+Before pushing substantive changes, run the repository-selected final evidence after the last relevant edit. Run a separate full-solution build or test pass when needed to cover an obligation outside that selection.
 
 ```bash
-dotnet build
-dotnet test --no-build
 dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local-plan
 dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local
 ```
+
+The validator keeps the latest compact proof and latest failure diagnostics in `TestResults/repository-evidence/local/` for each worktree. Use its default for final validation. Give `--output` a fresh path when you need all raw outputs from a particular run. See the [validation tool reference](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) for the retained files and package-cache behavior.
 
 The C# repository evidence tool uses the shared [evidence policy](https://github.com/forge-trust/AppSurface/blob/main/.github/evidence.policy.json) and compares the working tree with `origin/main` by default. `local-plan` prints the selected profile, producers, and obligations; `local` executes and verifies the selected evidence on the current OS. Add `--base <revision>` to select another comparison base, or `--scope all|native|coverage|packages` to plan or run one lane. Use `all` for the complete local policy selection; a scoped pass closes only its selected lane. `selection.json` exposes `requiresNativeCoverage` from the root policy selection. Test-only changes use the direct patch gate; source-code changes combine coverage and package checks, with native fan-in on PRs. Package checks may still be affected by ignored local artifacts in inspected paths; ignore status does not skip a package failure. See the [coverage fan-in guide](./guides/coverage-fan-in.md) and the [validation tool reference](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) for coverage gates, evidence output, and CI behavior. The standalone `coverage-solution.sh` remains an unconditional compatibility command; it is not the current `build.yml` evidence path.
 

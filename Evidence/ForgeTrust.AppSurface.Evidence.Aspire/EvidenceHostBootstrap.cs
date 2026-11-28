@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Evidence.Aspire;
 
@@ -45,6 +46,37 @@ public sealed record EvidenceHostOptions(
     /// <summary>Gets the separate grace period for cancelled producers to finish before owned registrations are disposed.</summary>
     /// <remarks>Defaults to ten seconds. If a producer remains active, cleanup fails and its registrations are preserved.</remarks>
     public TimeSpan ProducerCleanupTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Gets whether to prepare opt-in local producer receipts before starting resources.</summary>
+    /// <remarks>Requires <c>EvidenceHostBootstrap.PrepareAsync</c>. Reused results are informational and cannot satisfy a CI gate.</remarks>
+    public bool Reuse { get; init; }
+
+    /// <summary>Gets whether every candidate receipt must be audited by a complete fresh execution.</summary>
+    /// <remarks>Requires <see cref="Reuse"/>. A mismatch quarantines the producer key until a successful explicit audit.</remarks>
+    public bool VerifyReuse { get; init; }
+
+    /// <summary>Gets the repository root used to inventory declared inputs, defaulting to the repository containing the current directory.</summary>
+    public string? RepositoryRoot { get; init; }
+
+    /// <summary>Gets the optional local receipt store, taking precedence over APPSURFACE_EVIDENCE_RECEIPT_STORE and the per-user default.</summary>
+    /// <remarks>A distinct store is a distinct coordination domain. Never switch stores while children from a prior execution remain active.</remarks>
+    public string? ReceiptStore { get; init; }
+
+    /// <summary>Gets the one cumulative positive native-lease wait budget, defaulting to thirty minutes.</summary>
+    public TimeSpan ReceiptWaitTimeout { get; init; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>Gets an optional observer for bounded native key acquisition progress.</summary>
+    /// <remarks>The observer receives a key prefix and cumulative elapsed/remaining durations, never raw input values.</remarks>
+    public IProgress<EvidenceReuseWaitProgress>? ReceiptWaitProgress { get; init; }
+
+    /// <summary>Gets the exact captured patch bytes when the plan declares a patch coverage requirement.</summary>
+    /// <remarks>Preparation copies supplied memory. Null means no snapshot was supplied and remains absent;
+    /// it never becomes an empty snapshot. Reuse verifies a required patch's SHA-256 against the plan.
+    /// A normalized changed-path list cannot replace these bytes.</remarks>
+    public ReadOnlyMemory<byte>? CapturedPatch { get; init; }
+
+    /// <summary>Gets the per-invocation environment reader used to verify protected contexts without global test mutation.</summary>
+    internal Func<string, string?> EnvironmentReader { get; init; } = Environment.GetEnvironmentVariable;
 }
 
 /// <summary>
@@ -84,6 +116,27 @@ public interface IEvidenceResourceReadiness
     /// <returns>A task that completes only when the resource is ready.</returns>
     Task WaitUntilReadyAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>Immutable prepared-run data transferred to its single-use execution host.</summary>
+/// <param name="PreparedResults">Framework-verified reused results, never supplied by producer callbacks.</param>
+/// <param name="RequiredResourceIds">Immutable transitive closure of fresh producers' resources.</param>
+/// <param name="ResourceScope">Transferred application owner, or null for a resource-free execution.</param>
+/// <param name="ResourceGraph">Validated graph shared with preparation.</param>
+/// <param name="Writer">Coordinator-owned writer for each selected producer.</param>
+/// <param name="BeforeCleanup">Post-execution preparation work that must settle before registration disposal.</param>
+/// <param name="EnvelopeStatus">Envelope result verified before resource startup.</param>
+/// <param name="ExecutionId">Current opaque ownership ID.</param>
+/// <param name="ChildEnvironment">Private cooperative channel for an admitted producer, without global environment mutation.</param>
+internal sealed record EvidencePreparedExecution(
+    IReadOnlyDictionary<string, EvidenceProducerResult> PreparedResults,
+    IReadOnlySet<string> RequiredResourceIds,
+    EvidenceHostResourceScope? ResourceScope,
+    EvidenceResourceGraph ResourceGraph,
+    Func<EvidenceProducerDeclaration, EvidenceArtifactWriter> Writer,
+    Func<bool, CancellationToken, Task<bool>> BeforeCleanup,
+    EvidenceEnvelopeStatus EnvelopeStatus,
+    string ExecutionId,
+    Func<string, IReadOnlyDictionary<string, string>?> ChildEnvironment);
 
 /// <summary>
 /// Collects the only resource, producer, and envelope registrations an EvidenceHost may use.
@@ -142,32 +195,81 @@ public sealed class EvidenceHostRegistration
 
         EnvelopeVerifier = verifier;
     }
+
+    /// <summary>Rejects producer implementations whose live IDs differ from their captured registration keys.</summary>
+    /// <param name="producers">Frozen producer bindings, keyed by the selected producer IDs.</param>
+    /// <exception cref="EvidenceHostException">A registered producer changed its ID.</exception>
+    internal static void ValidatePreparedProducerIds(IReadOnlyDictionary<string, PreparedProducerRegistration> producers)
+    {
+        if (producers.Any(static binding => binding.Value.Producer.Id != binding.Key))
+            throw new EvidenceHostException("reuse.registration_changed", "A producer identifier changed after preparation.", "Keep registered identifiers immutable and prepare a new run.");
+    }
+
+    /// <summary>Builds the execution registration from the keys captured by preparation and resource transfer.</summary>
+    /// <param name="producers">Frozen producer bindings in registration order.</param>
+    /// <param name="resources">The factory's frozen readiness bindings, or null for a resource-free run.</param>
+    /// <param name="requiredResourceIds">The sorted IDs in the prepared run's exact resource closure.</param>
+    /// <returns>A registration ready for host admission after the caller checks cancellation.</returns>
+    /// <exception cref="EvidenceHostException">The readiness scope is invalid or an implementation changed its ID.</exception>
+    internal static EvidenceHostRegistration CreateForPreparedExecution(
+        IReadOnlyDictionary<string, PreparedProducerRegistration> producers,
+        IReadOnlyDictionary<string, IEvidenceResourceReadiness>? resources,
+        IReadOnlyList<string> requiredResourceIds)
+    {
+        if ((resources?.Count ?? 0) != requiredResourceIds.Count
+            || resources is not null && (
+                !resources.Keys.Order(StringComparer.Ordinal).SequenceEqual(requiredResourceIds, StringComparer.Ordinal)
+                || resources.Any(static binding => binding.Value.Id != binding.Key)))
+        {
+            throw new EvidenceHostException("reuse.resource_scope_invalid", "The factory transferred missing, unrequested, or changed readiness bindings.", "Transfer exactly the requested resource identifiers and its application owner.");
+        }
+
+        ValidatePreparedProducerIds(producers);
+        var registration = new EvidenceHostRegistration();
+        foreach (var (id, binding) in producers)
+            registration._producers.Add(id, binding.Producer);
+        if (resources is not null)
+        {
+            foreach (var (id, readiness) in resources)
+                registration._resources.Add(id, readiness);
+        }
+        return registration;
+    }
 }
 
 /// <summary>
 /// Runs a separate, consumer-owned EvidenceHost with explicit registrations and bounded cleanup.
 /// </summary>
-public sealed class EvidenceHostBootstrap : IAsyncDisposable
+public sealed partial class EvidenceHostBootstrap : IAsyncDisposable
 {
     private readonly EvidencePlan _plan;
     private readonly EvidenceHostRegistration _registration;
     private readonly EvidenceHostOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly string _artifactDirectory;
+    private readonly EvidencePreparedExecution? _preparedExecution;
+    private EvidenceResourceGraph? _resourceGraph;
     private readonly SemaphoreSlim _execution = new(1, 1);
     private readonly List<Task> _producerExecutions = [];
+    private readonly List<Task> _readinessExecutions = [];
     private bool _cleaned;
+    private string? _cleanupFailure;
+    private Task<string?>? _preparedRegistrationCleanup;
+    private CancellationToken _preparedCancellation;
 
     private EvidenceHostBootstrap(
         EvidencePlan plan,
         EvidenceHostRegistration registration,
         EvidenceHostOptions options,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        EvidencePreparedExecution? preparedExecution = null)
     {
         _plan = plan;
         _registration = registration;
         _options = options;
         _timeProvider = timeProvider;
+        _preparedExecution = preparedExecution;
+        _resourceGraph = preparedExecution?.ResourceGraph;
         _artifactDirectory = Path.GetFullPath(options.ArtifactDirectory ?? Path.Join("TestResults", "evidence", "artifacts"));
     }
 
@@ -193,12 +295,32 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(configure);
-        if (options is not null && (options.ProducerCleanupTimeout <= TimeSpan.Zero || options.ProducerCleanupTimeout > TimeSpan.FromMinutes(1)))
+        if (options is { Reuse: true } or { VerifyReuse: true })
+            throw new EvidenceHostException("reuse.preparation_required", "Receipt reuse requires preparation before resource startup.", "Use EvidenceHostBootstrap.PrepareAsync and compose only its RequiredResourceIds in the resource factory.");
+        if (options is not null && !EvidenceExecutionTimeouts.IsValidProducerCleanup(options.ProducerCleanupTimeout))
             throw new ArgumentOutOfRangeException(nameof(options), "Producer cleanup timeout must be positive and at most one minute.");
 
         var registration = new EvidenceHostRegistration();
         configure(registration);
         return new EvidenceHostBootstrap(plan, registration, options ?? new EvidenceHostOptions(), timeProvider ?? TimeProvider.System);
+    }
+
+    /// <summary>Creates the execution half of a prepared run after receipt restoration and exact resource transfer.</summary>
+    /// <param name="plan">Original complete plan, preserved for claims and digest binding.</param>
+    /// <param name="registration">Validated producers and exact active readiness bindings.</param>
+    /// <param name="options">Snapshot of prepared host options.</param>
+    /// <param name="timeProvider">Preparation clock.</param>
+    /// <param name="preparedExecution">Immutable prepared-run data and cleanup callbacks.</param>
+    /// <returns>The single-use execution host, owned by the prepared run.</returns>
+    internal static EvidenceHostBootstrap CreatePreparedExecution(
+        EvidencePlan plan,
+        EvidenceHostRegistration registration,
+        EvidenceHostOptions options,
+        TimeProvider timeProvider,
+        EvidencePreparedExecution preparedExecution)
+    {
+        ArgumentNullException.ThrowIfNull(preparedExecution);
+        return new EvidenceHostBootstrap(plan, registration, options, timeProvider, preparedExecution);
     }
 
     /// <summary>
@@ -212,6 +334,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         await _execution.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            _preparedCancellation = cancellationToken;
             if (State != EvidenceHostState.Created)
             {
                 throw new InvalidOperationException("EvidenceHost instances execute exactly once.");
@@ -232,7 +355,9 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
                 ValidateRegistrations();
                 State = EvidenceHostState.WaitingForResources;
-                var readiness = await WaitForResourcesAsync(cancellationToken).ConfigureAwait(false);
+                var readiness = _preparedExecution is { } preparedExecution
+                    ? await WaitForPreparedResourcesAsync(preparedExecution, cancellationToken).ConfigureAwait(false)
+                    : await WaitForResourcesAsync(cancellationToken).ConfigureAwait(false);
                 resourceResults = readiness.ResourceResults;
                 if (readiness.FailureResults is not null)
                 {
@@ -240,7 +365,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 }
 
                 State = EvidenceHostState.Producing;
-                var results = await ProduceAsync(cancellationToken).ConfigureAwait(false);
+                var results = await ProduceAsync(readiness.PreparedResultsById, cancellationToken).ConfigureAwait(false);
                 return await CollectAndCleanAsync(results, resourceResults, observationOnly, envelopeStatus, execution).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -289,6 +414,8 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
     private async Task<EnvelopeValidation> ValidateEnvelopeAsync(CancellationToken cancellationToken)
     {
+        if (_preparedExecution is { } preparedExecution)
+            return new EnvelopeValidation(preparedExecution.EnvelopeStatus, null);
         var needsEnvelope = _options.RequireTrustedEnvelope || _plan.Profile.Scope == EvidenceProfileScope.Release;
         if (!needsEnvelope)
         {
@@ -312,16 +439,15 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
     private void ValidateRegistrations()
     {
-        if (_plan.Profile.Resources.Count > EvidenceProfileLimits.MaximumResources
-            || _plan.Profile.Producers.Count > EvidenceProfileLimits.MaximumProducers
-            || _plan.Profile.Obligations.Count > EvidenceProfileLimits.MaximumObligations)
+        if (EvidenceProfileLimits.ExceedsLimits(_plan.Profile))
         {
             throw new EvidenceHostException("ASEVD301", "The resolved plan exceeds v1 EvidenceHost limits.", "Split the policy into bounded profiles before execution.");
         }
 
         foreach (var resource in _plan.Profile.Resources)
         {
-            if (!_registration.Resources.ContainsKey(resource.Id))
+            if ((_preparedExecution is null || _preparedExecution.RequiredResourceIds.Contains(resource.Id))
+                && !_registration.Resources.ContainsKey(resource.Id))
             {
                 throw new EvidenceHostException("ASEVD302", $"Required resource '{resource.Id}' is not explicitly registered.", "Register a consumer-owned readiness probe for every selected resource.");
             }
@@ -338,60 +464,100 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
     private async Task<ResourceReadiness> WaitForResourcesAsync(CancellationToken cancellationToken)
     {
-        var declarations = _plan.Profile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
         var results = new List<EvidenceResourceResult>();
-        foreach (var resource in OrderResources(declarations))
+        foreach (var resource in GetResourceGraph().GetOrderedResources())
         {
-            var timer = Stopwatch.StartNew();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(resource.DeadlineSeconds));
-            try
+            var result = await ProbeResourceReadinessAsync(
+                resource,
+                cancellationToken,
+                token => _registration.Resources[resource.Id].WaitUntilReadyAsync(token)).ConfigureAwait(false);
+            results.Add(result);
+            if (result.Outcome != EvidenceResourceOutcome.Ready)
             {
-                // A registration should observe cancellation, but the host must also enforce its
-                // declared deadline when a third-party probe fails to do so.
-                var readinessTask = _registration.Resources[resource.Id].WaitUntilReadyAsync(deadline.Token);
-                await readinessTask.WaitAsync(deadline.Token).ConfigureAwait(false);
-                results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Ready, timer.ElapsedMilliseconds));
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.TimedOut, timer.ElapsedMilliseconds, $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."));
                 return new ResourceReadiness(
                     results,
-                    FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception exception) when (IsNonFatalException(exception))
-            {
-                results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Unavailable, timer.ElapsedMilliseconds, $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
-                return new ResourceReadiness(
-                    results,
-                    FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
+                    FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, result.Diagnostic!));
             }
         }
 
         return new ResourceReadiness(results, null);
     }
 
-    private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(CancellationToken cancellationToken)
+    private async Task<EvidenceResourceResult> ProbeResourceReadinessAsync(
+        EvidenceResourceDeclaration resource,
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task> startReadiness)
+    {
+        var timer = Stopwatch.StartNew();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(resource.DeadlineSeconds));
+        try
+        {
+            // Eager callers start the probe inline. Prepared callers can start and register
+            // their actual callback task before this method awaits its settlement.
+            var readinessTask = startReadiness(deadline.Token);
+            await readinessTask.WaitAsync(deadline.Token).ConfigureAwait(false);
+            return new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Ready, timer.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new EvidenceResourceResult(
+                resource.Id,
+                EvidenceResourceOutcome.TimedOut,
+                timer.ElapsedMilliseconds,
+                $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (IsNonFatalException(exception))
+        {
+            return new EvidenceResourceResult(
+                resource.Id,
+                EvidenceResourceOutcome.Unavailable,
+                timer.ElapsedMilliseconds,
+                $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}.");
+        }
+    }
+
+    private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(
+        IReadOnlyDictionary<string, EvidenceResourceResult>? preparedReadiness, CancellationToken cancellationToken)
     {
         var results = new List<EvidenceProducerResult>();
+        var preparedExecution = _preparedExecution;
         foreach (var declaration in _plan.Profile.Producers)
         {
+            if (preparedExecution is not null && preparedExecution.PreparedResults.TryGetValue(declaration.Id, out var reused))
+            {
+                results.Add(reused);
+                continue;
+            }
+
+            if (preparedReadiness is not null && ProducerResourceClosure(declaration).Any(id =>
+                !preparedReadiness.TryGetValue(id, out var resource) || resource.Outcome != EvidenceResourceOutcome.Ready))
+            {
+                results.Add(new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Unavailable, [], "reuse.resource_unavailable: A resource required by this fresh producer did not become ready. Fix its readiness failure and retry."));
+                continue;
+            }
             var timer = Stopwatch.StartNew();
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(TimeSpan.FromSeconds(declaration.TimeoutSeconds));
             try
             {
-                var artifacts = new EvidenceArtifactWriter(declaration, Path.Join(_artifactDirectory, declaration.Id));
+                var artifacts = preparedExecution?.Writer.Invoke(declaration)
+                    ?? new EvidenceArtifactWriter(declaration, Path.Join(_artifactDirectory, declaration.Id));
                 // A registration should observe cancellation, but the host must also enforce its
                 // declared deadline when a third-party producer fails to do so.
-                var producerTask = _registration.Producers[declaration.Id]
-                    .ProduceAsync(new EvidenceProducerContext(_plan, declaration, _timeProvider, artifacts), deadline.Token)
-                    .AsTask();
+                var context = new EvidenceProducerContext(_plan, declaration, _timeProvider, artifacts)
+                {
+                    ExecutionId = preparedExecution?.ExecutionId,
+                    OwnedChildEnvironment = preparedExecution?.ChildEnvironment.Invoke(declaration.Id),
+                };
+                var implementation = _registration.Producers[declaration.Id];
+                var producerTask = preparedExecution is null
+                    ? implementation.ProduceAsync(context, deadline.Token).AsTask()
+                    : Task.Run(async () => await implementation.ProduceAsync(context, deadline.Token).ConfigureAwait(false));
                 _producerExecutions.Add(producerTask);
                 var result = await producerTask.WaitAsync(deadline.Token).ConfigureAwait(false);
                 results.Add(await ValidateProducerResultAsync(
@@ -428,6 +594,12 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         if (!string.Equals(result.ProducerId, declaration.Id, StringComparison.Ordinal))
         {
             return new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "Producer returned a result for a different declaration id.", ElapsedMilliseconds: elapsedMilliseconds);
+        }
+
+        if (result.Outcome == EvidenceProducerOutcome.Reused || result.ProducerKey is not null
+            || result.OriginManifestDigest is not null || result.OriginCompletedAt is not null)
+        {
+            return new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "reuse.forged_provenance: Only the prepared receipt coordinator may supply reuse outcomes or provenance.", ElapsedMilliseconds: elapsedMilliseconds);
         }
 
         var writtenArtifacts = artifacts.WrittenArtifacts;
@@ -472,18 +644,19 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     {
         if (_cleaned)
         {
-            return null;
+            return _cleanupFailure;
         }
 
         State = EvidenceHostState.Cleaning;
         // A producer can still be stopping an owned child after its execution deadline.
         // Never delete its workspace or dependencies while that task remains active.
-        var producers = Task.WhenAll(_producerExecutions);
+        var callbackTasks = _producerExecutions.Concat(_readinessExecutions).ToArray();
+        var producers = Task.WhenAll(callbackTasks);
         try
         {
             await producers.WaitAsync(_options.ProducerCleanupTimeout, _timeProvider).ConfigureAwait(false);
         }
-        catch (TimeoutException)
+        catch (TimeoutException) when (!producers.IsCompleted)
         {
             _ = producers.ContinueWith(static task => _ = task.Exception,
                 CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -497,13 +670,37 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         {
             // The original fatal producer failure is propagated by RunAsync. Do not
             // replay that task's exception when the caller later disposes the host.
-            _cleaned = true;
+            // Prepared ownership joins enrolled children before it attempts registration cleanup.
+            if (_preparedExecution is null) _cleaned = true;
             throw;
+        }
+        var fatalCallback = FirstFatalCallbackFailure(callbackTasks);
+        if (fatalCallback is not null)
+        {
+            if (_preparedExecution is null) _cleaned = true;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatalCallback).Throw();
+        }
+        if (_preparedExecution is { } preparedExecution)
+        {
+            if (!await preparedExecution.BeforeCleanup(true, _preparedCancellation).ConfigureAwait(false))
+                return "reuse.material_unsettled: An actual key callback remains active; registrations and key ownership are preserved.";
+            _preparedRegistrationCleanup ??= Task.Run(DisposePreparedRegistrationsAsync);
+            try
+            {
+                _cleanupFailure = await _preparedRegistrationCleanup.WaitAsync(_options.ProducerCleanupTimeout, _timeProvider).ConfigureAwait(false);
+                _cleaned = true;
+                return _cleanupFailure;
+            }
+            catch (TimeoutException)
+            {
+                return "reuse.cleanup_unsettled: Actual producer/resource disposal did not finish in its grace period; ownership is retained until settlement.";
+            }
         }
         _cleaned = true;
         Exception? failure = null;
+        var resourceOwners = _registration.Resources.Values.Reverse().Cast<object>();
         var owned = _registration.Producers.Values.Reverse().Cast<object>()
-            .Concat(_registration.Resources.Values.Reverse().Cast<object>())
+            .Concat(resourceOwners)
             .Distinct(ReferenceEqualityComparer.Instance);
         foreach (var disposable in owned)
         {
@@ -524,7 +721,32 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             }
         }
 
-        return failure is null ? null : $"Evidence cleanup failed with {failure.GetType().Name}.";
+        _cleanupFailure = failure is null ? null : $"Evidence cleanup failed with {failure.GetType().Name}.";
+        return _cleanupFailure;
+    }
+
+    private async Task<string?> DisposePreparedRegistrationsAsync()
+    {
+        var scope = _preparedExecution?.ResourceScope;
+        var owners = _registration.Producers.Values.Reverse().Cast<object>();
+        if (scope is null) owners = owners.Concat(_registration.Resources.Values.Reverse());
+
+        var disposal = await EvidenceOwnerDisposal.DisposePreparedAsync(owners, scope).ConfigureAwait(false);
+        if (disposal.FirstFatalFailure is { } fatal)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
+        return disposal.FirstNonFatalFailure is { } failure
+            ? $"reuse.cleanup_failed: Owned cleanup failed with {failure.GetType().Name}; execution settlement is unknown."
+            : null;
+    }
+
+    private static Exception? FirstFatalCallbackFailure(IEnumerable<Task> callbackTasks)
+    {
+        foreach (var exception in callbackTasks.Where(static task => task.IsFaulted)
+                     .SelectMany(static task => task.Exception!.Flatten().InnerExceptions))
+        {
+            if (!IsNonFatalException(exception)) return exception;
+        }
+        return null;
     }
 
     /// <summary>Classifies failures that the host and readiness adapters may summarize or retain as secondary errors.</summary>
@@ -532,60 +754,122 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     /// <returns>False for out-of-memory, stack-overflow, access-violation, and unloaded-domain failures; true otherwise.</returns>
     /// <remarks>Fatal failures must propagate unchanged. Classification does not perform cleanup or handle corrupted process state.</remarks>
     internal static bool IsNonFatalException(Exception exception) =>
-        exception is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException;
+        EvidenceExceptionPolicy.IsNonFatalException(exception);
 
-    private IReadOnlyList<EvidenceProducerResult> FailureForEveryProducer(EvidenceProducerOutcome outcome, string diagnostic) =>
-        _plan.Profile.Producers.Select(producer => new EvidenceProducerResult(producer.Id, outcome, [], diagnostic)).ToArray();
+    private IReadOnlyList<EvidenceProducerResult> FailureForEveryProducer(EvidenceProducerOutcome outcome, string diagnostic)
+        => BuildProducerFailureResults(_plan.Profile, _preparedExecution?.PreparedResults, outcome, diagnostic);
 
-    private static IReadOnlyList<EvidenceResourceDeclaration> OrderResources(IReadOnlyDictionary<string, EvidenceResourceDeclaration> declarations)
+    /// <summary>Projects failures for selected producers while retaining results already restored by preparation.</summary>
+    /// <param name="profile">The selected profile, in declaration order.</param>
+    /// <param name="preparedResults">Restored results by producer ID, or null when running eagerly.</param>
+    /// <param name="outcome">The failure outcome for producers without a restored result.</param>
+    /// <param name="diagnostic">The safe failure diagnostic for those producers.</param>
+    /// <returns>One result for every selected producer, in declaration order.</returns>
+    internal static IReadOnlyList<EvidenceProducerResult> BuildProducerFailureResults(
+        EvidenceProfile profile, IReadOnlyDictionary<string, EvidenceProducerResult>? preparedResults,
+        EvidenceProducerOutcome outcome, string diagnostic) => profile.Producers.Select(producer =>
+            preparedResults is not null && preparedResults.TryGetValue(producer.Id, out var reused)
+                ? reused
+                : new EvidenceProducerResult(producer.Id, outcome, [], diagnostic)).ToArray();
+
+    /// <summary>Joins actual callbacks and cleanup before a prepared coordinator can release execution leases.</summary>
+    /// <param name="isChildSettlementKnown">Checks whether all admitted children confirmed completion after callback tasks join.</param>
+    /// <returns>True only when all actual tasks and owned disposals completed successfully.</returns>
+    /// <remarks>Unknown children retain registrations and resources, including when a fatal callback is propagated.</remarks>
+    internal async Task<bool> JoinPreparedOwnershipAsync(Func<bool> isChildSettlementKnown)
     {
-        var ordered = new List<EvidenceResourceDeclaration>();
-        var visiting = new HashSet<string>(StringComparer.Ordinal);
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var resource in declarations.Values.OrderBy(static resource => resource.Id, StringComparer.Ordinal))
+        ArgumentNullException.ThrowIfNull(isChildSettlementKnown);
+        var callbackTasks = _producerExecutions.Concat(_readinessExecutions).ToArray();
+        Exception? fatal = null;
+        try
         {
-            Visit(resource);
+            await Task.WhenAll(callbackTasks).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsNonFatalException(exception))
+        {
+            // The terminal result already records a completed nonfatal callback failure.
+        }
+        catch (Exception exception) { fatal = exception; }
+        fatal ??= FirstFatalCallbackFailure(callbackTasks);
+
+        if (!isChildSettlementKnown())
+        {
+            if (fatal is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
+            return false;
         }
 
-        return ordered;
-
-        void Visit(EvidenceResourceDeclaration resource)
+        await _execution.WaitAsync().ConfigureAwait(false);
+        try
         {
-            if (visited.Contains(resource.Id))
+            if (fatal is not null)
             {
-                return;
-            }
-
-            if (!visiting.Add(resource.Id))
-            {
-                throw new EvidenceHostException("ASEVD304", $"Resource dependency cycle includes '{resource.Id}'.", "Declare an acyclic resource dependency graph.");
-            }
-
-            foreach (var dependencyId in resource.Requires)
-            {
-                if (!declarations.TryGetValue(dependencyId, out var dependency))
+                if (_preparedExecution is not null)
                 {
-                    throw new EvidenceHostException("ASEVD305", $"Resource '{resource.Id}' requires undeclared resource '{dependencyId}'.", "Declare every required resource in the selected profile.");
+                    _preparedRegistrationCleanup ??= Task.Run(DisposePreparedRegistrationsAsync);
+                    try { _cleanupFailure = await _preparedRegistrationCleanup.ConfigureAwait(false); }
+                    catch (Exception) { /* Preserve the original fatal callback after all cleanup owners were attempted. */ }
+                    _cleaned = true;
                 }
-
-                Visit(dependency);
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fatal).Throw();
             }
-
-            visiting.Remove(resource.Id);
-            visited.Add(resource.Id);
-            ordered.Add(resource);
+            if (_preparedRegistrationCleanup is not null)
+            {
+                _cleanupFailure = await _preparedRegistrationCleanup.ConfigureAwait(false);
+                _cleaned = true;
+                return _cleanupFailure is null;
+            }
+            return await CleanAsync().ConfigureAwait(false) is null;
+        }
+        finally
+        {
+            _execution.Release();
         }
     }
+
+    private async Task<ResourceReadiness> WaitForPreparedResourcesAsync(
+        EvidencePreparedExecution preparedExecution,
+        CancellationToken cancellationToken)
+    {
+        var results = new Dictionary<string, EvidenceResourceResult>(StringComparer.Ordinal);
+        foreach (var resource in GetResourceGraph().GetOrderedResources())
+        {
+            if (!preparedExecution.RequiredResourceIds.Contains(resource.Id))
+            {
+                results.Add(resource.Id, new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.NotRequiredForExecution, 0));
+                continue;
+            }
+
+            if (resource.Requires.Any(id => results[id].Outcome != EvidenceResourceOutcome.Ready))
+            {
+                results.Add(resource.Id, new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Unavailable, 0,
+                    "reuse.resource_dependency_unavailable: A required resource failed readiness; fix that failure and retry."));
+                continue;
+            }
+
+            var result = await ProbeResourceReadinessAsync(resource, cancellationToken, token =>
+            {
+                var actualTask = Task.Run(() => _registration.Resources[resource.Id].WaitUntilReadyAsync(token));
+                _readinessExecutions.Add(actualTask);
+                return actualTask;
+            }).ConfigureAwait(false);
+            results.Add(resource.Id, result);
+        }
+
+        return new ResourceReadiness(results.Values.ToArray(), FailureResults: null, PreparedResultsById: results);
+    }
+
+    private IReadOnlySet<string> ProducerResourceClosure(EvidenceProducerDeclaration producer) =>
+        GetResourceGraph().GetProducerResourceClosure(producer);
+
+    private EvidenceResourceGraph GetResourceGraph() =>
+        _resourceGraph ??= new EvidenceResourceGraph(_plan.Profile.Resources);
 
     private sealed record EnvelopeValidation(EvidenceEnvelopeStatus Status, IReadOnlyList<EvidenceProducerResult>? Results);
 
     private sealed record ResourceReadiness(
         IReadOnlyList<EvidenceResourceResult> ResourceResults,
-        IReadOnlyList<EvidenceProducerResult>? FailureResults);
+        IReadOnlyList<EvidenceProducerResult>? FailureResults,
+        IReadOnlyDictionary<string, EvidenceResourceResult>? PreparedResultsById = null);
 }
 
 /// <summary>

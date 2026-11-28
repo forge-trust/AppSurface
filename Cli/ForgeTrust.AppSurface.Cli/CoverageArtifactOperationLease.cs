@@ -61,6 +61,7 @@ internal sealed class CoverageArtifactOperationLeaseOptions
 /// </remarks>
 internal sealed partial class CoverageArtifactOperationLease : IDisposable
 {
+    private const string ContentionCode = "ASCOV202";
     private readonly CoverageRunOutputLease _directory;
     private readonly CoverageArtifactOperationLeaseOptions _options;
     private readonly bool _isWindows;
@@ -104,6 +105,12 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
 
     /// <summary>Gets whether this retained lease authorizes mutation and recovery of its physical output.</summary>
     internal bool IsExclusive { get; }
+
+    /// <summary>Identifies the stable failure raised when a compatible operation holds the lease.</summary>
+    /// <param name="exception">The failure observed while acquiring the lease.</param>
+    /// <returns>True only for a coverage execution exception with the lease contention code.</returns>
+    internal static bool IsContention(Exception exception) =>
+        exception is CoverageExecutionException { Code: ContentionCode };
 
     /// <summary>Acquires one nonblocking strongest-mode lease without performing output cleanup.</summary>
     /// <param name="existingDirectory">An existing directory validated without following ancestor links.</param>
@@ -304,7 +311,7 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
     }
 
     private static CoverageExecutionException Busy() => new(
-        "ASCOV202 Coverage output is busy with a compatible operation. sideEffects=none; waitMs=0. Wait for that operation to finish, then retry once or choose a fresh --output. Do not delete lock files. See guides/coverage-storage.md#ascov202.", 1);
+        ContentionCode + " Coverage output is busy with a compatible operation. sideEffects=none; waitMs=0. Wait for that operation to finish, then retry once or choose a fresh --output. Do not delete lock files. See guides/coverage-storage.md#ascov202.", 1);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeOverlappedLayout

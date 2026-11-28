@@ -242,7 +242,7 @@ dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configura
 dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- --operation local
 ```
 
-Both commands compare local changes with `origin/main` by default. Add `--base <revision>` to select another base and `--scope all|native|coverage|packages` to select a lane. The `coverage` scope runs full-solution coverage against the local diff; local collection cannot substitute for any selected three-OS CI matrix. The local output defaults under ignored `TestResults/repository-evidence/`; see the tool guide for source-drift behavior, options, and evidence details.
+Both commands compare local changes with `origin/main` by default. Add `--base <revision>` to select another base and `--scope all|native|coverage|packages` to select a lane. The `coverage` scope runs full-solution coverage against the local diff; local collection cannot substitute for any selected three-OS CI matrix. The latest local coverage reports and diagnostics are retained under ignored `TestResults/repository-evidence/local/`. See the [validation tool reference](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) for archive retention, source drift, and explicit raw output.
 
 ## Evidence and troubleshooting
 
