@@ -1,0 +1,29 @@
+{
+  "issue": 780,
+  "ordinaryPackageRun": 46167211762,
+  "ordinaryPackageAttempt": 1,
+  "ordinaryReferenceSha256": "ef83f594244f3b02a757ef67d908f91abb60b2c727a7e6910503145009f3e0be",
+  "priorUntimedReplayRun": 46169069579,
+  "priorUntimedReplayAttempt": 1,
+  "priorUntimedReplayReportSha256": "8c9d877dbf2512024d954dd3bb1df7390ae7cb3a59ece4ff0487a98ad6072ef5",
+  "base": "c3c9b6bd83d8852c37df596fae3339fbc3ae2274",
+  "head": "8c7f906bc31a56e2f6d0c9eb6bfe531eb91f1ce5",
+  "merge": "ccd62878fdce4cb2064bc19c8c1898f9b3dc601a",
+  "tree": "1ea6e9c9ddee30c3e892e69575f06c243b35b340",
+  "baselinePolicySha256": "83b2881a3ec0602952608d1c7db7debe3314ee973137a69f3f6709c2fb9702fd",
+  "candidatePolicySha256": "f3576f1dab4add3862485b283de62cb77cce90d705d0bc16a7dc9ebcbf723080",
+  "baselinePlanDigest": "0a6b1da3c3ae4f1effa3198683a4233e32781ad99c6304e35e394509fc4dbff5",
+  "coveragePlanDigest": "7d52599df14f9fb226b4714a811a816d385a911e5943e58b5aac1d1b3e869612",
+  "nativePlanDigest": "9e7b8ed10631035f711d63100f2acf235bdf8b02044abfc90d1360d8c78f1328",
+  "ordinaryPackageWorkflowBlob": "6176ee3c3e7eb3bcc13948c1732ba8607b3b3997",
+  "sourceDigest": "1847f627d23ee6f1aeec80f4b3d2012aa874b592d97ff6ea7cad03c1c3afd639",
+  "runner": {"image": "ubuntu-26.04", "build": "20261122.9.1", "arch": "X64", "sdk": "10.0.402", "node": "24.22.3", "pnpm": "11.1.3", "aspire": "13.6.5"},
+  "pairsPerState": 24,
+  "minimumSuccessfulPairsPerState": 20,
+  "states": ["warm", "cold"],
+  "candidateRules": [
+    {"id": "study-evidence-guide", "pattern": "packages/ci-evidence.md", "profileId": "no-evidence", "precedence": 30},
+    {"id": "study-evidence-guide-release-note", "pattern": "releases/unreleased.entries/2026-11-28-package-only-ci-evidence.md", "profileId": "no-evidence", "precedence": 30}
+  ],
+  "knownRegression": {"head": "076bbf30532f6d5e6419e7d971d511662be8eea1", "ordinaryBuildRun": 46166882315, "attempt": 1, "expectedDiagnostic": "RWEXPORT004"}
+}

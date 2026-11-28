@@ -1,0 +1,51 @@
+name: Evidence profile study pair
+
+on:
+  workflow_call:
+    inputs:
+      state:
+        required: true
+        type: string
+      pair:
+        required: true
+        type: number
+      seed:
+        required: true
+        type: string
+      candidate-policy:
+        required: true
+        type: string
+      candidate-plan:
+        required: true
+        type: string
+      first:
+        required: true
+        type: string
+      second:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  first:
+    uses: ./.github/workflows/evidence-profile-study-arm.yml
+    with:
+      state: ${{ inputs.state }}
+      pair: ${{ inputs.pair }}
+      arm: ${{ inputs.first }}
+      seed: ${{ inputs.seed }}
+      candidate-policy: ${{ inputs.candidate-policy }}
+      candidate-plan: ${{ inputs.candidate-plan }}
+  second:
+    needs: first
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/evidence-profile-study-arm.yml
+    with:
+      state: ${{ inputs.state }}
+      pair: ${{ inputs.pair }}
+      arm: ${{ inputs.second }}
+      seed: ${{ inputs.seed }}
+      candidate-policy: ${{ inputs.candidate-policy }}
+      candidate-plan: ${{ inputs.candidate-plan }}
