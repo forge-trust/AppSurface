@@ -2318,6 +2318,22 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         var executablePath = Path.Join(directory, "postgres");
         File.Copy(sleepPath, executablePath);
         File.SetUnixFileMode(executablePath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        if (OperatingSystem.IsMacOS())
+        {
+            // macOS kills a copied platform binary on launch (SIGKILL, exit 137) because its signature no longer
+            // matches its path. An ad-hoc signature lets the renamed copy run as an ordinary process.
+            using var codesign = Process.Start(new ProcessStartInfo("/usr/bin/codesign")
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                ArgumentList = { "--force", "--sign", "-", executablePath }
+            });
+            Assert.NotNull(codesign);
+            var error = codesign.StandardError.ReadToEnd();
+            codesign.WaitForExit();
+            Assert.True(codesign.ExitCode == 0, $"Ad-hoc signing the process identity fixture failed: {error}");
+        }
+
         return executablePath;
     }
 

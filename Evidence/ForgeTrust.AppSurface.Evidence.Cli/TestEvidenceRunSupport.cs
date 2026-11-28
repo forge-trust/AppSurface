@@ -73,7 +73,7 @@ internal static class TestEvidenceRunSupport
     }
 
     /// <summary>
-    /// Deletes the manifest, the summary and the selected <c>test</c> producers' artifact directories of an earlier run.
+    /// Deletes the manifest, the summary and the selected <c>test</c> and scoped coverage producers' artifact directories of an earlier run.
     /// </summary>
     /// <param name="outputDirectory">The evidence output directory.</param>
     /// <param name="plan">The plan about to run.</param>
@@ -83,9 +83,10 @@ internal static class TestEvidenceRunSupport
     /// place, still bound to an identical plan. After a cancelled rerun, <c>verify</c> now reports a missing manifest.
     /// </para>
     /// <para>
-    /// Only <c>test</c> producers have artifact directories retired: they are the only producers the CLI gives an
-    /// artifact writer, and the planner guarantees their ids are one safe path segment. A producer of another kind may
-    /// have an id such as <c>../../x</c>, so its id is never joined into a path that is deleted.
+    /// Only <c>test</c> producers and scoped coverage producers have artifact directories retired: they are the only
+    /// producers the CLI gives an artifact writer, and the planner guarantees their ids are one safe path segment
+    /// (<c>ASEVD149</c>, <c>ASEVD151</c>). A producer of another kind may have an id such as <c>../../x</c>, so its id
+    /// is never joined into a path that is deleted.
     /// </para>
     /// </remarks>
     /// <exception cref="EvidenceCliException">
@@ -109,7 +110,7 @@ internal static class TestEvidenceRunSupport
         {
             RejectLinkedDirectory(artifactRoot);
             retired = plan.Profile.Producers
-                .Where(IsTestProducer)
+                .Where(static producer => IsTestProducer(producer) || ScopedCoverageReceipt.IsScopedCoverageProducer(producer))
                 .Select(producer => Path.Join(artifactRoot, producer.Id))
                 .Where(Directory.Exists)
                 .ToArray();

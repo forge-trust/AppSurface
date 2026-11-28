@@ -92,7 +92,8 @@ public sealed class EvidenceTestProducerReadmeContractTests
     {
         Assert.EndsWith("#test-producer-preview", TestEvidenceRunSupport.PreviewLine, StringComparison.Ordinal);
         Assert.Contains("\n## Test producer (preview)\n", Readme, StringComparison.Ordinal);
-        Assert.Contains("A filtered test suite cannot close a coverage assertion; it can close the [`test` assertion](#test-producer-preview)", Readme, StringComparison.Ordinal);
+        Assert.Contains("A filtered test suite cannot close a repository-wide coverage assertion; it can close the [`test` assertion](#test-producer-preview)", Readme, StringComparison.Ordinal);
+        Assert.Contains("or the [scoped patch coverage assertion](#scoped-patch-coverage) of a producer that names its projects and sources in the plan", Readme, StringComparison.Ordinal);
         Assert.Contains("it does not scan consumer assemblies, discover test projects,", Readme, StringComparison.Ordinal);
         Assert.DoesNotContain("A skipped test project, filtered test suite, unavailable browser", Readme, StringComparison.Ordinal);
         foreach (var code in new[] { "ASEVD203", "ASEVD208", "ASEVD209", "ASEVD213", "ASEVD214", "ASEVD215", "ASEVD216" })

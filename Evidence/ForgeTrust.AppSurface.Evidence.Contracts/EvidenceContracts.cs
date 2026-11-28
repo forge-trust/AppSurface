@@ -299,6 +299,25 @@ public sealed record EvidenceProducerDeclaration(
     /// <remarks>Preserves the original kind for serialization. Planner validation uses its own exact kind comparison.</remarks>
     internal bool IsCoverageProducer() => string.Equals(Kind, "coverage", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Gets the declared test projects and source scope of a scoped patch coverage claim; <see langword="null"/> for an ordinary coverage producer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only producers of kind <c>coverage</c> may declare this value, and a producer that declares it must not declare
+    /// <see cref="CoverageGate"/>. Such a producer closes only <see cref="EvidenceScopedCoverageContract.AssertionId"/>.
+    /// See <see cref="EvidenceCoverageScope"/> for what the claim proves and what it does not.
+    /// </para>
+    /// <para>
+    /// It is omitted from canonical JSON when absent, so policies that do not use it keep their existing digests.
+    /// A reader that predates this property drops it while deserializing, plans the producer as an ordinary coverage
+    /// producer with no gate, and then fails closed at execution with <see cref="EvidenceProducerOutcome.Invalid"/>.
+    /// The compatibility boundary is execution, not planning.
+    /// </para>
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EvidenceCoverageScope? CoverageScope { get; init; }
+
     /// <summary>Determines whether this declaration uses a feature that requires an Evidence contract 1.1 plan.</summary>
     /// <returns>True for declared inputs, cooperative child lifetime, or an explicitly multi-file slot.</returns>
     internal bool RequiresContractVersion11() =>
@@ -395,6 +414,140 @@ public static class EvidenceTestProducerContract
         foreach (var project in projects)
         {
             total += 512 + (6L * (project?.Path?.Length ?? 0));
+        }
+
+        return total;
+    }
+}
+
+/// <summary>
+/// Declares a scoped patch coverage claim: the test projects to run and the source files whose changed lines they answer for.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A scoped claim proves one thing: the declared test projects ran and passed, and the changed lines under
+/// <see cref="Sources"/> meet the declared patch thresholds when only those projects' coverage counts. It says nothing
+/// about overall coverage and nothing about changed files outside <see cref="Sources"/>. Use it when a pull request
+/// touches one package and running every test project would cost more than the evidence is worth. Keep an
+/// unconditional repository-wide gate somewhere, such as on the default branch, or overall coverage can erode.
+/// </para>
+/// <para>
+/// The claim fails closed. A declared assembly that is missing from the merged report fails the run, a line counts as
+/// covered only from rows of the assembly its source entry declares, a changed file reported only under another
+/// assembly fails the run, and a run in which no changed file lies under a
+/// source pattern or a declared test project directory fails. The full rules are in the Evidence CLI README.
+/// </para>
+/// </remarks>
+/// <param name="Projects">
+/// 1 to <see cref="EvidenceScopedCoverageContract.MaximumProjects"/> unique repository-relative, forward-slash test
+/// project paths ending in <c>.csproj</c>, <c>.fsproj</c> or <c>.vbproj</c>. Only these projects run.
+/// </param>
+/// <param name="Sources">
+/// 1 to <see cref="EvidenceScopedCoverageContract.MaximumSources"/> source entries. A changed line is in scope when its
+/// path matches an entry's pattern; it is then scored only from that entry's assembly.
+/// </param>
+/// <param name="MinPatchLinePercent">Optional minimum changed-line coverage percentage, 0 through 100.</param>
+/// <param name="MinPatchBranchPercent">Optional minimum changed-branch coverage percentage, 0 through 100. At least one threshold is required.</param>
+/// <param name="PatchLineMode">Changed-line calculation mode: <c>measurable</c> or <c>codecov</c>, as in <see cref="EvidenceCoverageGateRequirements"/>.</param>
+/// <param name="TolerancePercent">Grace margin subtracted from each threshold, 0 through 100.</param>
+public sealed record EvidenceCoverageScope(
+    IReadOnlyList<string> Projects,
+    IReadOnlyList<EvidenceCoverageScopeSource> Sources,
+    decimal? MinPatchLinePercent = null,
+    decimal? MinPatchBranchPercent = null,
+    string PatchLineMode = "measurable",
+    decimal TolerancePercent = 0.5m);
+
+/// <summary>
+/// Declares one source pattern of a scoped patch coverage claim and the assembly whose coverage rows score it.
+/// </summary>
+/// <remarks>
+/// The assembly is declared rather than inferred from a project file, so planning needs no MSBuild evaluation and the
+/// value is bound into <c>PolicyDigest</c> and <c>PlanDigest</c>. It must equal the Cobertura <c>package</c> name,
+/// which is the compiled assembly name: a project that sets <c>AssemblyName</c> needs that name here.
+/// </remarks>
+/// <param name="Pattern">
+/// Repository-relative, forward-slash pattern with <c>*</c> inside a segment and <c>**</c> as a whole segment, at
+/// most <see cref="EvidenceScopedCoverageContract.MaximumPathLength"/> characters. This is the producer
+/// <c>inputs</c> grammar; <c>?</c>, brackets, braces, <c>:</c> and <c>\</c> are rejected.
+/// </param>
+/// <param name="Assembly">
+/// Assembly name as it appears in the Cobertura <c>package</c> element, at most
+/// <see cref="EvidenceScopedCoverageContract.MaximumAssemblyNameLength"/> characters of letters, digits, <c>.</c>,
+/// <c>_</c> and <c>-</c>.
+/// </param>
+public sealed record EvidenceCoverageScopeSource(string Pattern, string Assembly);
+
+/// <summary>
+/// Names the fixed parts of the scoped patch coverage claim that the planner enforces.
+/// </summary>
+/// <remarks>
+/// A producer that declares <see cref="EvidenceProducerDeclaration.CoverageScope"/> closes only <see cref="AssertionId"/>
+/// and writes one receipt to <see cref="ReceiptRelativeRoot"/>/<see cref="ReceiptFileName"/>. It never closes a
+/// repository-wide coverage assertion, so an obligation that needs one cannot be satisfied by a scoped producer.
+/// </remarks>
+public static class EvidenceScopedCoverageContract
+{
+    /// <summary>The producer kind that may declare a coverage scope, <c>coverage</c>.</summary>
+    public const string Kind = "coverage";
+
+    /// <summary>The only assertion id a scoped coverage producer may declare and close.</summary>
+    public const string AssertionId = "appsurface/coverage/patch-scoped@1";
+
+    /// <summary>The logical name of the single required receipt artifact slot.</summary>
+    public const string ReceiptSlotLogicalName = "scoped-coverage-receipt";
+
+    /// <summary>The required <c>relativeRoot</c> of the receipt slot.</summary>
+    public const string ReceiptRelativeRoot = "coverage-scope";
+
+    /// <summary>The receipt file name inside <see cref="ReceiptRelativeRoot"/>.</summary>
+    public const string ReceiptFileName = "scoped-coverage-receipt.json";
+
+    /// <summary>The required media type of the receipt slot.</summary>
+    public const string ReceiptMediaType = "application/json";
+
+    /// <summary>The largest number of test projects one scoped producer may declare.</summary>
+    public const int MaximumProjects = 32;
+
+    /// <summary>The largest number of source entries one scoped producer may declare.</summary>
+    public const int MaximumSources = 32;
+
+    /// <summary>The largest declared project path or source pattern length, in characters.</summary>
+    public const int MaximumPathLength = 512;
+
+    /// <summary>The largest declared assembly name length, in characters.</summary>
+    public const int MaximumAssemblyNameLength = 256;
+
+    /// <summary>The largest number of changed file paths the receipt lists in <c>unknownFiles</c>.</summary>
+    public const int MaximumUnknownFiles = 50;
+
+    /// <summary>The largest length, in characters, of a changed file path written to the receipt; longer paths are cut and flagged.</summary>
+    public const int MaximumReceiptPathLength = 512;
+
+    /// <summary>
+    /// Computes the smallest <c>maximumBytes</c> the receipt slot may declare for a scope: 8192 bytes, plus room for
+    /// every <c>unknownFiles</c> entry at its longest, plus each project and source at six bytes per character.
+    /// </summary>
+    /// <remarks>
+    /// Six bytes per character is the worst case of the receipt's JSON encoding, which writes a non-ASCII or
+    /// HTML-sensitive character as a <c>\uXXXX</c> escape. A slot sized from this value can always hold the receipt,
+    /// so a run never fails to write it after the tests ran.
+    /// </remarks>
+    /// <param name="scope">The declared scope; <see langword="null"/> lists count as empty.</param>
+    /// <returns>The minimum receipt slot size in bytes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is <see langword="null"/>.</exception>
+    public static long GetMinimumReceiptBytes(EvidenceCoverageScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        long total = 8192 + (MaximumUnknownFiles * ((6L * MaximumReceiptPathLength) + 64));
+        foreach (var project in scope.Projects ?? [])
+        {
+            total += 64 + (6L * (project?.Length ?? 0));
+        }
+
+        foreach (var source in scope.Sources ?? [])
+        {
+            total += 128 + (6L * ((source?.Pattern?.Length ?? 0) + (source?.Assembly?.Length ?? 0)));
         }
 
         return total;

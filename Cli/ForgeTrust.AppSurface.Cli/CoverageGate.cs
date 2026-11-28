@@ -860,6 +860,23 @@ internal sealed record PatchCoverageLine(
     int? CoveredConditions,
     int? ValidConditions);
 
+/// <summary>
+/// One merged Cobertura line row for a single package, file and line.
+/// </summary>
+/// <param name="Covered">Whether any row for this package, file and line had a hit.</param>
+/// <param name="CoveredConditions">Summed covered condition count, or <see langword="null"/> when no row reported conditions.</param>
+/// <param name="ValidConditions">Summed condition count, or <see langword="null"/> when no row reported conditions.</param>
+internal sealed record CoberturaLineRow(bool Covered, int? CoveredConditions, int? ValidConditions);
+
+/// <summary>
+/// A Cobertura report read by package: the package names it lists and its line rows keyed by package, file and line.
+/// </summary>
+/// <param name="ReportedPackages">Every named package element in the report, including packages with no rows.</param>
+/// <param name="Rows">Rows keyed by package name, then repository-relative file path, then one-based line number.</param>
+internal sealed record CoberturaPackageCoverage(
+    IReadOnlySet<string> ReportedPackages,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<int, CoberturaLineRow>>> Rows);
+
 internal enum PatchDiffParseStatus
 {
     Empty,
@@ -1853,6 +1870,124 @@ internal static class PatchCoverageEvaluator
         }
 
         return lineHits;
+    }
+
+    /// <summary>
+    /// Reads a Cobertura report into rows keyed by package, repository-relative file and line, plus the set of package
+    /// names the report lists, in one streaming pass.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the read-only view the scoped patch coverage claim scores from. The repository-wide patch gate keeps its
+    /// own file-and-line map, in which hits from every package count; this view keeps packages apart so a scoped claim
+    /// can count only the assembly a source entry declares. Rows for one package, file and line are merged the same
+    /// way the gate merges them: covered when any row has a hit, and condition counts summed.
+    /// </para>
+    /// <para>
+    /// A package element with an empty or missing <c>name</c> is ignored, and so are rows outside any package and rows
+    /// whose file is outside <paramref name="repositoryRoot"/>. A package listed with no rows is still reported, which
+    /// is how an instrumented assembly with no executable lines shows up.
+    /// </para>
+    /// </remarks>
+    /// <param name="coveragePath">Merged Cobertura XML file.</param>
+    /// <param name="repositoryRoot">Repository root used to make absolute report filenames repository-relative.</param>
+    /// <param name="cancellationToken">Cancellation token checked once per XML node.</param>
+    /// <returns>The package-keyed rows and the reported package names, both compared ordinally.</returns>
+    /// <exception cref="CommandException">ASCOV006 when the XML cannot be parsed or a condition count is out of range.</exception>
+    internal static async Task<CoberturaPackageCoverage> ReadPackageCoverageAsync(
+        string coveragePath,
+        string repositoryRoot,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(coveragePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        var packages = new HashSet<string>(StringComparer.Ordinal);
+        var rows = new Dictionary<string, Dictionary<string, Dictionary<int, PatchLineCoverageData>>>(StringComparer.Ordinal);
+        try
+        {
+            await using var stream = File.OpenRead(coveragePath);
+            using var reader = XmlReader.Create(stream, ReaderSettings);
+            string? currentPackage = null;
+            string? currentFile = null;
+            while (await reader.ReadAsync())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (reader.NodeType == XmlNodeType.Element && string.Equals(reader.Name, "package", StringComparison.Ordinal))
+                {
+                    var name = reader.GetAttribute("name");
+                    var named = !string.IsNullOrWhiteSpace(name);
+                    if (named)
+                    {
+                        packages.Add(name!);
+                    }
+
+                    currentPackage = named && !reader.IsEmptyElement ? name : null;
+                    currentFile = null;
+                    continue;
+                }
+
+                if (reader.NodeType == XmlNodeType.EndElement && string.Equals(reader.Name, "package", StringComparison.Ordinal))
+                {
+                    currentPackage = null;
+                    currentFile = null;
+                    continue;
+                }
+
+                if (reader.NodeType == XmlNodeType.Element && string.Equals(reader.Name, "class", StringComparison.Ordinal))
+                {
+                    currentFile = reader.IsEmptyElement ? null : NormalizeCoveragePath(reader.GetAttribute("filename"), repositoryRoot);
+                    continue;
+                }
+
+                if (reader.NodeType == XmlNodeType.EndElement && string.Equals(reader.Name, "class", StringComparison.Ordinal))
+                {
+                    currentFile = null;
+                    continue;
+                }
+
+                if (currentPackage is null
+                    || currentFile is null
+                    || reader.NodeType != XmlNodeType.Element
+                    || !string.Equals(reader.Name, "line", StringComparison.Ordinal)
+                    || !int.TryParse(reader.GetAttribute("number"), NumberStyles.None, CultureInfo.InvariantCulture, out var lineNumber)
+                    || !int.TryParse(reader.GetAttribute("hits"), NumberStyles.None, CultureInfo.InvariantCulture, out var hits))
+                {
+                    continue;
+                }
+
+                if (!rows.TryGetValue(currentPackage, out var files))
+                {
+                    files = new Dictionary<string, Dictionary<int, PatchLineCoverageData>>(StringComparer.Ordinal);
+                    rows.Add(currentPackage, files);
+                }
+
+                if (!files.TryGetValue(currentFile, out var fileRows))
+                {
+                    fileRows = [];
+                    files.Add(currentFile, fileRows);
+                }
+
+                PatchBranchCoverageCounts? branches = TryReadBranchCoverage(reader, out var branchCoverage) ? branchCoverage : null;
+                fileRows[lineNumber] = fileRows.TryGetValue(lineNumber, out var existing)
+                    ? existing.Merge(hits > 0, branches)
+                    : new PatchLineCoverageData(hits > 0, branches);
+            }
+        }
+        catch (XmlException ex)
+        {
+            throw new CommandException($"ASCOV006 Failed to parse Cobertura XML '{coveragePath}': {ex.Message}");
+        }
+
+        var readOnlyRows = rows.ToDictionary(
+            static package => package.Key,
+            static package => (IReadOnlyDictionary<string, IReadOnlyDictionary<int, CoberturaLineRow>>)package.Value.ToDictionary(
+                static file => file.Key,
+                static file => (IReadOnlyDictionary<int, CoberturaLineRow>)file.Value.ToDictionary(
+                    static line => line.Key,
+                    static line => new CoberturaLineRow(line.Value.Covered, line.Value.Branches?.Covered, line.Value.Branches?.Valid)),
+                StringComparer.Ordinal),
+            StringComparer.Ordinal);
+        return new CoberturaPackageCoverage(packages, readOnlyRows);
     }
 
     private static bool TryReadBranchCoverage(XmlReader reader, out PatchBranchCoverageCounts coverage)

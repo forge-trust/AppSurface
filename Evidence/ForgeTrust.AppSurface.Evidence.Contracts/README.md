@@ -122,6 +122,33 @@ The [planner](https://github.com/forge-trust/AppSurface/blob/main/Evidence/Forge
 - A filter that starts matching fewer tests can still pass if it matches at least `minimumTests` tests, or one when no minimum is set, and every selected test runs and passes. A filter that matches no test always fails.
 - A reader that does not know the `test` property drops it and computes a different `PolicyDigest`. Upgrade every CLI that runs or verifies evidence before adding a `test` block to a shared policy, and remove the block before downgrading.
 
+## Scoped patch coverage declaration
+
+A producer of kind `coverage` may declare an optional `coverageScope` block instead of `coverageGate`. It then runs only its declared test projects and closes one assertion, `appsurface/coverage/patch-scoped@1`, which says the changed lines under its sources meet its patch thresholds when only the declared assemblies' coverage counts. See the [CLI section](../ForgeTrust.AppSurface.Evidence.Cli/README.md#scoped-patch-coverage) for a full example, scoring and the receipt.
+
+| Member | Shape and default | Constraint |
+| --- | --- | --- |
+| `EvidenceProducerDeclaration.CoverageScope` | `EvidenceCoverageScope?`, `null` | Kind `coverage` only, and never with `coverageGate`. Omitted from canonical JSON when `null`. |
+| `EvidenceCoverageScope.Projects` | list of string | 1 to 32 unique repository-relative test project paths. |
+| `EvidenceCoverageScope.Sources` | list of `EvidenceCoverageScopeSource` | 1 to 32 entries with unique patterns. |
+| `EvidenceCoverageScopeSource.Pattern` | string | Producer `inputs` pattern grammar, at most 512 characters. |
+| `EvidenceCoverageScopeSource.Assembly` | string | Cobertura package name: letters, digits, `.`, `_`, `-`, at most 256 characters. |
+| `EvidenceCoverageScope.MinPatchLinePercent`, `MinPatchBranchPercent` | `decimal?`, `null` | 0 to 100; at least one is required. |
+| `EvidenceCoverageScope.PatchLineMode` | string, `measurable` | `measurable` or `codecov`. |
+| `EvidenceCoverageScope.TolerancePercent` | decimal, `0.5` | 0 to 100. |
+| `EvidenceScopedCoverageContract` | constants | The assertion id, the receipt slot name, `relativeRoot` (`coverage-scope`), file name and media type, the limits above, and `GetMinimumReceiptBytes(scope)`: 8192 bytes, plus 50 times (six bytes per character of a 512-character path plus 64), plus each project at 64 bytes and six per character, plus each source at 128 bytes and six per character of its pattern and assembly. |
+
+The [planner](../ForgeTrust.AppSurface.Evidence.Planner/README.md#scoped-coverage-diagnostics) enforces every constraint with `ASEVD150` through `ASEVD161`.
+
+**Why a separate block.** The repository-wide `coverageGate` keeps its overall thresholds required, so a policy cannot weaken the full gate by accident. A scoped claim has no overall thresholds because its block has no field for them, and it closes a different assertion id.
+
+**Digests.** The whole declaration is hashed, so changing a project, a source, an assembly or a threshold changes `PolicyDigest` and `PlanDigest`. A policy with no `coverageScope` block keeps its existing canonical bytes. The block is not tied to contract 1.1.
+
+**Pitfalls.**
+
+- The compatibility boundary is execution, not planning. A reader that predates `coverageScope` drops the block while deserializing, plans the producer as an ordinary coverage producer with no gate, and then reports it `Invalid` at execution because it has no `coverageGate`. It never produces a passing claim, but it does not reject the policy up front. Upgrade every CLI that runs or verifies evidence before adding the block to a shared policy.
+- A scoped pass says nothing about overall coverage. Keep a repository-wide coverage producer on an unconditional route.
+
 ## Pitfalls
 
 - Do not construct a `NoEvidenceRequired` result merely because a local run omitted tests. It is a policy outcome, not a convenience override.

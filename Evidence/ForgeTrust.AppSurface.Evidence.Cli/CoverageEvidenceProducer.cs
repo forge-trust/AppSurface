@@ -1,5 +1,6 @@
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Evidence.Cli;
 
@@ -13,6 +14,10 @@ namespace ForgeTrust.AppSurface.Evidence.Cli;
 /// <param name="ChildLifetime">Optional explicitly cooperative child coordinator.</param>
 /// <param name="FinalReportRoot">Optional destination for ordinary current-run reports.</param>
 /// <param name="BeforeCustodyForTests">Optional scheduling seam after required report delivery and before custody.</param>
+/// <param name="RepositoryRoot">
+/// Repository root that a scoped producer's declared project paths and the patch paths are relative to. Null resolves
+/// the Git repository containing the current directory. Only a scoped producer reads it.
+/// </param>
 internal sealed record CoverageEvidenceProducerRequest(
     EvidenceProducerDeclaration Producer,
     string? SolutionPath,
@@ -22,7 +27,8 @@ internal sealed record CoverageEvidenceProducerRequest(
     EvidenceArtifactWriter? ArtifactWriter = null,
     EvidenceChildLifetimeSession? ChildLifetime = null,
     string? FinalReportRoot = null,
-    Action? BeforeCustodyForTests = null);
+    Action? BeforeCustodyForTests = null,
+    string? RepositoryRoot = null);
 
 /// <summary>
 /// Runs the private AppSurface coverage engine for the first-party Evidence workflow.
@@ -112,6 +118,10 @@ internal sealed class CoverageEvidenceProducer
     /// reuse.child_lifetime_required. An opted-in custody request also requires the coordinator's session.
     /// This result makes no SDK child-settlement claim; the coordinator closes enrollment after the whole producer,
     /// joins actual child settlement and applies publication admission. It must not close enrollment per command.
+    /// A declaration with <see cref="EvidenceProducerDeclaration.CoverageScope"/> takes the scoped branch instead: it
+    /// runs only the declared projects, scores the scoped claim, writes its receipt through
+    /// <see cref="CoverageEvidenceProducerRequest.ArtifactWriter"/> for every outcome, and never publishes receipt
+    /// custody, so its result is always ineligible for reuse.
     /// </remarks>
     /// <param name="request">Named execution paths, producer inputs, and optional custody settings.</param>
     /// <param name="cancellationToken">Cancels the entire producer, including report delivery.</param>
@@ -132,6 +142,7 @@ internal sealed class CoverageEvidenceProducer
         var childLifetime = request.ChildLifetime;
         var finalReportRoot = request.FinalReportRoot;
         var beforeCustodyForTests = request.BeforeCustodyForTests;
+        var repositoryRoot = request.RepositoryRoot;
 
         static CoverageEvidenceProducerExecutionResult Finish(EvidenceProducerResult result)
             => new(result, "inventory-result-not-passed");
@@ -139,6 +150,13 @@ internal sealed class CoverageEvidenceProducer
         if (!producer.IsCoverageProducer())
         {
             return Finish(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Unavailable, [], $"Producer kind '{producer.Kind}' requires an explicit consumer EvidenceHost registration."));
+        }
+
+        if (producer.CoverageScope is { } scope)
+        {
+            var scoped = await RunScopedAsync(producer, scope, solutionPath, outputDirectory, diffSnapshot, writers,
+                artifactWriter, repositoryRoot, cancellationToken).ConfigureAwait(false);
+            return new(scoped, "scoped-coverage-not-reusable");
         }
 
         if (string.IsNullOrWhiteSpace(solutionPath))
@@ -327,6 +345,149 @@ internal sealed class CoverageEvidenceProducer
                 ? failure.Reason : "inventory-custody-unavailable");
         }
     }
+
+    /// <summary>
+    /// Runs the declared test projects, scores the scoped patch claim, and writes its receipt for every outcome.
+    /// </summary>
+    /// <remarks>
+    /// Order: solution check (<see cref="ScopedCoverageReason.SolutionUnavailable"/>), diff check
+    /// (<see cref="ScopedCoverageReason.DiffUnavailable"/>), then one coverage run of the declared projects into
+    /// <c>coverage-scoped/&lt;producer id&gt;</c>, so two scoped producers never share report files and none can
+    /// collide with the reserved children of the repository-wide producer's <c>coverage</c> directory. The run is followed by the
+    /// existing gate with zero overall thresholds and no patch thresholds: its verdict is ignored, and it runs only so
+    /// <c>coverage-patch-targets.json</c> and <c>.md</c> hold per-line detail beside the merged report. The merged report
+    /// is then read by package and classified by <see cref="ScopedPatchClassifier"/>. Expiry of
+    /// <c>timeoutSeconds</c> writes a <see cref="ScopedCoverageReason.DeadlineExceeded"/> receipt from the timeout
+    /// handler; caller cancellation propagates and writes nothing.
+    /// </remarks>
+    private async Task<EvidenceProducerResult> RunScopedAsync(
+        EvidenceProducerDeclaration producer,
+        EvidenceCoverageScope scope,
+        string? solutionPath,
+        string outputDirectory,
+        EvidenceDiffSnapshot? diffSnapshot,
+        CoverageTextWriters writers,
+        EvidenceArtifactWriter? artifactWriter,
+        string? repositoryRoot,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(solutionPath))
+        {
+            return await FinishScopedAsync(producer, scope, ScopedPatchClassification.Unclassified(scope, ScopedCoverageReason.SolutionUnavailable),
+                "The scoped coverage producer requires --solution, as the repository-wide coverage producer does.", artifactWriter).ConfigureAwait(false);
+        }
+
+        if (diffSnapshot is null)
+        {
+            return await FinishScopedAsync(producer, scope, ScopedPatchClassification.Unclassified(scope, ScopedCoverageReason.DiffUnavailable),
+                "The scoped coverage producer requires --diff-file so the plan and the scored lines come from the same diff.", artifactWriter).ConfigureAwait(false);
+        }
+
+        var coverageDirectory = Path.Join(outputDirectory, ScopedCoverageRootName, producer.Id);
+        var deadlineToken = CancellationToken.None;
+        string? detail;
+        try
+        {
+            var root = repositoryRoot ?? GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory());
+            var timeout = TimeSpan.FromSeconds(producer.TimeoutSeconds);
+            var producerDeadline = new CoverageProducerDeadline(_clock, _clock.GetTimestamp(), timeout);
+            using var deadline = new CancellationTokenSource(timeout, _clock);
+            deadlineToken = deadline.Token;
+            using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadlineToken);
+            var runRequest = CreateRunRequest(solutionPath, outputDirectory, new(producer.CoverageExecution)) with
+            {
+                TestProjects = [.. scope.Projects.Select(project => Path.GetFullPath(Path.Join(root, project)))],
+                OutputDirectory = coverageDirectory,
+                ProducerDeadline = producerDeadline,
+                ArtifactRetention = producer.CoverageArtifactRetention,
+            };
+            var patchRequest = new CoveragePatchRequest(
+                root,
+                PatchDiffSource.ForSnapshot(diffSnapshot.Bytes.ToArray(), diffSnapshot.Label, EvidencePlan.MaximumCapturedPatchBytes, diffSnapshot.Sha256),
+                MinPatchLinePercent: null,
+                MinPatchBranchPercent: null,
+                string.Equals(scope.PatchLineMode, "codecov", StringComparison.OrdinalIgnoreCase) ? PatchLineMode.Codecov : PatchLineMode.Measurable);
+            var coveragePath = Path.Join(coverageDirectory, "coverage.cobertura.xml");
+            var gateRequest = new CoverageGateRequest(coveragePath, coverageDirectory, 0, 0, patchRequest, scope.TolerancePercent);
+            var execution = await _executionWorkflow.RunAndGateAsync(runRequest, gateRequest, writers, executionCancellation.Token).ConfigureAwait(false);
+            if (!execution.Run.Success)
+            {
+                return await FinishScopedAsync(producer, scope, ScopedPatchClassification.Unclassified(scope, ScopedCoverageReason.RunFailed),
+                    "The coverage run of the declared projects reported a failed test, merge, or artifact step.", artifactWriter).ConfigureAwait(false);
+            }
+
+            var report = await PatchCoverageEvaluator.ReadPackageCoverageAsync(coveragePath, root, executionCancellation.Token).ConfigureAwait(false);
+            var diffText = diffSnapshot.Text;
+            var changedFiles = string.IsNullOrWhiteSpace(diffText) ? [] : EvidenceUnifiedDiffReader.Read(diffText);
+            var changedLines = PatchCoverageEvaluator.ParseChangedLines(diffText);
+            var classification = ScopedPatchClassifier.Classify(scope, changedFiles, changedLines, report);
+            detail = execution.Gate?.PatchTargetsJsonPath is { } targets ? $"Per-line detail: {targets}." : null;
+            return await FinishScopedAsync(producer, scope, classification, detail, artifactWriter).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (deadlineToken.IsCancellationRequested)
+        {
+            detail = "The coverage run of the declared projects exceeded the producer's timeoutSeconds.";
+            return await FinishScopedAsync(producer, scope, ScopedPatchClassification.Unclassified(scope, ScopedCoverageReason.DeadlineExceeded), detail, artifactWriter).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
+        {
+            var code = exception is CoverageExecutionException { Code: { } ascov } ? ascov : exception.GetType().Name;
+            return await FinishScopedAsync(producer, scope, ScopedPatchClassification.Unclassified(scope, ScopedCoverageReason.RunFailed),
+                $"The scoped coverage run failed with {code}.", artifactWriter).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Writes the receipt and builds the result; a receipt that cannot be written withholds the assertion.</summary>
+    private static async Task<EvidenceProducerResult> FinishScopedAsync(
+        EvidenceProducerDeclaration producer,
+        EvidenceCoverageScope scope,
+        ScopedPatchClassification classification,
+        string? detail,
+        EvidenceArtifactWriter? artifactWriter)
+    {
+        var outcome = ScopedCoverageReceipt.ToOutcome(classification.Reason);
+        var diagnostic = ScopedCoverageReceipt.FormatDiagnostic(scope, classification, detail);
+        IReadOnlyList<EvidenceArtifactResult>? artifacts = null;
+        if (artifactWriter is not null)
+        {
+            try
+            {
+                // Not cancellable: a timed-out or failed run still needs its receipt.
+                artifacts =
+                [
+                    await artifactWriter.WriteAsync(
+                        EvidenceScopedCoverageContract.ReceiptSlotLogicalName,
+                        ScopedCoverageReceipt.ReceiptRelativePath,
+                        ScopedCoverageReceipt.Serialize(scope, classification),
+                        CancellationToken.None).ConfigureAwait(false),
+                ];
+            }
+            catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
+            {
+                diagnostic += $" The receipt could not be written ({exception.GetType().Name}).";
+                if (outcome == EvidenceProducerOutcome.Passed)
+                {
+                    outcome = EvidenceProducerOutcome.Failed;
+                }
+            }
+        }
+
+        return new EvidenceProducerResult(
+            producer.Id,
+            outcome,
+            outcome == EvidenceProducerOutcome.Passed ? producer.AssertionIds : [],
+            diagnostic)
+        {
+            Artifacts = artifacts,
+        };
+    }
+
+    /// <summary>The output child that holds one <c>&lt;producer id&gt;</c> directory per scoped coverage producer.</summary>
+    internal const string ScopedCoverageRootName = "coverage-scoped";
 
     /// <summary>Builds the coverage engine request for the resolved built-in settings.</summary>
     /// <param name="solutionPath">Solution submitted to the engine.</param>

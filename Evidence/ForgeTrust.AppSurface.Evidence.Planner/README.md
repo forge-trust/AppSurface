@@ -111,12 +111,34 @@ The planner does not classify C# semantics or infer that a getter, constructor, 
 | `ASEVD147` | The `test-receipt` slot's `maximumBytes` is below 4096 plus, per project, 512 plus six bytes per character of its path (the worst case of the receipt's JSON escaping). | Set `maximumBytes` to at least the minimum printed in the message. |
 | `ASEVD148` | A `test` producer's `timeoutSeconds` is below 30. | Use 30 or more so the producer keeps time to write its receipt. |
 | `ASEVD149` | A `test` producer id is not one safe path segment (`A-Z a-z 0-9 . _ -`, and not `.` or `..`). | Rename the producer; its id names the artifact directory. Other kinds keep the general identifier rule (`ASEVD121`). |
+| `ASEVD150` | A producer of a kind other than `coverage` declares a `coverageScope` block. | Remove the block or set `kind` to `coverage`. |
+| `ASEVD151` | A scoped coverage producer id is not one safe path segment. | Rename the producer; its id names the artifact and `coverage-scoped/<id>` directories. |
+| `ASEVD152` | A producer declares both `coverageScope` and `coverageGate`. | Use two producers: `coverageGate` for the repository-wide claim, `coverageScope` for the scoped patch claim. |
+| `ASEVD153` | `coverageScope.projects` is empty, has more than 32 entries, repeats a path (compared without case), or holds a path that `ASEVD139` would reject. | Declare 1 to 32 unique repository-relative test project paths. |
+| `ASEVD154` | `coverageScope.sources` is empty, has more than 32 entries, repeats a pattern, or holds an invalid pattern or assembly name. | Use the producer `inputs` pattern grammar, at most 512 characters, and an assembly name of letters, digits, `.`, `_` and `-`, at most 256 characters. |
+| `ASEVD155` | No patch threshold is declared, a threshold or the tolerance is outside 0 to 100, or `patchLineMode` is not `measurable` or `codecov`. | Declare `minPatchLinePercent`, `minPatchBranchPercent` or both. |
+| `ASEVD156` | A scoped producer's `assertionIds` is not exactly `["appsurface/coverage/patch-scoped@1"]`. | Paste the array printed in the message. A scoped producer never closes a repository-wide coverage assertion. |
+| `ASEVD157` | A producer without `coverageScope` declares `appsurface/coverage/patch-scoped@1`. | Add the `coverageScope` block or remove the assertion id. |
+| `ASEVD158` | A scoped producer does not declare exactly one required `scoped-coverage-receipt` slot with media type `application/json`, `relativeRoot` `coverage-scope` and no `maximumFiles`. | Paste the `artifactSlots` value printed in the message. |
+| `ASEVD159` | The receipt slot's `maximumBytes` is below the minimum derived from the declaration. | Set `maximumBytes` to at least the minimum printed in the message. |
+| `ASEVD160` | A scoped producer is in a profile whose scope is not `Targeted`. | Move it to a `Targeted` profile; a release profile needs a repository-wide coverage producer. |
+| `ASEVD161` | Two source entries with different assemblies can match the same path. | Give each assembly patterns under its own directory. |
 
 ### Test producer rules (preview)
 
 `ASEVD137` through `ASEVD149` apply only to producers of kind `test`, except `ASEVD143`, which keeps a `test` block off every other kind. The planner checks them in this order and reports the first failure: `ASEVD143`, `ASEVD149`, `ASEVD137`, `ASEVD138`, then per project `ASEVD139` to `ASEVD142`, then `ASEVD144` to `ASEVD148`. The general producer rules (`ASEVD110`, `ASEVD121`, `ASEVD125`, `ASEVD126`) run first.
 
 Why these rules exist: a `test` producer claims only that the tests it selected all ran and passed. `ASEVD144` and `ASEVD145` stop that claim from standing in for a coverage assertion, and `ASEVD146` and `ASEVD147` guarantee the producer can always write the receipt a gate reads. The kind, its assertion id and these codes are preview and may change without a compatibility step. Pitfall: an older planner ignores an unknown `test` block instead of rejecting it, so upgrade every CLI that plans or verifies before adding one to a shared policy.
+
+### Scoped coverage diagnostics
+
+`ASEVD150` through `ASEVD161` guard the [scoped patch coverage declaration](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#scoped-patch-coverage-declaration). The planner reports the first failure in this order: `ASEVD150`, `ASEVD157`, then for a producer with a `coverageScope` block `ASEVD151` to `ASEVD156`, `ASEVD158`, `ASEVD159`, `ASEVD160` and `ASEVD161`. The general producer rules and the test producer rules run first.
+
+Why these rules exist: a scoped claim answers only for its declared sources. `ASEVD152`, `ASEVD156` and `ASEVD157` keep it from standing in for a repository-wide coverage assertion, so an obligation that names a scoped producer for a repository-wide assertion is rejected by `ASEVD115`. `ASEVD158` and `ASEVD159` guarantee the receipt can always be written. `ASEVD161` keeps every in-scope path tied to exactly one assembly.
+
+`ASEVD161` is conservative. Two patterns are treated as overlapping unless their literal leading segments differ, so `src/A/*.cs` and `src/A/*.txt` with different assemblies are rejected even though they cannot match one path. Split such sources by directory.
+
+Pitfall: the planner does not check routing. A rule broader than a scoped producer's sources can select it for changes it does not answer for; the producer then reports `NothingInScope` or counts the files as out of scope. See the [CLI pitfalls](../ForgeTrust.AppSurface.Evidence.Cli/README.md#scoped-coverage-pitfalls).
 
 Read next: [contracts](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), [CLI workflow](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md), and the [policy cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).
 

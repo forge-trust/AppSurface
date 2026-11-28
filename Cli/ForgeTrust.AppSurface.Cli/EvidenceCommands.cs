@@ -4,6 +4,7 @@ using System.Text;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
@@ -237,14 +238,14 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
     internal Func<string?> StepSummaryPathResolver { get; set; } =
         static () => Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
 
-    /// <summary>Gets or sets the resolver for the repository root that declared test project paths are relative to.</summary>
+    /// <summary>Gets or sets the resolver for the repository root that declared test project paths, scoped coverage projects and patch paths are relative to.</summary>
     internal Func<string> RepositoryRootResolver { get; set; } =
         static () => GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory());
 
     /// <inheritdoc />
     /// <remarks>
     /// Order: resolve the plan; reject selections that cannot run truthfully (<c>ASEVD214</c>, <c>ASEVD215</c>);
-    /// retire the earlier manifest, summary and selected <c>test</c> producer artifact directories (<c>ASEVD216</c> when one is a link); write the plan; run producers one at a
+    /// retire the earlier manifest, summary and selected <c>test</c> and scoped coverage producer artifact directories (<c>ASEVD216</c> when one is a link); write the plan; run producers one at a
     /// time; confirm returned artifacts on disk and downgrade a producer whose artifact is not there; write the
     /// manifest and summary. Kinds <c>coverage</c> and <c>test</c> are built in; any other kind is <c>Unavailable</c>.
     /// </remarks>
@@ -310,7 +311,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
                 {
                     var produced = TestEvidenceRunSupport.IsTestProducer(producer)
                         ? await RunTestProducerAsync(plan, producer, artifactRoot, console, testReports, cancellationToken)
-                        : await RunProducerAsync(producer, resolution.DiffSnapshot, outputDirectory, console, cancellationToken);
+                        : await RunProducerAsync(producer, resolution.DiffSnapshot, outputDirectory, artifactRoot, console, cancellationToken);
                     var checkedResult = await TestEvidenceRunSupport.EnforceArtifactsAsync(artifactRoot, produced, cancellationToken);
                     if (!ReferenceEquals(checkedResult, produced))
                     {
@@ -366,16 +367,28 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         EvidenceProducerDeclaration producer,
         EvidenceDiffSnapshot? diffSnapshot,
         string outputDirectory,
+        string artifactRoot,
         IConsole console,
         CancellationToken cancellationToken)
     {
-        return await _coverageProducer.RunAsync(
-            producer,
-            SolutionPath,
-            outputDirectory,
-            diffSnapshot,
-            CoverageTextWriters.Create(console.Output, console.Error),
+        var writers = CoverageTextWriters.Create(console.Output, console.Error);
+        if (!ScopedCoverageReceipt.IsScopedCoverageProducer(producer))
+        {
+            return await _coverageProducer.RunAsync(producer, SolutionPath, outputDirectory, diffSnapshot, writers, cancellationToken);
+        }
+
+        // A scoped producer writes its receipt under artifacts/<id>; the planner guarantees the id is one safe segment.
+        var execution = await _coverageProducer.RunWithInventoryAsync(
+            new(
+                Producer: producer,
+                SolutionPath: SolutionPath,
+                ExecutionRoot: outputDirectory,
+                DiffSnapshot: diffSnapshot,
+                Writers: writers,
+                ArtifactWriter: new EvidenceArtifactWriter(producer, PathUtils.PathUnder(artifactRoot, producer.Id)),
+                RepositoryRoot: RepositoryRootResolver()),
             cancellationToken);
+        return execution.Result;
     }
 
     private async Task<EvidenceProducerResult> RunTestProducerAsync(
@@ -459,7 +472,7 @@ internal static class EvidenceReuseCommandOptions
         return receiptWait;
     }
 
-    /// <summary>Rejects local reuse in release or protected CI contexts and in profiles that select the preview test producer.</summary>
+    /// <summary>Rejects local reuse in release or protected CI contexts and in profiles that select the preview test producer (<c>ASEVD219</c>) or a scoped coverage producer (<c>ASEVD220</c>).</summary>
     /// <param name="reuse">Whether reuse is enabled; fresh invocations retain their existing behavior.</param>
     /// <param name="plan">The selected policy-bound plan.</param>
     /// <param name="environmentReader">Optional per-call environment seam, without process-wide test mutation.</param>
@@ -469,6 +482,8 @@ internal static class EvidenceReuseCommandOptions
             throw new CommandException("ASEVD215: local producer reuse is unavailable for release profiles and protected CI. Fix: run without --reuse in the trusted release workflow. Code: reuse.gate_context_forbidden. No producer or resource was started.");
         if (reuse && plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer))
             throw new CommandException("ASEVD219: The preview test producer requires a fresh CLI run. Run the selected profile without --reuse. Code: reuse.test_preview_requires_fresh. No producer or resource was started.");
+        if (reuse && plan.Profile.Producers.Any(ScopedCoverageReceipt.IsScopedCoverageProducer))
+            throw new CommandException("ASEVD220: A scoped coverage producer requires a fresh CLI run. Run the selected profile without --reuse. Code: reuse.scoped_coverage_requires_fresh. No producer or resource was started.");
     }
 }
 
