@@ -192,13 +192,15 @@ public sealed class DotnetCliTestRunSourceTests
         Assert.Contains("Microsoft.Testing.Platform", unsupported.Detail, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task RestoreAndBuild_ShouldUseTheProjectDirectoryAndBuildServerFlags()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RestoreAndBuild_ShouldApplyLockedModeOnlyToRestore(bool lockedMode)
     {
         using var directory = TestDirectory.Create();
         var project = Project(directory.Path);
         var runner = new ScriptedRunner(Ok(""), new ChildProcessResult(true, 1, "", "", false), Ok(""), new ChildProcessResult(false, -1, "", "", false));
-        var source = new DotnetCliTestRunSource(runner, "dotnet-x", "Release");
+        var source = new DotnetCliTestRunSource(runner, "dotnet-x", "Release", lockedMode);
 
         Assert.Null((await source.RestoreAsync(project, CancellationToken.None)).Failure);
         Assert.Equal(TestRunReason.RestoreFailed, (await source.RestoreAsync(project, CancellationToken.None)).Failure);
@@ -206,7 +208,8 @@ public sealed class DotnetCliTestRunSourceTests
         Assert.Null(build.Failure);
         Assert.Equal(TestRunReason.BuildFailed, (await source.BuildAsync(project, CancellationToken.None)).Failure);
 
-        Assert.Equal(["restore", "A.Tests.csproj", "-property:Configuration=Release", "--disable-build-servers", "-nodeReuse:false", "-tl:off", "--nologo"], runner.Requests[0].Arguments);
+        string[] lockArguments = lockedMode ? ["--locked-mode"] : [];
+        Assert.Equal(["restore", "A.Tests.csproj", "-property:Configuration=Release", .. lockArguments, "--disable-build-servers", "-nodeReuse:false", "-tl:off", "--nologo"], runner.Requests[0].Arguments);
         Assert.Equal(["dotnet-x", "build", "A.Tests.csproj", "-c", "Release", "--no-restore", "--disable-build-servers", "-nodeReuse:false", "-tl:off", "--nologo"], build.Command);
         Assert.All(runner.Requests, request => Assert.Equal(project.Directory, request.WorkingDirectory));
         Assert.All(runner.Requests, static request => Assert.Equal("dotnet-x", request.FileName));

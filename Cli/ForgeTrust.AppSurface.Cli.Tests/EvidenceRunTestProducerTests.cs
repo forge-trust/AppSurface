@@ -15,6 +15,38 @@ public sealed class EvidenceRunTestProducerTests
     private const string HiddenTestName = "Zeta.Hidden.CaseName";
     private const int PlanSizeMarginBytes = 4096;
 
+    [Theory]
+    [InlineData(null, false, "Release")]
+    [InlineData("Release", true, "Release")]
+    [InlineData("Debug", true, "Debug")]
+    public async Task Run_ShouldApplyTheSelectedTestBuildOptions(string? configuration, bool lockedMode, string expectedConfiguration)
+    {
+        using var fixture = Fixture.Create();
+        fixture.Source.Inventory = ["A.One"];
+        fixture.Source.Results = [new("A.One", TestCaseOutcome.Passed)];
+
+        await fixture.RunAsync(configuration, lockedMode);
+
+        var options = Assert.IsType<TestEvidenceProducerOptions>(fixture.TestProducerOptions);
+        Assert.Equal(expectedConfiguration, options.Configuration);
+        Assert.Equal(lockedMode, options.LockedMode);
+    }
+
+    [Theory]
+    [InlineData("test", "Profile=Other", false, "--configuration must be Release or Debug.")]
+    [InlineData("coverage", null, true, "require a selected built-in test producer")]
+    [InlineData("coverage", "Release", false, "require a selected built-in test producer")]
+    public async Task Run_ShouldRejectInvalidTestBuildOptionsBeforeWritingEvidence(string kind, string? configuration, bool lockedMode, string expectedError)
+    {
+        using var fixture = Fixture.Create(kind: kind);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => fixture.RunAsync(configuration, lockedMode));
+
+        Assert.Contains(expectedError, exception.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(fixture.Output));
+        Assert.Empty(fixture.Source.Calls);
+    }
+
     [Fact]
     public async Task Run_ShouldCloseTheAssertionPrintTheCountsTableAndVerify()
     {
@@ -534,6 +566,8 @@ public sealed class EvidenceRunTestProducerTests
 
         public FakeSource Source { get; } = new();
 
+        public TestEvidenceProducerOptions? TestProducerOptions { get; private set; }
+
         public string? StepSummaryPath { get; set; }
 
         public FakeInMemoryConsole Console { get; } = new();
@@ -585,16 +619,22 @@ public sealed class EvidenceRunTestProducerTests
             return File.WriteAllBytesAsync(PolicyPath, json);
         }
 
-        public async Task RunAsync()
+        public async Task RunAsync(string? configuration = null, bool lockedMode = false)
         {
             var command = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CoverageEvidenceProducerTests.CreateUnusedProducer())
             {
                 PolicyPath = PolicyPath,
                 Paths = ["scripts/build.sh"],
                 OutputDirectory = Output,
+                Configuration = configuration,
+                LockedMode = lockedMode,
                 RepositoryRootResolver = () => Path.Join(Root, "repo"),
                 StepSummaryPathResolver = () => StepSummaryPath,
-                TestProducerFactory = (id, options) => new TestEvidenceProducer(id, options with { ScratchRoot = Path.Join(Root, "scratch") }, Source),
+                TestProducerFactory = (id, options) =>
+                {
+                    TestProducerOptions = options;
+                    return new TestEvidenceProducer(id, options with { ScratchRoot = TestPathUtils.PathUnder(Root, "scratch") }, Source);
+                },
             };
             await command.ExecuteAsync(Console);
         }

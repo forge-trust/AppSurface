@@ -99,18 +99,21 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
     private readonly IChildProcessRunner _runner;
     private readonly string _dotnetPath;
     private readonly string _configuration;
+    private readonly bool _lockedMode;
 
     /// <summary>Creates the source.</summary>
     /// <param name="runner">Child process runner.</param>
     /// <param name="dotnetPath">The <c>dotnet</c> host used for every step.</param>
     /// <param name="configuration">Build configuration.</param>
-    public DotnetCliTestRunSource(IChildProcessRunner runner, string dotnetPath, string configuration)
+    /// <param name="lockedMode">Whether to restore packages using NuGet locked mode.</param>
+    public DotnetCliTestRunSource(IChildProcessRunner runner, string dotnetPath, string configuration, bool lockedMode = false)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         ArgumentException.ThrowIfNullOrWhiteSpace(dotnetPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(configuration);
         _dotnetPath = dotnetPath;
         _configuration = configuration;
+        _lockedMode = lockedMode;
     }
 
     /// <inheritdoc />
@@ -161,13 +164,16 @@ internal sealed class DotnetCliTestRunSource : ITestRunSource
     }
 
     /// <inheritdoc />
-    public Task<TestRunStep> RestoreAsync(TestRunProject project, CancellationToken cancellationToken) =>
-        RunStepAsync(
+    public Task<TestRunStep> RestoreAsync(TestRunProject project, CancellationToken cancellationToken)
+    {
+        string[] lockArguments = _lockedMode ? ["--locked-mode"] : [];
+        return RunStepAsync(
             project,
             "restore",
-            ["restore", Path.GetFileName(project.FullPath), $"-property:Configuration={_configuration}", .. BuildServerFlags],
+            ["restore", Path.GetFileName(project.FullPath), $"-property:Configuration={_configuration}", .. lockArguments, .. BuildServerFlags],
             TestRunReason.RestoreFailed,
             cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<TestRunStep> BuildAsync(TestRunProject project, CancellationToken cancellationToken) =>
