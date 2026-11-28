@@ -27,7 +27,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private readonly ValidationSettings _settings;
     private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _command;
-    private EvidenceWorkspace? _workspace;
+    private NativeProducerWorkspace? _workspace;
     private int _disposed;
     private string? _settingsHash;
     private List<CommandSummary> _commandSummaries = [];
@@ -73,7 +73,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             _commandSummaries = [];
             _stageDetail = "";
             _lastExitCode = null;
-            _workspace = EvidenceWorkspace.Create(
+            _workspace = NativeProducerWorkspace.Create(
                 _settings.ScratchParent,
                 new EvidenceWorkspaceOptions(_settings.MaximumScratchBytes, _settings.MinimumFreeBytes));
             var budget = new Func<CancellationToken, ValueTask>(_ => CheckBudgetAsync());
@@ -122,6 +122,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
         catch (EvidenceCommandException exception)
         {
+            _workspace?.RecordCommandFailure(exception);
             return Failure($"The installed-consumer command journey did not complete/{exception.Code}.", stopwatch.ElapsedMilliseconds);
         }
         catch (Exception exception) when (IsContractFailure(exception))
@@ -505,7 +506,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             if (result.ExitCode != 0 && !allowMissing) throw new InvalidDataException("Required source identity command failed.");
             return result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
         }
-        catch (EvidenceCommandException exception) when (allowMissing && !RepositoryCommandSettlement.IsUnconfirmedCleanup(exception))
+        catch (EvidenceCommandException exception) when (allowMissing && !exception.CleanupUnconfirmed)
         {
             return string.Empty;
         }

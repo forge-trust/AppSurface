@@ -327,7 +327,7 @@ public sealed class NativeConsumerContractTests
     }
 
     [Fact]
-    public async Task ProduceAsync_OptionalGitStatusCleanupFailureFailsWithoutGrantingAssertions()
+    public async Task ProduceAsync_OptionalGitStatusCleanupFailureRetainsWorkspaceWithoutGrantingAssertions()
     {
         var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var parent = Directory.CreateTempSubdirectory("appsurface-native-git-cleanup-failure-").FullName;
@@ -340,20 +340,26 @@ public sealed class NativeConsumerContractTests
                 Assert.Equal("git", request.FileName);
                 Assert.Equal(["status", "--porcelain", "--untracked-files=all"], request.Arguments);
                 return Task.FromException<EvidenceCommandResult>(
-                    new EvidenceCommandException("cleanup_failed", "child cleanup was not confirmed"));
+                    new EvidenceCommandException(EvidenceCommandException.CleanupFailedCode, "child cleanup was not confirmed"));
             }
 
             var settings = Settings(root, parent);
-            await using var producer = new InstalledConsumerProducer(settings, FailGitStatus);
+            var producer = new InstalledConsumerProducer(settings, FailGitStatus);
 
             var result = await producer.ProduceAsync(Context(Declaration(producer.Id)), CancellationToken.None);
 
             Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
-            Assert.Contains("cleanup_failed", result.Diagnostic, StringComparison.Ordinal);
+            Assert.Contains(EvidenceCommandException.CleanupFailedCode, result.Diagnostic, StringComparison.Ordinal);
             Assert.Empty(result.SatisfiedAssertionIds);
             Assert.Equal(1, commandCount);
+            var workspace = Assert.Single(Directory.EnumerateDirectories(parent, "evidence-workspace-*"));
+
+            var cleanup = await Assert.ThrowsAsync<EvidenceCommandException>(() => producer.DisposeAsync().AsTask());
+
+            Assert.True(cleanup.CleanupUnconfirmed);
+            Assert.True(Directory.Exists(workspace));
         }
-        finally { Directory.Delete(parent, recursive: true); }
+        finally { NativeEvidenceTestDirectory.Delete(parent); }
     }
 
     [Fact]

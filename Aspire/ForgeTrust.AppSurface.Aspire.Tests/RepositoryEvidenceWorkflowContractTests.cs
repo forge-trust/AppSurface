@@ -46,6 +46,15 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceReusePackageProofTests",
         "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidencePackedReuseJourneyTests",
         "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.NativeEvidenceProgramTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.LocalEvidenceOutputTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.LocalEvidenceWorkflowTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.EvidenceCommandRunnerTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.RepositoryGitChangesTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.RepositoryEvidenceWorkflowContractTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.RepositoryEvidenceWorkflowTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.PackageChecksProducerTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.NativeProducerCleanupTests",
+        "FullyQualifiedName~ForgeTrust.AppSurface.Aspire.Tests.RepositoryCommandSettlementTests",
     ];
 
     private readonly YamlMappingNode _workflow;
@@ -161,7 +170,7 @@ public sealed class RepositoryEvidenceWorkflowContractTests
             .ToArray();
 
         Assert.Equal(expected, selectors);
-        Assert.Equal(1437, System.Text.Encoding.UTF8.GetByteCount(string.Join("|", selectors)));
+        Assert.Equal(2187, System.Text.Encoding.UTF8.GetByteCount(string.Join("|", selectors)));
         var lockedRestore = FindStep(securitySteps, "Restore coverage security tests (locked)")["run"].AsScalar();
         const string loadProjects = "$projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')";
         Assert.Contains(loadProjects, lockedRestore);

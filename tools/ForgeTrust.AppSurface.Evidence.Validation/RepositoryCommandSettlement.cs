@@ -29,6 +29,23 @@ internal sealed class RepositoryCommandSettlement
             }
         };
 
+    /// <summary>Observes typed command failures from a source check before its caller handles them.</summary>
+    /// <param name="check">The source check to observe.</param>
+    /// <returns>A source check that preserves its result, cancellation, or exception.</returns>
+    internal Func<CancellationToken, Task> TrackSourceCheck(Func<CancellationToken, Task> check) =>
+        async cancellationToken =>
+        {
+            try
+            {
+                await check(cancellationToken).ConfigureAwait(false);
+            }
+            catch (EvidenceCommandException exception)
+            {
+                Observe(exception);
+                throw;
+            }
+        };
+
     /// <summary>Records unconfirmed cleanup from a command failure propagated to the run boundary.</summary>
     /// <param name="failure">An exception from the current invocation.</param>
     internal void Observe(Exception failure)
@@ -43,5 +60,5 @@ internal sealed class RepositoryCommandSettlement
     /// <param name="failure">The command failure to classify.</param>
     /// <returns><see langword="true"/> when cleanup may still be active.</returns>
     internal static bool IsUnconfirmedCleanup(Exception failure) =>
-        failure is EvidenceCommandException { Code: "cleanup_failed" };
+        failure is EvidenceCommandException { CleanupUnconfirmed: true };
 }

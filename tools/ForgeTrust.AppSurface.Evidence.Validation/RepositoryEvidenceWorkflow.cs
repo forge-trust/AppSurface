@@ -21,20 +21,43 @@ internal static class RepositoryEvidenceWorkflow
 {
     private const int MaximumJsonBytes = 16 * 1024 * 1024;
 
-    /// <summary>Carries in-process services for a local repository evidence execution.</summary>
+    /// <summary>Carries source verification and managed cleanup state for a local repository evidence execution.</summary>
     /// <param name="VerifySourceAsync">Rechecks the pinned source and policy before coverage can use a local patch.</param>
-    /// <param name="ManagedRun">Cache and cleanup tracking for managed output. Explicit output passes null.</param>
+    /// <param name="ManagedRun">Optional cache and cleanup tracking. Local execution requires cleanup tracking.</param>
     internal sealed record LocalExecutionContext(Func<CancellationToken, Task> VerifySourceAsync, LocalEvidenceOutput.ManagedRun? ManagedRun);
 
     /// <summary>Runs one explicit repository planning, execution, or gate operation; incomplete evidence returns nonzero.</summary>
     /// <param name="options">Validated command options and trusted plan inputs.</param>
     /// <param name="cancellationToken">Cancels execution and artifact verification.</param>
-    /// <param name="localExecution">Local execution services, required for patch overrides. Direct CLI callers omit these services.</param>
-    internal static async Task<int> RunAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
-        LocalExecutionContext? localExecution = null)
+    internal static async Task<int> RunAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken)
+    {
+        await RunCoreAsync(options, cancellationToken, localExecution: null);
+        return 0;
+    }
+
+    /// <summary>Runs only a local repository execution and returns its candidate manifest without publishing it.</summary>
+    /// <param name="options">Validated run options and trusted plan inputs.</param>
+    /// <param name="cancellationToken">Cancels execution and artifact production.</param>
+    /// <param name="localExecution">Source verification and managed cleanup state for the local run.</param>
+    internal static async Task<EvidenceManifest> RunLocalAsync(IReadOnlyDictionary<string, string> options,
+        CancellationToken cancellationToken, LocalExecutionContext localExecution)
+    {
+        ArgumentNullException.ThrowIfNull(localExecution);
+        if (Required(options, "--operation") != "run")
+            throw new ArgumentException("Local repository evidence requires the run operation.", nameof(options));
+
+        return await RunCoreAsync(options, cancellationToken, localExecution)
+            ?? throw new InvalidOperationException("Local repository execution did not produce a manifest.");
+    }
+
+    private static async Task<EvidenceManifest?> RunCoreAsync(IReadOnlyDictionary<string, string> options,
+        CancellationToken cancellationToken, LocalExecutionContext? localExecution)
     {
         var operation = Required(options, "--operation");
         if (operation is not ("plan" or "run" or "verify")) throw new ArgumentException("Operation must be plan, run or verify.");
+        var managedRun = localExecution is null
+            ? null
+            : localExecution.ManagedRun ?? throw new InvalidOperationException("Local repository execution requires managed cleanup tracking.");
         ValidateOptions(options, operation);
         var policy = Read<EvidencePolicy>(Required(options, "--policy"), cancellationToken);
         var paths = Read<NormalizedDiffPath[]>(Required(options, "--changed-paths"), cancellationToken);
@@ -63,7 +86,7 @@ internal static class RepositoryEvidenceWorkflow
             var manifest = Read<EvidenceManifest>(Required(options, "--manifest"), cancellationToken);
             await VerifyAsync(plan, manifest, Required(options, "--artifact-root"), cancellationToken);
             Console.WriteLine($"Evidence gate passed: {manifest.ClaimKind} ({plan.PlanDigest})");
-            return 0;
+            return null;
         }
 
         var output = Path.GetFullPath(Required(options, "--output"));
@@ -79,7 +102,6 @@ internal static class RepositoryEvidenceWorkflow
         }
         ValidationSettings? settings = null;
         RepositoryCheckSettings? checks = null;
-        var managedRun = localExecution?.ManagedRun;
         if (operation == "run" && plan.Profile.Producers.Count > 0)
         {
             var dotnet = Path.GetFullPath(Required(options, "--dotnet"));
@@ -126,7 +148,7 @@ internal static class RepositoryEvidenceWorkflow
         }, Program.JsonOptions), cancellationToken);
         var summaryPath = PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.SummaryFileName);
         await File.WriteAllTextAsync(summaryPath, Summary(plan), cancellationToken);
-        if (operation == "plan") return 0;
+        if (operation == "plan") return null;
 
         var runner = new EvidenceCommandRunner();
         var command = managedRun?.Settlement.Track(runner.RunAsync) ?? runner.RunAsync;
@@ -146,13 +168,102 @@ internal static class RepositoryEvidenceWorkflow
                 registration.AddProducer(producer);
             }
         }, new EvidenceHostOptions(ArtifactDirectory: artifactRoot));
+        managedRun?.BeginHostExecution();
         var result = await host.RunAsync(cancellationToken: cancellationToken);
+        managedRun?.RecordHostCleanup(result.Metrics.CleanupCompleted);
+
+        if (localExecution is not null)
+        {
+            foreach (var producer in result.ProducerResults)
+                Console.WriteLine($"{producer.ProducerId}: {producer.Outcome} {producer.Diagnostic}");
+            return result;
+        }
+
         await File.WriteAllBytesAsync(PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ManifestFileName),
             EvidenceCanonicalJson.Serialize(result), CancellationToken.None);
-        await File.AppendAllTextAsync(summaryPath, $"\nClaim: `{result.ClaimKind}`; cleanup: `{result.Metrics.CleanupCompleted}`.\n", CancellationToken.None);
+        await AppendSummaryBestEffortAsync(summaryPath,
+            $"\nClaim: `{result.ClaimKind}`; cleanup: `{result.Metrics.CleanupCompleted}`.\n");
         foreach (var producer in result.ProducerResults) Console.WriteLine($"{producer.ProducerId}: {producer.Outcome} {producer.Diagnostic}");
         await VerifyAsync(plan, result, artifactRoot, cancellationToken);
-        return 0;
+        return null;
+    }
+
+    /// <summary>Persists a local candidate as ObservationOnly until cleanup, artifacts and pinned source are verified.</summary>
+    /// <param name="plan">The plan used to produce the candidate manifest.</param>
+    /// <param name="result">The candidate returned by <see cref="RunLocalAsync"/>.</param>
+    /// <param name="output">The proof output directory that contains the plan and producer artifacts.</param>
+    /// <param name="execution">The local source verifier and managed cleanup state.</param>
+    /// <param name="cancellationToken">Cancels verification before gate-eligible publication.</param>
+    internal static async Task FinalizeLocalManifestAsync(EvidencePlan plan, EvidenceManifest result, string output,
+        LocalExecutionContext execution, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(execution);
+        var managedRun = execution.ManagedRun
+            ?? throw new ArgumentException("Local repository finalization requires managed cleanup tracking.", nameof(execution));
+
+        var proofDirectory = Path.GetFullPath(output);
+        var summaryPath = PathUtils.PathUnder(proofDirectory, RepositoryEvidenceOutputLayout.SummaryFileName);
+        var provisional = result.Eligibility == EvidenceClaimEligibility.PullRequestGate
+            ? EvidenceManifestBuilder.Build(plan, result.ProducerResults, observationOnly: true,
+                envelopeStatus: result.EnvelopeStatus, resourceResults: result.ResourceResults, metrics: result.Metrics)
+            : result;
+
+        try
+        {
+            await WriteManifestAtomicallyAsync(proofDirectory, EvidenceCanonicalJson.Serialize(provisional), CancellationToken.None);
+            ValidationProof.Require(!managedRun.CleanupUnconfirmed,
+                "local repository and command cleanup is confirmed");
+            await VerifyAsync(plan, result,
+                PathUtils.PathUnder(proofDirectory, RepositoryEvidenceOutputLayout.ArtifactsDirectoryName), cancellationToken);
+            await execution.VerifySourceAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            await WriteManifestAtomicallyAsync(proofDirectory, EvidenceCanonicalJson.Serialize(result), cancellationToken);
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException and not StackOverflowException)
+        {
+            var note = provisional.ClaimKind == EvidenceClaimKind.ObservationOnly
+                ? "\nClaim downgraded to ObservationOnly; rerun evidence.\n"
+                : "\nLocal evidence verification failed; rerun evidence.\n";
+            await AppendSummaryBestEffortAsync(summaryPath, note);
+            throw;
+        }
+
+        await AppendSummaryBestEffortAsync(summaryPath,
+            $"\nClaim: `{result.ClaimKind}`; cleanup: `{result.Metrics.CleanupCompleted}`.\n");
+    }
+
+    private static async Task WriteManifestAtomicallyAsync(string proofDirectory, byte[] manifestBytes,
+        CancellationToken cancellationToken)
+    {
+        var manifestPath = PathUtils.PathUnder(proofDirectory, RepositoryEvidenceOutputLayout.ManifestFileName);
+        var temporaryPath = PathUtils.PathUnder(proofDirectory,
+            RepositoryEvidenceOutputLayout.ManifestFileName + "." + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            await File.WriteAllBytesAsync(temporaryPath, manifestBytes, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporaryPath, manifestPath, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temporaryPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static async Task AppendSummaryBestEffortAsync(string summaryPath, string text)
+    {
+        try
+        {
+            await File.AppendAllTextAsync(summaryPath, text, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Could not update evidence summary at '{summaryPath}': {exception.Message}");
+        }
     }
 
     /// <summary>Returns the closed declaration implemented by each repository producer; unknown IDs fail closed.</summary>

@@ -21,16 +21,27 @@ another comparison or `--repository /absolute/checkout` from elsewhere. The defa
 `Local evidence output:`. Each invocation validates in fresh workspaces under `.scratch/` in that
 directory. Package discovery skips hidden directories, keeping generated consumer projects out of
 the repository's package inventory. Each run replaces only its own
-archive (`latest.zip`, `latest-failure.zip`, `latest-plan.zip`, or `latest-plan-failure.zip`), so a
-failure keeps the last success available. Runs using the managed output are serialized per worktree.
+archive. Executions use `latest.zip`, `latest-failure.zip`, and `latest-cancelled.zip`. Plans use
+the corresponding `latest-plan` names. An empty change inventory or an error before output exists
+leaves the previous archives intact. Managed planning and both execution modes share a per-worktree
+lock in the worktree's Git metadata directory.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage
-diagnostics. Archive traversal skips scratch trees outside those retained paths. Extract an archive
-to verify it using the same relative layout. Scratch is removed
+diagnostics. Before replacing a successful archive, the validator verifies the original resolved
+policy, changed-path inventory, plan, and any verified manifest and declared artifacts inside the
+staged ZIP. Archive traversal skips scratch trees outside retained paths. Extract `local-policy.json`,
+`changed-paths.json`, `plan/evidence-plan.json`, `proof/evidence-manifest.json`, and `proof/artifacts/`
+to replay `verify` with the producing scope. Scratch is removed
 after successful retention and known cleanup. If execution or archiving stops without confirmed
 cleanup, the scratch path is retained for diagnosis. When a failed run has a proof directory, an
-unreadable or oversized manifest also keeps scratch. Managed runs check the host cleanup outcome
-and observe command cleanup failures before producers format their diagnostics. The private
-`package-restore/` cache keeps the package-gate build warm and its worktree restore metadata usable
+unreadable or oversized manifest also keeps scratch. The validator tracks the host cleanup result
+and confirms subprocess exit and closure of both output pipes before declaring cleanup complete.
+For `local`, it records the run's output path in `appsurface-local-evidence/run.pending-cleanup`
+beside `run.lock`, relative to `git rev-parse --absolute-git-dir`. A crash or unconfirmed cleanup
+leaves the marker in place and blocks execution even with an explicit `--output`. After the prior
+validator exits, `local-plan` remains available. Remove the printed marker only after confirming
+the prior processes have stopped, and keep any scratch needed for investigation. Run recovery
+planning with `--no-build --no-restore` to avoid rebuilding the validator during diagnosis. The private
+`.scratch/package-restore/` cache keeps package discovery out of restored fixtures and keeps the package-gate build warm and its worktree restore metadata usable
 between runs. Installed-consumer and cold-cache proofs still have their own isolated restores and feeds.
 
 Use `--output /absolute/fresh-output` when you need a complete, unpacked run for a specific investigation
@@ -86,8 +97,10 @@ The [C# Git collector](https://github.com/forge-trust/AppSurface/blob/main/tools
 `source-state.json` alongside `changed-paths.json`. Its `sourceDigest` is included in the derived
 `local-policy.json` policy ID, so the canonical plan and resulting manifest bind the exact local source
 state while preserving the checked-in rules and producer contracts. Local execution rechecks source and policy before the
-candidate build, after it, and after producer completion. Edits during execution fail the local gate; if
-producers already returned a manifest, its claim is downgraded to `ObservationOnly`. Keep output under
+candidate build, after it, and after producer completion. Eligible producer results are initially
+saved as `ObservationOnly`. The validator promotes the manifest atomically after cleanup, artifact,
+source and policy checks pass. A failed source check still preserves the original error if the
+summary cannot be written. Keep output under
 ignored `TestResults` or outside the checkout: writing output into an unignored source directory changes
 the inventory and correctly invalidates the run. A local pass covers only the current OS; CI still owns
 its selected native supplement. The recorded source digest describes dirty local inputs; package source metadata

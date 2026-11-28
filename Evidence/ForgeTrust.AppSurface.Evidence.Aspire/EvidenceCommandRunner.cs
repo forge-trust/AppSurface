@@ -6,15 +6,30 @@ namespace ForgeTrust.AppSurface.Evidence.Aspire;
 /// <summary>Identifies a bounded command execution failure without exposing command inputs or environment values.</summary>
 public sealed class EvidenceCommandException : Exception
 {
+    /// <summary>The stable code used when command shutdown or output capture could not be confirmed.</summary>
+    public const string CleanupFailedCode = "cleanup_failed";
+    internal const string DrainTimeoutCode = "drain_timeout";
+    internal const string CaptureFailedCode = "capture_failed";
+
     /// <summary>Creates a command exception with a stable, secret-safe code.</summary>
     public EvidenceCommandException(string code, string message, Exception? innerException = null)
         : base(message, innerException)
     {
         Code = code;
+        CleanupUnconfirmed = code == CleanupFailedCode;
+    }
+
+    internal EvidenceCommandException(string code, string message, bool cleanupUnconfirmed)
+        : this(code, message)
+    {
+        CleanupUnconfirmed = cleanupUnconfirmed;
     }
 
     /// <summary>Gets the stable failure classification.</summary>
     public string Code { get; }
+
+    /// <summary>Gets whether the caller should preserve resources the command might still use.</summary>
+    public bool CleanupUnconfirmed { get; }
 }
 
 /// <summary>Describes one explicit, bounded command invocation.</summary>
@@ -129,21 +144,26 @@ public sealed class EvidenceCommandRunner
         var elapsed = Stopwatch.StartNew();
         var output = new OutputBudget(request.MaximumOutputBytes);
         using var captureLifetime = new CancellationTokenSource();
-        Task stdout = Task.CompletedTask;
-        Task stderr = Task.CompletedTask;
+        var standardOutput = process.StandardOutput.BaseStream;
+        var standardError = process.StandardError.BaseStream;
+        Stream stdout;
+        Stream stderr;
         try
         {
-            stdout = CaptureAsync(_captureStream(process.StandardOutput.BaseStream), output, isError: false, captureLifetime.Token);
-            stderr = CaptureAsync(_captureStream(process.StandardError.BaseStream), output, isError: true, captureLifetime.Token);
+            stdout = _captureStream(standardOutput);
+            stderr = _captureStream(standardError);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
         {
-            captureLifetime.Cancel();
-            process.StandardOutput.Close();
-            process.StandardError.Close();
-            await TerminateAndDrainAsync(process, stdout, stderr).ConfigureAwait(false);
-            throw new EvidenceCommandException("capture_failed", "The evidence command output capture could not be initialized.");
+            // No adapted reader has started. Observe EOF on the original pipes before reporting setup failure.
+            Task[] drains = [standardOutput.CopyToAsync(Stream.Null, captureLifetime.Token),
+                standardError.CopyToAsync(Stream.Null, captureLifetime.Token)];
+            await ConfirmShutdownAsync(process, drains, captureLifetime, EvidenceCommandException.CaptureFailedCode).ConfigureAwait(false);
+            throw new EvidenceCommandException(EvidenceCommandException.CaptureFailedCode, "The evidence command output capture could not be initialized.");
         }
+        Task[] readers = [CaptureAsync(stdout, output, isError: false, captureLifetime.Token),
+            CaptureAsync(stderr, output, isError: true, captureLifetime.Token)];
+        var capture = Task.WhenAll(readers);
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         lifetime.CancelAfter(request.Timeout);
         var budgetFailure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -164,8 +184,7 @@ public sealed class EvidenceCommandRunner
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            captureLifetime.Cancel();
-            await TerminateAndDrainAsync(process, stdout, stderr).ConfigureAwait(false);
+            await ConfirmShutdownAsync(process, readers, captureLifetime).ConfigureAwait(false);
             throw new OperationCanceledException(cancellationToken);
         }
         catch (OperationCanceledException)
@@ -173,8 +192,6 @@ public sealed class EvidenceCommandRunner
             failure = budgetFailure.Task.IsCompletedSuccessfully
                 ? CreateBudgetException(budgetFailure.Task.Result, "during_execution")
                 : new EvidenceCommandException("timeout", "The evidence command exceeded its deadline.");
-            captureLifetime.Cancel();
-            await TerminateAndDrainAsync(process, stdout, stderr).ConfigureAwait(false);
         }
         finally
         {
@@ -183,25 +200,29 @@ public sealed class EvidenceCommandRunner
 
         if (failure is not null)
         {
+            await ConfirmShutdownAsync(process, readers, captureLifetime).ConfigureAwait(false);
             await ObserveBoundedAsync(budgetMonitor).ConfigureAwait(false);
             throw failure;
         }
 
         try
         {
-            await Task.WhenAll(stdout, stderr).WaitAsync(DrainTimeout, cancellationToken).ConfigureAwait(false);
+            await capture.WaitAsync(DrainTimeout, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is TimeoutException or IOException or OperationCanceledException)
+        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
         {
-            captureLifetime.Cancel();
-            process.StandardOutput.Close();
-            process.StandardError.Close();
-            await TerminateAndDrainAsync(process, stdout, stderr).ConfigureAwait(false);
+            var code = exception switch
+            {
+                TimeoutException => EvidenceCommandException.DrainTimeoutCode,
+                OperationCanceledException => EvidenceCommandException.CleanupFailedCode,
+                _ => EvidenceCommandException.CaptureFailedCode,
+            };
+            await ConfirmShutdownAsync(process, readers, captureLifetime, code).ConfigureAwait(false);
             await ObserveBoundedAsync(budgetMonitor).ConfigureAwait(false);
             if (exception is OperationCanceledException) throw;
             if (exception is TimeoutException)
-                throw new EvidenceCommandException("drain_timeout", "The evidence command did not close its output streams within the cleanup deadline.");
-            throw new EvidenceCommandException("capture_failed", "The evidence command output could not be captured completely.");
+                throw new EvidenceCommandException(EvidenceCommandException.DrainTimeoutCode, "The evidence command did not close its output streams within the cleanup deadline.");
+            throw new EvidenceCommandException(EvidenceCommandException.CaptureFailedCode, "The evidence command output could not be captured completely.");
         }
         await ObserveBoundedAsync(budgetMonitor).ConfigureAwait(false);
         if (request.CheckBudget is not null)
@@ -262,43 +283,24 @@ public sealed class EvidenceCommandRunner
             : new EvidenceCommandException("budget_check_failed",
                 $"The evidence workspace budget check failed ({phase}; HRESULT 0x{exception.HResult:X8}).");
 
-    private static async Task TerminateAndDrainAsync(Process process, Task stdout, Task stderr)
+    private static async Task ConfirmShutdownAsync(Process process, IReadOnlyList<Task> readers, CancellationTokenSource captureLifetime,
+        string captureFailureCode = EvidenceCommandException.CleanupFailedCode)
     {
         try
         {
-            if (!process.HasExited)
+            await EvidenceProcessShutdown.ConfirmAsync(process, readers, DrainTimeout, captureFailureCode).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (readers.Any(reader => !reader.IsCompleted))
             {
-                process.Kill(entireProcessTree: true);
+                captureLifetime.Cancel();
+                // Give cooperative readers time to stop without revising the shutdown verdict.
+                var capture = Task.WhenAll(readers);
+                await Task.WhenAny(capture, Task.Delay(DrainTimeout)).ConfigureAwait(false);
+                _ = capture.Exception;
             }
         }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
-        {
-            throw new EvidenceCommandException("cleanup_failed", "The evidence command process tree could not be terminated.");
-        }
-
-        try
-        {
-            await process.WaitForExitAsync().WaitAsync(DrainTimeout).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            throw new EvidenceCommandException("cleanup_failed", "The evidence command process did not exit after termination.");
-        }
-
-        await ObserveCaptureAsync(stdout).ConfigureAwait(false);
-        await ObserveCaptureAsync(stderr).ConfigureAwait(false);
-    }
-
-    private static async Task ObserveCaptureAsync(Task task)
-    {
-        try { await task.WaitAsync(DrainTimeout).ConfigureAwait(false); }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
-        catch (IOException) { }
-        catch (TimeoutException) { throw new EvidenceCommandException("cleanup_failed", "The evidence command output capture did not stop within its cleanup deadline."); }
     }
 
     private static async Task ObserveBoundedAsync(Task task)

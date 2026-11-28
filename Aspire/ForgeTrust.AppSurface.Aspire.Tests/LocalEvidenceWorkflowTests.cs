@@ -83,10 +83,9 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         {
             runCalls++;
             Assert.Equal("run", options["--operation"]);
-            Assert.Null(execution.ManagedRun);
+            Assert.Null(execution.ManagedRun?.PackageRestoreCache);
             await execution.VerifySourceAsync(cancellationToken);
-            await WriteCompleteProofAsync(options, cancellationToken);
-            return 0;
+            return await BuildCompleteProofAsync(options, cancellationToken);
         });
 
         Assert.Equal(0, await workflow.RunAsync(Options(fixture, "local", "coverage"), CancellationToken.None));
@@ -102,9 +101,10 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SourceOrPolicyDriftAfterCompleteRun_PersistsValidObservationOnlyManifest(bool policyDrift)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task SourceOrPolicyDriftAfterCompleteRun_PersistsValidObservationOnlyManifest(bool policyDrift, bool summaryUnavailable)
     {
         var fixture = await CreateFixtureAsync();
         await ChangeAsync(fixture, "src/new-feature.cs", "class Feature { }");
@@ -117,24 +117,39 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         }
         var workflow = new LocalEvidenceWorkflow(workflow: async (options, cancellationToken, _) =>
         {
-            await WriteCompleteProofAsync(options, cancellationToken);
-            if (policyDrift)
+            var result = await BuildCompleteProofAsync(options, cancellationToken);
+            if (summaryUnavailable)
+            {
+                var summary = TestPathUtils.PathUnder(options["--output"], "evidence-summary.md");
+                File.Delete(summary);
+                Directory.CreateDirectory(summary);
+            }
+            if (summaryUnavailable)
+                File.Delete(externalPolicy);
+            else if (policyDrift)
                 await File.AppendAllTextAsync(externalPolicy, "\n", cancellationToken);
             else
                 await ChangeAsync(fixture, "src/new-feature.cs", "class Feature { int Changed; }");
-            return 0;
+            return result;
         });
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var expectedFailure = summaryUnavailable ? typeof(FileNotFoundException) : typeof(InvalidOperationException);
+        var failure = await Assert.ThrowsAsync(expectedFailure, () =>
             workflow.RunAsync(runOptions, CancellationToken.None));
 
+        if (!summaryUnavailable)
+            Assert.Contains("source or policy changed", failure.Message, StringComparison.Ordinal);
         var plan = ReadPlan(LastOutput);
         var manifest = ReadManifest(LastOutput);
         Assert.Equal(EvidenceClaimKind.ObservationOnly, manifest.ClaimKind);
         Assert.Equal(EvidenceExecutionVerdict.Passed, manifest.ExecutionVerdict);
         Assert.Equal(EvidenceClaimEligibility.Informational, manifest.Eligibility);
         Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-        Assert.Contains("Claim downgraded to ObservationOnly", await File.ReadAllTextAsync(Path.Join(LastOutput, "proof", "evidence-summary.md")));
+        var summaryPath = TestPathUtils.PathUnder(LastOutput, "proof", "evidence-summary.md");
+        if (summaryUnavailable)
+            Assert.False(File.Exists(summaryPath));
+        else
+            Assert.Contains("Claim downgraded to ObservationOnly", await File.ReadAllTextAsync(summaryPath));
     }
 
     [Theory]
@@ -171,8 +186,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         var workflow = new LocalEvidenceWorkflow(workflow: async (runOptions, token, _) =>
         {
             Assert.Equal(host, runOptions["--dotnet"]);
-            await WriteCompleteProofAsync(runOptions, token);
-            return 0;
+            return await BuildCompleteProofAsync(runOptions, token);
         });
 
         try
@@ -187,11 +201,11 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
     }
 
     [Fact]
-    public async Task FailedRunWorkflowExitCode_DoesNotAcceptOrReadAProofManifest()
+    public async Task FailedRunWorkflow_DoesNotPublishAProofManifest()
     {
         var fixture = await CreateFixtureAsync();
         await ChangeAsync(fixture, "src/new-feature.cs", "class Feature { }");
-        var workflow = new LocalEvidenceWorkflow(workflow: (_, _, _) => Task.FromResult(1));
+        var workflow = new LocalEvidenceWorkflow(workflow: (_, _, _) => throw new InvalidOperationException("producer startup failed"));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             workflow.RunAsync(Options(fixture, "local", "coverage"), CancellationToken.None));
@@ -449,13 +463,16 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
             run++;
             var output = runOptions["--output"];
             Assert.False(Directory.Exists(output));
-            await WriteCompleteProofAsync(runOptions, token);
+            var result = await BuildCompleteProofAsync(runOptions, token, failed: run == 2);
             var coverage = TestPathUtils.PathUnder(output, "coverage");
             Directory.CreateDirectory(coverage);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(coverage, "coverage.cobertura.xml"), $"run {run}", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(coverage, "coverage-run.log"), $"log {run}", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(coverage, "generated.bin"), "scratch", token);
-            return run == 2 ? 1 : 0;
+            var packageChecks = TestPathUtils.PathUnder(output, "package-checks");
+            Directory.CreateDirectory(packageChecks);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(packageChecks, "generated.md"), "scratch", token);
+            return result;
         });
         var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
 
@@ -479,7 +496,80 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         await RepositoryEvidenceWorkflow.VerifyAsync(ReadPlan(extracted), ReadManifest(extracted),
             TestPathUtils.PathUnder(extracted, "proof", "artifacts"), CancellationToken.None);
         Assert.Null(ReadArchive(retained, "latest.zip", "proof/coverage/generated.bin"));
+        Assert.Null(ReadArchive(retained, "latest.zip", "proof/package-checks/generated.md"));
         Assert.Empty(Directory.EnumerateFileSystemEntries(TestPathUtils.PathUnder(retained, ".scratch")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManagedOutput_RejectsChangedReplayInputBeforeReplacingProof(bool removeInput)
+    {
+        var fixture = await CreateFixtureAsync();
+        await ChangeAsync(fixture, "src/feature.cs", "class Feature { }");
+        var options = Options(fixture, "local", "coverage");
+        options.Remove("--output");
+        var replaceInput = false;
+        var workflow = new LocalEvidenceWorkflow(workflow: async (runOptions, token, _) =>
+        {
+            var result = await BuildCompleteProofAsync(runOptions, token);
+            if (replaceInput)
+            {
+                var input = runOptions["--policy"];
+                if (removeInput)
+                    File.Delete(input);
+                else
+                {
+                    var bytes = await File.ReadAllBytesAsync(input, token);
+                    bytes[0] = (byte)'[';
+                    await File.WriteAllBytesAsync(input, bytes, token);
+                }
+            }
+            return result;
+        });
+        var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
+        var proof = TestPathUtils.PathUnder(retained, "latest.zip");
+        Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
+        var prior = await File.ReadAllBytesAsync(proof);
+
+        replaceInput = true;
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => workflow.RunAsync(options, CancellationToken.None));
+
+        Assert.Contains("local-policy.json", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(prior, await File.ReadAllBytesAsync(proof));
+        Assert.Contains(failure.Message, ReadArchive(retained, "latest-failure.zip", "run-status.txt"));
+    }
+
+    [Fact]
+    public async Task ManagedOutput_CancellationRetainsOnlyAnObservationAlongsideThePriorProof()
+    {
+        var fixture = await CreateFixtureAsync();
+        await ChangeAsync(fixture, "src/feature.cs", "class Feature { }");
+        var options = Options(fixture, "local", "coverage");
+        options.Remove("--output");
+        using var cancellation = new CancellationTokenSource();
+        var cancelAfterCollection = false;
+        var workflow = new LocalEvidenceWorkflow(workflow: async (runOptions, token, _) =>
+        {
+            var result = await BuildCompleteProofAsync(runOptions, token);
+            if (cancelAfterCollection)
+                cancellation.Cancel();
+            return result;
+        });
+        var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
+        var proof = TestPathUtils.PathUnder(retained, "latest.zip");
+        Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
+        var prior = await File.ReadAllBytesAsync(proof);
+
+        cancelAfterCollection = true;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => workflow.RunAsync(options, cancellation.Token));
+
+        Assert.Equal(prior, await File.ReadAllBytesAsync(proof));
+        var manifest = ReadArchive(retained, "latest-cancelled.zip", "proof/evidence-manifest.json");
+        Assert.NotNull(manifest);
+        Assert.Equal(EvidenceClaimKind.ObservationOnly,
+            EvidenceCanonicalJson.Deserialize<EvidenceManifest>(System.Text.Encoding.UTF8.GetBytes(manifest)).ClaimKind);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(fixture.Root, ".git", "appsurface-local-evidence", "run.pending-cleanup")));
     }
 
     [Fact]
@@ -493,7 +583,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         var workflow = new LocalEvidenceWorkflow(workflow: async (runOptions, token, execution) =>
         {
             var managed = Assert.IsType<LocalEvidenceOutput.ManagedRun>(execution.ManagedRun);
-            Assert.Equal(TestPathUtils.PathUnder(retained, "package-restore"), managed.PackageRestoreCache);
+            Assert.Equal(TestPathUtils.PathUnder(retained, ".scratch", "package-restore"), managed.PackageRestoreCache);
             await execution.VerifySourceAsync(token);
 
             var failure = new EvidenceCommandException("cleanup_failed", "The child did not exit.");
@@ -501,15 +591,90 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
             var request = new EvidenceCommandRequest("test-command", [], fixture.Root, TimeSpan.FromSeconds(1));
             Assert.Same(failure, await Assert.ThrowsAsync<EvidenceCommandException>(() => command(request, token)));
 
-            await WriteCompleteProofAsync(runOptions, token);
-            return 0;
+            return await BuildCompleteProofAsync(runOptions, token);
         });
 
-        Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RunAsync(options, CancellationToken.None));
 
-        Assert.True(File.Exists(TestPathUtils.PathUnder(retained, "latest.zip")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(retained, "latest.zip")));
         var scratch = Assert.Single(Directory.EnumerateDirectories(TestPathUtils.PathUnder(retained, ".scratch")));
-        Assert.Equal(EvidenceClaimKind.TargetedComplete, ReadManifest(TestPathUtils.PathUnder(scratch, "run")).ClaimKind);
+        Assert.Equal(EvidenceClaimKind.ObservationOnly, ReadManifest(TestPathUtils.PathUnder(scratch, "run")).ClaimKind);
+        var marker = TestPathUtils.PathUnder(fixture.Root, ".git", "appsurface-local-evidence", "run.pending-cleanup");
+        Assert.True(File.Exists(marker));
+        var retry = await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RunAsync(options, CancellationToken.None));
+        Assert.Contains(marker, retry.Message, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.RunAsync(Options(fixture, "local", "coverage"), CancellationToken.None));
+        Assert.False(Directory.Exists(LastOutput));
+
+        options["--operation"] = "local-plan";
+        Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
+        Assert.True(File.Exists(marker));
+        Assert.NotNull(ReadArchive(retained, "latest-plan.zip", "plan/evidence-plan.json"));
+    }
+
+    [Fact]
+    public async Task ExplicitRun_RejectsANestedDirectoryBeforeCreatingOutput()
+    {
+        var fixture = await CreateFixtureAsync();
+        var nested = Directory.CreateDirectory(TestPathUtils.PathUnder(fixture.Root, "nested")).FullName;
+        var options = Options(fixture, "local");
+        options["--repository"] = nested;
+
+        var failure = await Assert.ThrowsAsync<ArgumentException>(() =>
+            new LocalEvidenceWorkflow().RunAsync(options, CancellationToken.None));
+
+        Assert.Contains("Git worktree root", failure.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(LastOutput));
+    }
+
+    [Fact]
+    public async Task ManagedEmptyInventory_PreservesTheSuccessAndPlanArchives()
+    {
+        var fixture = await CreateFixtureAsync();
+        await ChangeAsync(fixture, "docs/guide.md", "local docs change");
+        var workflow = new LocalEvidenceWorkflow();
+        var options = Options(fixture, "local");
+        options.Remove("--output");
+        var planOptions = new Dictionary<string, string>(options) { ["--operation"] = "local-plan" };
+        var retained = TestPathUtils.PathUnder(fixture.Root, "TestResults", "repository-evidence", "local");
+        var proof = TestPathUtils.PathUnder(retained, "latest.zip");
+        var plan = TestPathUtils.PathUnder(retained, "latest-plan.zip");
+        Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
+        Assert.Equal(0, await workflow.RunAsync(planOptions, CancellationToken.None));
+        var previousProof = await File.ReadAllBytesAsync(proof);
+        var previousPlan = await File.ReadAllBytesAsync(plan);
+
+        File.Delete(TestPathUtils.PathUnder(fixture.Root, "docs", "guide.md"));
+        Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
+        Assert.Equal(0, await workflow.RunAsync(planOptions, CancellationToken.None));
+
+        Assert.Equal(previousProof, await File.ReadAllBytesAsync(proof));
+        Assert.Equal(previousPlan, await File.ReadAllBytesAsync(plan));
+        Assert.Empty(Directory.EnumerateDirectories(TestPathUtils.PathUnder(retained, ".scratch")));
+    }
+
+    [Fact]
+    public async Task LinkedWorktree_UsesItsOwnCleanupMarker()
+    {
+        var fixture = await CreateFixtureAsync();
+        var linked = new Fixture(TestPathUtils.PathUnder(_root, "linked"), fixture.Head);
+        await GitAsync(fixture.Root, "worktree", "add", "--detach", "--quiet", linked.Root, fixture.Head);
+        var policy = TestPathUtils.PathUnder(linked.Root, ".github", "evidence.policy.json");
+        Assert.True(File.Exists(policy));
+        var marker = TestPathUtils.PathUnder(fixture.Root, ".git", "appsurface-local-evidence", "run.pending-cleanup");
+        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        await File.WriteAllTextAsync(marker, "primary worktree needs cleanup");
+        await ChangeAsync(linked, "docs/guide.md", "linked docs change");
+        var options = Options(linked, "local");
+        options.Remove("--output");
+
+        Assert.Equal(0, await new LocalEvidenceWorkflow().RunAsync(options, CancellationToken.None));
+
+        var retained = TestPathUtils.PathUnder(linked.Root, "TestResults", "repository-evidence", "local");
+        Assert.NotNull(ReadArchive(retained, "latest.zip", "proof/evidence-manifest.json"));
+        Assert.True(File.Exists(marker));
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(fixture.Root, "TestResults")));
     }
 
     [Fact]
@@ -525,8 +690,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         {
             started.TrySetResult();
             await release.Task.WaitAsync(TimeSpan.FromSeconds(20), token);
-            await WriteCompleteProofAsync(runOptions, token);
-            return 0;
+            return await BuildCompleteProofAsync(runOptions, token);
         });
 
         var active = workflow.RunAsync(options, CancellationToken.None);
@@ -617,28 +781,29 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
     private static EvidencePlan ReadPlan(string output) => EvidenceCanonicalJson.Deserialize<EvidencePlan>(File.ReadAllBytes(Path.Join(output, "plan", "evidence-plan.json")));
     private static EvidenceManifest ReadManifest(string output) => EvidenceCanonicalJson.Deserialize<EvidenceManifest>(File.ReadAllBytes(Path.Join(output, "proof", "evidence-manifest.json")));
 
-    private static async Task WriteCompleteProofAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken)
+    private static async Task<EvidenceManifest> BuildCompleteProofAsync(IReadOnlyDictionary<string, string> options,
+        CancellationToken cancellationToken, bool failed = false)
     {
         var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(options["--plan"], cancellationToken));
         var output = options["--output"];
         Directory.CreateDirectory(output);
-        await File.WriteAllBytesAsync(Path.Join(output, "evidence-plan.json"), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(output, "evidence-plan.json"), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
         var results = new List<EvidenceProducerResult>();
         foreach (var producer in plan.Profile.Producers)
         {
-            var writer = new EvidenceArtifactWriter(producer, Path.Join(output, "artifacts", producer.Id));
+            var writer = new EvidenceArtifactWriter(producer, TestPathUtils.PathUnder(output, "artifacts", producer.Id));
             foreach (var slot in producer.ArtifactSlots.Where(slot => slot.Required))
             {
                 await writer.WriteAsync(slot.LogicalName, $"proof/{slot.LogicalName}.json", "{}"u8.ToArray(), cancellationToken);
             }
 
-            results.Add(new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed,
-                producer.AssertionIds, Artifacts: writer.WrittenArtifacts));
+            var outcome = failed ? EvidenceProducerOutcome.Failed : EvidenceProducerOutcome.Passed;
+            results.Add(new EvidenceProducerResult(producer.Id, outcome,
+                failed ? [] : producer.AssertionIds, Artifacts: writer.WrittenArtifacts));
         }
 
-        var manifest = EvidenceManifestBuilder.Build(plan, results);
-        await File.WriteAllBytesAsync(Path.Join(output, "evidence-manifest.json"), EvidenceCanonicalJson.Serialize(manifest), cancellationToken);
-        await File.WriteAllTextAsync(Path.Join(output, "evidence-summary.md"), $"Claim: `{manifest.ClaimKind}`.\n", cancellationToken);
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, "evidence-summary.md"), "Producer results collected.\n", cancellationToken);
+        return EvidenceManifestBuilder.Build(plan, results);
     }
 
     private static async Task<string> GitAsync(string workingDirectory, params string[] arguments)

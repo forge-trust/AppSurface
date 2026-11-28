@@ -42,8 +42,8 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
         var output = Path.GetFullPath(_settings.OutputDirectory);
         var packageOutput = PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.PackageChecksDirectoryName);
         var cache = _settings.PackageRestoreCache ?? PathUtils.PathUnder(packageOutput, "nuget-packages");
-        var artifacts = Path.Join(packageOutput, "artifacts");
-        var manifestPath = Path.Join(artifacts, "package-artifact-manifest.json");
+        var artifacts = PathUtils.PathUnder(packageOutput, RepositoryEvidenceOutputLayout.ArtifactsDirectoryName);
+        var manifestPath = PathUtils.PathUnder(artifacts, RepositoryEvidenceOutputLayout.PackageArtifactManifestFileName);
         var reportPath = Path.Join(artifacts, "package-validation-report.md");
         var version = "0.0.0-evidence." + Guid.NewGuid().ToString("N");
         var commands = new List<CommandEvidence>();
@@ -74,7 +74,7 @@ internal sealed class PackageChecksProducer : IEvidenceProducer
             await VerifyArchivesAsync(manifest, artifacts, cancellationToken).ConfigureAwait(false);
             if (context.Artifacts is null) return Failure("Package-checks producer has no artifact writer.");
 
-            await context.Artifacts.WriteAsync("package-manifest", "proof/package-artifact-manifest.json", manifest, cancellationToken).ConfigureAwait(false);
+            await context.Artifacts.WriteAsync("package-manifest", "proof/" + RepositoryEvidenceOutputLayout.PackageArtifactManifestFileName, manifest, cancellationToken).ConfigureAwait(false);
             await context.Artifacts.WriteAsync("package-report", "proof/package-validation-report.md", report, cancellationToken).ConfigureAwait(false);
             var resultBytes = JsonSerializer.SerializeToUtf8Bytes(new
             {

@@ -14,7 +14,7 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed class PackedStorageProducer(ValidationSettings settings,
     Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>>? command = null) : IEvidenceProducer, IAsyncDisposable
 {
-    private EvidenceWorkspace? _workspace;
+    private NativeProducerWorkspace? _workspace;
     private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _command =
         command ?? new EvidenceCommandRunner().RunAsync;
     private readonly List<object> _transcript = [];
@@ -43,13 +43,14 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
         }
         finally
         {
-            if (_workspace is not null) await _workspace.DisposeAsync().ConfigureAwait(false);
+            if (_workspace is not null && !_workspace.CleanupUnconfirmed)
+                await _workspace.DisposeAsync().ConfigureAwait(false);
         }
     }
 
     private async ValueTask<EvidenceProducerResult> RunJourneyAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
     {
-        _workspace = EvidenceWorkspace.Create(settings.ScratchParent,
+        _workspace = NativeProducerWorkspace.Create(settings.ScratchParent,
             new EvidenceWorkspaceOptions(settings.MaximumScratchBytes, settings.MinimumFreeBytes));
         var root = _workspace.RootPath;
         using var package = ZipFile.OpenRead(settings.PackagePath);
@@ -169,6 +170,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings,
         }
         catch (EvidenceCommandException exception)
         {
+            _workspace.RecordCommandFailure(exception);
             return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Failed, [], "Packed storage command failed: " + exception.Code + ". " + exception.Message);
         }
         finally

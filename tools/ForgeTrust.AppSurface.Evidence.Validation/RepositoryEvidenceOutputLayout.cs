@@ -30,6 +30,9 @@ internal static class RepositoryEvidenceOutputLayout
     /// <summary>The package-check producer's output directory beneath an execution proof directory.</summary>
     internal const string PackageChecksDirectoryName = "package-checks";
 
+    /// <summary>The package inventory retained with package check diagnostics.</summary>
+    internal const string PackageArtifactManifestFileName = "package-artifact-manifest.json";
+
     /// <summary>The package-gate command stage name.</summary>
     internal const string PackageGateStageName = "gate";
 

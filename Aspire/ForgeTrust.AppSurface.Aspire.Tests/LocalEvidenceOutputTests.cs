@@ -16,7 +16,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
     public async Task SuccessfulRun_PublishesOperationSpecificArchive(string operation, string archiveName)
     {
         var output = string.Empty;
-        var exitCode = await LocalEvidenceOutput.RunAsync(_repository, operation, (scratch, _) =>
+        var exitCode = await LocalEvidenceOutput.RunAsync(_repository, operation, GitDirectory, (scratch, _) =>
         {
             output = scratch;
             Assert.Equal(Under(LocalRoot, ".scratch"), Directory.GetParent(scratch)?.Parent?.FullName);
@@ -38,7 +38,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
         string successArchiveName,
         string failureArchiveName)
     {
-        var successOutput = await LocalEvidenceOutput.RunAsync(_repository, operation, async (scratch, _) =>
+        var successOutput = await LocalEvidenceOutput.RunAsync(_repository, operation, GitDirectory, async (scratch, _) =>
         {
             await WriteOutputFileAsync(scratch, "package-build.log", "prior success");
             return 0;
@@ -48,7 +48,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
         var priorSuccess = await File.ReadAllBytesAsync(successPath);
 
         var failureScratch = string.Empty;
-        var failureExitCode = await LocalEvidenceOutput.RunAsync(_repository, operation, async (scratch, _) =>
+        var failureExitCode = await LocalEvidenceOutput.RunAsync(_repository, operation, GitDirectory, async (scratch, _) =>
         {
             failureScratch = scratch;
             await WriteOutputFileAsync(scratch, "package-build.log", "current failure");
@@ -74,7 +74,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
         var scratchPath = string.Empty;
 
         var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            LocalEvidenceOutput.RunAsync(_repository, operation, async (scratch, _) =>
+            LocalEvidenceOutput.RunAsync(_repository, operation, GitDirectory, async (scratch, _) =>
             {
                 scratchPath = scratch;
                 await WriteOutputFileAsync(scratch, "package-build.log", "preserve this detail");
@@ -96,11 +96,11 @@ public sealed class LocalEvidenceOutputTests : IDisposable
         var retainedArchivePath = string.Empty;
 
         var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            LocalEvidenceOutput.RunAsync(_repository, "local", async (scratch, _) =>
+            LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, async (scratch, _) =>
             {
                 scratchPath = scratch;
                 await WriteOutputFileAsync(scratch, "proof/coverage/failure-detail.log", "preserve this detail");
-                retainedArchivePath = Under(Path.GetDirectoryName(scratch)!, "retained.zip");
+                retainedArchivePath = Under(Path.GetDirectoryName(scratch)!, "latest-failure.zip.staging");
                 Directory.CreateDirectory(retainedArchivePath);
                 throw failure;
             }));
@@ -117,6 +117,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
         var retained = new[]
         {
             "plan/evidence-plan.json",
+            "proof/package-checks/artifacts/package-artifact-manifest.json",
             "plan/nested/detail.json",
             "proof/artifacts/producer/result.bin",
             "changed-paths.json",
@@ -157,7 +158,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
             "proof/coverage/nested/unlisted.bin",
         };
 
-        await LocalEvidenceOutput.RunAsync(_repository, "local", async (scratch, _) =>
+        await LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, async (scratch, _) =>
         {
             foreach (var path in retained.Concat(omitted))
                 await WriteOutputFileAsync(scratch, path, path);
@@ -204,7 +205,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
     public async Task NonzeroRun_CleansScratchOnlyWhenFailureEvidenceAllowsIt(string proofState, bool cleansScratch)
     {
         var scratchPath = string.Empty;
-        var exitCode = await LocalEvidenceOutput.RunAsync(_repository, "local", async (scratch, managedRun) =>
+        var exitCode = await LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, async (scratch, managedRun) =>
         {
             scratchPath = scratch;
             switch (proofState)
@@ -264,7 +265,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
         var scratchPath = string.Empty;
 
         var thrown = await Assert.ThrowsAsync<EvidenceCommandException>(() =>
-            LocalEvidenceOutput.RunAsync(_repository, "local", (scratch, _) =>
+            LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, (scratch, _) =>
             {
                 scratchPath = scratch;
                 Directory.CreateDirectory(scratch);
@@ -278,13 +279,67 @@ public sealed class LocalEvidenceOutputTests : IDisposable
     }
 
     [Fact]
+    public async Task ThrownPreflightFailure_DoesNotReplaceTheLastFailureArchive()
+    {
+        await LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, async (scratch, _) =>
+        {
+            await WriteOutputFileAsync(scratch, "package-build.log", "previous diagnostic");
+            return 1;
+        });
+        var previous = await File.ReadAllBytesAsync(Under(LocalRoot, "latest-failure.zip"));
+        var failure = new InvalidOperationException("preflight failed");
+
+        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, (_, _) => Task.FromException<int>(failure))));
+
+        Assert.Equal(previous, await File.ReadAllBytesAsync(Under(LocalRoot, "latest-failure.zip")));
+        Assert.Empty(Directory.EnumerateDirectories(Under(LocalRoot, ".scratch")));
+    }
+
+    [Fact]
+    public async Task FailedMarkerRemoval_PreservesOriginalErrorAndBlocksRetry()
+    {
+        var marker = Under(GitDirectory, "appsurface-local-evidence", "run.pending-cleanup");
+        var failure = new IOException("original error");
+
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() =>
+            LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, (_, _) =>
+            {
+                File.Delete(marker);
+                Directory.CreateDirectory(marker);
+                return Task.FromException<int>(failure);
+            })));
+
+        var retry = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, (_, _) => Task.FromResult(0)));
+        Assert.Contains(marker, retry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SuccessfulDelegateWithAnUnconfirmedHostCannotPublish()
+    {
+        var marker = Under(GitDirectory, "appsurface-local-evidence", "run.pending-cleanup");
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, (_, run) =>
+            {
+                run.BeginHostExecution();
+                return Task.FromResult(0);
+            }));
+
+        Assert.Contains("cleanup could not be confirmed", failure.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(marker));
+        Assert.False(File.Exists(Under(LocalRoot, "latest.zip")));
+    }
+
+    [Fact]
     public async Task ConcurrentManagedRun_IsRejectedWhileWorktreeLockIsHeld()
     {
         var nestedRunRejected = false;
-        var exitCode = await LocalEvidenceOutput.RunAsync(_repository, "local", async (_, _) =>
+        var exitCode = await LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, async (_, _) =>
         {
             await Assert.ThrowsAsync<IOException>(() =>
-                LocalEvidenceOutput.RunAsync(_repository, "local", (_, _) => Task.FromResult(0)));
+                LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, (_, _) => Task.FromResult(0)));
             nestedRunRejected = true;
             return 0;
         });
@@ -310,7 +365,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
 
         var runStarted = false;
         var failure = await Assert.ThrowsAsync<IOException>(() =>
-            LocalEvidenceOutput.RunAsync(_repository, "local", (_, _) =>
+            LocalEvidenceOutput.RunAsync(_repository, "local", GitDirectory, (_, _) =>
             {
                 runStarted = true;
                 return Task.FromResult(0);
@@ -322,6 +377,8 @@ public sealed class LocalEvidenceOutputTests : IDisposable
     }
 
     public void Dispose() => NativeEvidenceTestDirectory.Delete(_repository);
+
+    private string GitDirectory => Directory.CreateDirectory(Under(_repository, ".git")).FullName;
 
     private string LocalRoot => Under(_repository, "TestResults", "repository-evidence", "local");
 

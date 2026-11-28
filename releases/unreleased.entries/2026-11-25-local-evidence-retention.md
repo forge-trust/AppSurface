@@ -1,0 +1,2 @@
+<!-- appsurface:unreleased-entry section="included" -->
+- **Verify retained local proofs and block unsafe retries.** The [repository validator](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) verifies compact proof before replacing the last successful archive, retains cancellation diagnostics separately, and blocks execution when prior cleanup is unconfirmed. Planning stays available after the previous validator exits.

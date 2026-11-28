@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Validation;
 using ForgeTrust.AppSurface.Testing;
 
@@ -10,6 +11,49 @@ public sealed class RepositoryGitChangesTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("repository-git-changes-").FullName;
     private readonly RepositoryGitChanges _collector = new();
+
+    [Fact]
+    public async Task ReadBoundedAsync_DrainsThePipeAfterOutputLimitIsExceeded()
+    {
+        using var stream = new MemoryStream(new byte[32 * 1024]);
+        using var commandLifetime = new CancellationTokenSource();
+
+        var output = await RepositoryGitChanges.ReadBoundedAsync(stream, 8, commandLifetime, CancellationToken.None);
+
+        Assert.Null(output);
+        Assert.Equal(stream.Length, stream.Position);
+        Assert.True(commandLifetime.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task ReadBoundedAsync_AcceptsExactLimitWithoutCancelingGit()
+    {
+        var expected = Enumerable.Range(0, 8).Select(value => (byte)value).ToArray();
+        using var stream = new MemoryStream(expected);
+        using var commandLifetime = new CancellationTokenSource();
+
+        var output = await RepositoryGitChanges.ReadBoundedAsync(stream, expected.Length, commandLifetime, CancellationToken.None);
+
+        Assert.Equal(expected, output);
+        Assert.False(commandLifetime.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task ReadBoundedAsync_TypesReaderFailureAsUnconfirmedGitCapture()
+    {
+        using var stream = new FailingReadStream();
+        using var commandLifetime = new CancellationTokenSource();
+        var reader = RepositoryGitChanges.ReadBoundedAsync(stream, 8, commandLifetime, CancellationToken.None);
+
+        await Assert.ThrowsAsync<IOException>(() => reader);
+        Assert.True(commandLifetime.IsCancellationRequested);
+
+        var failure = await Assert.ThrowsAsync<EvidenceCommandException>(() => EvidenceProcessShutdown.ConfirmAsync(
+            () => { }, () => Task.CompletedTask, [reader], TimeSpan.FromSeconds(1), EvidenceCommandException.CaptureFailedCode));
+
+        Assert.Equal(EvidenceCommandException.CaptureFailedCode, failure.Code);
+        Assert.True(failure.CleanupUnconfirmed);
+    }
 
     [Fact]
     public async Task CollectLocalAsync_CombinesCommittedStagedUnstagedAndUntrackedChanges()
@@ -464,6 +508,12 @@ public sealed class RepositoryGitChangesTests : IDisposable
         var output = process.StandardOutput.ReadToEnd(); var error = process.StandardError.ReadToEnd(); process.WaitForExit();
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}");
         return output.Trim();
+    }
+
+    private sealed class FailingReadStream : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(new IOException("synthetic Git pipe read failure"));
     }
 
     public void Dispose() => NativeEvidenceTestDirectory.Delete(_root);
