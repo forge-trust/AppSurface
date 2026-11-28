@@ -482,10 +482,11 @@ public sealed class RepositoryEvidenceWorkflowTests : IDisposable
             Directory.CreateDirectory(manifestPath);
         }, new LocalEvidenceOutput.ManagedRun(null));
 
-        await Assert.ThrowsAnyAsync<IOException>(() =>
+        var failure = await Record.ExceptionAsync(() =>
             RepositoryEvidenceWorkflow.FinalizeLocalManifestAsync(
                 evidence.Plan, evidence.Manifest, output, execution, CancellationToken.None));
 
+        Assert.True(failure is IOException or UnauthorizedAccessException, $"Expected a blocked manifest rename, got: {failure}");
         Assert.NotEmpty(stagedBytes);
         Assert.True(Directory.Exists(manifestPath));
         Assert.Empty(Directory.EnumerateFiles(output, RepositoryEvidenceOutputLayout.ManifestFileName + ".*.tmp"));
