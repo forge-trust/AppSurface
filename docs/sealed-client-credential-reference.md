@@ -48,10 +48,10 @@ run/authority/client mismatches before reading the sealed value. A metadata file
 be a leaf symbolic link. It is metadata, not a second credential store. These bindings do not yet wire the public
 adapter graph or qualify real Keycloak reconciliation with the new anchor.
 
-The [preparation tool](../tests/keycloak-identity-feasibility/prepare-worker-anchor.py) generates a project outside
+The [preparation tool](https://github.com/forge-trust/AppSurface/blob/main/tests/keycloak-identity-feasibility/prepare-worker-anchor.py) generates a project outside
 the checkout with one reference to the extracted pure DLL, cleared package feeds and fresh private caches. It
 preserves every relative path in the adapter's recursive worker closure and rejects a different pure DLL or any
-fixture output that would replace candidate bytes. Preparation and execution use the same [worker archive reader](../tests/keycloak-identity-feasibility/worker_payload.py), which rejects invalid and duplicate worker paths. Keep it alongside the Python drivers when copying them. The [runtime driver](../tests/keycloak-identity-feasibility/run-sealed-memory.py)
+fixture output that would replace candidate bytes. Preparation and execution use the same [worker archive reader](https://github.com/forge-trust/AppSurface/blob/main/tests/keycloak-identity-feasibility/worker_payload.py), which rejects invalid and duplicate worker paths. Keep it alongside the Python drivers when copying them. The [runtime driver](https://github.com/forge-trust/AppSurface/blob/main/tests/keycloak-identity-feasibility/run-sealed-memory.py)
 uses read-only copied payloads, disabled networking and an empty read-only NuGet cache. Its worker/web readers are
 small public-`Read()` fixtures; their role names do not imply actual reconciliation or web/OIDC acceptance.
 
@@ -65,7 +65,7 @@ deadline. Unavailable observation or an uncertain clear retains active state. Se
 requiring worker-anchor mode. The former records the exact injected observer code 75 and verifies retained active
 state and private input; the latter fails after marker unlink to exercise rollback. Both must exit nonzero and
 retain active state. Neither is a successful normal run. The separate
-[stopped-fixture cleanup tool](../tests/keycloak-identity-feasibility/cleanup-stopped-memory-fixture.py) accepts only
+[stopped-fixture cleanup tool](https://github.com/forge-trust/AppSurface/blob/main/tests/keycloak-identity-feasibility/cleanup-stopped-memory-fixture.py) accepts only
 the exact observer-failure receipt and its retention checks, validates the private root and all four owned identities, reacquires the lease
 and requires fresh independent stopped observation before removing the containers and input. It never starts or
 stops a workload and leaves the failed marker and original receipt unchanged. It is not the product recovery API.

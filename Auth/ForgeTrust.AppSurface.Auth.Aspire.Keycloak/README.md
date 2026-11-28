@@ -151,10 +151,10 @@ native executable even when the adapter assembly is loaded from the extraction c
 lookup supports renamed AppHosts and skips [shared .NET installations](https://learn.microsoft.com/en-us/dotnet/core/distribution-packaging)
 that contain the muxer's `host/fxr` directory.
 
-The Keycloak evidence job runs the [two-version consumer check](../../tests/keycloak-identity-feasibility/verify-worker-consumer.py).
+The Keycloak evidence job runs the [two-version consumer check](https://github.com/forge-trust/AppSurface/blob/main/tests/keycloak-identity-feasibility/verify-worker-consumer.py).
 It exercises upgrade, publish, and clean with local fixture packages that share file timestamps. Run it from the repository root with
 `python3 tests/keycloak-identity-feasibility/verify-worker-consumer.py --dotnet <absolute-dotnet-host>`.
-The same job runs the [packed single-file smoke](../../tests/keycloak-identity-feasibility/verify-packed-worker-single-file.py)
+The same job runs the [packed single-file smoke](https://github.com/forge-trust/AppSurface/blob/main/tests/keycloak-identity-feasibility/verify-packed-worker-single-file.py)
 against the real adapter archive and its shipped publish target. It checks both layouts in offline consumers,
 including lookup from another directory and `ASKEYC022` when the external runtime configuration is missing.
 It also checks a self-extracting AppHost named `dotnet` and rejection of a complete worker placed beside a private

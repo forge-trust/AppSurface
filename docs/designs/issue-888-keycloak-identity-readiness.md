@@ -137,7 +137,7 @@ Update the [Keycloak adapter README](https://github.com/forge-trust/AppSurface/b
 1. Record maintainer/consumer acceptance, including the explicit AC7 amendment to daemon/volume exclusion independent of realm and the breaking Run/local-environment registration policy with its migration/release note, and the named release owner; refresh both fixture inventories. This design approval does not authorize publication, infrastructure apply or production mutation.
 2. Prove the local daemon/volume identity and Aspire acquisition/teardown hooks, including crash windows, before committing lease APIs or platform support.
 3. Prove the credential delivery channel and complete packed worker dependency closure; freeze the desired-state/public failure names only after the two-fixture lifecycle succeeds.
-4. Implement contracts, adapter/worker, tests and documentation together; run focused real-boundary checks and, when practical, [solution coverage](../../scripts/coverage-solution.sh). Then perform the separately authorized publication and published consumer proof.
+4. Implement contracts, adapter/worker, tests and documentation together; run focused real-boundary checks and, when practical, [solution coverage](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh). Then perform the separately authorized publication and published consumer proof.
 
 These gates are unresolved engineering/owner evidence, not completed tests. No new production controller, CLI/dashboard, credential lifecycle service, provider SDK abstraction, account schema, Terraform ownership or replacement of Skoolit's separate runtime OIDC decision is included.
 
