@@ -108,6 +108,47 @@ public sealed class TestDotnetHostTests : IDisposable
     }
 
     [Fact]
+    public void ResolveExisting_SkipsMissingCandidatesAndUsesExistingCandidatesInOrder()
+    {
+        var hintedHost = CreateHost("hinted-host");
+        var rootHost = CreateHost("root-sdk", "dotnet");
+        var firstPathHost = CreateHost("first-sdk", "dotnet");
+        var secondPathHost = CreateHost("second-sdk", "dotnet");
+        var path = string.Join(Path.PathSeparator,
+            Path.GetRelativePath(_root, Path.GetDirectoryName(firstPathHost)!),
+            Path.GetRelativePath(_root, Path.GetDirectoryName(secondPathHost)!));
+        var relativeHintedHost = Path.GetRelativePath(_root, hintedHost);
+        var missingHost = TestPathUtils.PathUnder(_root, "missing-host");
+        var missingRoot = Path.GetRelativePath(_root, TestPathUtils.PathUnder(_root, "missing-sdk"));
+
+        var resolved = TestDotnetHost.ResolveExisting(
+            relativeHintedHost, Path.GetDirectoryName(rootHost), path, _root, isWindows: false);
+        Assert.Equal(hintedHost, resolved);
+
+        var relativeRoot = Path.GetRelativePath(_root, Path.GetDirectoryName(rootHost)!);
+        resolved = TestDotnetHost.ResolveExisting(
+            missingHost, relativeRoot, path, _root, isWindows: false);
+        Assert.Equal(rootHost, resolved);
+
+        resolved = TestDotnetHost.ResolveExisting(
+            missingHost, missingRoot, path, _root, isWindows: false);
+        Assert.Equal(firstPathHost, resolved);
+    }
+
+    [Theory]
+    [InlineData(false, "dotnet")]
+    [InlineData(true, "dotnet.exe")]
+    public void ResolveExisting_UsesPlatformHostNameBeneathDotnetRoot(bool isWindows, string executable)
+    {
+        var expected = CreateHost("sdk", executable);
+
+        var resolved = TestDotnetHost.ResolveExisting(
+            null, Path.GetDirectoryName(expected), null, _root, isWindows);
+
+        Assert.Equal(expected, resolved);
+    }
+
+    [Fact]
     public void Resolve_ThrowsWhenNoPathCandidateExists()
     {
         Assert.Throws<InvalidOperationException>(() =>

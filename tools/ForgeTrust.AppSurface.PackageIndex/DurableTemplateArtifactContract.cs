@@ -80,6 +80,7 @@ internal static class DurableTemplateArtifactContract
         "tests/AppSurfaceDurableWorker.Tests/BoundedProcessRunner.cs",
         "tests/AppSurfaceDurableWorker.Tests/FixtureBudgets.cs",
         "tests/AppSurfaceDurableWorker.Tests/FirstDurableWorkTests.cs",
+        "tests/AppSurfaceDurableWorker.Tests/FirstWorkFailureMarker.cs",
         "tests/AppSurfaceDurableWorker.Tests/HostContractTests.cs",
         "tests/AppSurfaceDurableWorker.Tests/PostgreSqlTestContainerImage.cs",
         "tests/AppSurfaceDurableWorker.Tests/SetupOperationLifetime.cs",

@@ -50,6 +50,7 @@ public sealed class TemplateRepositoryContractTests
         "tests/AppSurfaceDurableWorker.Tests/AppSurfaceDurableWorker.Tests.csproj",
         "tests/AppSurfaceDurableWorker.Tests/BoundedProcessRunner.cs",
         "tests/AppSurfaceDurableWorker.Tests/FirstDurableWorkTests.cs",
+        "tests/AppSurfaceDurableWorker.Tests/FirstWorkFailureMarker.cs",
         "tests/AppSurfaceDurableWorker.Tests/FixtureBudgets.cs",
         "tests/AppSurfaceDurableWorker.Tests/HostContractTests.cs",
         "tests/AppSurfaceDurableWorker.Tests/NativePostgreSqlSmokeTests.cs",

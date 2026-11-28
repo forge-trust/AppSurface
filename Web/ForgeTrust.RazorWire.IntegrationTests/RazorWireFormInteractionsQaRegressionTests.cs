@@ -20,8 +20,7 @@ public sealed class RazorWireFormInteractionsQaRegressionTests
         // Regression: ISSUE-001 — duplicated delete fields submitted an empty Boolean value.
         // Found by /qa on 2026-07-18.
         // Report: .gstack/qa-reports/qa-report-127-0-0-1-6196-2026-07-18.md
-        await using var context = await _fixture.Browser.NewContextAsync();
-        await RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync(context);
+        await using var context = await _fixture.CreateFunctionalRuntimeContextAsync();
         var page = await context.NewPageAsync();
 
         await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/FormInteractions");

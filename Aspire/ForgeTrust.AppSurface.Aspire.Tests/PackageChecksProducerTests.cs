@@ -21,13 +21,18 @@ public sealed class PackageChecksProducerTests
     }
     private static readonly string[] Assertions = ["package/manifest@1", "package/generated-docs@1", "package/archives-and-consumers@1"];
 
-    [Fact]
-    public async Task ProduceAsync_RunsOnlyThreePackageChecksAndRetainsBoundedProofs()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProduceAsync_RunsOnlyThreePackageChecksAndRetainsBoundedProofs(bool managedLocal)
     {
         using var root = new TemporaryDirectory("package-checks-tests-");
         var output = TestPathUtils.PathUnder(root.FullName, "evidence");
         Directory.CreateDirectory(output);
-        var settings = Settings(root.FullName, output);
+        var cache = managedLocal
+            ? TestPathUtils.PathUnder(root.FullName, "package-restore")
+            : TestPathUtils.PathUnder(output, "package-checks", "nuget-packages");
+        var settings = Settings(root.FullName, output) with { PackageRestoreCache = managedLocal ? cache : null };
         var requests = new List<EvidenceCommandRequest>();
         var producer = new PackageChecksProducer(settings, async (request, _) =>
         {
@@ -57,7 +62,7 @@ public sealed class PackageChecksProducerTests
         Assert.All(requests, request =>
         {
             Assert.Equal(Path.GetFullPath(root.FullName), request.WorkingDirectory);
-            Assert.StartsWith(TestPathUtils.PathUnder(output, "package-checks"), request.Environment["NUGET_PACKAGES"], StringComparison.Ordinal);
+            Assert.Equal(cache, request.Environment["NUGET_PACKAGES"]);
             Assert.Equal(settings.DotnetPath, request.Environment["DOTNET_HOST_PATH"]);
             Assert.StartsWith(Path.GetDirectoryName(settings.DotnetPath) + Path.PathSeparator, request.Environment["PATH"], StringComparison.Ordinal);
             Assert.DoesNotContain("restore", request.Arguments);
@@ -463,7 +468,7 @@ public sealed class PackageChecksProducerTests
     }
 
     private static RepositoryCheckSettings Settings(string repository, string output) =>
-        new(Path.GetFullPath(repository), ResolveDotnet(), output);
+        new(Path.GetFullPath(repository), TestDotnetHost.ResolveExisting(), output);
 
     private static (EvidenceProducerContext Context, EvidenceArtifactWriter Writer) Context(string output)
     {
@@ -481,14 +486,4 @@ public sealed class PackageChecksProducerTests
 
     private static string ValueAfter(IReadOnlyList<string> args, string option) => args[Array.IndexOf(args.ToArray(), option) + 1];
 
-    private static string ResolveDotnet()
-    {
-        var candidates = new[] { Environment.GetEnvironmentVariable("DOTNET_HOST_PATH"), Environment.GetEnvironmentVariable("DOTNET_ROOT") is { Length: > 0 } root ? TestPathUtils.PathUnder(root, "dotnet") : null }
-            .Where(static path => !string.IsNullOrWhiteSpace(path)).Cast<string>();
-        var explicitHost = candidates.FirstOrDefault(File.Exists);
-        if (explicitHost is not null) return Path.GetFullPath(explicitHost);
-        var executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        return (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator)
-            .Select(directory => string.IsNullOrEmpty(directory) ? executable : TestPathUtils.PathUnder(directory, executable)).First(File.Exists);
-    }
 }

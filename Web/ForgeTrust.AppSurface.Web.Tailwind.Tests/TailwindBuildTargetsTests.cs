@@ -1,12 +1,10 @@
 extern alias TailwindTasks;
 
-using System.Collections;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
-using Microsoft.Build.Framework;
 using TailwindBuildTask = TailwindTasks::ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
@@ -513,34 +511,5 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     {
         var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         return Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "tailwind.release.json");
-    }
-
-    private sealed class RecordingBuildEngine : IBuildEngine
-    {
-        public List<BuildErrorEventArgs> Errors { get; } = [];
-
-        public List<BuildWarningEventArgs> Warnings { get; } = [];
-
-        public List<BuildMessageEventArgs> Messages { get; } = [];
-
-        public bool ContinueOnError => false;
-
-        public int LineNumberOfTaskNode => 0;
-
-        public int ColumnNumberOfTaskNode => 0;
-
-        public string ProjectFileOfTaskNode => string.Empty;
-
-        public void LogErrorEvent(BuildErrorEventArgs e) => Errors.Add(e);
-
-        public void LogWarningEvent(BuildWarningEventArgs e) => Warnings.Add(e);
-
-        public void LogMessageEvent(BuildMessageEventArgs e) => Messages.Add(e);
-
-        public void LogCustomEvent(CustomBuildEventArgs e)
-        {
-        }
-
-        public bool BuildProjectFile(string projectFileName, string[] targetNames, IDictionary globalProperties, IDictionary targetOutputs) => true;
     }
 }

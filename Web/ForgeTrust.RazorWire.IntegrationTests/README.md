@@ -44,21 +44,27 @@ completion and the DOM assertions, with the existing deadlines.
 
 ## Functional runtime readiness
 
-The functional form-interactions and concurrent user-list revalidation tests in
-[`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs) and the functional nested-collection tests in
-[`RazorWireNestedCollectionsPlaywrightTests`](./RazorWireNestedCollectionsPlaywrightTests.cs) share
-`RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync`, which installs a local empty CSS response
-for the sample's Google Fonts stylesheet before navigation. The sample uses its system-font fallback;
-these tests verify conditional fields, nested collection form data, focus, validation redisplay, and preservation
-of concurrent stream updates. Use the [visual-baseline
-suites](#release-page-visual-baselines) when verifying appearance.
+The packaged runtime initialization, functional form-interactions, and concurrent user-list revalidation tests in
+[`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs), along with the functional dialog form tests in
+[`RazorWireDialogPlaywrightTests`](./RazorWireDialogPlaywrightTests.cs), use
+`RazorWireMvcPlaywrightFixture.CreateFunctionalRuntimeContextAsync`. The factory creates a caller-owned context and
+installs a local empty CSS response for the sample's Google Fonts stylesheet before navigation. It accepts optional
+`BrowserNewContextOptions`, including the no-JavaScript dialog test's disabled-JavaScript setting. Functional
+nested-collection tests configure their independently owned contexts with
+`RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync`. The sample uses its system-font fallback.
+
+The MVC and nested-collection tests verify conditional fields, nested collection form data, focus, validation redisplay,
+and preservation of concurrent stream updates. The dialog tests verify no-JavaScript fallback and inline-to-stream form
+behavior. Use the [visual-baseline suites](#release-page-visual-baselines) when verifying appearance.
 
 The [sample layout](../../examples/razorwire-mvc/Views/Shared/_Layout.cshtml) requests this decorative stylesheet
 before parser-blocking runtime scripts. A stalled font response can therefore prevent parsing and runtime initialization,
 even when every local asset has loaded. The context intercepts only `https://fonts.googleapis.com/**`;
 application scripts, styles, requests, and the form-readiness and validation assertions still run normally.
-The [no-JavaScript dialog test](./RazorWireDialogPlaywrightTests.cs) uses the same local stylesheet response.
-After each form POST it checks the HTTP response, the browser's destination URL, and the form or message rendered there.
+The [dialog form tests](./RazorWireDialogPlaywrightTests.cs) for no-JavaScript fallback and inline-to-stream submission
+use the same local stylesheet response. The no-JavaScript test checks the HTTP response, destination URL, and rendered
+form or message after each POST. The inline-to-stream test starts waiting for the fallback URL before submitting, waits
+for `DOMContentLoaded`, then exercises the inline form and the streamed dialog independently.
 Keep this interception scoped to functional tests. The nested-collection responsive and no-JavaScript tests keep their ordinary contexts.
 The functional navigation helper keeps its default 30-second `load` deadline and 15-second runtime-readiness wait.
 Regression cases hold an upstream decorative-font request to verify local fallback and hold a required application script

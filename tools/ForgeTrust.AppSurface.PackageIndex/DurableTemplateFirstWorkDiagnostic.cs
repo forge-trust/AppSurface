@@ -19,6 +19,15 @@ internal sealed record DurableTemplateFirstWorkDiagnostic(string Phase, string C
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? SetupOperation { get; init; }
 
+    /// <summary>Gets an optional closed Docker prerequisite cause from the generated fixture's typed failure.</summary>
+    /// <remarks>
+    /// Retained only for an InvalidOperationException at the Docker prerequisite setup boundary.
+    /// Process failure includes launch or bounded cleanup failure; unavailable includes nonzero, empty or truncated responses.
+    /// No raw exception message or process stream is retained, and absence does not establish a cause.
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? DockerPrerequisiteCause { get; init; }
+
     private const string Prefix = "[FirstDurableWork] failure phase=";
     private static readonly HashSet<string> Phases = new(StringComparer.Ordinal)
     {
@@ -73,6 +82,15 @@ internal sealed record DurableTemplateFirstWorkDiagnostic(string Phase, string C
                     ? ReadSetupOperation(line[(locationAt + 4)..causeAt])
                     : null,
             };
+            if (result.SetupOperation == "docker-prerequisite" && code == "InvalidOperationException")
+            {
+                var cause = line[(causeAt + 7)..cleanupAt];
+                result = result with
+                {
+                    DockerPrerequisiteCause = cause is "docker-probe-timeout" or "docker-probe-process-failure" or "docker-daemon-unavailable"
+                        ? cause : null,
+                };
+            }
         }
         return result;
     }

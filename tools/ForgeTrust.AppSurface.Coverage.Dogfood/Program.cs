@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Coverage;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 // This adapter supplies only AppSurface's checked-in policy and exact paths. All capture,
@@ -17,7 +18,6 @@ return args.Length > 0 && args[0] == "--package-proof"
 
 internal static class CoverageDogfood
 {
-    internal const string NativeFilter = "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests";
     private const string ReportProfileId = "coverlet-collector-cobertura-v1";
     private const string CollectorPackageVersion = "10.0.1";
     private const string ShadowProofFileName = "shadow-proof.json";
@@ -32,23 +32,28 @@ internal static class CoverageDogfood
     {
         if (args.Length == 1 && args[0] == "--help")
         {
-            Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--contract-version 2|3 (default 2)] [--diff-policy-id appsurface-visual-baseline-png-v1 (v3 only)] [--native-platform Linux|Windows|Darwin --report <normalized> --raw <collector>] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
+            Console.WriteLine("Print the ordered test filter with --print-test-filter native|shared-cli|lifecycle-cli.");
+            Console.WriteLine("Native inputs: --collection-root <coverage-run-output> or --raw-index <project-to-original-json> --timings <json>.");
+            Console.WriteLine("AppSurface policy adapter: --operation native|fanin --repository <clean-root> --cli <installed-appsurface> --output <fresh-parent> --configuration Debug|Release [--contract-version 2|3 (default 2)] [--diff-policy-id appsurface-visual-baseline-png-v1 (v3 only)] [--native-platform Linux|Windows|Darwin] [--primary <report> --timings <json> --native-inputs <directory> --diff-base <ref>] --run-scope <repository> --run-id <id> --attempt <positive-integer>");
             return 0;
         }
         var stage = "options";
         try
         {
+            if (args is ["--print-test-filter", var lane])
+            {
+                Console.WriteLine(NativeCoverageTestInventory.ReadFilter(lane));
+                return 0;
+            }
             if (args.Length % 2 != 0) throw new ArgumentException();
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
-            var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "contract-version", "diff-policy-id", "native-platform", "report", "raw", "primary", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
+            var allowed = new[] { "operation", "repository", "cli", "output", "configuration", "contract-version", "diff-policy-id", "native-platform", "collection-root", "raw-index", "primary", "timings", "native-inputs", "diff-base", "run-scope", "run-id", "attempt" }.ToHashSet(StringComparer.Ordinal);
             for (var i = 0; i < args.Length; i += 2)
                 if (!args[i].StartsWith("--", StringComparison.Ordinal) || !allowed.Contains(args[i][2..]) || !options.TryAdd(args[i][2..], args[i + 1])) throw new ArgumentException();
-            string Required(string key) => options.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException();
-            var root = Path.GetFullPath(Required("repository"));
-            var cli = Path.GetFullPath(Required("cli"));
-            var output = Path.GetFullPath(Required("output"));
-            var configuration = Required("configuration");
-            var operationName = Required("operation");
+            var root = Path.GetFullPath(RequireOption(options, "repository"));
+            var cli = Path.GetFullPath(RequireOption(options, "cli"));
+            var output = Path.GetFullPath(RequireOption(options, "output"));
+            var configuration = RequireOption(options, "configuration");
             var contractVersion = options.TryGetValue("contract-version", out var versionText)
                 && int.TryParse(versionText, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedVersion)
                 ? parsedVersion : versionText is null ? 2 : throw new ArgumentException();
@@ -63,6 +68,7 @@ internal static class CoverageDogfood
                     return ReportFailure("options", "unsupported-diff-policy-id",
                         $"Use {CoverageFanInPolicy.VisualBaselinePngDiffPolicyId} for --diff-policy-id.");
             }
+            var operationArguments = ParseOperationArguments(options);
             if (configuration is not ("Debug" or "Release") || Directory.Exists(output) || File.Exists(output)) throw new ArgumentException();
             stage = "source-inventory";
             var solution = XDocument.Load(Path.Join(root, "ForgeTrust.AppSurface.slnx"));
@@ -70,7 +76,13 @@ internal static class CoverageDogfood
             var projects = solution.Descendants("Project").Select(x => x.Attribute("Path")?.Value)
                 .Where(x => x is not null && (x.EndsWith(".Tests.csproj", StringComparison.Ordinal) || x.EndsWith(".IntegrationTests.csproj", StringComparison.Ordinal)))
                 .Select(x => x!.Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
-            var nativeProjects = new[] { "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj" };
+            var nativeProjects = NativeCoverageTestInventory.ReadNativeProjects();
+            var nativeFilter = NativeCoverageTestInventory.ReadFilter();
+            var limits = new CoverageOperationLimits(TotalRecords: 4_000_000);
+            stage = "native-inputs";
+            var collectionInputs = operationArguments is CollectionArguments collection
+                ? NativeCoverageCaptureInputs.FromCollection(collection.Root, nativeProjects, checked((int)limits.JsonBytes))
+                : null;
             var measurements = new InvocationMeasurements();
             string gitVersion = "not-checked-v2";
             string commit;
@@ -99,18 +111,20 @@ internal static class CoverageDogfood
             }
             stage = "collector-policy";
             var policy = new CoverageFanInPolicy(new(commit, tree, sdk.Trim(), configuration),
-                new("github-actions", Required("run-scope"), Required("run-id"), int.Parse(Required("attempt"), System.Globalization.CultureInfo.InvariantCulture)),
-                projects, new[] { "Linux", "Windows", "Darwin" }.Select(x => new CoverageSupplement(x.ToLowerInvariant(), x, NativeFilter, nativeProjects)).ToArray(),
+                new("github-actions", RequireOption(options, "run-scope"), RequireOption(options, "run-id"),
+                    int.Parse(RequireOption(options, "attempt"), CultureInfo.InvariantCulture)),
+                projects, new[] { "Linux", "Windows", "Darwin" }.Select(x => new CoverageSupplement(x.ToLowerInvariant(), x, nativeFilter, nativeProjects)).ToArray(),
                 diffBase is not null
                     ? new(CoverageGateMode.AggregateAndPatch, DiffBase: diffBase) : new(CoverageGateMode.AggregateOnly),
-                Limits: new CoverageOperationLimits(TotalRecords: 4_000_000))
+                Limits: limits)
             {
                 ContractVersion = contractVersion,
                 ReportProfileId = contractVersion == 3 ? ReportProfileId : null,
                 DiffPolicyId = diffPolicyId
             };
             if (contractVersion == 3)
-                await ValidateCollectorVersionsAsync(root, (operationName == "native" ? nativeProjects : projects).Distinct(StringComparer.Ordinal)
+                await ValidateCollectorVersionsAsync(root,
+                    (operationArguments is NativeArguments ? nativeProjects : projects).Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal).ToArray(), configuration, measurements);
             var policyElement = ToVersionedPolicyElement(policy, contractVersion);
             stage = "pinned-patch";
@@ -118,12 +132,13 @@ internal static class CoverageDogfood
                 ? await DeriveExpectedPatchSha256Async(root, policyElement, policy.Limits!, measurements)
                 : null;
             stage = "native-inputs";
-            var nativeInputs = operationName == "fanin"
-                ? CoverageFanInNativeInputs.Discover(Required("native-inputs"), policy.Supplements.Select(x => x.Id)) : null;
+            var fanIn = operationArguments as FanInArguments;
+            var nativeInputs = fanIn is null
+                ? null : CoverageFanInNativeInputs.Discover(fanIn.NativeInputs, policy.Supplements.Select(x => x.Id));
             stage = "prepare-output";
             Directory.CreateDirectory(output);
             var accounting = new List<OperationAccounting>();
-            async Task Invoke(string operation, object request, string suffix, bool collect = false)
+            async Task Invoke(string operation, object request, string suffix)
             {
                 stage = "command-" + suffix;
                 var requestFile = Path.Join(output, suffix + "-request.json");
@@ -132,28 +147,29 @@ internal static class CoverageDogfood
                     operation == "accept" ? expectedPatchSha256 : null);
                 await File.WriteAllBytesAsync(requestFile,
                     JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = contractVersion, operation, request = requestProjection }, Json));
-                var cliArgs = new List<string> { "coverage", "fan-in", operation == "collect" ? "capture" : operation, "--request", requestFile, "--result", resultFile, "--json" };
-                if (collect) cliArgs.Add("--collect");
-                _ = await Command(root, cli, cliArgs.ToArray(), measurements, "fanin-" + suffix);
+                _ = await Command(root, cli,
+                    ["coverage", "fan-in", operation, "--request", requestFile, "--result", resultFile, "--json"],
+                    measurements, "fanin-" + suffix);
                 if (contractVersion == 3)
                     accounting.Add(ReadOperationAccounting(resultFile, operation, policy.Limits!.TotalBytes));
             }
-            if (operationName == "native")
+            if (operationArguments is NativeArguments native)
             {
                 stage = "native-arguments";
-                var platform = Required("native-platform");
-                if (platform is not ("Linux" or "Windows" or "Darwin")) throw new ArgumentException();
-                await Invoke("capture", new CoverageCaptureRequest(policy, root, Path.Join(output, "capture"), platform.ToLowerInvariant(),
-                    Required("report"), RawCoveragePath: Required("raw")), "native");
+                var inputs = native is ReplayArguments replay
+                    ? NativeCoverageCaptureInputs.FromReplay(replay.RawIndex, replay.Timings)
+                    : collectionInputs!;
+                await Invoke("capture", new CoverageCaptureRequest(policy, root, EvidenceArtifactValidation.GetContainedPath(output, "capture"), native.Platform.ToLowerInvariant(),
+                    TimingsPath: inputs.TimingsPath, RawCoveragePaths: inputs.RawCoveragePaths), "native");
                 stage = "native-proof";
                 if (contractVersion == 3)
                     await WriteShadowProofAsync(output, "native", policy, gitVersion, measurements, accounting,
                         expectedPatchSha256, policy.Limits!.TotalBytes);
             }
-            else if (operationName == "fanin")
+            else if (fanIn is not null)
             {
                 var primary = Path.Join(output, "primary");
-                await Invoke("capture", new CoverageCaptureRequest(policy, root, primary, "primary", Required("primary"), Required("timings")), "primary");
+                await Invoke("capture", new CoverageCaptureRequest(policy, root, primary, "primary", fanIn.Primary, fanIn.Timings), "primary");
                 var imported = new List<string>();
                 foreach (var supplement in policy.Supplements)
                 {
@@ -179,7 +195,6 @@ internal static class CoverageDogfood
                         expectedPatchSha256, policy.Limits!.TotalBytes);
                 }
             }
-            else throw new ArgumentException();
             return 0;
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or JsonException
@@ -192,6 +207,35 @@ internal static class CoverageDogfood
             return ReportFailure(stage, reason, recovery);
         }
     }
+
+    /// <summary>Resolves the selected operation and its required arguments before any file reads or output creation.</summary>
+    private static OperationArguments ParseOperationArguments(IReadOnlyDictionary<string, string> options)
+    {
+        var operation = RequireOption(options, "operation");
+        var hasCollectionRoot = options.ContainsKey("collection-root");
+        if (hasCollectionRoot && (operation != "native" || options.ContainsKey("raw-index") || options.ContainsKey("timings")))
+            throw new ArgumentException("--collection-root is valid only for native capture and cannot be combined with explicit replay inputs.");
+
+        if (operation == "fanin")
+            return new FanInArguments(RequireOption(options, "primary"), RequireOption(options, "timings"),
+                RequireOption(options, "native-inputs"));
+
+        if (operation != "native") throw new ArgumentException();
+        var platform = RequireOption(options, "native-platform");
+        if (platform is not ("Linux" or "Windows" or "Darwin")) throw new ArgumentException();
+        return hasCollectionRoot
+            ? new CollectionArguments(platform, RequireOption(options, "collection-root"))
+            : new ReplayArguments(platform, RequireOption(options, "raw-index"), RequireOption(options, "timings"));
+    }
+
+    private static string RequireOption(IReadOnlyDictionary<string, string> options, string key)
+        => options.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException();
+
+    private abstract record OperationArguments;
+    private abstract record NativeArguments(string Platform) : OperationArguments;
+    private sealed record CollectionArguments(string Platform, string Root) : NativeArguments(Platform);
+    private sealed record ReplayArguments(string Platform, string RawIndex, string Timings) : NativeArguments(Platform);
+    private sealed record FanInArguments(string Primary, string Timings, string NativeInputs) : OperationArguments;
 
     private static int ReportFailure(string stage, string reason, string recovery)
     {
@@ -211,9 +255,9 @@ internal static class CoverageDogfood
             new CoverageRunProject(path, Path.GetFullPath(path, root), "profile-" + index, false)).ToArray(), []);
         var started = Stopwatch.GetTimestamp();
         await CoverageRunDriverPreflight.ValidateAsync(CoverageRunDriver.Collector, configuration, resolution,
-            new CliWrapCoverageRunProcessRunner(), supervisor, deadline.Token, requiredCollectorVersion: "10.0.1");
+            new CliWrapCoverageRunProcessRunner(), supervisor, deadline.Token, requiredCollectorVersion: CollectorPackageVersion);
         measurements.Record("collector-profile", Stopwatch.GetElapsedTime(started).TotalMilliseconds, null, 0);
-        measurements.VerifiedCollectorVersion = "10.0.1";
+        measurements.VerifiedCollectorVersion = CollectorPackageVersion;
     }
 
     private static async Task<string> Command(string root, string executable, string[] arguments,

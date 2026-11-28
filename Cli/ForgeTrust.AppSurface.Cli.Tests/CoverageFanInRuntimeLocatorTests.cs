@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Coverage;
@@ -22,6 +23,9 @@ public sealed class CoverageFanInRuntimeLocatorTests
         Assert.True(File.Exists(Path.Join(payload.RootDirectory, "appsettings.json")));
         Assert.True(File.Exists(Path.Join(payload.RootDirectory, "runtimes", "win", "lib", "net10.0", "System.Diagnostics.EventLog.dll")));
         Assert.Equal(payload.EntryPointPath, locator.ResolveReportGeneratorDll());
+        using var deployedManifest = File.OpenRead(TestPathUtils.PathUnder(payload.RootDirectory, "runtime-manifest.json"));
+        var digest = Convert.ToHexString(SHA256.HashData(deployedManifest)).ToLowerInvariant();
+        Assert.Equal("sha256:" + digest, StrictReportGeneratorRuntimeLocator.GetPinnedManifestDigest());
     }
 
     [Fact]

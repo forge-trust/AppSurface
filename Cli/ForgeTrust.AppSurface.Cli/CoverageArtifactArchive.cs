@@ -255,8 +255,7 @@ internal static class CoverageArtifactArchive
                 foreach (var component in components[..^1])
                 {
                     work.Check(cancellationToken);
-                    var next = CoverageRunOutputLease.AcquireArtifactDirectory(Path.Join(current.ArtifactDirectoryPath, component), false, true)
-                        ?? current.CreateArtifactDirectory(component);
+                    var next = current.OpenOrCreateArtifactChildDirectory(component, requirePrivate: true);
                     parents.Add(next);
                     current = next;
                 }

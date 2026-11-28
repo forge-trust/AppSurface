@@ -475,7 +475,9 @@ public sealed partial class EvidenceHostBootstrapTests
                 registration.AddProducer(new PassingProducer("coverage", "coverage/assertion@1"));
             });
         var missingDependencyException = await Assert.ThrowsAsync<EvidenceHostException>(() => missingDependency.RunAsync());
-        Assert.Contains("ASEVD305", missingDependencyException.Message, StringComparison.Ordinal);
+        Assert.Equal("ASEVD305", missingDependencyException.Code);
+        Assert.Equal("ASEVD305: Resource 'postgres' requires undeclared resource 'missing'. Fix: Declare every required resource in the selected profile.",
+            missingDependencyException.Message);
 
         using var cancellation = new CancellationTokenSource();
         var producer = new CallerCancellableProducer("coverage");

@@ -9,10 +9,14 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 namespace ForgeTrust.AppSurface.Evidence.Validation;
 
 /// <summary>Exercises public storage commands from a verified packed CLI with independent byte assertions.</summary>
-internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvidenceProducer, IAsyncDisposable
+/// <param name="settings">The immutable packed storage validation settings.</param>
+/// <param name="command">Optional repository command runner. The default runs bounded commands directly.</param>
+internal sealed class PackedStorageProducer(ValidationSettings settings,
+    Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>>? command = null) : IEvidenceProducer, IAsyncDisposable
 {
     private EvidenceWorkspace? _workspace;
-    private readonly EvidenceCommandRunner _commands = new();
+    private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _command =
+        command ?? new EvidenceCommandRunner().RunAsync;
     private readonly List<object> _transcript = [];
 
     /// <inheritdoc />
@@ -96,7 +100,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
                 Environment = environment,
                 CheckBudget = _ => { _workspace.CheckBudget(); return ValueTask.CompletedTask; },
             };
-            var result = await _commands.RunAsync(request, cancellationToken);
+            var result = await _command(request, cancellationToken);
             _transcript.Add(new
             {
                 command = arguments,

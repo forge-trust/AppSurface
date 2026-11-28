@@ -23,7 +23,7 @@ public sealed class RazorWireMvcPlaywrightTests
     [Fact]
     public async Task RuntimeScripts_LoadFromPackagePathsAndExposeBrowserGlobals()
     {
-        await using var context = await _fixture.Browser.NewContextAsync();
+        await using var context = await _fixture.CreateFunctionalRuntimeContextAsync();
         var page = await context.NewPageAsync();
 
         await page.GotoAsync(_fixture.ReactivityUrl);
@@ -228,7 +228,7 @@ public sealed class RazorWireMvcPlaywrightTests
     [Fact]
     public async Task FormInteractionsSample_ReplacesPageLocalJavaScriptForConditionalAndCollectionRows()
     {
-        await using var context = await CreateFunctionalRuntimeContextAsync();
+        await using var context = await _fixture.CreateFunctionalRuntimeContextAsync();
         var page = await context.NewPageAsync();
         var browserMessages = CaptureBrowserMessages(page);
 
@@ -303,7 +303,7 @@ public sealed class RazorWireMvcPlaywrightTests
     [Fact]
     public async Task FormInteractionsSample_RedisplaysValidationErrorsForInvalidPostedState()
     {
-        await using var context = await CreateFunctionalRuntimeContextAsync();
+        await using var context = await _fixture.CreateFunctionalRuntimeContextAsync();
         var page = await context.NewPageAsync();
         var browserMessages = CaptureBrowserMessages(page);
 
@@ -682,7 +682,7 @@ public sealed class RazorWireMvcPlaywrightTests
     {
         var unique = Guid.NewGuid().ToString("N")[..8];
         var usernames = Enumerable.Range(0, writerCount).Select(index => $"swr-{index}-{unique}").ToArray();
-        await using var observerContext = await CreateFunctionalRuntimeContextAsync();
+        await using var observerContext = await _fixture.CreateFunctionalRuntimeContextAsync();
         var observerPage = await observerContext.NewPageAsync();
         await observerPage.GotoAsync(_fixture.ReactivityUrl);
         await WaitForStreamConnectedAsync(observerPage);
@@ -790,7 +790,7 @@ public sealed class RazorWireMvcPlaywrightTests
                 """);
             await Task.WhenAll(usernames.Select(async username =>
             {
-                await using var actorContext = await CreateFunctionalRuntimeContextAsync();
+                await using var actorContext = await _fixture.CreateFunctionalRuntimeContextAsync();
                 var actorPage = await actorContext.NewPageAsync();
                 await actorPage.GotoAsync(_fixture.ReactivityUrl);
                 var response = await RegisterUserAndWaitForPostAsync(actorPage, username);
@@ -1684,27 +1684,6 @@ public sealed class RazorWireMvcPlaywrightTests
         return messages;
     }
 
-    /// <summary>Creates a functional runtime-test context whose readiness is independent of the sample's decorative web font.</summary>
-    /// <returns>A browser context that serves the Google Fonts stylesheet locally while loading application assets normally.</returns>
-    /// <remarks>
-    /// The stylesheet precedes parser-blocking scripts in the sample layout. A stalled font request therefore blocks
-    /// runtime initialization even though these tests assert runtime behavior rather than font rendering.
-    /// </remarks>
-    private async Task<IBrowserContext> CreateFunctionalRuntimeContextAsync()
-    {
-        var context = await _fixture.Browser.NewContextAsync();
-        try
-        {
-            await RazorWireMvcPlaywrightFixture.ConfigureFunctionalFormContextAsync(context);
-            return context;
-        }
-        catch
-        {
-            await context.DisposeAsync();
-            throw;
-        }
-    }
-
     /// <summary>
     /// Waits until the RazorWire form-interactions runtime has loaded, exposed its manager, and enhanced the sample form.
     /// </summary>
@@ -1784,7 +1763,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
     public string ReactivityUrl { get; private set; } = string.Empty;
     public string FormFailuresUrl { get; private set; } = string.Empty;
 
-    /// <summary>Installs the local decorative-font fallback used by functional form tests.</summary>
+    /// <summary>Installs the local decorative-font fallback used by functional runtime and form tests.</summary>
     /// <param name="context">The caller-owned context to configure before navigating to the sample.</param>
     /// <returns>A task that completes when the font stylesheet route has been installed.</returns>
     /// <remarks>
@@ -1799,6 +1778,32 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
             ContentType = "text/css",
             Body = "/* Functional form tests use the sample's system-font fallback. */"
         }));
+
+    /// <summary>Creates a functional runtime-test context with the local decorative-font fallback installed.</summary>
+    /// <param name="options">Optional browser context settings, such as disabling JavaScript.</param>
+    /// <returns>A caller-owned context that serves the Google Fonts stylesheet locally while loading application assets normally.</returns>
+    /// <remarks>
+    /// The stylesheet precedes parser-blocking scripts in the sample layout. A stalled font request therefore blocks
+    /// runtime initialization even though these tests assert runtime behavior rather than font rendering.
+    /// If installing the route fails, the context is disposed before the exception is rethrown.
+    /// The caller remains responsible for disposing the returned context.
+    /// </remarks>
+    internal async Task<IBrowserContext> CreateFunctionalRuntimeContextAsync(BrowserNewContextOptions? options = null)
+    {
+        var context = options is null
+            ? await Browser.NewContextAsync()
+            : await Browser.NewContextAsync(options);
+        try
+        {
+            await ConfigureFunctionalFormContextAsync(context);
+            return context;
+        }
+        catch
+        {
+            await context.DisposeAsync();
+            throw;
+        }
+    }
 
     public async Task InitializeAsync()
     {

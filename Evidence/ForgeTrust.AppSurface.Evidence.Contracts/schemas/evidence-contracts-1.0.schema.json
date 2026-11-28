@@ -1,0 +1,770 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:forgetrust:appsurface:evidence-contracts:1.0",
+  "title": "AppSurface Evidence canonical plan or manifest 1.0",
+  "description": "Canonical emitted JSON shape reference. Runtime contract readers additionally enforce semantic graph, digest, policy authorization, and artifact validation.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Plan"
+    },
+    {
+      "$ref": "#/$defs/Manifest"
+    }
+  ],
+  "$defs": {
+    "NormalizedDiffPath": {
+      "type": "object",
+      "properties": {
+        "Path": {
+          "type": "string"
+        },
+        "Kind": {
+          "type": "string"
+        },
+        "PreviousPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "Path",
+        "Kind",
+        "PreviousPath"
+      ],
+      "additionalProperties": false
+    },
+    "ArtifactSlot": {
+      "type": "object",
+      "properties": {
+        "LogicalName": {
+          "type": "string"
+        },
+        "RelativeRoot": {
+          "type": "string"
+        },
+        "MediaType": {
+          "type": "string"
+        },
+        "Required": {
+          "type": "boolean"
+        },
+        "MaximumBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "LogicalName",
+        "RelativeRoot",
+        "MediaType",
+        "Required",
+        "MaximumBytes"
+      ],
+      "additionalProperties": false
+    },
+    "CoverageExecution": {
+      "type": "object",
+      "properties": {
+        "Configuration": {
+          "type": "string"
+        },
+        "TestResults": {
+          "type": "string",
+          "enum": [
+            "None",
+            "Junit"
+          ]
+        },
+        "Parallelism": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      },
+      "required": [
+        "Configuration",
+        "TestResults",
+        "Parallelism"
+      ],
+      "additionalProperties": false
+    },
+    "Inputs": {
+      "type": "object",
+      "properties": {
+        "Include": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "Include",
+        "Exclude"
+      ],
+      "additionalProperties": false
+    },
+    "CoverageGate": {
+      "type": "object",
+      "properties": {
+        "MinLinePercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "MinBranchPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "MinPatchLinePercent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "MinPatchBranchPercent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "PatchLineMode": {
+          "type": "string",
+          "enum": [
+            "measurable",
+            "codecov"
+          ]
+        },
+        "TolerancePercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "MinLinePercent",
+        "MinBranchPercent",
+        "MinPatchLinePercent",
+        "MinPatchBranchPercent",
+        "PatchLineMode",
+        "TolerancePercent"
+      ],
+      "additionalProperties": false
+    },
+    "TestDeclaration": {
+      "type": "object",
+      "properties": {
+        "Projects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/TestProject"
+          }
+        }
+      },
+      "required": [
+        "Projects"
+      ],
+      "additionalProperties": false
+    },
+    "TestProject": {
+      "type": "object",
+      "properties": {
+        "Path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "Filter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "MinimumTests": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "Path"
+      ],
+      "additionalProperties": false
+    },
+    "Producer": {
+      "type": "object",
+      "properties": {
+        "Id": {
+          "type": "string"
+        },
+        "Kind": {
+          "type": "string"
+        },
+        "Version": {
+          "type": "string"
+        },
+        "RequiredResources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "AssertionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ArtifactSlots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactSlot"
+          }
+        },
+        "TimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "CoverageGate": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CoverageGate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "CoverageExecution": {
+          "$ref": "#/$defs/CoverageExecution"
+        },
+        "Test": {
+          "$ref": "#/$defs/TestDeclaration"
+        },
+        "CoverageArtifactRetention": {
+          "type": "string",
+          "enum": [
+            "managed",
+            "full"
+          ]
+        }
+      },
+      "required": [
+        "Id",
+        "Kind",
+        "Version",
+        "RequiredResources",
+        "AssertionIds",
+        "ArtifactSlots",
+        "TimeoutSeconds",
+        "CoverageGate",
+        "CoverageArtifactRetention"
+      ],
+      "additionalProperties": false
+    },
+    "Resource": {
+      "type": "object",
+      "properties": {
+        "Id": {
+          "type": "string"
+        },
+        "Readiness": {
+          "type": "string"
+        },
+        "DeadlineSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "Requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "Id",
+        "Readiness",
+        "DeadlineSeconds",
+        "Requires"
+      ],
+      "additionalProperties": false
+    },
+    "Obligation": {
+      "type": "object",
+      "properties": {
+        "Id": {
+          "type": "string"
+        },
+        "RiskClass": {
+          "type": "string"
+        },
+        "Rationale": {
+          "type": "string"
+        },
+        "RequiredProducerIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "RequiredAssertionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "Id",
+        "RiskClass",
+        "Rationale",
+        "RequiredProducerIds",
+        "RequiredAssertionId"
+      ],
+      "additionalProperties": false
+    },
+    "Profile": {
+      "type": "object",
+      "properties": {
+        "Id": {
+          "type": "string"
+        },
+        "Scope": {
+          "type": "string",
+          "enum": [
+            "Targeted",
+            "Release"
+          ]
+        },
+        "Resources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Resource"
+          }
+        },
+        "Producers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Producer"
+          }
+        },
+        "Obligations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Obligation"
+          }
+        }
+      },
+      "required": [
+        "Id",
+        "Scope",
+        "Resources",
+        "Producers",
+        "Obligations"
+      ],
+      "additionalProperties": false
+    },
+    "PolicyRule": {
+      "type": "object",
+      "properties": {
+        "Id": {
+          "type": "string"
+        },
+        "Pattern": {
+          "type": "string"
+        },
+        "ProfileId": {
+          "type": "string"
+        },
+        "Precedence": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "Id",
+        "Pattern",
+        "ProfileId",
+        "Precedence"
+      ],
+      "additionalProperties": false
+    },
+    "Policy": {
+      "type": "object",
+      "properties": {
+        "Id": {
+          "type": "string"
+        },
+        "Version": {
+          "type": "string"
+        },
+        "ConservativeProfileId": {
+          "type": "string"
+        },
+        "Profiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Profile"
+          }
+        },
+        "Rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PolicyRule"
+          }
+        },
+        "CombineProfiles": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "Id",
+        "Version",
+        "ConservativeProfileId",
+        "Profiles",
+        "Rules"
+      ],
+      "additionalProperties": false
+    },
+    "Plan": {
+      "type": "object",
+      "properties": {
+        "ContractVersion": {
+          "const": "1.0"
+        },
+        "PolicyId": {
+          "type": "string"
+        },
+        "PolicyDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "DiffDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "Profile": {
+          "$ref": "#/$defs/Profile"
+        },
+        "ChangedPaths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NormalizedDiffPath"
+          }
+        },
+        "MatchedRuleIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "PlanDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "PolicySnapshot": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Policy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "PatchSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "ContractVersion",
+        "PolicyId",
+        "PolicyDigest",
+        "DiffDigest",
+        "Profile",
+        "ChangedPaths",
+        "MatchedRuleIds",
+        "PlanDigest",
+        "PolicySnapshot"
+      ],
+      "additionalProperties": false
+    },
+    "ArtifactResult": {
+      "type": "object",
+      "properties": {
+        "LogicalName": {
+          "type": "string"
+        },
+        "RelativePath": {
+          "type": "string"
+        },
+        "MediaType": {
+          "type": "string"
+        },
+        "LengthBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "Sha256": {
+          "type": "string",
+          "pattern": "^[0-9A-Fa-f]{64}$"
+        }
+      },
+      "required": [
+        "LogicalName",
+        "RelativePath",
+        "MediaType",
+        "LengthBytes",
+        "Sha256"
+      ],
+      "additionalProperties": false
+    },
+    "ProducerResult": {
+      "type": "object",
+      "properties": {
+        "ProducerId": {
+          "type": "string"
+        },
+        "Outcome": {
+          "type": "string",
+          "enum": [
+            "Passed",
+            "Failed",
+            "Flaky",
+            "TimedOut",
+            "Unavailable",
+            "Cancelled",
+            "Invalid",
+            "SkippedNotRequired"
+          ]
+        },
+        "SatisfiedAssertionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Diagnostic": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Artifacts": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ArtifactResult"
+          }
+        },
+        "ElapsedMilliseconds": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "ProducerId",
+        "Outcome",
+        "SatisfiedAssertionIds",
+        "Diagnostic",
+        "Artifacts",
+        "ElapsedMilliseconds"
+      ],
+      "additionalProperties": false
+    },
+    "ResourceResult": {
+      "type": "object",
+      "properties": {
+        "ResourceId": {
+          "type": "string"
+        },
+        "Outcome": {
+          "type": "string",
+          "enum": [
+            "Ready",
+            "Unavailable",
+            "TimedOut",
+            "Cancelled",
+            "Invalid"
+          ]
+        },
+        "ElapsedMilliseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "Diagnostic": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ResourceId",
+        "Outcome",
+        "ElapsedMilliseconds",
+        "Diagnostic"
+      ],
+      "additionalProperties": false
+    },
+    "Metrics": {
+      "type": "object",
+      "properties": {
+        "PlanningMilliseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ResourceReadinessMilliseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ProducerMilliseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "CleanupMilliseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "TotalMilliseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "CleanupCompleted": {
+          "type": "boolean"
+        },
+        "CleanupDiagnostic": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "PlanningMilliseconds",
+        "ResourceReadinessMilliseconds",
+        "ProducerMilliseconds",
+        "CleanupMilliseconds",
+        "TotalMilliseconds",
+        "CleanupCompleted",
+        "CleanupDiagnostic"
+      ],
+      "additionalProperties": false
+    },
+    "Manifest": {
+      "type": "object",
+      "properties": {
+        "ContractVersion": {
+          "const": "1.0"
+        },
+        "PlanDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "ExecutionVerdict": {
+          "type": "string",
+          "enum": [
+            "Passed",
+            "Incomplete",
+            "Invalid"
+          ]
+        },
+        "ClaimKind": {
+          "type": "string",
+          "enum": [
+            "None",
+            "TargetedComplete",
+            "ReleaseComplete",
+            "NoEvidenceRequired",
+            "ObservationOnly"
+          ]
+        },
+        "Eligibility": {
+          "type": "string",
+          "enum": [
+            "None",
+            "PullRequestGate",
+            "ReleaseGate",
+            "Informational"
+          ]
+        },
+        "EnvelopeStatus": {
+          "type": "string",
+          "enum": [
+            "NotRequired",
+            "ValidatedNotAttested",
+            "Unavailable",
+            "Invalid"
+          ]
+        },
+        "ResourceResults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResourceResult"
+          }
+        },
+        "SelectedObligationIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ClosedObligationIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "UnmediatedObligationIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ProducerResults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProducerResult"
+          }
+        },
+        "Metrics": {
+          "$ref": "#/$defs/Metrics"
+        },
+        "ManifestDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "ContractVersion",
+        "PlanDigest",
+        "ExecutionVerdict",
+        "ClaimKind",
+        "Eligibility",
+        "EnvelopeStatus",
+        "ResourceResults",
+        "SelectedObligationIds",
+        "ClosedObligationIds",
+        "UnmediatedObligationIds",
+        "ProducerResults",
+        "Metrics",
+        "ManifestDigest"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

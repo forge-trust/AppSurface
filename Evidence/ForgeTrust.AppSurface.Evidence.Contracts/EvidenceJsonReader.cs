@@ -76,6 +76,13 @@ internal static class EvidenceJsonReader
                     ValidateCollectionItems(value);
                     ValidateContractVersion(value);
                 };
+
+                if (typeInfo.Type == typeof(EvidenceManifest))
+                {
+                    // The wire field is optional and derived. Validate it when present without storing it.
+                    typeInfo.Properties.Single(static property => property.Name == nameof(EvidenceManifest.ReuseCount)).Set =
+                        static (value, count) => ValidateReuseCount((EvidenceManifest)value, count);
+                }
             }
         });
         return new JsonSerializerOptions
@@ -201,14 +208,23 @@ internal static class EvidenceJsonReader
 
     private static void ValidateContractVersion<TValue>(TValue value)
     {
-        if (value is EvidencePlan plan && !string.Equals(plan.ContractVersion, EvidencePlan.CurrentContractVersion, StringComparison.Ordinal))
+        if (value is EvidencePlan plan && !EvidenceContractVersions.IsSupported(plan.ContractVersion))
         {
             throw new JsonException("Evidence plan contract version is missing or unsupported.");
         }
 
-        if (value is EvidenceManifest manifest && !string.Equals(manifest.ContractVersion, EvidencePlan.CurrentContractVersion, StringComparison.Ordinal))
+        if (value is EvidenceManifest manifest && !EvidenceContractVersions.IsSupported(manifest.ContractVersion))
         {
             throw new JsonException("Evidence manifest contract version is missing or unsupported.");
+        }
+    }
+
+    private static void ValidateReuseCount(EvidenceManifest manifest, object? count)
+    {
+        ValidateItems(manifest.ProducerResults);
+        if (count is not int reportedCount || reportedCount != manifest.ReuseCount)
+        {
+            throw new JsonException("ReuseCount does not match the producer results.");
         }
     }
 

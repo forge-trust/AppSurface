@@ -14,6 +14,9 @@ internal sealed record RepositoryCheckSettings(string RepositoryRoot, string Dot
     /// <summary>Native fan-in contract to require for both captures and acceptance. Defaults to v2 for explicit compatibility callers.</summary>
     internal int NativeCoverageContractVersion { get; init; } = 2;
 
+    /// <summary>Optional stable, private local package-gate restore cache. Consumer proof caches are independent.</summary>
+    internal string? PackageRestoreCache { get; init; }
+
     /// <summary>Optional same-run CI collection to verify and gate instead of collecting again. Never used for local patches.</summary>
     internal string? CoverageCollectionDirectory { get; init; }
 
