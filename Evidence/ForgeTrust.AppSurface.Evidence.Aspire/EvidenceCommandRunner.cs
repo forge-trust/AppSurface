@@ -19,8 +19,11 @@ public sealed class EvidenceCommandException : Exception
         CleanupUnconfirmed = code == CleanupFailedCode;
     }
 
-    internal EvidenceCommandException(string code, string message, bool cleanupUnconfirmed) : this(code, message) =>
+    internal EvidenceCommandException(string code, string message, bool cleanupUnconfirmed)
+        : this(code, message)
+    {
         CleanupUnconfirmed = cleanupUnconfirmed;
+    }
 
     /// <summary>Gets the stable failure classification.</summary>
     public string Code { get; }
