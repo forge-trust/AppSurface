@@ -102,7 +102,7 @@ public sealed class EvidencePlanner
         }
 
         var draft = new EvidencePlan(
-            ContractVersion: "1.0",
+            ContractVersion: EvidencePlan.CurrentContractVersion,
             PolicyId: policy.Id,
             PolicyDigest: policyDigest,
             DiffDigest: diffDigest,

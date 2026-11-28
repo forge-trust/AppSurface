@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
@@ -454,6 +453,9 @@ public sealed record EvidencePlan(
     string PlanDigest,
     EvidencePolicy? PolicySnapshot = null)
 {
+    /// <summary>Gets the version written by the planner and accepted for plans and manifests by the canonical JSON reader.</summary>
+    public static string CurrentContractVersion => "1.0";
+
     /// <summary>Lowercase SHA-256 of the exact unified patch bytes captured at planning, when available.</summary>
     /// <remarks><see cref="DiffDigest"/> still identifies the normalized path list; a path-only plan cannot bind patch acceptance.</remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -1167,94 +1169,6 @@ public static class EvidenceArtifactValidation
     }
 
     private static bool IsSha256(string value) => value.Length == 64 && value.All(static character => char.IsAsciiHexDigit(character));
-}
-
-/// <summary>
-/// Serializes contract objects deterministically for evidence identity and verification.
-/// </summary>
-public static class EvidenceCanonicalJson
-{
-    /// <summary>
-    /// Serializes a value as canonical UTF-8 JSON with ordinal object-property order.
-    /// </summary>
-    /// <typeparam name="TValue">Value type to serialize.</typeparam>
-    /// <param name="value">Value to serialize.</param>
-    /// <returns>Canonical UTF-8 JSON bytes.</returns>
-    public static byte[] Serialize<TValue>(TValue value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-
-        using var document = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions));
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            WriteElement(document.RootElement, writer);
-        }
-
-        return stream.ToArray();
-    }
-
-    /// <summary>
-    /// Deserializes a JSON document using the contract serializer options.
-    /// </summary>
-    /// <typeparam name="TValue">Value type to deserialize.</typeparam>
-    /// <param name="utf8Json">JSON bytes.</param>
-    /// <returns>The deserialized value.</returns>
-    public static TValue Deserialize<TValue>(ReadOnlySpan<byte> utf8Json)
-    {
-        var value = JsonSerializer.Deserialize<TValue>(utf8Json, SerializerOptions);
-        return value ?? throw new InvalidOperationException($"Evidence JSON did not contain a {typeof(TValue).Name} value.");
-    }
-
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = false,
-        Converters = { new JsonStringEnumConverter() },
-    };
-
-    private static void WriteElement(JsonElement element, Utf8JsonWriter writer)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                writer.WriteStartObject();
-                foreach (var property in element.EnumerateObject().OrderBy(static property => property.Name, StringComparer.Ordinal))
-                {
-                    writer.WritePropertyName(property.Name);
-                    WriteElement(property.Value, writer);
-                }
-
-                writer.WriteEndObject();
-                break;
-            case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (var item in element.EnumerateArray())
-                {
-                    WriteElement(item, writer);
-                }
-
-                writer.WriteEndArray();
-                break;
-            case JsonValueKind.String:
-                writer.WriteStringValue(element.GetString());
-                break;
-            case JsonValueKind.Number:
-                writer.WriteRawValue(element.GetRawText(), skipInputValidation: true);
-                break;
-            case JsonValueKind.True:
-                writer.WriteBooleanValue(true);
-                break;
-            case JsonValueKind.False:
-                writer.WriteBooleanValue(false);
-                break;
-            case JsonValueKind.Null:
-                writer.WriteNullValue();
-                break;
-            default:
-                throw new InvalidOperationException($"Unsupported JSON token {element.ValueKind}.");
-        }
-    }
 }
 
 /// <summary>

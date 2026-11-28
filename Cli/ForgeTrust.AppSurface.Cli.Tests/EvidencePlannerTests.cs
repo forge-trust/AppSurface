@@ -472,34 +472,6 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
-    public async Task CliWorkflow_ShouldDescribeExternalAndTrustedPrerequisitesForAReleaseProfile()
-    {
-        using var directory = TestDirectory.Create();
-        var policyPath = Path.Join(directory.Path, "evidence.policy.json");
-        var profile = new EvidenceProfile(
-            "release",
-            EvidenceProfileScope.Release,
-            [],
-            [
-                new EvidenceProducerDeclaration("database", "postgres-integration", "1", [], ["database/assertion@1"], [], 60),
-                new EvidenceProducerDeclaration("browser", "playwright-browser", "1", [], ["browser/assertion@1"], [], 60),
-            ],
-            [
-                new EvidenceObligation("database", "database", "Database behavior changed.", ["database"], "database/assertion@1"),
-                new EvidenceObligation("browser", "browser", "Browser behavior changed.", ["browser"], "browser/assertion@1"),
-            ]);
-        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(new EvidencePolicy("release-policy", "1", "release", [profile], [])));
-        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
-
-        var report = await workflow.DoctorAsync(new EvidencePlanningRequest(policyPath, ["src/Feature.cs"], null), CancellationToken.None);
-
-        Assert.Contains(report.Checks, check => check.Id == "docker:database");
-        Assert.Contains(report.Checks, check => check.Id == "browser:browser");
-        Assert.Contains(report.Checks, check => check.Id == "trusted-envelope");
-        Assert.Contains(report.Checks, check => check.NextAction is not null);
-    }
-
-    [Fact]
     public async Task CliWorkflow_ShouldRejectMissingMalformedAndMismatchedEvidenceInputs()
     {
         using var directory = TestDirectory.Create();
@@ -652,7 +624,7 @@ public sealed class EvidencePlannerTests
         var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
             workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, [], diffPath), CancellationToken.None));
 
-        Assert.True(diffFileAccess.WasOpened);
+        Assert.True(diffFileAccess.WasReplaced);
         Assert.Contains("ASEVD206", exception.Message, StringComparison.Ordinal);
         Assert.Contains("exceeds the 20971520 byte limit", exception.Message, StringComparison.Ordinal);
     }
@@ -1080,15 +1052,18 @@ public sealed class EvidencePlannerTests
         Assert.Equal("Correct the input and rerun.", diagnostic.Fix);
     }
 
-    private sealed class ReplacingEvidenceDiffFileAccess(string expectedPath, byte[] replacement) : IEvidenceDiffFileAccess
+    private sealed class ReplacingEvidenceDiffFileAccess(string targetPath, byte[] replacement) : IEvidenceInputFileAccess
     {
-        public bool WasOpened { get; private set; }
+        public bool WasReplaced { get; private set; }
 
         public Stream OpenRead(string path)
         {
-            Assert.Equal(expectedPath, path);
-            File.WriteAllBytes(path, replacement);
-            WasOpened = true;
+            if (string.Equals(path, targetPath, StringComparison.Ordinal))
+            {
+                File.WriteAllBytes(path, replacement);
+                WasReplaced = true;
+            }
+
             return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
     }

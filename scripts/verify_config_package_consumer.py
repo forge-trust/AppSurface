@@ -230,9 +230,6 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     consumer = work / "consumer"
     domain_project = work / "domain-project"
-    domain_project_file = domain_project / "DomainFixture.csproj"
-    domain_fixture_source = repo / "tests/config-package-consumer/fixtures/domain"
-    domain_project_template = domain_fixture_source / (domain_project_file.name + ".template")
     domain_feed = work / "domain-feed"
     package_ids = ["ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Config", "ForgeTrust.AppSurface.Config.Testing"]
     log_stages = [
@@ -297,16 +294,25 @@ def main():
                 "cacheState": "isolated-cold", "stagesSeconds": timings, "result": "incomplete"}
     stage_state = {"current": "setup"}
     try:
-        shutil.copyfile(repo / "tests/config-package-consumer/pinned-inventory.md", work / "pinned-inventory.md")
-        inventory = (work / "pinned-inventory.md").read_text()
+        consumer_source = repo / "tests/config-package-consumer"
+        pinned_inventory = consumer_source / "pinned-inventory.md"
+        shutil.copyfile(pinned_inventory, work / pinned_inventory.name)
+        inventory = (work / pinned_inventory.name).read_text()
         if any(evidence[key] not in inventory for key in ["baselineSkoolitRevision", "baselineAppSurfaceRevision"]):
             raise RuntimeError("Copied selection inventory disagrees with its baseline revision references.")
+        fixture_source = consumer_source / "fixtures/domain"
+        fixture_template = fixture_source / "DomainFixture.csproj.template"
+        domain_source = fixture_source / "DomainConfigs.cs"
+        consumer_sources = [consumer_source / filename for filename in (
+            "Program.cs", "ExplicitRegistrationExample.cs", "WorkerRootConfigs.cs", "WorkerStageProof.cs",
+            "EnvironmentCandidateInspectionProof.cs", "appsettings.json",
+        )]
         input_paths = [
             repo / "scripts/verify_config_package_consumer.py",
-            *sorted((repo / "tests/config-package-consumer").rglob("*.cs")),
-            domain_project_template,
-            repo / "tests/config-package-consumer/pinned-inventory.md",
-            repo / "tests/config-package-consumer/appsettings.json",
+            *consumer_sources,
+            domain_source,
+            fixture_template,
+            pinned_inventory,
         ]
         for package_id in package_ids:
             package_root = repo / ("" if package_id.endswith("Core") else "Config") / package_id
@@ -337,16 +343,17 @@ def main():
             package_id: hashlib.sha256((artifacts / f"{package_id}.{args.package_version}.nupkg").read_bytes()).hexdigest()
             for package_id in package_ids
         }
-        shutil.copyfile(domain_project_template, domain_project_file)
-        shutil.copyfile(domain_fixture_source / "DomainConfigs.cs", domain_project / "DomainConfigs.cs")
+        fixture_project = domain_project / "DomainFixture.csproj"
+        shutil.copyfile(fixture_template, fixture_project)
+        shutil.copyfile(domain_source, domain_project / domain_source.name)
         write_nuget_config(domain_project / "NuGet.Config", [
             ("candidate", artifacts),
             ("nuget.org", "https://api.nuget.org/v3/index.json"),
         ])
-        if project_reference_count(domain_project_file) != 0:
+        if project_reference_count(fixture_project) != 0:
             raise RuntimeError("Packed Domain fixture must use package references only.")
         run("domain-restore", [
-            "dotnet", "restore", domain_project_file.name, "--configfile", "NuGet.Config",
+            "dotnet", "restore", fixture_project.name, "--configfile", "NuGet.Config",
             "-p:PackageVersion=" + args.package_version, "-p:Version=" + args.package_version,
         ], cwd=domain_project)
         domain_graph = package_graph(domain_project / "obj/project.assets.json")
@@ -354,7 +361,7 @@ def main():
             if domain_graph.get(package_id) != args.package_version:
                 raise RuntimeError("Domain restore graph did not select the requested candidate package identity.")
         run("pack-domain-fixture", [
-            "dotnet", "pack", domain_project_file.name, "--no-restore", "--configuration", args.configuration,
+            "dotnet", "pack", fixture_project.name, "--no-restore", "--configuration", args.configuration,
             "--output", str(domain_feed), "-p:PackageVersion=" + args.package_version,
             "-p:Version=" + args.package_version,
         ], cwd=domain_project)
@@ -382,12 +389,8 @@ def main():
             ("domain-fixture", domain_feed),
             ("nuget.org", "https://api.nuget.org/v3/index.json"),
         ])
-        consumer_sources = [
-            "Program.cs", "ExplicitRegistrationExample.cs", "WorkerRootConfigs.cs", "WorkerStageProof.cs",
-            "EnvironmentCandidateInspectionProof.cs", "appsettings.json",
-        ]
-        for filename in consumer_sources:
-            shutil.copyfile(repo / "tests/config-package-consumer" / filename, consumer / filename)
+        for source in consumer_sources:
+            shutil.copyfile(source, consumer / source.name)
         timings["scaffold"] = round(time.monotonic() - started, 3)
         if project_reference_count(consumer / "Consumer.csproj") != 0:
             raise RuntimeError("Packed consumer must use package references only.")
