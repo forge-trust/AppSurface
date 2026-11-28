@@ -449,6 +449,8 @@ internal static class CoverageFanInComposer
         return relative.Length > 0 ? relative : throw InvalidCoveragePath();
     }
 
+    internal static void ValidateRepositoryRoot(string sourceRoot) => _ = ParseSourceRoot(sourceRoot);
+
     private static PortableRoot ParseSourceRoot(string sourceRoot)
     {
         if (string.IsNullOrEmpty(sourceRoot) || sourceRoot.Contains('\0'))

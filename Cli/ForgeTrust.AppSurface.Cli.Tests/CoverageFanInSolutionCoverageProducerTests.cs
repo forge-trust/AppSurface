@@ -203,7 +203,8 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData("linked-file")]
     [InlineData("oversized-file")]
     [InlineData("legacy-v1")]
-    [InlineData("wrong-profile")]
+    [InlineData("missing-hashes")]
+    [InlineData("unbound-legacy-symbols")]
     public async Task ImportAsync_RejectsInvalidCompilerSymbolHandoff(string defect)
     {
         using var fixture = new Fixture();
@@ -235,11 +236,12 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                     break;
                 case "oversized-file": await File.WriteAllBytesAsync(first, new byte[1024 * 1024 + 1]); break;
                 case "legacy-v1":
-                case "wrong-profile":
+                case "missing-hashes":
+                case "unbound-legacy-symbols":
                     var receiptPath = TestPathUtils.PathUnder(coverage, "collection-receipt.json");
                     var receipt = JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!.AsObject();
-                    if (defect == "legacy-v1") receipt["SchemaVersion"] = 1;
-                    else receipt.Remove("CompilerSymbols");
+                    if (defect != "missing-hashes") receipt["SchemaVersion"] = 1;
+                    if (defect != "legacy-v1") receipt.Remove("CompilerSymbols");
                     await File.WriteAllTextAsync(receiptPath, receipt.ToJsonString());
                     break;
             }
@@ -247,8 +249,26 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
             await Assert.ThrowsAsync<InvalidDataException>(() => SolutionCoverageHandoff.ImportAsync(collection,
                 TestPathUtils.PathUnder(fixture.Root, "imported", "coverage"),
                 new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
-                requireKeycloakNativeCoverage: defect != "wrong-profile"));
+                requireKeycloakNativeCoverage: defect != "unbound-legacy-symbols"));
         });
+    }
+
+    [Fact]
+    public async Task StageCompilerSymbolsAsync_LeavesAnExistingSymbolDirectoryUntouched()
+    {
+        using var fixture = new Fixture();
+        await fixture.CreateKeycloakCompilerInputsAsync();
+        var coverage = TestPathUtils.PathUnder(fixture.Root, "coverage");
+        var symbols = TestPathUtils.PathUnder(coverage, "compiler-symbols");
+        Directory.CreateDirectory(symbols);
+        var sentinel = TestPathUtils.PathUnder(symbols, "retained.txt");
+        await File.WriteAllTextAsync(sentinel, "caller owned");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            SolutionCoverageHandoff.StageCompilerSymbolsAsync(fixture.Root, coverage, "Release", CancellationToken.None));
+
+        Assert.Equal(sentinel, Assert.Single(Directory.EnumerateFileSystemEntries(symbols)));
+        Assert.Equal("caller owned", await File.ReadAllTextAsync(sentinel));
     }
 
     [Fact]

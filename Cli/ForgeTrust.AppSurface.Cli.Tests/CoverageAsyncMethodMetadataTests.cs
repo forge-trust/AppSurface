@@ -78,6 +78,10 @@ public sealed class CoverageFanInAsyncMethodMetadataTests
 
         Assert.Empty(CoverageAsyncMethodMetadata.Read(fixture.Assembly, fixture.Pdb,
             TestPathUtils.PathUnder(temporaryDirectory.Path, "elsewhere")));
+        Assert.Throws<InvalidDataException>(() => CoverageAsyncMethodMetadata.Read(mapped.Assembly, mapped.Pdb, "relative"));
+
+        var relative = Compile("CoverageFixture", source, "src/CoverageFixture.cs");
+        Assert.Empty(CoverageAsyncMethodMetadata.Read(relative.Assembly, relative.Pdb, sourceRoot));
     }
 
     internal static CompiledFixture Compile(string assemblyName, string source, string documentPath)

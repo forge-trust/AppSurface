@@ -12,8 +12,9 @@ internal static class CoverageAsyncMethodMetadata
 
     internal static IReadOnlyList<CoverageAsyncMethod> Read(byte[] assembly, byte[] pdb, string sourceRoot)
     {
-        if (assembly is null || pdb is null || !IsAbsolutePath(sourceRoot))
-            throw new InvalidDataException("Compiler symbol metadata input is invalid.");
+        ArgumentNullException.ThrowIfNull(assembly);
+        ArgumentNullException.ThrowIfNull(pdb);
+        CoverageFanInComposer.ValidateRepositoryRoot(sourceRoot);
         try
         {
             using var pe = new PEReader(new MemoryStream(assembly, writable: false));
@@ -164,8 +165,8 @@ internal static class CoverageAsyncMethodMetadata
         var document = pdb.GetDocument(documentHandle);
         var digest = pdb.GetBlobBytes(document.Hash);
         var documentName = pdb.GetString(document.Name);
-        if (visibleLines.Count == 0 || pdb.GetGuid(document.HashAlgorithm) != Sha256DocumentHash
-            || digest.Length != 32 || !IsAbsolutePath(documentName)) return false;
+        if (visibleLines.Count == 0 || pdb.GetGuid(document.HashAlgorithm) != Sha256DocumentHash || digest.Length != 32)
+            return false;
         try
         {
             // Deterministic SDK builds map the checkout source root to /_/.
@@ -176,7 +177,6 @@ internal static class CoverageAsyncMethodMetadata
         {
             return false;
         }
-        if (string.IsNullOrEmpty(file)) return false;
         lines = visibleLines.ToArray();
         checksum = Convert.ToHexString(digest);
         pointShape = shape.ToString();
@@ -227,11 +227,6 @@ internal static class CoverageAsyncMethodMetadata
         if (namespaceName.Length != 0) name = namespaceName + "." + name;
         return name.Length != 0;
     }
-
-    private static bool IsAbsolutePath(string path) => !string.IsNullOrWhiteSpace(path)
-        && (path[0] == '/' || path.StartsWith("\\\\", StringComparison.Ordinal)
-            || path.StartsWith("//", StringComparison.Ordinal)
-            || (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && (path[2] == '/' || path[2] == '\\')));
 }
 
 internal sealed record CoverageAsyncMethod(string Assembly, string SourceType, string SourceMethod,

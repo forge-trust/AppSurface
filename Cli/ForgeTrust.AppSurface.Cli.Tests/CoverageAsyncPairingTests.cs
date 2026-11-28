@@ -50,7 +50,11 @@ public sealed class CoverageFanInAsyncPairingTests
     [InlineData("missing-state-machine-class")]
     [InlineData("renamed-source-method")]
     [InlineData("repeated-method-line")]
+    [InlineData("missing-method-lines")]
+    [InlineData("bad-hit-count")]
     [InlineData("inconsistent-branch-flag")]
+    [InlineData("different-branch-kind")]
+    [InlineData("different-package")]
     [InlineData("missing-symbol")]
     public void Ambiguous_or_different_records_keep_their_original_measurement(string defect)
     {
@@ -77,8 +81,22 @@ public sealed class CoverageFanInAsyncPairingTests
                 var line = nativeMethod.Descendants("line").Single();
                 line.Parent!.Add(new XElement(line));
                 break;
+            case "missing-method-lines":
+                nativeMethod.Element("lines")!.Remove();
+                break;
+            case "bad-hit-count":
+                nativeMethod.Descendants("line").Single().SetAttributeValue("hits", "-1");
+                break;
             case "inconsistent-branch-flag":
                 nativeMethod.Descendants("line").Single().SetAttributeValue("branch", "false");
+                break;
+            case "different-branch-kind":
+                var nonBranch = nativeMethod.Descendants("line").Single();
+                nonBranch.SetAttributeValue("branch", "false");
+                nonBranch.SetAttributeValue("condition-coverage", null);
+                break;
+            case "different-package":
+                native.Descendants("package").Single().SetAttributeValue("name", "ForeignAssembly");
                 break;
         }
         IReadOnlyList<CoverageAsyncMethod> nativeSymbols = defect switch
@@ -98,21 +116,26 @@ public sealed class CoverageFanInAsyncPairingTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Flattened_nested_class_requires_a_unique_source_sequence_point(bool ambiguous)
+    [InlineData("unique")]
+    [InlineData("ambiguous-symbol")]
+    [InlineData("ambiguous-class")]
+    [InlineData("missing-class")]
+    public void Flattened_nested_class_requires_a_unique_source_record(string shape)
     {
         var nested = Method() with { SourceType = SourceType + "/Inner" };
         var primary = Report(SourceType, "WorkAsync", 0, 0, 2);
         var native = Report(StateMachine, "MoveNext", 1, 2, 2);
-        IReadOnlyList<CoverageAsyncMethod> primarySymbols = ambiguous
+        var primaryClass = primary.Descendants("class").Single();
+        if (shape == "ambiguous-class") primaryClass.Parent!.Add(new XElement(primaryClass));
+        if (shape == "missing-class") primaryClass.SetAttributeValue("name", "Unrelated");
+        IReadOnlyList<CoverageAsyncMethod> primarySymbols = shape == "ambiguous-symbol"
             ? [nested, nested with { SourceType = SourceType + "/Other", StateMachineType = StateMachine + "Other" }]
             : [nested];
 
         var projected = CoverageAsyncPairing.Project([(primary, Root), (native, Root)], [primarySymbols, [nested]]);
 
         Assert.All(projected[0].Document.Descendants("line"),
-            line => Assert.Equal(ambiguous ? "0% (0/2)" : "100% (2/2)", Branches(line)));
+            line => Assert.Equal(shape == "unique" ? "100% (2/2)" : "0% (0/2)", Branches(line)));
     }
 
     [Fact]
@@ -127,13 +150,15 @@ public sealed class CoverageFanInAsyncPairingTests
             line.SetAttributeValue("branch", "false");
         }
         var baseline = Report("Other", "Unrelated", 0, 0, 2);
+        var secondNative = new XDocument(native);
+        foreach (var line in secondNative.Descendants("line")) line.SetAttributeValue("hits", "3");
 
-        var projected = CoverageAsyncPairing.Project([(primary, Root), (baseline, Root), (native, Root)],
-            [[method], [], [method]]);
+        var projected = CoverageAsyncPairing.Project([(primary, Root), (baseline, Root), (native, Root), (secondNative, Root)],
+            [[method], [], [method], [method]]);
 
         Assert.All(projected[0].Document.Descendants("line"), line =>
         {
-            Assert.Equal("2", line.Attribute("hits")!.Value);
+            Assert.Equal("3", line.Attribute("hits")!.Value);
             Assert.Null(line.Attribute("condition-coverage"));
         });
         Assert.Same(baseline, projected[1].Document);

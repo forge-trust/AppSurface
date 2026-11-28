@@ -41,6 +41,11 @@ public sealed class CoverageFanInCompilerSymbolsTests
         var assembly = TestPathUtils.PathUnder(temp.Path, "Example.dll");
         Assert.Throws<ArgumentException>(() => CoverageFanInCompilerSymbols.ValidateRequest("capture",
             request with { CompilerSymbolAssemblies = [assembly, assembly] }));
+        var oversized = Enumerable.Repeat(assembly, CoverageFanInCompilerSymbols.MaximumAssemblies + 1).ToArray();
+        Assert.Throws<ArgumentException>(() => CoverageFanInCompilerSymbols.ValidateRequest("capture",
+            request with { CompilerSymbolAssemblies = oversized }));
+        Assert.Throws<InvalidDataException>(() => CoverageFanInCompilerSymbols.RetainedFileNames(
+            JsonSerializer.SerializeToElement(Array.Empty<string>())));
 
         var import = request with { ImportDirectory = TestPathUtils.PathUnder(temp.Path, "import") };
         CoverageFanInCompilerSymbols.ValidateRequest("capture", import);

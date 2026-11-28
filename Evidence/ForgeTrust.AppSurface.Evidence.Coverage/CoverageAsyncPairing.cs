@@ -58,19 +58,13 @@ internal static class CoverageAsyncPairing
     private static XDocument NormalizeCopy((XDocument Document, string SourceRoot) input)
         => CoverageFanInComposer.NormalizePaths(new XDocument(input.Document), input.SourceRoot);
 
-    private static Dictionary<MetadataIdentity, CoverageAsyncMethod> GetUniqueMethods(
+    private static Dictionary<(string Assembly, string File, string SourceType, string SourceMethod, string StateMachineType), CoverageAsyncMethod> GetUniqueMethods(
         IReadOnlyList<CoverageAsyncMethod> methods)
     {
         return methods
-            .GroupBy(CreateIdentity)
+            .GroupBy(method => (method.Assembly, method.File, method.SourceType, method.SourceMethod, method.StateMachineType))
             .Where(group => group.Count() == 1)
             .ToDictionary(group => group.Key, group => group.Single());
-    }
-
-    private static MetadataIdentity CreateIdentity(CoverageAsyncMethod method)
-    {
-        return new MetadataIdentity(method.Assembly, method.File, method.SourceType,
-            method.SourceMethod, method.StateMachineType);
     }
 
     private static void AddObservations(
@@ -81,7 +75,7 @@ internal static class CoverageAsyncPairing
         CoverageAsyncMethod generatedMetadata,
         Dictionary<XElement, LinePromotion> promotions)
     {
-        var sourceClass = FindSourceClass(sourceDocument, sourceMetadata, out var projectedToOuterClass);
+        var sourceClass = FindSourceClass(sourceDocument, sourceMetadata, out var projectedClassName);
         var generatedClass = FindUniqueClass(generatedDocument, generatedMetadata.Assembly,
             generatedMetadata.StateMachineType, generatedMetadata.File);
         if (sourceClass is null || generatedClass is null)
@@ -100,7 +94,7 @@ internal static class CoverageAsyncPairing
         foreach (var lineNumber in sourceMetadata.Lines.Distinct())
         {
             if (!generatedLines.Contains(lineNumber)
-                || (projectedToOuterClass && !IsUniqueProjectedSourceLine(sourceSymbols, sourceMetadata, lineNumber))
+                || (projectedClassName is not null && !IsUniqueProjectedSourceLine(sourceSymbols, sourceMetadata, projectedClassName, lineNumber))
                 || !TryFindUniqueLine(sourceMethod, lineNumber, out var sourceLine)
                 || !TryFindUniqueLine(moveNext, lineNumber, out var generatedLine))
             {
@@ -125,9 +119,9 @@ internal static class CoverageAsyncPairing
     private static XElement? FindSourceClass(
         XDocument document,
         CoverageAsyncMethod metadata,
-        out bool projectedToOuterClass)
+        out string? projectedClassName)
     {
-        projectedToOuterClass = false;
+        projectedClassName = null;
         var exactMatches = FindClasses(document, metadata.Assembly, metadata.SourceType, metadata.File);
         if (exactMatches.Length == 1)
         {
@@ -145,7 +139,7 @@ internal static class CoverageAsyncPairing
             return null;
         }
 
-        projectedToOuterClass = true;
+        projectedClassName = outerClassName;
         return outerMatches[0];
     }
 
@@ -183,13 +177,9 @@ internal static class CoverageAsyncPairing
     private static bool IsUniqueProjectedSourceLine(
         IReadOnlyList<CoverageAsyncMethod> sourceSymbols,
         CoverageAsyncMethod sourceMetadata,
+        string outerClassName,
         int lineNumber)
     {
-        if (!TryGetOuterClassName(sourceMetadata.SourceType, out var outerClassName))
-        {
-            return false;
-        }
-
         var matchingRecords = sourceSymbols.Count(symbol =>
             string.Equals(symbol.Assembly, sourceMetadata.Assembly, StringComparison.Ordinal)
             && string.Equals(GetProjectedClassName(symbol.SourceType), outerClassName, StringComparison.Ordinal)
@@ -305,13 +295,6 @@ internal static class CoverageAsyncPairing
         var (covered, valid) = CoverageFanInComposer.ReadBranchCounts(line);
         return new LineObservation(hits, hasBranches, covered, valid);
     }
-
-    private readonly record struct MetadataIdentity(
-        string Assembly,
-        string File,
-        string SourceType,
-        string SourceMethod,
-        string StateMachineType);
 
     private readonly record struct LinePromotion(long Hits, long? FullBranches);
 
