@@ -197,13 +197,18 @@ public sealed partial class CoverageEvidenceProducerTests
     {
         using var fixture = await ScopedFixture.CreateAsync(Cobertura(("Alpha", "src/Alpha/Feature.cs", 1, 1), ("Beta", "src/Beta/Other.cs", 1, 1)));
 
-        var execution = await fixture.Producer.RunWithInventoryAsync(fixture.Declaration, fixture.Solution, fixture.Output,
-            Diff("src/Alpha/Feature.cs", 1), CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None,
-            repositoryRoot: fixture.Root);
+        var execution = await fixture.Producer.RunWithInventoryAsync(
+            new(
+                Producer: fixture.Declaration,
+                SolutionPath: fixture.Solution,
+                ExecutionRoot: fixture.Output,
+                DiffSnapshot: Diff("src/Alpha/Feature.cs", 1),
+                Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+                RepositoryRoot: fixture.Root),
+            CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Null(execution.Result.Artifacts);
-        Assert.Null(execution.Inventory);
         Assert.Equal("scoped-coverage-not-reusable", execution.InventoryIneligibilityReason);
     }
 
@@ -321,14 +326,15 @@ public sealed partial class CoverageEvidenceProducerTests
             CancellationToken cancellationToken = default)
         {
             var execution = await Producer.RunWithInventoryAsync(
-                Declaration,
-                solution == string.Empty ? Solution : solution,
-                Output,
-                diff,
-                CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
-                cancellationToken,
-                artifactWriter: new EvidenceArtifactWriter(Declaration, ArtifactRoot),
-                repositoryRoot: Root);
+                new(
+                    Producer: Declaration,
+                    SolutionPath: solution == string.Empty ? Solution : solution,
+                    ExecutionRoot: Output,
+                    DiffSnapshot: diff,
+                    Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+                    ArtifactWriter: new EvidenceArtifactWriter(Declaration, ArtifactRoot),
+                    RepositoryRoot: Root),
+                cancellationToken);
             return execution.Result;
         }
 

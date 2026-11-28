@@ -846,11 +846,17 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         sqlPath,
     ];
 
-    private static async Task RequireDockerAsync()
+    private static Task RequireDockerAsync() => RequireDockerAsync(BoundedProcessRunner.RequireDockerAsync);
+
+    /// <summary>Classifies a bounded Docker prerequisite check for the fixture's first-work diagnostics.</summary>
+    /// <param name="checkDocker">The Docker prerequisite check, supplied explicitly for deterministic fixture tests.</param>
+    /// <returns>A task that completes when the daemon is available.</returns>
+    internal static async Task RequireDockerAsync(Func<Task> checkDocker)
     {
+        ArgumentNullException.ThrowIfNull(checkDocker);
         try
         {
-            await BoundedProcessRunner.RequireDockerAsync().ConfigureAwait(false);
+            await checkDocker().ConfigureAwait(false);
         }
         catch (InvalidOperationException exception)
         {

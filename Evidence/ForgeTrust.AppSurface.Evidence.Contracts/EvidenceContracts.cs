@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
@@ -295,6 +294,10 @@ public sealed record EvidenceProducerDeclaration(
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EvidenceTestDeclaration? Test { get; init; }
+
+    /// <summary>Gets whether runtime dispatch treats this declaration as the built-in coverage producer.</summary>
+    /// <remarks>Preserves the original kind for serialization. Planner validation uses its own exact kind comparison.</remarks>
+    internal bool IsCoverageProducer() => string.Equals(Kind, "coverage", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Gets the declared test projects and source scope of a scoped patch coverage claim; <see langword="null"/> for an ordinary coverage producer.
@@ -683,6 +686,9 @@ public sealed record EvidencePlan(
     string PlanDigest,
     EvidencePolicy? PolicySnapshot = null)
 {
+    /// <summary>Gets the baseline version for plans and manifests that do not use version 1.1 features.</summary>
+    public static string CurrentContractVersion => EvidenceContractVersions.V10;
+
     /// <summary>Maximum size of a captured patch shared by planning, coverage, and receipt preparation.</summary>
     internal const int MaximumCapturedPatchBytes = 20 * 1024 * 1024;
 
@@ -1369,8 +1375,19 @@ public static class EvidenceArtifactValidation
     /// </summary>
     /// <param name="producer">Producer declaration that owns the slots.</param>
     /// <param name="artifacts">Producer-returned artifact metadata.</param>
-    /// <returns><see langword="true"/> when every artifact is declared, bounded, and valid.</returns>
+    /// <returns><see langword="true"/> when every artifact is valid and every required slot is filled.</returns>
     public static bool AreValid(EvidenceProducerDeclaration producer, IReadOnlyList<EvidenceArtifactResult>? artifacts)
+        => AreValid(producer, artifacts, requireAllRequiredSlots: true);
+
+    /// <summary>Validates all supplied artifacts and optionally requires every required slot to be filled.</summary>
+    /// <param name="producer">Producer declaration that owns the slots.</param>
+    /// <param name="artifacts">Producer-returned artifact metadata.</param>
+    /// <param name="requireAllRequiredSlots">Use <see langword="false"/> for incomplete 1.1 results that may omit required artifacts.</param>
+    /// <returns><see langword="true"/> when all supplied artifacts and the requested slot completeness are valid.</returns>
+    internal static bool AreValid(
+        EvidenceProducerDeclaration producer,
+        IReadOnlyList<EvidenceArtifactResult>? artifacts,
+        bool requireAllRequiredSlots)
     {
         ArgumentNullException.ThrowIfNull(producer);
         artifacts ??= [];
@@ -1430,7 +1447,7 @@ public static class EvidenceArtifactValidation
             }
         }
 
-        return producer.ArtifactSlots.Where(static slot => slot.Required)
+        return !requireAllRequiredSlots || producer.ArtifactSlots.Where(static slot => slot.Required)
             .All(slot => artifacts.Any(artifact => string.Equals(artifact.LogicalName, slot.LogicalName, StringComparison.Ordinal)));
     }
 
@@ -1544,7 +1561,10 @@ public static class EvidenceArtifactValidation
         catch (DirectoryNotFoundException) { }
     }
 
-    private static bool IsReservedSegment(string segment)
+    /// <summary>Checks whether a portable path segment is reserved or normalized specially by Windows.</summary>
+    /// <param name="segment">One path segment without a directory separator.</param>
+    /// <returns><see langword="true"/> for trailing dots or spaces and reserved device-name stems.</returns>
+    internal static bool IsReservedSegment(string segment)
     {
         if (segment.EndsWith('.') || segment.EndsWith(' ')) return true;
         var stem = segment.Split('.')[0];
@@ -1557,165 +1577,6 @@ public static class EvidenceArtifactValidation
     }
 
     private static bool IsSha256(string? value) => value is { Length: 64 } && value.All(static character => char.IsAsciiHexDigit(character));
-}
-
-/// <summary>
-/// Serializes contract objects deterministically for evidence identity and verification.
-/// </summary>
-public static class EvidenceCanonicalJson
-{
-    /// <summary>
-    /// Serializes a value as canonical UTF-8 JSON with ordinal object-property order.
-    /// </summary>
-    /// <typeparam name="TValue">Value type to serialize.</typeparam>
-    /// <param name="value">Value to serialize.</param>
-    /// <returns>Canonical UTF-8 JSON bytes.</returns>
-    /// <remarks>Enum serialization preserves the generic <see cref="JsonStringEnumConverter"/> behavior for contract and consumer-defined enums.</remarks>
-    public static byte[] Serialize<TValue>(TValue value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-
-        using var document = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions));
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            WriteElement(document.RootElement, writer);
-        }
-
-        return stream.ToArray();
-    }
-
-    /// <summary>
-    /// Deserializes a JSON document using the compatible contract serializer behavior.
-    /// </summary>
-    /// <typeparam name="TValue">Value type to deserialize.</typeparam>
-    /// <param name="utf8Json">JSON bytes.</param>
-    /// <returns>The deserialized value.</returns>
-    /// <remarks>
-    /// Generic values, including evidence policies, preserve <see cref="JsonStringEnumConverter"/> behavior.
-    /// Reads of <see cref="EvidencePlan"/> and <see cref="EvidenceManifest"/> require defined named enum tokens;
-    /// numeric enum tokens and numeric strings are rejected. Those contracts must use version 1.0 or 1.1,
-    /// and an explicit manifest reuse count must match its producer results.
-    /// </remarks>
-    public static TValue Deserialize<TValue>(ReadOnlySpan<byte> utf8Json)
-    {
-        var serializerOptions = typeof(TValue) == typeof(EvidencePlan) || typeof(TValue) == typeof(EvidenceManifest)
-            ? StrictContractReaderOptions
-            : SerializerOptions;
-        var value = JsonSerializer.Deserialize<TValue>(utf8Json, serializerOptions);
-        if (value is EvidencePlan plan && !EvidenceContractVersions.IsSupported(plan.ContractVersion)
-            || value is EvidenceManifest manifest && !EvidenceContractVersions.IsSupported(manifest.ContractVersion))
-        {
-            throw new JsonException("Unsupported evidence contract version.");
-        }
-
-        if (value is EvidenceManifest result)
-        {
-            using var document = JsonDocument.Parse(utf8Json.ToArray());
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                if (string.Equals(property.Name, nameof(EvidenceManifest.ReuseCount), StringComparison.OrdinalIgnoreCase)
-                    && (property.Value.ValueKind != JsonValueKind.Number || !property.Value.TryGetInt32(out var count) || count != result.ReuseCount))
-                {
-                    throw new JsonException("ReuseCount does not match the producer results.");
-                }
-            }
-        }
-
-        return value ?? throw new InvalidOperationException($"Evidence JSON did not contain a {typeof(TValue).Name} value.");
-    }
-
-    private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions(strictContractEnums: false);
-
-    private static readonly JsonSerializerOptions StrictContractReaderOptions = CreateSerializerOptions(strictContractEnums: true);
-
-    private static JsonSerializerOptions CreateSerializerOptions(bool strictContractEnums)
-    {
-        var options = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            WriteIndented = false,
-        };
-
-        if (strictContractEnums)
-        {
-            options.Converters.Add(new NamedEnumConverter<EvidenceProfileScope>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceExecutionVerdict>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceClaimKind>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceClaimEligibility>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceEnvelopeStatus>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceProducerOutcome>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceResourceOutcome>());
-            options.Converters.Add(new NamedEnumConverter<EvidenceCoverageTestResultFormat>());
-        }
-
-        // Preserve the original generic enum behavior for serialization, policy reads, and other consumers.
-        options.Converters.Add(new JsonStringEnumConverter());
-        return options;
-    }
-
-    // Used only by the EvidencePlan and EvidenceManifest reader options. The generic fallback remains
-    // JsonStringEnumConverter so consumer enums and legacy policy input keep their existing semantics.
-    private sealed class NamedEnumConverter<TEnum> : JsonConverter<TEnum> where TEnum : struct, Enum
-    {
-        public override TEnum Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            var text = reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
-            if (text is not null
-                && Enum.GetNames<TEnum>().FirstOrDefault(candidate => string.Equals(candidate, text, StringComparison.OrdinalIgnoreCase)) is { } name)
-            {
-                return Enum.Parse<TEnum>(name);
-            }
-
-            throw new JsonException($"Expected a named {typeof(TEnum).Name} value.");
-        }
-
-        public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options)
-            => throw new NotSupportedException("The strict contract reader converter does not support serialization.");
-    }
-
-    private static void WriteElement(JsonElement element, Utf8JsonWriter writer)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                writer.WriteStartObject();
-                foreach (var property in element.EnumerateObject().OrderBy(static property => property.Name, StringComparer.Ordinal))
-                {
-                    writer.WritePropertyName(property.Name);
-                    WriteElement(property.Value, writer);
-                }
-
-                writer.WriteEndObject();
-                break;
-            case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (var item in element.EnumerateArray())
-                {
-                    WriteElement(item, writer);
-                }
-
-                writer.WriteEndArray();
-                break;
-            case JsonValueKind.String:
-                writer.WriteStringValue(element.GetString());
-                break;
-            case JsonValueKind.Number:
-                writer.WriteRawValue(element.GetRawText(), skipInputValidation: true);
-                break;
-            case JsonValueKind.True:
-                writer.WriteBooleanValue(true);
-                break;
-            case JsonValueKind.False:
-                writer.WriteBooleanValue(false);
-                break;
-            case JsonValueKind.Null:
-                writer.WriteNullValue();
-                break;
-            default:
-                throw new InvalidOperationException($"Unsupported JSON token {element.ValueKind}.");
-        }
-    }
 }
 
 /// <summary>
@@ -1768,8 +1629,6 @@ public static class EvidenceManifestBuilder
         var declaredResources = plan.Profile.Resources
             .GroupBy(static resource => resource.Id, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
-        var hasReuseData = producerResults.Any(static result =>
-            result.Outcome == EvidenceProducerOutcome.Reused || result.HasAnyReuseProvenance());
         var declarationsRequireV11 = EvidenceContractVersions.RequiresVersion11(plan.PolicySnapshot, plan.Profile);
         var invalid = !EvidenceContractVersions.IsSupported(plan.ContractVersion)
             || !Enum.IsDefined(plan.Profile.Scope)
@@ -1778,14 +1637,11 @@ public static class EvidenceManifestBuilder
             || duplicateResults
             || duplicateResourceResults
             || plan.Profile.Resources.Count != declaredResources.Count
-            || resourceResults.Any(static result => result.Outcome == EvidenceResourceOutcome.NotRequiredForExecution)
-                && plan.ContractVersion != EvidenceContractVersions.V11
             || producerResults.Any(static result => !Enum.IsDefined(result.Outcome))
             || plan.ContractVersion == EvidenceContractVersions.V11 && producerResults.Any(static result => result.Outcome == EvidenceProducerOutcome.Invalid)
             || resourceResults.Any(static result => !Enum.IsDefined(result.Outcome))
             || metrics.PreparationMilliseconds < 0 || metrics.ReceiptWaitMilliseconds < 0 || metrics.ArtifactRestoreMilliseconds < 0
-            || metrics.HasNonzeroReuseTimings() && plan.ContractVersion != EvidenceContractVersions.V11
-            || hasReuseData && plan.ContractVersion != EvidenceContractVersions.V11
+            || plan.ContractVersion != EvidenceContractVersions.V11 && UsesVersion11ResultData(producerResults, resourceResults, metrics)
             || declarationsRequireV11 && plan.ContractVersion != EvidenceContractVersions.V11
             || results.Keys.Any(id => !producerDeclarations.ContainsKey(id))
             || resources.Keys.Any(id => !declaredResources.ContainsKey(id))
@@ -1795,10 +1651,10 @@ public static class EvidenceManifestBuilder
                 || pair.Value.Outcome == EvidenceProducerOutcome.Reused && !IsValidReuseProvenance(pair.Value)
                 || pair.Value.Outcome != EvidenceProducerOutcome.Reused && pair.Value.HasAnyReuseProvenance()
                 || !EvidenceArtifactValidation.AreValid(
-                    plan.ContractVersion == EvidenceContractVersions.V11 && pair.Value.Outcome is not (EvidenceProducerOutcome.Passed or EvidenceProducerOutcome.Reused)
-                        ? declaration with { ArtifactSlots = declaration.ArtifactSlots.Select(static slot => slot with { Required = false }).ToArray() }
-                        : declaration,
-                    pair.Value.Artifacts));
+                    declaration,
+                    pair.Value.Artifacts,
+                    requireAllRequiredSlots: plan.ContractVersion != EvidenceContractVersions.V11
+                        || pair.Value.Outcome is EvidenceProducerOutcome.Passed or EvidenceProducerOutcome.Reused));
         var closed = new List<string>();
         var unmediated = new List<string>();
 
@@ -1877,6 +1733,29 @@ public static class EvidenceManifestBuilder
         return draft with { ManifestDigest = EvidenceDigest.CanonicalSha256(draft) };
     }
 
+    /// <summary>Verifies a plan's supported contract version, policy snapshot, and canonical digests.</summary>
+    /// <param name="plan">The resolved plan to verify, with its policy snapshot and any recorded patch digest.</param>
+    /// <returns>Whether the plan is internally consistent and its optional patch digest is canonical.</returns>
+    /// <remarks>Callers that admit execution must separately resolve the recorded policy and check the selected plan.</remarks>
+    internal static bool VerifyPlanIntegrity(EvidencePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        if (!EvidenceContractVersions.IsSupported(plan.ContractVersion)
+            || plan.ContractVersion == EvidenceContractVersions.V10
+                && EvidenceContractVersions.RequiresVersion11(plan.PolicySnapshot, plan.Profile)
+            || plan.PolicySnapshot is null
+            || plan.PatchSha256 is { } patch && (patch.Length != 64 || !patch.All(char.IsAsciiHexDigitLower))
+            || !string.Equals(plan.PolicyDigest, EvidenceDigest.CanonicalSha256(plan.PolicySnapshot), StringComparison.Ordinal)
+            || !string.Equals(plan.DiffDigest, EvidenceDigest.CanonicalSha256(plan.ChangedPaths), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var planWithoutDigest = plan with { PlanDigest = string.Empty };
+        return string.Equals(plan.PlanDigest, EvidenceDigest.CanonicalSha256(planWithoutDigest), StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// Validates that a manifest still binds to a supplied plan and canonical manifest content.
     /// This detects inconsistent or edited claim fields, but does not authenticate the origin of a plan or manifest.
@@ -1890,26 +1769,15 @@ public static class EvidenceManifestBuilder
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(manifest);
 
-        if (!EvidenceContractVersions.IsSupported(plan.ContractVersion)
-            || !EvidenceContractVersions.IsSupported(manifest.ContractVersion)
-            || !string.Equals(plan.ContractVersion, manifest.ContractVersion, StringComparison.Ordinal)
-            || plan.ContractVersion == EvidenceContractVersions.V10 && (
-                EvidenceContractVersions.RequiresVersion11(plan.PolicySnapshot, plan.Profile)
-                || manifest.Metrics.HasNonzeroReuseTimings()
-                || manifest.ReuseCount != 0
-                || manifest.ProducerResults.Any(static result => result.HasAnyReuseProvenance())
-                || manifest.ResourceResults.Any(static result => result.Outcome == EvidenceResourceOutcome.NotRequiredForExecution)
-                || manifest.ClaimKind == EvidenceClaimKind.LocalReusedComplete))
+        if (!string.Equals(plan.ContractVersion, manifest.ContractVersion, StringComparison.Ordinal)
+            || plan.ContractVersion == EvidenceContractVersions.V10
+                && (UsesVersion11ResultData(manifest.ProducerResults, manifest.ResourceResults, manifest.Metrics)
+                    || manifest.ClaimKind == EvidenceClaimKind.LocalReusedComplete))
         {
             return false;
         }
 
-        var planWithoutDigest = plan with { PlanDigest = string.Empty };
-        if (plan.PolicySnapshot is null
-            || plan.PatchSha256 is { } patch && (patch.Length != 64 || !patch.All(char.IsAsciiHexDigitLower))
-            || !string.Equals(plan.PolicyDigest, EvidenceDigest.CanonicalSha256(plan.PolicySnapshot), StringComparison.Ordinal)
-            || !string.Equals(plan.DiffDigest, EvidenceDigest.CanonicalSha256(plan.ChangedPaths), StringComparison.Ordinal)
-            || !string.Equals(plan.PlanDigest, EvidenceDigest.CanonicalSha256(planWithoutDigest), StringComparison.Ordinal)
+        if (!VerifyPlanIntegrity(plan)
             || !string.Equals(plan.PlanDigest, manifest.PlanDigest, StringComparison.Ordinal))
         {
             return false;
@@ -1946,6 +1814,14 @@ public static class EvidenceManifestBuilder
             && !manifest.ProducerResults.Any(static result => result.Outcome == EvidenceProducerOutcome.Reused)
             && Verify(plan, manifest);
     }
+
+    private static bool UsesVersion11ResultData(
+        IReadOnlyList<EvidenceProducerResult> producerResults,
+        IReadOnlyList<EvidenceResourceResult> resourceResults,
+        EvidenceExecutionMetrics metrics)
+        => metrics.HasNonzeroReuseTimings()
+            || producerResults.Any(static result => result.Outcome == EvidenceProducerOutcome.Reused || result.HasAnyReuseProvenance())
+            || resourceResults.Any(static result => result.Outcome == EvidenceResourceOutcome.NotRequiredForExecution);
 
     private static bool IsValidReuseProvenance(EvidenceProducerResult result)
         => result.ProducerKey is { Length: 64 } key && key.All(char.IsAsciiHexDigitLower)

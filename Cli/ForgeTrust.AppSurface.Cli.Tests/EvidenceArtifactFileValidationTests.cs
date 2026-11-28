@@ -214,10 +214,10 @@ public sealed class EvidenceArtifactFileValidationTests
         var planner = new EvidencePlanner();
         var plan = planner.Resolve(new EvidencePolicy("sample", "1", profile.Id, [profile], []),
             [new NormalizedDiffPath("src/Changed.cs")]);
-        var output = Path.Join(directory.Path, "evidence");
+        var output = TestPathUtils.PathUnder(directory.Path, "evidence");
         const string report = "coverage/report.xml";
         var (_, custodyRoot) = EvidenceReuseExecutionResolver.GetProducerRoots(output, coverageId, !multipleProducers);
-        var reportPath = Path.Join(custodyRoot, report);
+        var reportPath = TestPathUtils.PathUnder(custodyRoot, report);
         Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
         await File.WriteAllBytesAsync(reportPath, Content);
         var artifact = new EvidenceArtifactResult(CoverageEvidenceInventory.LogicalName, report,
@@ -227,8 +227,8 @@ public sealed class EvidenceArtifactFileValidationTests
         var workflow = new EvidenceCliWorkflow(planner);
         await workflow.WritePlanAsync(plan, output, CancellationToken.None);
         await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, results), output, CancellationToken.None);
-        var planPath = Path.Join(output, "evidence-plan.json");
-        var manifestPath = Path.Join(output, "evidence-manifest.json");
+        var planPath = TestPathUtils.PathUnder(output, "evidence-plan.json");
+        var manifestPath = TestPathUtils.PathUnder(output, "evidence-manifest.json");
 
         var verified = await workflow.VerifyAsync(planPath, manifestPath, CancellationToken.None, requireGateAdmission: true);
         Assert.Equal(EvidenceClaimKind.TargetedComplete, verified.Manifest.ClaimKind);

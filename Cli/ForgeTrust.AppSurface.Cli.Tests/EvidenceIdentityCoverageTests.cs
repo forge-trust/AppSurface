@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Diagnostics;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
@@ -458,30 +457,9 @@ public sealed class EvidenceIdentityCoverageTests
             await GitAsync("add", "--all");
             await GitAsync("commit", "--quiet", "--allow-empty", "-m", "identity coverage");
         }
-        private async Task<string> GitAsync(params string[] arguments)
-        {
-            using var process = new Process { StartInfo = new ProcessStartInfo("git") { WorkingDirectory = Root, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false } };
-            foreach (var name in process.StartInfo.Environment.Keys.Where(name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray())
-                process.StartInfo.Environment.Remove(name);
-            process.StartInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            process.StartInfo.Environment["GIT_CONFIG_GLOBAL"] = TestPathUtils.PathUnder(Root, "absent-global-config");
-            foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-            process.Start();
-            var output = process.StandardOutput.ReadToEndAsync();
-            var error = process.StandardError.ReadToEndAsync();
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            try { await process.WaitForExitAsync(deadline.Token); }
-            catch
-            {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync(CancellationToken.None);
-                await Task.WhenAll(output, error);
-                throw;
-            }
-            await Task.WhenAll(output, error);
-            if (process.ExitCode != 0) throw new InvalidOperationException(await error);
-            return await output;
-        }
+        private Task<string> GitAsync(params string[] arguments)
+            => EvidenceGitTestRunner.RunAsync(Root, arguments);
+
         public void Dispose() => _directory.Dispose();
     }
 }

@@ -213,18 +213,8 @@ public sealed class EvidenceIdentityProcessCoverageTests
                 foreach (var path in files) File.WriteAllText(TestPathUtils.PathUnder(root, path), "stable input");
                 File.WriteAllText(TestPathUtils.PathUnder(root, "git-probe-files.json"), JsonSerializer.Serialize(files));
             }
-            var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-            var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent!.Name;
-            var source = TestPathUtils.PathUnder(repository, "tests", "ForgeTrust.AppSurface.CoverageLeaseProbe", "bin", configuration, "net10.0");
-            var executable = "ForgeTrust.AppSurface.CoverageLeaseProbe" + (OperatingSystem.IsWindows() ? ".exe" : "");
-            Assert.True(File.Exists(TestPathUtils.PathUnder(source, executable)));
             var bin = TestPathUtils.PathUnder(root, "git-bin");
-            Directory.CreateDirectory(bin);
-            foreach (var file in Directory.EnumerateFiles(source))
-                File.Copy(file, TestPathUtils.PathUnder(bin, Path.GetFileName(file)));
-            var git = TestPathUtils.PathUnder(bin, OperatingSystem.IsWindows() ? "git.exe" : "git");
-            File.Copy(TestPathUtils.PathUnder(bin, executable), git);
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(git, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            CoverageLeaseProbeStager.Stage(bin, "git");
             var values = new Dictionary<string, string>
             {
                 ["APPSURFACE_IDENTITY_GIT_PROBE_ROOT"] = root,

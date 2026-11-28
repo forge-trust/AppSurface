@@ -324,6 +324,18 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Split-Path -Parent $docsStylesheet)
           Set-Content -NoNewline -Path $docsStylesheet -Value ""
 
+      - name: Prepare packed reuse journey feed
+        shell: pwsh
+        run: |
+          $feed = Join-Path $env:RUNNER_TEMP 'packed-reuse-journey-feed'
+          dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release --no-restore -- `
+            --operation pack-candidate-feed --mode reuse --repository $env:GITHUB_WORKSPACE --output $feed `
+            --version $env:COVERAGE_CLI_CANDIDATE_VERSION --source-commit $env:COVERAGE_SOURCE_COMMIT `
+            --dotnet (Get-Command dotnet).Source --no-restore true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:GITHUB_ENV -Value "APPSURFACE_PACKED_JOURNEY_FEED=$feed"
+          Add-Content -Path $env:GITHUB_ENV -Value "APPSURFACE_PACKED_JOURNEY_VERSION=$env:COVERAGE_CLI_CANDIDATE_VERSION"
+
       - name: Run coverage security contracts
         shell: pwsh
         env:
@@ -355,23 +367,6 @@ jobs:
           COVERAGE_DOGFOOD_OUTPUT: ${{ runner.temp }}/coverage-native-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           if (Test-Path -LiteralPath $env:COVERAGE_DOGFOOD_OUTPUT) { throw "Native coverage output path is not fresh." }
-          $collection = "${{ runner.temp }}/coverage-native-results"
-          $timingsPath = Join-Path $collection 'timings.json'
-          $timings = Get-Content -Raw -LiteralPath $timingsPath | ConvertFrom-Json
-          $projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')
-          $reports = @{}
-          foreach ($entry in $timings.projects) {
-            if (!$entry.coverageFile -or $entry.project -cnotin $projects -or $reports.ContainsKey($entry.project)) {
-              throw 'Native coverage report index is invalid.'
-            }
-            # coverage run stages an exact copy of the original collector bytes at coverageFile.
-            $reports[$entry.project] = Join-Path $collection $entry.coverageFile
-          }
-          if ($projects.Count -eq 0 -or $reports.Count -ne $projects.Count) {
-            throw 'Expected exactly the declared native test project reports.'
-          }
-          $indexPath = Join-Path $env:RUNNER_TEMP 'coverage-native-report-index.json'
-          $reports | ConvertTo-Json | Set-Content -LiteralPath $indexPath
           $platform = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "Darwin" } else { "Linux" }
           $contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }
           $diffBase = if ($contractVersion -eq '3') { $env:COVERAGE_V3_DIFF_BASE } else { $env:COVERAGE_GATE_DIFF_BASE }
@@ -381,7 +376,7 @@ jobs:
           $adapter = @('--operation', 'native', '--contract-version', $contractVersion,
             '--repository', $PWD.Path, '--cli', $env:COVERAGE_CLI_PATH,
             '--output', $env:COVERAGE_DOGFOOD_OUTPUT, '--configuration', 'Release', '--native-platform', $platform,
-            '--raw-index', $indexPath, '--timings', $timingsPath,
+            '--collection-root', "${{ runner.temp }}/coverage-native-results",
             '--run-scope', $env:COVERAGE_RUN_SCOPE, '--run-id', $env:COVERAGE_RUN_ID, '--attempt', $env:COVERAGE_RUN_ATTEMPT)
           if ($contractVersion -eq '3') { $adapter += @('--diff-policy-id', 'appsurface-visual-baseline-png-v1') }
           if ($diffBase) { $adapter += @('--diff-base', $diffBase) }
@@ -431,11 +426,13 @@ jobs:
           name: coverage-security-diagnostics-${{ matrix.os }}
           path: |
             ${{ runner.temp }}/coverage-native-results
+            ${{ runner.temp }}/packed-reuse-journey-feed/pack-logs/pack-*.log
             ${{ runner.temp }}/packed-reuse-diagnostics/**/pack-*.log
             ${{ runner.temp }}/packed-reuse-diagnostics/**/source.log
             ${{ runner.temp }}/packed-reuse-diagnostics/**/proof/proof.json
             ${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log
-            ${{ runner.temp }}/packed-reuse-diagnostics/**/consumer-proof.log
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/proof/packed-progress.jsonl
+            ${{ runner.temp }}/packed-reuse-diagnostics/**/fixture-progress.jsonl
           if-no-files-found: warn
           retention-days: 7
 

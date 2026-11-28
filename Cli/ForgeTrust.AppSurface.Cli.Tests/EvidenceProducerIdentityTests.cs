@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
@@ -526,45 +525,12 @@ public sealed class EvidenceProducerIdentityTests
             await GitAsync("add", "--all");
             await GitAsync("commit", "--quiet", "-m", message, "--allow-empty");
         }
-        internal async Task GitAsync(params string[] arguments)
-        {
-            _ = await RunGitAsync(captureOutput: false, arguments);
-        }
+        internal Task GitAsync(params string[] arguments)
+            => EvidenceGitTestRunner.RunAsync(Root, arguments);
 
-        internal Task<string> GitOutputAsync(params string[] arguments)
-            => RunGitAsync(captureOutput: true, arguments);
+        internal async Task<string> GitOutputAsync(params string[] arguments)
+            => (await EvidenceGitTestRunner.RunAsync(Root, arguments)).TrimEnd('\r', '\n');
 
-        private async Task<string> RunGitAsync(bool captureOutput, params string[] arguments)
-        {
-            using var process = new Process { StartInfo = new ProcessStartInfo("git") { WorkingDirectory = Root, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false } };
-            foreach (var name in process.StartInfo.Environment.Keys.Where(name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray())
-                process.StartInfo.Environment.Remove(name);
-            process.StartInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            process.StartInfo.Environment["GIT_CONFIG_GLOBAL"] = TestPathUtils.PathUnder(Root, "absent-global-config");
-            foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-            process.Start();
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var stdout = process.StandardOutput.ReadToEndAsync(deadline.Token);
-            var stderr = process.StandardError.ReadToEndAsync(deadline.Token);
-            try
-            {
-                await process.WaitForExitAsync(deadline.Token);
-                await Task.WhenAll(stdout, stderr).WaitAsync(deadline.Token);
-            }
-            catch (OperationCanceledException) when (deadline.IsCancellationRequested)
-            {
-                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                try { await process.WaitForExitAsync(cleanup.Token); } catch (OperationCanceledException) { }
-                try { await Task.WhenAll(stdout, stderr).WaitAsync(cleanup.Token); } catch (OperationCanceledException) { }
-                throw new TimeoutException("Git fixture command exceeded its 20-second deadline.");
-            }
-
-            var output = await stdout;
-            var error = await stderr;
-            if (process.ExitCode != 0) throw new InvalidOperationException(error);
-            return captureOutput ? output.TrimEnd('\r', '\n') : string.Empty;
-        }
         public void Dispose() => new TestDirectory(Root).Dispose();
     }
 }

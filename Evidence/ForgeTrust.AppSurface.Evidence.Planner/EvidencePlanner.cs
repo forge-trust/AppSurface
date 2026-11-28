@@ -112,7 +112,7 @@ public sealed class EvidencePlanner
 
         var declarationsRequireV11 = EvidenceContractVersions.RequiresVersion11(policy, profile);
         var draft = new EvidencePlan(
-            ContractVersion: declarationsRequireV11 ? EvidenceContractVersions.V11 : EvidenceContractVersions.V10,
+            ContractVersion: declarationsRequireV11 ? EvidenceContractVersions.V11 : EvidencePlan.CurrentContractVersion,
             PolicyId: policy.Id,
             PolicyDigest: policyDigest,
             DiffDigest: diffDigest,

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -290,7 +291,9 @@ public sealed class EvidenceReceiptStoreTests
                     sourceRoot, DateTimeOffset.UtcNow, CancellationToken.None);
                 Assert.True(publication.Published, publication.Reason);
                 var recovered = lease.ProposeReadReceipt();
-                Assert.True(recovered.IsCandidate);
+                Assert.Equal(EvidenceReceiptReadOutcome.AuthorityEligible, recovered.Outcome);
+                Assert.False(recovered.IsCandidate);
+                Assert.Null(recovered.Result);
                 Assert.Null(recovered.State?.AuditIntentExecutionId);
                 Assert.False(recovered.State?.AuditMismatch);
                 Assert.Equal(publication.PayloadDirectoryName, recovered.State?.PayloadDirectoryName);
@@ -364,6 +367,8 @@ public sealed class EvidenceReceiptStoreTests
             var view = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") });
             var peek = view.Peek(key);
             Assert.Equal(EvidenceReceiptReadOutcome.Candidate, peek.Outcome);
+            Assert.True(peek.IsCandidate);
+            Assert.Equal("candidate", peek.Reason);
             Assert.Equal(EvidenceProducerOutcome.Passed, peek.Result?.Outcome);
             Assert.Equal(39, peek.OriginElapsedMilliseconds);
             Assert.Equal(manifest.ManifestDigest, peek.OriginManifest?.ManifestDigest);
@@ -420,28 +425,56 @@ public sealed class EvidenceReceiptStoreTests
         var sourceRoot = NewRoot();
         try
         {
+            var clock = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+            var repository = Hash("repo").ToLowerInvariant();
+            var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
+            { RootDirectory = storeRoot, RepositoryNamespace = repository, Clock = clock });
+
             var producer = ReceiptProducer();
             var plan = CreatePlan(producer);
             var writer = new EvidenceArtifactWriter(producer, sourceRoot);
             await writer.WriteAsync("report", "reports/result.txt", "report"u8.ToArray());
             var result = new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed,
                 ["assertion"], string.Empty, writer.WrittenArtifacts);
+            string settledReport;
+            using (var settledLease = Assert.Single(await store.AcquireAsync([Hash("settled-receipt")], CancellationToken.None)))
+            {
+                settledLease.EstablishAuthority("settled-execution");
+                var settled = await settledLease.PublishAsync("settled-execution", plan,
+                    EvidenceManifestBuilder.Build(plan, [result]), producer.Id, sourceRoot, clock.GetUtcNow(), CancellationToken.None);
+                Assert.True(settled.Published, settled.Reason);
+                settledReport = TestPathUtils.PathUnder(settledLease.DirectoryPath,
+                    settled.PayloadDirectoryName!, "artifacts", "reports", "result.txt");
+            }
+
             var overhead = EvidenceCanonicalJson.Serialize(result).Length;
             result = result with { Diagnostic = new string('x', rawBytes - overhead) };
             Assert.Equal(rawBytes, EvidenceCanonicalJson.Serialize(result).Length);
             var manifest = EvidenceManifestBuilder.Build(plan, [result]);
-            var store = EvidenceReceiptStore.Open(new EvidenceReceiptStoreOptions
-            { RootDirectory = storeRoot, RepositoryNamespace = Hash("repo") });
             using var lease = Assert.Single(await store.AcquireAsync([Hash("producer")], CancellationToken.None));
             lease.EstablishAuthority("oversized-authority");
             var before = lease.ReadState();
+            // Reserving payload capacity would run maintenance and reclaim the expired settled receipt.
+            clock.Advance(TimeSpan.FromDays(7));
+            var indexPath = TestPathUtils.PathUnder(storeRoot, "quota-index.json");
+            var indexBefore = await File.ReadAllBytesAsync(indexPath);
+            Assert.True(File.Exists(settledReport));
+            var artifactCopyAttempted = false;
 
-            var publication = await lease.PublishAsync("oversized-authority", plan, manifest, producer.Id,
-                sourceRoot, DateTimeOffset.UtcNow, CancellationToken.None);
+            var outcomes = await EvidenceReceiptStore.EvidenceReceiptKeyLease.PublishInvocationCoreAsync(
+                storeRoot, repository, "oversized-authority", plan, manifest,
+                [new EvidenceReceiptPublicationRequest(lease, producer.Id, sourceRoot, clock.GetUtcNow())],
+                CancellationToken.None, beforeArtifactCopyForTests: (_, _) => artifactCopyAttempted = true);
+            var publication = outcomes[producer.Id];
 
             Assert.False(publication.Published);
             Assert.Equal(expectedReason, publication.Reason);
             Assert.Equal(before, lease.ReadState());
+            var indexAfter = await File.ReadAllBytesAsync(indexPath);
+            var quotaChanged = !indexBefore.AsSpan().SequenceEqual(indexAfter);
+            Assert.False(quotaChanged || artifactCopyAttempted,
+                $"Oversized authority changed the quota index ({quotaChanged}) or attempted an artifact copy ({artifactCopyAttempted}).");
+            Assert.Equal("report", await File.ReadAllTextAsync(settledReport));
             Assert.DoesNotContain(Directory.EnumerateDirectories(lease.DirectoryPath), path =>
                 Path.GetFileName(path).StartsWith("payload", StringComparison.Ordinal));
             Assert.Equal("report", await File.ReadAllTextAsync(Path.Combine(sourceRoot, "reports/result.txt")));

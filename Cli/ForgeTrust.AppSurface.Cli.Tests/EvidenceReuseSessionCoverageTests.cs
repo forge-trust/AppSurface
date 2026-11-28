@@ -494,6 +494,58 @@ public sealed class EvidenceReuseSessionCoverageTests
     }
 
     [Fact]
+    public async Task InputChangeSettlementFailureKeepsPublicationFailureAttribution()
+    {
+        using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();
+        await repository.WriteAsync("src/input.txt", "input before failed settlement");
+        await repository.CommitAsync();
+        var producer = new ProbeProducer("failed-input-settlement-probe", "assertion");
+        var declaration = ProbeDeclaration(producer.Id, "assertion");
+        var plan = CreatePlan(declaration);
+        var store = TestPathUtils.PathUnder(repository.Root, "failed-input-settlement-store");
+        var artifacts = TestPathUtils.PathUnder(repository.Root, "failed-input-settlement-artifacts");
+        await using var session = await EvidenceProducerReuseSession.PrepareAsync(plan, Registrations(producer),
+            new Dictionary<string, string>(), ReuseOptions(repository.Root, store), _ => artifacts, CancellationToken.None);
+        var key = Assert.IsType<string>(Assert.Single(session.Decisions).ProducerKey);
+        Assert.True(await session.BeginExecutionAsync(CancellationToken.None));
+        var result = await producer.ProduceAsync(new EvidenceProducerContext(plan, declaration,
+            TimeProvider.System, session.GetWriter(declaration)), CancellationToken.None);
+        Assert.True(await session.BeforeCleanupAsync(true, CancellationToken.None));
+        await repository.WriteAsync("src/input.txt", "input changed after cleanup revalidation");
+
+        var indexPath = TestPathUtils.PathUnder(store, "quota-index.json");
+        var savedIndexPath = TestPathUtils.PathUnder(repository.Root, "saved-quota-index.json");
+        File.Move(indexPath, savedIndexPath);
+        Directory.CreateDirectory(indexPath);
+        EvidenceManifest completed;
+        try
+        {
+            completed = await session.CompleteAsync(EvidenceManifestBuilder.Build(plan, [result],
+                metrics: new EvidenceExecutionMetrics { CleanupCompleted = true }), CancellationToken.None);
+        }
+        finally
+        {
+            if (Directory.Exists(indexPath)) Directory.Delete(indexPath);
+            if (File.Exists(savedIndexPath)) File.Move(savedIndexPath, indexPath);
+        }
+
+        Assert.Equal(EvidenceExecutionVerdict.Passed, completed.ExecutionVerdict);
+        var decision = Assert.Single(session.Decisions);
+        Assert.Equal("reuse.publication_suppressed", decision.Reason);
+        Assert.Equal(EvidenceReceiptPublication.Suppressed, decision.Publication);
+        Assert.Contains("publication failed (", decision.Diagnostic, StringComparison.Ordinal);
+        Assert.Contains("Preserve unresolved authority and retry", decision.Diagnostic, StringComparison.Ordinal);
+        Assert.Equal(key, decision.ProducerKey);
+        Assert.Equal(1, producer.ExecutionCount);
+        var identity = await BuildIdentityAsync(repository.Root, plan, declaration);
+        Assert.Equal(session.ExecutionId,
+            EvidenceReceiptQuota.ReadAuthority(store, identity.RepositoryNamespace, key)?.InFlightExecutionId);
+        var receipt = EvidenceReceiptStore.OpenReadOnly(new EvidenceReceiptStoreOptions
+        { RootDirectory = store, RepositoryNamespace = identity.RepositoryNamespace });
+        Assert.False(receipt.Peek(key).IsCandidate);
+    }
+
+    [Fact]
     public async Task RepeatedKeyMaterialChangesExhaustSingleReprepareAndReleaseEveryLease()
     {
         using var repository = await EvidenceIdentityCoverageTests.TestRepository.CreateAsync();

@@ -14,6 +14,7 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Coverage" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Planner" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Validation" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
     <None Update="README.md" Pack="true" PackagePath="" />
     <None Include="schemas/*.json" Pack="true" PackagePath="schemas/%(Filename)%(Extension)" />

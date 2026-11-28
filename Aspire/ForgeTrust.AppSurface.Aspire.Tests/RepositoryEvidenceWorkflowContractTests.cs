@@ -122,6 +122,28 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     }
 
     [Fact]
+    public void NativeCoveragePreparesPackedReuseFeedAfterLockedRestoreAndBeforeCollection()
+    {
+        var job = _buildWorkflow["jobs"].AsMapping()["coverage-security-platform"].AsMapping();
+        var securitySteps = job["steps"].AsSequence();
+        var restoreStep = FindStep(securitySteps, "Restore coverage security tests (locked)");
+        var preparationStep = FindStep(securitySteps, "Prepare packed reuse journey feed");
+        Assert.True(IndexOf(securitySteps, restoreStep) < IndexOf(securitySteps, preparationStep));
+        var prepare = preparationStep["run"].AsScalar();
+        Assert.Contains("--operation pack-candidate-feed --mode reuse", prepare);
+        Assert.Contains("--source-commit $env:COVERAGE_SOURCE_COMMIT", prepare);
+        Assert.Contains("--no-restore true", prepare);
+        const string publishFeed = "APPSURFACE_PACKED_JOURNEY_FEED=$feed";
+        Assert.Contains(publishFeed, prepare);
+        Assert.Contains("APPSURFACE_PACKED_JOURNEY_VERSION=$env:COVERAGE_CLI_CANDIDATE_VERSION", prepare);
+        const string checkExit = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }";
+        Assert.Contains(checkExit, prepare);
+        Assert.True(prepare.IndexOf(checkExit, StringComparison.Ordinal) < prepare.IndexOf(publishFeed, StringComparison.Ordinal));
+        var collectorStep = FindStep(securitySteps, "Run coverage security contracts");
+        Assert.True(IndexOf(securitySteps, preparationStep) < IndexOf(securitySteps, collectorStep));
+    }
+
+    [Fact]
     public void NativeCollectorFilterMatchesTheOrderedSelectorPolicy()
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
@@ -130,7 +152,8 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var collectorStep = FindStep(securitySteps, "Run coverage security contracts");
         var collector = collectorStep["run"].AsScalar();
         var inventory = ReadSelectorInventory(repository);
-        var selectors = inventory.Select(entry => entry.Selector).ToArray();
+        var selectors = inventory.Where(entry => entry.Scope is "native" or "shared-cli")
+            .Select(entry => entry.Selector).ToArray();
         var expected = ExpectedCoverageSecurityOnlySelectors.Take(8)
             .Concat(ExpectedSharedCliSelectors.Take(2))
             .Concat(ExpectedCoverageSecurityOnlySelectors.Skip(8))
@@ -144,35 +167,14 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.Contains(loadProjects, lockedRestore);
         Assert.Contains("foreach ($project in $projects)", lockedRestore);
         Assert.Contains("dotnet restore $project --locked-mode", lockedRestore);
-        Assert.Contains("$filter = & dotnet $dogfood --print-test-filter native", collector);
-        Assert.Contains("'--test-argument', '--filter', '--test-argument', $filter", collector);
-        Assert.Contains(loadProjects, collector);
-        Assert.Contains("$arguments += @('--test-project', $project)", collector);
-        Assert.Contains("'--artifact-retention', 'full'", collector);
-        Assert.Contains("'--test-argument', '--blame-hang-timeout', '--test-argument', '2m'", collector);
-        Assert.Equal("${{ runner.temp }}/packed-reuse-diagnostics",
-            collectorStep["env"].AsMapping()["APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS"].AsScalar());
-        Assert.Contains("New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS", collector);
-        var capture = FindStep(job["steps"].AsSequence(), "Attest successful native coverage evidence")["run"].AsScalar();
-        Assert.Contains("'--raw-index', $indexPath, '--timings', $timingsPath", capture);
-        Assert.Contains(loadProjects, capture);
-        Assert.Contains("$entry.project -cnotin $projects", capture);
-        Assert.Contains("$reports.ContainsKey($entry.project)", capture);
-        Assert.Contains("$reports.Count -ne $projects.Count", capture);
+        const string collectionDirectory = "${{ runner.temp }}/coverage-native-results";
+        Assert.Contains($"'--output', \"{collectionDirectory}\"", collector);
+        var captureStep = FindStep(securitySteps, "Attest successful native coverage evidence");
+        Assert.True(IndexOf(securitySteps, collectorStep) < IndexOf(securitySteps, captureStep));
+        var capture = captureStep["run"].AsScalar();
+        Assert.Contains($"'--collection-root', \"{collectionDirectory}\"", capture);
         Assert.Contains("$contractVersion = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { '3' } else { '2' }", capture);
         Assert.Contains("'--contract-version', $contractVersion", capture);
-
-        var diagnostics = FindStep(securitySteps, "Upload coverage security diagnostics");
-        var diagnosticPaths = diagnostics["with"].AsMapping()["path"].AsScalar();
-        Assert.Equal(new[]
-        {
-            "${{ runner.temp }}/coverage-native-results",
-            "${{ runner.temp }}/packed-reuse-diagnostics/**/pack-*.log",
-            "${{ runner.temp }}/packed-reuse-diagnostics/**/source.log",
-            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/proof.json",
-            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log",
-            "${{ runner.temp }}/packed-reuse-diagnostics/**/consumer-proof.log"
-        }, diagnosticPaths.Split('\n', StringSplitOptions.RemoveEmptyEntries));
     }
 
     [Fact]
@@ -184,15 +186,16 @@ public sealed class RepositoryEvidenceWorkflowContractTests
             .Select(entry => entry.Selector).ToArray();
         Assert.Equal(ExpectedSharedCliSelectors, sharedSelectors);
         var lifecycle = FindStep(NativeJob["steps"].AsSequence(), "Test native lifecycle contracts for selected producers")["run"].AsScalar();
-        var exclusiveSelectors = ReadArraySelectors(lifecycle, "cliSelectors");
-        var composedSelectors = exclusiveSelectors.Concat(sharedSelectors).ToArray();
+        var exclusiveSelectors = inventory.Where(entry => entry.Scope == "lifecycle-cli")
+            .Select(entry => entry.Selector).ToArray();
+        var composedSelectors = inventory.Where(entry => entry.Scope is "lifecycle-cli" or "shared-cli")
+            .Select(entry => entry.Selector).ToArray();
 
         Assert.Equal(ExpectedNativeCliOnlySelectors, exclusiveSelectors);
         Assert.Equal(ExpectedNativeCliOnlySelectors.Concat(ExpectedSharedCliSelectors), composedSelectors);
         Assert.Contains("dotnet restore $dogfoodProject --locked-mode", lifecycle);
         Assert.Contains("dotnet build $dogfoodProject --configuration Release --no-restore", lifecycle);
-        Assert.Contains("$sharedCliFilter = & dotnet $dogfood --print-test-filter shared-cli", lifecycle);
-        Assert.Contains("$cliFilter = ($cliSelectors -join '|') + '|' + $sharedCliFilter", lifecycle);
+        Assert.Contains("$cliFilter = & dotnet $dogfood --print-test-filter lifecycle-cli", lifecycle);
         Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", lifecycle);
         Assert.Contains("--filter $cliFilter", lifecycle);
         Assert.Contains("if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", lifecycle);
@@ -500,18 +503,18 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.True(IndexOf(steps, preparation) < IndexOf(steps, proof));
         Assert.True(IndexOf(steps, preparation) < IndexOf(steps, reuseProof));
         Assert.Contains("steps.pack.outcome == 'success'", preparation["if"].AsScalar());
-        var contractsPack = "dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj";
         var preparationCommand = preparation["run"].AsScalar();
-        Assert.Contains(contractsPack, preparationCommand);
-        var workflowCommands = string.Join("\n", steps.Children.OfType<YamlMappingNode>()
-            .Where(step => step.Children.ContainsKey("run")).Select(step => step["run"].AsScalar()));
-        Assert.Equal(2, workflowCommands.Split(contractsPack, StringSplitOptions.None).Length);
-        Assert.Contains("Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj", preparationCommand);
-        Assert.Contains("Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj", preparationCommand);
-        Assert.Contains("Copy-Item", preparationCommand);
-        Assert.Contains("/p:RepositoryCommit=$env:SOURCE_COMMIT", preparationCommand);
-        Assert.Contains("/p:SourceRevisionId=$env:SOURCE_COMMIT", preparationCommand);
-        Assert.Equal("${{ steps.diff.outputs.source_commit }}", preparation["env"].AsMapping()["SOURCE_COMMIT"].AsScalar());
+        var neutralFeedCommand = FindDotnetInvocation(preparationCommand, "--operation", "pack-candidate-feed");
+        AssertCommandOption(neutralFeedCommand, "--mode", "neutral");
+        AssertCommandOption(neutralFeedCommand, "--repository", "$env:GITHUB_WORKSPACE");
+        AssertCommandOption(neutralFeedCommand, "--output", "$feed");
+        AssertCommandOption(neutralFeedCommand, "--version", "$env:PACKAGE_VERSION");
+        AssertCommandOption(neutralFeedCommand, "--source-commit", "$env:SOURCE_COMMIT");
+        AssertCommandOption(neutralFeedCommand, "--package", "$env:PACKAGE_PATH");
+        var preparationEnvironment = preparation["env"].AsMapping();
+        Assert.Equal("${{ steps.diff.outputs.source_commit }}", preparationEnvironment["SOURCE_COMMIT"].AsScalar());
+        Assert.Equal("${{ steps.pack.outputs.package }}", preparationEnvironment["PACKAGE_PATH"].AsScalar());
+        Assert.Equal("${{ steps.pack.outputs.version }}", preparationEnvironment["PACKAGE_VERSION"].AsScalar());
         Assert.True(IndexOf(steps, proof) < IndexOf(steps, rejection));
         Assert.Contains("steps.pack.outcome == 'success'", rejection["if"].AsScalar());
         foreach (var step in new[] { proof, reuseProof })
@@ -520,10 +523,26 @@ public sealed class RepositoryEvidenceWorkflowContractTests
             var env = step["env"].AsMapping();
             Assert.Equal("${{ steps.prepare-neutral-feed.outputs.feed }}", env["NATIVE_PACKAGE_FEED"].AsScalar());
             Assert.Equal("${{ steps.prepare-neutral-feed.outputs.version }}", env["NATIVE_PACKAGE_VERSION"].AsScalar());
-            Assert.Contains("--feed $env:NATIVE_PACKAGE_FEED --version $env:NATIVE_PACKAGE_VERSION", step["run"].AsScalar());
         }
-        Assert.Contains("@('Planner', 'Readiness', 'Cli', 'Aspire')", reuseProof["run"].AsScalar());
-        Assert.Contains("--package-proof", proof["run"].AsScalar());
+        var neutralProofCommand = FindDotnetInvocation(proof["run"].AsScalar(), "--package-proof");
+        AssertCommandOption(neutralProofCommand, "--feed", "$env:NATIVE_PACKAGE_FEED");
+        AssertCommandOption(neutralProofCommand, "--version", "$env:NATIVE_PACKAGE_VERSION");
+
+        var reuseCommand = reuseProof["run"].AsScalar();
+        var extendFeedCommand = FindDotnetInvocation(reuseCommand, "--operation", "pack-candidate-feed");
+        AssertCommandOption(extendFeedCommand, "--mode", "extend-neutral");
+        AssertCommandOption(extendFeedCommand, "--repository", "$env:GITHUB_WORKSPACE");
+        AssertCommandOption(extendFeedCommand, "--output", "$env:NATIVE_PACKAGE_FEED");
+        AssertCommandOption(extendFeedCommand, "--version", "$env:NATIVE_PACKAGE_VERSION");
+        AssertCommandOption(extendFeedCommand, "--source-commit", "$env:SOURCE_COMMIT");
+        var reuseProofCommand = FindDotnetInvocation(reuseCommand, "--operation", "reuse-package-proof");
+        AssertCommandOption(reuseProofCommand, "--feed", "$env:NATIVE_PACKAGE_FEED");
+        AssertCommandOption(reuseProofCommand, "--version", "$env:NATIVE_PACKAGE_VERSION");
+        AssertCommandOption(reuseProofCommand, "--source-commit", "$env:SOURCE_COMMIT");
+        AssertCommandOption(reuseProofCommand, "--dotnet", "(Get-Command dotnet).Source");
+        AssertCommandOption(reuseProofCommand, "--output", "$proof");
+        Assert.True(reuseCommand.IndexOf(extendFeedCommand, StringComparison.Ordinal) < reuseCommand.IndexOf(reuseProofCommand, StringComparison.Ordinal));
+        Assert.Equal("${{ steps.diff.outputs.source_commit }}", reuseProof["env"].AsMapping()["SOURCE_COMMIT"].AsScalar());
         Assert.Contains("$LASTEXITCODE -eq 0 -or (Test-Path $output)", rejection["run"].AsScalar());
         Assert.Contains("<repository type='git' commit='$candidateCommit'/>", rejection["run"].AsScalar());
         Assert.Contains("coverage.private-dependency-invalid", rejection["run"].AsScalar());
@@ -532,6 +551,8 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var upload = FindStep(steps, "Preserve evidence inputs, plan, proof, and artifacts")["with"].AsMapping()["path"].AsScalar();
         Assert.Contains("native-coverage-library-proof/proof.json", upload);
         Assert.Contains("native-coverage-library-proof/published-proof/runs/**", upload);
+        Assert.Contains("${{ runner.temp }}/native-coverage-library-feed/pack-logs/pack-*.log", upload);
+        Assert.Contains("${{ runner.temp }}/native-evidence-reuse-package-proof/packed-progress.jsonl", upload);
     }
 
     [Fact]
@@ -658,21 +679,10 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         {
             var entry = line.Split('\t', 2);
             Assert.Equal(2, entry.Length);
-            Assert.Contains(entry[0], new[] { "native", "shared-cli" });
+            Assert.Contains(entry[0], new[] { "native", "shared-cli", "lifecycle-cli" });
             Assert.StartsWith("FullyQualifiedName~", entry[1], StringComparison.Ordinal);
             return (entry[0], entry[1]);
         }).ToArray();
-    }
-
-    private static string[] ReadArraySelectors(string script, string variable)
-    {
-        var pattern = $@"(?ms)\${Regex.Escape(variable)}\s*=\s*@\((?<selectors>.*?)\)";
-        var match = Regex.Match(script, pattern);
-        Assert.True(match.Success, $"Expected ${variable} to contain its lane-specific selectors.");
-        return Regex.Matches(match.Groups["selectors"].Value, "'([^']+)'")
-            .Cast<Match>()
-            .Select(selector => selector.Groups[1].Value)
-            .ToArray();
     }
 
     private YamlMappingNode NativeJob => _workflow["jobs"].AsMapping()["native-evidence"].AsMapping();
@@ -682,6 +692,16 @@ public sealed class RepositoryEvidenceWorkflowContractTests
 
     private static int IndexOf(YamlSequenceNode steps, YamlMappingNode target) =>
         steps.Children.ToList().FindIndex(step => ReferenceEquals(step, target));
+
+    private static string FindDotnetInvocation(string run, string option, string? value = null)
+    {
+        var argument = value is null ? Regex.Escape(option) : $@"{Regex.Escape(option)}\s+{Regex.Escape(value)}";
+        return run.Split('\n').Single(line =>
+            Regex.IsMatch(line, $@"^\s*dotnet(?=\s).*\s{argument}(?:\s|$)"));
+    }
+
+    private static void AssertCommandOption(string command, string option, string value) =>
+        Assert.Matches($@"(?:^|\s){Regex.Escape(option)}\s+{Regex.Escape(value)}(?=\s|$)", command);
 }
 
 internal static class WorkflowYamlNodeExtensions

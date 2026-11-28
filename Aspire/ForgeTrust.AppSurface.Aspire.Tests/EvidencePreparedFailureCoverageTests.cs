@@ -471,6 +471,36 @@ public sealed class EvidencePreparedFailureCoverageTests
     }
 
     [Fact]
+    public async Task FatalPreparedOwnerDisposalTakesPrecedenceOverEarlierIoFailureBeforeHostAdmission()
+    {
+        using var directory = TempDirectory.Create("evidence-mixed-disposal-");
+        var fatalDisposal = new OutOfMemoryException("synthetic fatal later owner disposal");
+        var disposalOrder = new List<string>();
+        var first = new LifecycleProducer(disposalFailure: new IOException("controlled first owner disposal"),
+            id: "first", disposalOrder: disposalOrder);
+        var later = new LifecycleProducer(disposalFailure: fatalDisposal, id: "later", disposalOrder: disposalOrder);
+        var prepared = await EvidenceHostBootstrap.PrepareAsync(Plan(first.Id, later.Id), registration =>
+        {
+            registration.AddProducer(first, "fixture-v1");
+            registration.AddProducer(later, "fixture-v1");
+        }, new EvidenceHostOptions
+        {
+            RepositoryRoot = directory.Path,
+            ArtifactDirectory = TestPathUtils.PathUnder(directory.Path, "artifacts"),
+            EnvironmentReader = _ => null
+        });
+
+        var observed = await Record.ExceptionAsync(() => prepared.DisposeAsync().AsTask());
+
+        Assert.Same(fatalDisposal, observed);
+        Assert.Equal(["first", "later"], disposalOrder);
+        Assert.Equal(1, first.Disposals);
+        Assert.Equal(1, later.Disposals);
+        Assert.Equal(0, first.Runs);
+        Assert.Equal(0, later.Runs);
+    }
+
+    [Fact]
     public async Task FatalProducerFailureRemainsPrimaryWhenFatalOwnerDisposalAlsoFails()
     {
         using var directory = TempDirectory.Create("evidence-primary-fatal-");
@@ -573,11 +603,13 @@ public sealed class EvidencePreparedFailureCoverageTests
         _ => new IOException("controlled cleanup failure")
     };
 
-    private static EvidencePlan Plan()
+    private static EvidencePlan Plan(string producerId = "check", params string[] otherProducerIds)
     {
-        var producer = new EvidenceProducerDeclaration("check", "custom", "1", [], ["valid"], [], 10);
-        var profile = new EvidenceProfile("local", EvidenceProfileScope.Targeted, [], [producer],
-            [new EvidenceObligation("check", "test", "Fixture", [producer.Id], "valid")]);
+        var producers = otherProducerIds.Prepend(producerId)
+            .Select(id => new EvidenceProducerDeclaration(id, "custom", "1", [], ["valid"], [], 10)).ToArray();
+        var obligations = producers.Select(producer =>
+            new EvidenceObligation(producer.Id, "test", "Fixture", [producer.Id], "valid")).ToArray();
+        var profile = new EvidenceProfile("local", EvidenceProfileScope.Targeted, [], producers, obligations);
         return new EvidencePlanner().Resolve(new EvidencePolicy("fixture", "1", profile.Id, [profile], [new("all", "**", profile.Id)]),
             [new NormalizedDiffPath("input.txt")]);
     }
@@ -695,10 +727,10 @@ public sealed class EvidencePreparedFailureCoverageTests
     }
 
     private sealed class LifecycleProducer(Exception? failure = null, TaskCompletionSource? cleanupRelease = null,
-        Exception? disposalFailure = null)
+        Exception? disposalFailure = null, string id = "check", List<string>? disposalOrder = null)
         : IEvidenceProducer, IAsyncDisposable
     {
-        public string Id => "check";
+        public string Id => id;
         internal readonly TaskCompletionSource CleanupEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal int Runs;
         internal int Disposals;
@@ -712,6 +744,7 @@ public sealed class EvidencePreparedFailureCoverageTests
         public async ValueTask DisposeAsync()
         {
             Disposals++;
+            disposalOrder?.Add(Id);
             CleanupEntered.TrySetResult();
             if (cleanupRelease is not null) await cleanupRelease.Task;
             if (disposalFailure is not null) throw disposalFailure;

@@ -190,8 +190,9 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     /// <param name="cancellationToken">Invocation cancellation, forwarded to actual factory and producer work.</param>
     /// <returns>The current digest-bound manifest after bounded execution and cleanup waits.</returns>
     /// <remarks>
-    /// Host admission and disposal share a handoff: cancellation that wins before admission retains any returned
-    /// scope for cleanup without starting readiness or producers. Disposal after admission joins the owned run.
+    /// Cancellation or a disposal request that wins the handoff retains any returned scope for cleanup without
+    /// starting readiness or producers, even if disposal has yet to signal factory cancellation.
+    /// Disposal after admission joins the owned run.
     /// </remarks>
     public async Task<EvidenceManifest> RunAsync(
         Func<IReadOnlyList<string>, CancellationToken, ValueTask<EvidenceHostResourceScope>> createResources,
@@ -202,7 +203,8 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         var executionStarted = false;
         try
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            lock (_cleanupSync)
+                ObjectDisposedException.ThrowIf(_disposed, this);
             if (_used) throw new InvalidOperationException("Prepared Evidence runs execute exactly once.");
             _used = true;
             EvidenceHostRegistration.ValidatePreparedProducerIds(_producers);
@@ -222,8 +224,8 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                 _producers, _scope?.Resources, RequiredResourceIds);
             lock (_cleanupSync)
             {
-                // Disposal and host admission share this handoff. A factory may return a scope after cancellation;
-                // retain that scope for cleanup without admitting readiness or producer work when disposal won.
+                // The disposal claim wins even before cancellation callbacks run outside this lock.
+                if (_disposed) return CancelledWithOwnedWork(observationOnly);
                 _factoryCancellation.Token.ThrowIfCancellationRequested();
                 _host = EvidenceHostBootstrap.CreatePreparedExecution(_plan, executionRegistration, _executionOptions, _clock,
                     new EvidencePreparedExecution(
@@ -247,7 +249,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _factoryCancellation.IsCancellationRequested)
         {
             RequestFactoryCancellation();
-            return FailureManifest(EvidenceProducerOutcome.Cancelled, "reuse.cancelled: The invocation was cancelled; actual factory and cleanup ownership remains retained.", observationOnly);
+            return CancelledWithOwnedWork(observationOnly);
         }
         catch (Exception exception) when (executionStarted && EvidenceHostBootstrap.IsNonFatalException(exception) && exception is not EvidenceHostException)
         {
@@ -260,6 +262,10 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
             _execution.Release();
         }
     }
+
+    private EvidenceManifest CancelledWithOwnedWork(bool observationOnly)
+        => FailureManifest(EvidenceProducerOutcome.Cancelled,
+            "reuse.cancelled: The invocation was cancelled; actual factory and cleanup ownership remains retained.", observationOnly);
 
     private EvidenceManifest FailureManifest(EvidenceProducerOutcome outcome, string diagnostic, bool observationOnly,
         IReadOnlyList<EvidenceResourceResult>? actualResources = null, EvidenceExecutionMetrics? actualMetrics = null)
@@ -283,48 +289,53 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
 
     private async Task<bool> CleanupAsync()
     {
-        Exception? primary = null;
+        Exception? fatal = null;
         var settled = true;
         try { await _session.JoinKeyMaterialAsync().ConfigureAwait(false); }
-        catch (Exception exception) { primary = exception; settled = false; }
+        catch (Exception exception) { RecordFailure(exception); }
         if (_factoryTask is not null)
         {
             try { _scope ??= await _factoryTask.ConfigureAwait(false); }
             catch (Exception exception) when (EvidenceHostBootstrap.IsNonFatalException(exception)) { /* Factory owns its partial construction on failure. */ }
-            catch (Exception exception) { primary ??= exception; settled = false; }
+            catch (Exception exception) { RecordFailure(exception); }
         }
         // A bounded producer return may leave an enrolled child using the application's resources.
         // Join its actual handler before disposing any producer registration or resource scope.
         try { settled &= await _session.JoinActualTasksAsync().ConfigureAwait(false); }
-        catch (Exception exception) { primary ??= exception; settled = false; }
+        catch (Exception exception) { RecordFailure(exception); }
         try
         {
             if (_host is not null) settled &= await _host.JoinPreparedOwnershipAsync(() => _session.AreChildrenSettled).ConfigureAwait(false);
             else if (_session.AreChildrenSettled)
             {
-                var disposedOwners = new HashSet<object>(ReferenceEqualityComparer.Instance);
-                var disposal = await EvidenceOwnerDisposal.DisposeAsync(
-                    _producers.Values.Select(static producer => producer.Producer), disposedOwners).ConfigureAwait(false);
-                if (disposal.FirstFailure is not null)
-                {
-                    primary ??= disposal.FirstFailure;
-                    settled = false;
-                }
-                if (_scope is not null) await _scope.DisposeAsync(disposedOwners).ConfigureAwait(false);
+                var disposal = await EvidenceOwnerDisposal.DisposePreparedAsync(
+                    _producers.Values.Select(static producer => producer.Producer), _scope).ConfigureAwait(false);
+                settled &= disposal is { FirstNonFatalFailure: null, FirstFatalFailure: null };
+                fatal ??= disposal.FirstFatalFailure;
             }
         }
-        catch (Exception exception) { primary ??= exception; settled = false; }
+        catch (Exception exception) { RecordFailure(exception); }
         try { _session.CompleteUnsuccessfulSettlement(settled); }
         finally { await _session.DisposeAsync().ConfigureAwait(false); }
-        if (primary is not null && !EvidenceHostBootstrap.IsNonFatalException(primary)) ExceptionDispatchInfo.Capture(primary).Throw();
+        if (fatal is not null) ExceptionDispatchInfo.Capture(fatal).Throw();
         return settled;
+
+        void RecordFailure(Exception exception)
+        {
+            settled = false;
+            if (!EvidenceHostBootstrap.IsNonFatalException(exception)) fatal ??= exception;
+        }
     }
 
     /// <summary>Requests factory cancellation and joins actual cleanup before releasing execution ownership.</summary>
     /// <returns>The actual cleanup operation; this does not interpret a grace timeout as termination.</returns>
     /// <remarks>Cancellation is requested before joining an active run. A throwing cancellation callback is retained
     /// while actual factory and owner cleanup are joined, then rethrown; cleanup failures remain primary.</remarks>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync() => DisposeAsync(beforeFactoryCancellationForTests: null);
+
+    /// <summary>Lets tests pause the first disposal after claiming ownership and before signaling the factory.</summary>
+    /// <param name="beforeFactoryCancellationForTests">Optional async gate run outside the handoff lock.</param>
+    internal async ValueTask DisposeAsync(Func<Task>? beforeFactoryCancellationForTests)
     {
         var requestCancellation = false;
         lock (_cleanupSync)
@@ -335,7 +346,12 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
                 requestCancellation = true;
             }
         }
-        if (requestCancellation) RequestFactoryCancellation();
+        if (requestCancellation)
+        {
+            if (beforeFactoryCancellationForTests is not null)
+                await beforeFactoryCancellationForTests().ConfigureAwait(false);
+            RequestFactoryCancellation();
+        }
         await _execution.WaitAsync().ConfigureAwait(false);
         try { ObserveCleanup(); }
         finally { _execution.Release(); }
@@ -372,7 +388,7 @@ public sealed class EvidencePreparedRun : IAsyncDisposable
     private static EvidencePlan FreezePlan(EvidencePlan plan)
     {
         var frozen = EvidenceCanonicalJson.Deserialize<EvidencePlan>(EvidenceCanonicalJson.Serialize(plan));
-        if (!EvidenceManifestBuilder.Verify(frozen, EvidenceManifestBuilder.Build(frozen, [])))
+        if (!EvidenceManifestBuilder.VerifyPlanIntegrity(frozen))
             throw new EvidenceHostException("reuse.plan_invalid", "The supplied plan or policy digest is invalid.", "Resolve a current policy into a digest-bound plan before preparation.");
         var resolved = new EvidencePlanner().ResolveRecordedPlan(frozen.PolicySnapshot!, frozen.ChangedPaths, frozen.PatchSha256);
         if (!string.Equals(resolved.PlanDigest, frozen.PlanDigest, StringComparison.Ordinal))

@@ -59,6 +59,9 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         {
             Assert.Contains("--no-build", command.Arguments);
             Assert.Contains("--no-restore", command.Arguments);
+            Assert.Equal("95", ValueAfter(command.Arguments, "--min-line"));
+            Assert.Equal("85", ValueAfter(command.Arguments, "--min-branch"));
+            Assert.Equal("0.5", ValueAfter(command.Arguments, "--tolerance"));
         });
         var exclusiveProjects = run.Arguments.Zip(run.Arguments.Skip(1))
             .Where(pair => pair.First == "--exclusive-test-project").Select(pair => pair.Second).ToArray();
@@ -468,6 +471,62 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     }
 
     [Theory]
+    [InlineData("aggregate-gate", 0, false)]
+    [InlineData("aggregate-gate", 1, false)]
+    [InlineData("aggregate-gate", 0, true)]
+    [InlineData("patch-gate", 0, true)]
+    public async Task ProduceAsync_ValidatesTheBoundedGateBytesItPublishes(string gateDirectory, int excessBytes, bool changeVerdict)
+    {
+        const int maximumBytes = 2 * 1024 * 1024;
+        using var fixture = new Fixture();
+        var gate = TestPathUtils.PathUnder(fixture.Output, "coverage", gateDirectory, "coverage-gate.json");
+        var sourceChecks = 0;
+        var settings = new RepositoryCheckSettings(fixture.Root, fixture.Dotnet, fixture.Output,
+            DiffFile: TestPathUtils.PathUnder(fixture.Root, "local.patch"))
+        {
+            VerifyLocalSourceAsync = async cancellationToken =>
+            {
+                if (++sourceChecks != 3) return;
+                // The final source check occurs after gate validation but before artifact publication.
+                if (changeVerdict)
+                {
+                    var json = await File.ReadAllTextAsync(gate, cancellationToken);
+                    Assert.Contains("\"passed\":true", json, StringComparison.Ordinal);
+                    await File.WriteAllTextAsync(gate, json.Replace("\"passed\":true", "\"passed\":false", StringComparison.Ordinal), cancellationToken);
+                }
+                var padding = maximumBytes + excessBytes - checked((int)new FileInfo(gate).Length);
+                await File.AppendAllTextAsync(gate, new string(' ', padding), cancellationToken);
+            },
+        };
+        var producer = fixture.CreateWithSettings(settings, async (request, _) =>
+        {
+            await fixture.CompleteCommandAsync(request);
+            if (request.Arguments.Contains("--min-patch-line")) await fixture.WriteGateAsync(request, "success");
+            return Success();
+        });
+
+        var result = await producer.ProduceAsync(fixture.Context, CancellationToken.None);
+
+        Assert.Equal(3, sourceChecks);
+        Assert.Equal(maximumBytes + excessBytes, new FileInfo(gate).Length);
+        if (excessBytes > 0 || changeVerdict)
+        {
+            await AssertFailedWithoutClaimsAsync(fixture, result, "patch-gate");
+            return;
+        }
+
+        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        var artifact = Assert.Single(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == gateDirectory);
+        var published = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(fixture.Root, "artifacts", "proof", gateDirectory + ".json"));
+        Assert.Equal(await File.ReadAllBytesAsync(gate), published);
+        Assert.Equal(maximumBytes, artifact.LengthBytes);
+        var patchArtifact = Assert.Single(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
+        using var resultDocument = JsonDocument.Parse(await File.ReadAllTextAsync(
+            TestPathUtils.PathUnder(fixture.Root, "artifacts", "proof", "result.json")));
+        Assert.Equal(patchArtifact.Sha256, resultDocument.RootElement.GetProperty("patchGateSha256").GetString());
+    }
+
+    [Theory]
     [InlineData("success")]
     [InlineData("zero-patch")]
     [InlineData("thresholds")]
@@ -862,6 +921,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
     [InlineData("wrong-receipt-version")]
     [InlineData("wrong-run")]
     [InlineData("altered-gate")]
+    [InlineData("staged-patch-edited")]
     [InlineData("failed-aggregate")]
     [InlineData("failed-patch")]
     public async Task ProduceAsync_RequiresDeliveredNativeV2AcceptanceAndIndependentVerification(string defect)
@@ -878,6 +938,13 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         try
         {
             var settings = fixture.NativeSettings("base-commit");
+            if (defect == "staged-patch-edited")
+            {
+                var patch = TestPathUtils.PathUnder(fixture.Output, "coverage", "patch-gate", "coverage-gate.json");
+                fixture.BeforeGitStatusAsync = cancellationToken => File.Exists(patch)
+                    ? File.AppendAllTextAsync(patch, " ", cancellationToken)
+                    : Task.CompletedTask;
+            }
             foreach (var platform in new[] { "linux", "windows", "darwin" })
                 Directory.CreateDirectory(Path.Join(settings.NativeCoverageDirectory!, platform));
             var commands = new List<EvidenceCommandRequest>();
@@ -890,7 +957,8 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                     Assert.Equal(settings.CoverageCliPath, ValueAfter(request.Arguments, "--cli"));
                     Assert.Equal(settings.DiffBase, ValueAfter(request.Arguments, "--diff-base"));
                     Assert.Equal(settings.NativeCoverageDirectory, ValueAfter(request.Arguments, "--native-inputs"));
-                    await fixture.WriteNativeV2ProofAsync(ValueAfter(request.Arguments, "--output"), defect);
+                    await fixture.WriteNativeV2ProofAsync(ValueAfter(request.Arguments, "--output"),
+                        defect == "staged-patch-edited" ? "success" : defect);
                 }
                 else
                 {
@@ -907,9 +975,15 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
                 Assert.Equal(["coverage/solution-complete@1", "coverage/thresholds@1"], result.SatisfiedAssertionIds);
                 Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "aggregate-gate");
-                Assert.Contains(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
-                using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(fixture.Root, "artifacts/proof/result.json")));
-                Assert.Equal(64, proof.RootElement.GetProperty("nativeFanInProofSha256").GetString()!.Length);
+                var patch = Assert.Single(fixture.Writer.WrittenArtifacts, artifact => artifact.LogicalName == "patch-gate");
+                using var proof = JsonDocument.Parse(await File.ReadAllTextAsync(
+                    TestPathUtils.PathUnder(fixture.Root, "artifacts", "proof", "result.json")));
+                var accepted = TestPathUtils.PathUnder(fixture.Output, "coverage-fanin", "accepted");
+                using var acceptance = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(accepted, "acceptance.json")));
+                Assert.Equal(acceptance.RootElement.GetProperty("composedGateSha256").GetString(), patch.Sha256);
+                Assert.Equal(patch.Sha256, proof.RootElement.GetProperty("patchGateSha256").GetString());
+                Assert.Equal(EvidenceDigest.Sha256(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(accepted, "acceptance.json"))),
+                    proof.RootElement.GetProperty("nativeFanInProofSha256").GetString());
             }
             else await AssertFailedWithoutClaimsAsync(fixture, result, "native-fan-in");
         }
@@ -1257,6 +1331,7 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
         public EvidenceArtifactWriter Writer { get; }
         public List<EvidenceCommandRequest> GitCommands { get; } = [];
         public Queue<string> GitStatusResponses { get; } = new();
+        public Func<CancellationToken, Task>? BeforeGitStatusAsync { get; set; }
         public Queue<string> HeadResponses { get; } = new();
         public Queue<string> TreeResponses { get; } = new();
         public Queue<string> SdkResponses { get; } = new();
@@ -1285,7 +1360,10 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 {
                     GitCommands.Add(request);
                     if (request.Arguments.Contains("status"))
+                    {
+                        if (BeforeGitStatusAsync is { } beforeStatus) await beforeStatus(token);
                         return new EvidenceCommandResult(0, GitStatusResponses.Count > 0 ? GitStatusResponses.Dequeue() : string.Empty, "", 1);
+                    }
                     if (request.Arguments.Last() == "HEAD^{tree}")
                         return new EvidenceCommandResult(0, TreeResponses.Count > 0 ? TreeResponses.Dequeue() : new string('b', 40), "", 1);
                     if (request.Arguments.Last() == "HEAD^{commit}")

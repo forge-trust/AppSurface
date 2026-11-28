@@ -91,6 +91,12 @@ internal sealed record EvidenceProducerReuseDecision(string ProducerId, Evidence
 /// </remarks>
 internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
 {
+    private enum AuditPublicationOutcome
+    {
+        NoFailure,
+        FinalizationFailed,
+    }
+
     private enum AuditComparisonState
     {
         QuarantinedExpectation,
@@ -273,29 +279,38 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         if (namespaces.Length != 1) throw new InvalidOperationException("Producer repositories changed during preparation.");
         if (_options.ReadOnly)
         {
-            var readOnly = EvidenceReceiptStore.OpenReadOnly(StoreOptions(namespaces[0], _options.WaitTimeout));
-            foreach (var pair in _identities)
-            {
-                var candidate = readOnly.Peek(pair.Value.Key);
-                if (candidate.Outcome == EvidenceReceiptReadOutcome.Miss)
-                {
-                    _decisions[pair.Key] = candidate.State?.IsQuarantined == true
-                        ? new(pair.Key, EvidenceProducerReuseStatus.Miss, "reuse.audit-quarantined",
-                            "The key is quarantined. Run with --reuse and --verify-reuse to recover after a complete successful fresh audit.", pair.Value.Key)
-                        : DescribeMiss(readOnly, pair.Key, pair.Value, candidate.Reason);
-                    continue;
-                }
-                _decisions[pair.Key] = new(pair.Key,
-                    candidate.IsCandidate ? EvidenceProducerReuseStatus.Hit : EvidenceProducerReuseStatus.Unavailable,
-                    "reuse." + candidate.Reason,
-                    candidate.IsCandidate ? "Candidate receipt found; run will acquire ownership and revalidate all bytes." : "No admissible candidate receipt; run will revalidate before execution.",
-                    pair.Value.Key, candidate.OriginCompletedAt ?? candidate.State?.OriginCompletedAt, candidate.OriginElapsedMilliseconds);
-            }
+            InspectReceiptsReadOnly(namespaces[0]);
             return;
         }
 
         if (!await AcquireStableKeysAsync(namespaces[0], cancellationToken).ConfigureAwait(false)) return;
+        await RestoreReceiptsUnderLeaseAsync(cancellationToken).ConfigureAwait(false);
+    }
 
+    private void InspectReceiptsReadOnly(string repositoryNamespace)
+    {
+        var readOnly = EvidenceReceiptStore.OpenReadOnly(StoreOptions(repositoryNamespace, _options.WaitTimeout));
+        foreach (var pair in _identities)
+        {
+            var candidate = readOnly.Peek(pair.Value.Key);
+            if (candidate.Outcome == EvidenceReceiptReadOutcome.Miss)
+            {
+                _decisions[pair.Key] = candidate.State?.IsQuarantined == true
+                    ? new(pair.Key, EvidenceProducerReuseStatus.Miss, "reuse.audit-quarantined",
+                        "The key is quarantined. Run with --reuse and --verify-reuse to recover after a complete successful fresh audit.", pair.Value.Key)
+                    : DescribeMiss(readOnly, pair.Key, pair.Value, candidate.Reason);
+                continue;
+            }
+            _decisions[pair.Key] = new(pair.Key,
+                candidate.IsCandidate ? EvidenceProducerReuseStatus.Hit : EvidenceProducerReuseStatus.Unavailable,
+                "reuse." + candidate.Reason,
+                candidate.IsCandidate ? "Candidate receipt found; run will acquire ownership and revalidate all bytes." : "No admissible candidate receipt; run will revalidate before execution.",
+                pair.Value.Key, candidate.OriginCompletedAt ?? candidate.State?.OriginCompletedAt, candidate.OriginElapsedMilliseconds);
+        }
+    }
+
+    private async Task RestoreReceiptsUnderLeaseAsync(CancellationToken cancellationToken)
+    {
         foreach (var producer in _plan.Profile.Producers.Where(producer => _identities.ContainsKey(producer.Id)))
         {
             var identity = _identities[producer.Id];
@@ -451,7 +466,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         {
             return (new(null, "reuse.inputs_required", "No Inputs declaration; execute fresh."), false);
         }
-        if (string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)
+        if (producer.IsCoverageProducer()
             && producer.CoverageExecution is not { CooperativeChildLifetime: true })
         {
             return (new(null, "reuse.child_lifetime_required",
@@ -550,7 +565,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             }
             // Channel creation is an execution side effect, so it follows admission of the complete key set.
             foreach (var producer in _plan.Profile.Producers.Where(producer => _admitted.Contains(producer.Id)
-                && string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase)))
+                && producer.IsCoverageProducer()))
             {
                 _options.BeforeChildChannelStartForTests?.Invoke(producer.Id);
                 var child = EvidenceChildLifetimeSession.Start(ExecutionId, _options.Clock);
@@ -630,13 +645,14 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         return _childrenSettled;
     }
 
-    /// <summary>Evaluates audits and publishes only after complete successful current execution and cleanup.</summary>
+    /// <summary>Finalizes the current manifest and publishes only after successful execution and cleanup.</summary>
+    /// <remarks>Refused admission preserves the original producer results and any durable audit intent.</remarks>
     internal async Task<EvidenceManifest> CompleteAsync(EvidenceManifest manifest, CancellationToken cancellationToken)
     {
         if (!_options.Enabled) return manifest;
         if (_plan.ContractVersion == "1.0" && _identities.Count == 0) return manifest;
         var results = manifest.ProducerResults.ToArray();
-        var auditMismatch = ApplyAuditComparisons(results);
+        var auditMismatch = _admissionCompleted && ApplyAuditComparisons(results);
         var metrics = manifest.Metrics with
         {
             PreparationMilliseconds = _preparationMilliseconds,
@@ -647,13 +663,14 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         };
         var completed = EvidenceManifestBuilder.Build(_plan, results,
             manifest.ClaimKind == EvidenceClaimKind.ObservationOnly, manifest.EnvelopeStatus, manifest.ResourceResults, metrics);
-        if (completed.ExecutionVerdict != EvidenceExecutionVerdict.Passed || auditMismatch)
+        if (!_admissionCompleted || completed.ExecutionVerdict != EvidenceExecutionVerdict.Passed || auditMismatch)
         {
             CompleteUnsuccessfulSettlement(metrics.CleanupCompleted);
             return completed;
         }
 
-        if (await PublishReceiptsAsync(completed, cancellationToken).ConfigureAwait(false))
+        var publicationOutcome = await PublishReceiptsAsync(completed, cancellationToken).ConfigureAwait(false);
+        if (publicationOutcome == AuditPublicationOutcome.FinalizationFailed)
             completed = EvidenceManifestBuilder.Build(_plan, results.Select(result => _auditComparisons.ContainsKey(result.ProducerId)
                 ? result with { Outcome = EvidenceProducerOutcome.Failed, Diagnostic = "reuse.audit_finalization_failed: Fresh audit could not atomically finalize its receipt and clear intent. The key remains blocked; inspect store health and retry an explicit audit." }
                 : result).ToArray(), observationOnly: manifest.ClaimKind == EvidenceClaimKind.ObservationOnly,
@@ -686,18 +703,19 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         return hasMismatch;
     }
 
-    // Returns whether an audited producer could not finalize its receipt. Ordinary refusals only affect its reuse decision.
-    private async Task<bool> PublishReceiptsAsync(EvidenceManifest completed, CancellationToken cancellationToken)
+    // Ordinary publication refusals affect the reuse decision without failing the invocation.
+    private async Task<AuditPublicationOutcome> PublishReceiptsAsync(EvidenceManifest completed, CancellationToken cancellationToken)
     {
         var (publicationRequests, auditFailed) = await PreparePublicationRequestsAsync(cancellationToken).ConfigureAwait(false);
         if (auditFailed)
         {
             CompleteUnsuccessfulSettlement(actualCleanupCompleted: true);
-            return true;
+            return AuditPublicationOutcome.FinalizationFailed;
         }
 
-        return publicationRequests.Count > 0
-            && await PublishReceiptBatchAsync(completed, publicationRequests, cancellationToken).ConfigureAwait(false);
+        return publicationRequests.Count == 0
+            ? AuditPublicationOutcome.NoFailure
+            : await PublishReceiptBatchAsync(completed, publicationRequests, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<(IReadOnlyList<EvidenceReceiptPublicationRequest> Requests, bool AuditFailed)> PreparePublicationRequestsAsync(
@@ -732,7 +750,8 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                     _decisions[producer.Id] = new(producer.Id, EvidenceProducerReuseStatus.Ineligible, "reuse.inputs_changed",
                         "Repository namespace or prepared input identity changed during execution or cleanup; the fresh result is preserved and no receipt is published.", preparedIdentity.Key);
                     RecordPublicationRefusal(producer.Id, ref auditFailed);
-                    SettleKnownExecution(lease);
+                    if (SettleKnownExecution(lease) is { } settlementFailure)
+                        ExceptionDispatchInfo.Capture(settlementFailure).Throw();
                     continue;
                 }
                 publicationRequests.Add(new(lease, producer.Id, _artifactRoot(producer), _options.Clock.GetUtcNow())
@@ -752,7 +771,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
         return (publicationRequests, auditFailed);
     }
 
-    private async Task<bool> PublishReceiptBatchAsync(EvidenceManifest completed,
+    private async Task<AuditPublicationOutcome> PublishReceiptBatchAsync(EvidenceManifest completed,
         IReadOnlyList<EvidenceReceiptPublicationRequest> publicationRequests, CancellationToken cancellationToken)
     {
         var auditFailed = false;
@@ -773,7 +792,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
                 RecordPublicationRefusal(request.ProducerId, ref auditFailed);
                 TrySettleKnownExecution(request.Lease);
             }
-            return auditFailed;
+            return auditFailed ? AuditPublicationOutcome.FinalizationFailed : AuditPublicationOutcome.NoFailure;
         }
 
         foreach (var request in publicationRequests)
@@ -788,12 +807,9 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             if (!publication.Published)
             {
                 RecordPublicationRefusal(request.ProducerId, ref auditFailed);
-                try
-                {
-                    _options.BeforeRefusedPublicationSettlementForTests?.Invoke(request.ProducerId);
-                    SettleKnownExecution(request.Lease);
-                }
-                catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
+                var settlementFailure = SettleKnownExecution(request.Lease,
+                    () => _options.BeforeRefusedPublicationSettlementForTests?.Invoke(request.ProducerId));
+                if (settlementFailure is not null)
                 {
                     decision = decision with
                     {
@@ -803,7 +819,7 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
             }
             _decisions[request.ProducerId] = decision;
         }
-        return auditFailed;
+        return auditFailed ? AuditPublicationOutcome.FinalizationFailed : AuditPublicationOutcome.NoFailure;
     }
 
     private void RecordPublicationRefusal(string producerId, ref bool auditFailed)
@@ -850,22 +866,22 @@ internal sealed class EvidenceProducerReuseSession : IAsyncDisposable
     }
 
     private bool TrySettleKnownExecution(EvidenceReceiptStore.EvidenceReceiptKeyLease lease)
+        => SettleKnownExecution(lease) is null;
+
+    private Exception? SettleKnownExecution(EvidenceReceiptStore.EvidenceReceiptKeyLease lease,
+        Action? beforeSettle = null)
     {
         try
         {
-            SettleKnownExecution(lease);
-            return true;
+            beforeSettle?.Invoke();
+            lease.SettleExecutionIfOwned(ExecutionId);
+            return null;
         }
         catch (Exception exception) when (EvidenceExceptionPolicy.IsNonFatalException(exception))
         {
             // Unconfirmed settlement preserves authority.
-            return false;
+            return exception;
         }
-    }
-
-    private void SettleKnownExecution(EvidenceReceiptStore.EvidenceReceiptKeyLease lease)
-    {
-        if (lease.ReadState()?.InFlightExecutionId == ExecutionId) lease.SettleExecution(ExecutionId);
     }
 
     private async Task ResetFailedRestoreAsync(EvidenceProducerDeclaration producer, EvidenceArtifactWriter writer, CancellationToken token)

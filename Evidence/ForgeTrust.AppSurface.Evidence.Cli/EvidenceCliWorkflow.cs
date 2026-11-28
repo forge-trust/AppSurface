@@ -1,3 +1,4 @@
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -16,20 +17,22 @@ internal sealed class EvidenceCliWorkflow
     private const string GeneratedMarker = "appsurface-evidence-starter-v1";
     private const string LocalReusedNextAction = "Local reused evidence is complete for this invocation, but it is informational and cannot satisfy a gate. Run fresh evidence for gate admission.";
     private readonly EvidencePlanner _planner;
-    private readonly IEvidenceDiffFileAccess _diffFileAccess;
+    private readonly IEvidenceInputFileAccess _inputFileAccess;
 
     /// <summary>
-    /// Initializes the workflow with the planner and diff-file access used to resolve policy and changed-path inputs.
+    /// Initializes the workflow with the planner and the file opener used for Evidence inputs.
     /// </summary>
     /// <param name="planner">The nonnull planner that resolves normalized paths against the selected policy.</param>
-    /// <param name="diffFileAccess">
-    /// The optional access boundary that opens explicit diff files. Omit this value in production to use the physical
-    /// file system; tests can supply a deterministic source that verifies the bytes observed at open time.
+    /// <param name="inputFileAccess">
+    /// Optional opener for policy, plan, manifest, and explicit diff files. The workflow owns each returned
+    /// stream and counts its bytes as they arrive. The default opens files on the physical file system.
     /// </param>
-    public EvidenceCliWorkflow(EvidencePlanner planner, IEvidenceDiffFileAccess? diffFileAccess = null)
+    public EvidenceCliWorkflow(
+        EvidencePlanner planner,
+        IEvidenceInputFileAccess? inputFileAccess = null)
     {
         _planner = planner ?? throw new ArgumentNullException(nameof(planner));
-        _diffFileAccess = diffFileAccess ?? new PhysicalEvidenceDiffFileAccess();
+        _inputFileAccess = inputFileAccess ?? new PhysicalEvidenceInputFileAccess();
     }
 
     /// <summary>
@@ -78,15 +81,19 @@ internal sealed class EvidenceCliWorkflow
     }
 
     /// <summary>
-    /// Resolves an evidence plan and reports prerequisite readiness without provisioning resources or running producers.
+    /// Resolves an evidence plan and reports structural prerequisites without provisioning resources or running producers.
     /// </summary>
+    /// <remarks>
+    /// A registered verifier must validate the execution envelope in the consumer's protected workflow.
+    /// Planning and CI environment values provide no admission.
+    /// </remarks>
     public async Task<EvidenceDoctorReport> DoctorAsync(EvidencePlanningRequest request, CancellationToken cancellationToken)
     {
         var plan = await ExplainAsync(request, cancellationToken).ConfigureAwait(false);
         var checks = new List<EvidenceDoctorCheck>
         {
-            new("policy", true, "ready", $"Policy '{plan.PolicyId}' resolved profile '{plan.Profile.Id}'.", null),
-            new("diff", true, "ready", $"Resolved {plan.ChangedPaths.Count} normalized changed path(s).", null),
+            new("policy", "ready", $"Policy '{plan.PolicyId}' resolved profile '{plan.Profile.Id}'.", null),
+            new("diff", "ready", $"Resolved {plan.ChangedPaths.Count} normalized changed path(s).", null),
         };
         foreach (var producer in plan.Profile.Producers)
         {
@@ -104,23 +111,13 @@ internal sealed class EvidenceCliWorkflow
             }
         }
 
-        if (plan.Profile.Scope == EvidenceProfileScope.Release)
-        {
-            var githubActions = string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
-            checks.Add(new EvidenceDoctorCheck(
-                "trusted-envelope",
-                githubActions,
-                githubActions ? "ready" : "blocked",
-                githubActions ? "GitHub Actions environment is available for the consumer envelope verifier." : "Release evidence requires a CI-provided trusted envelope.",
-                githubActions ? null : "Run from the consumer's protected CI workflow or request observation-only evidence."));
-        }
+        checks.Add(new EvidenceDoctorCheck(
+            "trusted-envelope",
+            "unverified",
+            "The execution envelope is unverified. Planning and CI environment values grant no admission.",
+            "For release evidence, use the registered verifier in the consumer's protected workflow. See https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#release-evidence"));
 
-        var blocked = checks.Any(static check => string.Equals(check.Status, "blocked", StringComparison.Ordinal));
-        var external = checks.Any(static check => string.Equals(check.Status, "external-prerequisite", StringComparison.Ordinal));
-        return new EvidenceDoctorReport(
-            blocked ? "blocked" : external ? "ready_with_external_prerequisites" : "ready",
-            plan,
-            checks);
+        return new EvidenceDoctorReport(plan, checks);
     }
 
     /// <summary>
@@ -146,7 +143,8 @@ internal sealed class EvidenceCliWorkflow
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
-        var policy = await ReadPolicyAsync(request.PolicyPath, cancellationToken).ConfigureAwait(false);
+        var policy = await ReadJsonInputAsync<EvidencePolicy>(request.PolicyPath, JsonInputKind.Policy, cancellationToken)
+            .ConfigureAwait(false);
         var inputs = await ReadPathsAndSnapshotAsync(request, cancellationToken).ConfigureAwait(false);
         var plan = inputs.Snapshot is null
             ? _planner.Resolve(policy, inputs.Paths)
@@ -173,33 +171,80 @@ internal sealed class EvidenceCliWorkflow
     /// Writes the canonical plan and its human-readable summary to <paramref name="outputDirectory"/>.
     /// </summary>
     /// <remarks>Replaces <c>evidence-plan.json</c> and <c>evidence-summary.json</c> when they already exist.</remarks>
-    public async Task WritePlanAsync(EvidencePlan plan, string outputDirectory, CancellationToken cancellationToken,
-        IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions = null)
+    /// <param name="plan">The resolved plan.</param>
+    /// <param name="outputDirectory">The directory that receives the plan and summary.</param>
+    /// <param name="cancellationToken">Cancels writing the outputs.</param>
+    /// <param name="reuseDecisions">Optional reuse decisions to include in the human-readable summary.</param>
+    /// <exception cref="EvidenceCliException">The generated plan exceeds the JSON input ceiling (<c>ASEVD217</c>).</exception>
+    public Task WritePlanAsync(
+        EvidencePlan plan,
+        string outputDirectory,
+        CancellationToken cancellationToken,
+        IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions = null) =>
+        WritePlanAsync(plan, outputDirectory, retirePreviousRun: false, cancellationToken, reuseDecisions);
+
+    /// <summary>
+    /// Validates the canonical plan size, retires earlier run output, and writes the new plan and summary.
+    /// </summary>
+    /// <remarks>Call before starting any producer. An oversized plan leaves the earlier run intact.</remarks>
+    /// <exception cref="EvidenceCliException">
+    /// The plan exceeds the JSON input ceiling (<c>ASEVD217</c>), or a linked artifact directory cannot be retired
+    /// (<c>ASEVD216</c>).
+    /// </exception>
+    public Task WriteRunPlanAsync(EvidencePlan plan, string outputDirectory, CancellationToken cancellationToken) =>
+        WritePlanAsync(plan, outputDirectory, retirePreviousRun: true, cancellationToken, reuseDecisions: null);
+
+    private static async Task WritePlanAsync(
+        EvidencePlan plan,
+        string outputDirectory,
+        bool retirePreviousRun,
+        CancellationToken cancellationToken,
+        IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        Directory.CreateDirectory(outputDirectory);
-        await WriteCanonicalAsync(Path.Join(outputDirectory, "evidence-plan.json"), plan, cancellationToken).ConfigureAwait(false);
-        await WriteSummaryAsync(outputDirectory, CreateSummary(plan, reuseDecisions), cancellationToken).ConfigureAwait(false);
+        var json = SerializeBoundedOutput(plan, "plan");
+        if (retirePreviousRun)
+        {
+            TestEvidenceRunSupport.RetireOutputs(outputDirectory, plan);
+        }
+
+        await WriteOutputAsync(
+            outputDirectory,
+            Path.Join(outputDirectory, "evidence-plan.json"),
+            json,
+            () => CreateSummary(plan, reuseDecisions),
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Writes the canonical manifest and its human-readable summary to <paramref name="outputDirectory"/>.
     /// </summary>
     /// <remarks>Replaces <c>evidence-manifest.json</c> and <c>evidence-summary.json</c> when they already exist.</remarks>
-    public async Task WriteManifestAsync(EvidenceManifest manifest, string outputDirectory, CancellationToken cancellationToken,
+    /// <param name="manifest">The completed run manifest.</param>
+    /// <param name="outputDirectory">The directory that receives the manifest and summary.</param>
+    /// <param name="cancellationToken">Cancels writing the outputs.</param>
+    /// <param name="reuseDecisions">Optional reuse decisions to include in the human-readable summary.</param>
+    /// <exception cref="EvidenceCliException">The generated manifest exceeds the JSON input ceiling (<c>ASEVD217</c>).</exception>
+    public async Task WriteManifestAsync(
+        EvidenceManifest manifest,
+        string outputDirectory,
+        CancellationToken cancellationToken,
         IReadOnlyList<EvidenceReuseSummaryDecision>? reuseDecisions = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
-        Directory.CreateDirectory(outputDirectory);
-        await WriteCanonicalAsync(Path.Join(outputDirectory, "evidence-manifest.json"), manifest, cancellationToken).ConfigureAwait(false);
-        await WriteSummaryAsync(outputDirectory, CreateSummary(manifest, reuseDecisions), cancellationToken).ConfigureAwait(false);
+        await WriteOutputAsync(
+            outputDirectory,
+            Path.Join(outputDirectory, "evidence-manifest.json"),
+            SerializeBoundedOutput(manifest, "manifest"),
+            () => CreateSummary(manifest, reuseDecisions),
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Verifies that a manifest is canonical and is bound to the supplied plan without rerunning producers.
     /// </summary>
     /// <remarks>
-    /// Missing files produce <c>ASEVD208</c>, malformed canonical JSON produces <c>ASEVD209</c>, and a missing,
+    /// Missing files and invalid paths produce <c>ASEVD208</c>, malformed canonical JSON produces <c>ASEVD209</c>, and a missing,
     /// unresolvable, or non-binding policy snapshot produces <c>ASEVD203</c>.
     /// </remarks>
     public Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyAsync(
@@ -244,7 +289,7 @@ internal sealed class EvidenceCliWorkflow
             {
                 var usesCoverageCustody = useDefaultRoot && artifact.LogicalName == CoverageEvidenceInventory.LogicalName
                     && verified.Plan.Profile.Producers.Any(declaration => declaration.Id == producer.ProducerId
-                        && string.Equals(declaration.Kind, "coverage", StringComparison.OrdinalIgnoreCase));
+                        && declaration.IsCoverageProducer());
                 var status = usesCoverageCustody
                     ? await CheckCoverageCustodyAsync(outputDirectory, verified.Plan, producer.ProducerId, artifact, cancellationToken).ConfigureAwait(false)
                     : await EvidenceArtifactFileValidation.CheckAsync(root, producer.ProducerId, artifact, cancellationToken).ConfigureAwait(false);
@@ -278,8 +323,10 @@ internal sealed class EvidenceCliWorkflow
         CancellationToken cancellationToken,
         bool requireGateAdmission)
     {
-        var plan = await ReadCanonicalAsync<EvidencePlan>(planPath, cancellationToken).ConfigureAwait(false);
-        var manifest = await ReadCanonicalAsync<EvidenceManifest>(manifestPath, cancellationToken).ConfigureAwait(false);
+        var plan = await ReadJsonInputAsync<EvidencePlan>(planPath, JsonInputKind.Plan, cancellationToken)
+            .ConfigureAwait(false);
+        var manifest = await ReadJsonInputAsync<EvidenceManifest>(manifestPath, JsonInputKind.Manifest, cancellationToken)
+            .ConfigureAwait(false);
         if (plan.PolicySnapshot is null)
         {
             throw new EvidenceCliException(
@@ -386,24 +433,6 @@ internal sealed class EvidenceCliWorkflow
         return string.Join(Environment.NewLine, new[] { baseSummary }.Concat(rows));
     }
 
-    private static async Task<EvidencePolicy> ReadPolicyAsync(string policyPath, CancellationToken cancellationToken)
-    {
-        if (!File.Exists(policyPath))
-        {
-            throw new EvidenceCliException("ASEVD204", $"Evidence policy '{policyPath}' does not exist.", "Run 'appsurface evidence init --sample' or pass --policy with a checked-in policy path.");
-        }
-
-        var bytes = await File.ReadAllBytesAsync(policyPath, cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return EvidenceCanonicalJson.Deserialize<EvidencePolicy>(bytes);
-        }
-        catch (JsonException exception)
-        {
-            throw new EvidenceCliException("ASEVD205", $"Evidence policy '{policyPath}' is not valid JSON: {exception.Message}", "Correct the policy JSON and rerun doctor or explain.");
-        }
-    }
-
     private async Task<(IReadOnlyList<NormalizedDiffPath> Paths, EvidenceDiffSnapshot? Snapshot)> ReadPathsAndSnapshotAsync(
         EvidencePlanningRequest request,
         CancellationToken cancellationToken)
@@ -430,7 +459,7 @@ internal sealed class EvidenceCliWorkflow
     {
         try
         {
-            await using var stream = _diffFileAccess.OpenRead(path);
+            await using var stream = _inputFileAccess.OpenRead(path);
             var bytes = await ReadBoundedBytesAsync(stream, EvidencePlan.MaximumCapturedPatchBytes, path, cancellationToken).ConfigureAwait(false);
 
             return new EvidenceDiffSnapshot(bytes, Path.GetFileName(path), Convert.ToHexString(SHA256.HashData(bytes)));
@@ -481,7 +510,6 @@ internal sealed class EvidenceCliWorkflow
             || File.Exists("/var/run/docker.sock");
         return new EvidenceDoctorCheck(
             $"docker:{producerId}",
-            available,
             available ? "ready" : "external-prerequisite",
             available ? "Docker capability is available." : $"Producer '{producerId}' requires Docker-backed disposable dependencies.",
             available ? null : "Start Docker Desktop or use the consumer CI runner that provides Docker.");
@@ -492,37 +520,107 @@ internal sealed class EvidenceCliWorkflow
         var available = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
         return new EvidenceDoctorCheck(
             $"browser:{producerId}",
-            available,
             available ? "ready" : "external-prerequisite",
             available ? "Browser capability is configured." : $"Producer '{producerId}' requires the consumer's browser test runtime.",
             available ? null : "Install the consumer browser runtime or use its CI browser image.");
     }
 
-    private static async Task WriteCanonicalAsync<TValue>(string path, TValue value, CancellationToken cancellationToken)
+    private static async Task WriteOutputAsync(
+        string outputDirectory,
+        string canonicalPath,
+        byte[] canonicalJson,
+        Func<object> createSummary,
+        CancellationToken cancellationToken)
     {
-        await File.WriteAllBytesAsync(path, EvidenceCanonicalJson.Serialize(value), cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllBytesAsync(canonicalPath, canonicalJson, cancellationToken).ConfigureAwait(false);
+        await File.WriteAllTextAsync(
+            Path.Join(outputDirectory, "evidence-summary.json"),
+            JsonSerializer.Serialize(createSummary(), new JsonSerializerOptions { WriteIndented = true }),
+            new UTF8Encoding(false),
+            cancellationToken).ConfigureAwait(false);
     }
 
-    private static Task WriteSummaryAsync<TSummary>(string outputDirectory, TSummary summary, CancellationToken cancellationToken)
-        => File.WriteAllTextAsync(Path.Join(outputDirectory, "evidence-summary.json"),
-            JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }),
-            new UTF8Encoding(false), cancellationToken);
-
-    private static async Task<TValue> ReadCanonicalAsync<TValue>(string path, CancellationToken cancellationToken)
+    private static byte[] SerializeBoundedOutput<TValue>(TValue value, string kind)
     {
-        if (!File.Exists(path))
+        var json = EvidenceCanonicalJson.Serialize(value);
+        if (json.Length > EvidenceCanonicalJson.MaximumInputBytes)
         {
-            throw new EvidenceCliException("ASEVD208", $"Evidence file '{path}' does not exist.", "Pass paths from the same generated evidence output directory.");
+            throw new EvidenceCliException(
+                "ASEVD217",
+                $"The generated Evidence {kind} exceeds the {EvidenceCanonicalJson.MaximumInputBytes} byte verification limit.",
+                "Shorten descriptive policy text, changed-path inputs, or evidence diagnostics and rerun.");
         }
+
+        return json;
+    }
+
+    private async Task<TValue> ReadJsonInputAsync<TValue>(
+        string path,
+        JsonInputKind kind,
+        CancellationToken cancellationToken)
+    {
+        var isPolicy = kind == JsonInputKind.Policy;
+        var inputName = kind switch
+        {
+            JsonInputKind.Policy => "Evidence policy",
+            JsonInputKind.Plan => "Evidence plan",
+            _ => "Evidence manifest",
+        };
+        var pathCode = isPolicy ? "ASEVD204" : "ASEVD208";
 
         try
         {
-            return EvidenceCanonicalJson.Deserialize<TValue>(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+            await using var stream = OpenInput();
+            return await EvidenceCanonicalJson.DeserializeAsync<TValue>(
+                stream,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException
+            or UnauthorizedAccessException or SecurityException)
         {
-            throw new EvidenceCliException("ASEVD209", $"Evidence file '{path}' is not valid JSON: {exception.Message}", "Regenerate evidence instead of editing the output.");
+            const string guide = " See https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input.";
+            var fix = isPolicy
+                ? "Use a readable policy with unique properties and named enum values within the input limit, then rerun doctor or explain."
+                : "Regenerate readable plan and manifest files with the current supported schema within the input limit.";
+            throw new EvidenceCliException(
+                isPolicy ? "ASEVD205" : "ASEVD209",
+                $"{inputName} could not be read as supported, unambiguous JSON within the 20 MiB input limit.",
+                fix + guide);
         }
+
+        Stream OpenInput()
+        {
+            try
+            {
+                return _inputFileAccess.OpenRead(path);
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                throw new EvidenceCliException(
+                    pathCode,
+                    $"{inputName} '{path}' does not exist.",
+                    isPolicy
+                        ? "Run 'appsurface evidence init --sample' or pass --policy with a checked-in policy path."
+                        : "Pass paths from the same generated evidence output directory.");
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+            {
+                throw new EvidenceCliException(
+                    pathCode,
+                    $"{inputName} path is empty or invalid.",
+                    isPolicy
+                        ? "Run 'appsurface evidence init --sample' or pass --policy with a valid checked-in policy path."
+                        : "Pass valid plan and manifest paths from the same generated evidence output directory.");
+            }
+        }
+    }
+
+    private enum JsonInputKind
+    {
+        Policy,
+        Plan,
+        Manifest,
     }
 
     private static bool ContainsGeneratedMarker(string path) => File.ReadAllText(path).Contains(GeneratedMarker, StringComparison.Ordinal);
@@ -786,26 +884,26 @@ internal sealed class EvidenceDiffSnapshot
 }
 
 /// <summary>
-/// Opens explicit unified diff files for Evidence planning.
+/// Opens explicit JSON or unified diff inputs for Evidence planning and structural verification.
 /// </summary>
 /// <remarks>
 /// This narrow internal boundary keeps the production reader file-backed while allowing tests to prove that the
 /// bounded stream reader evaluates the bytes available when a path is actually opened, not stale file metadata.
 /// </remarks>
-internal interface IEvidenceDiffFileAccess
+internal interface IEvidenceInputFileAccess
 {
     /// <summary>
     /// Opens <paramref name="path"/> for sequential read access.
     /// </summary>
-    /// <param name="path">The explicit path supplied through <c>--diff-file</c>.</param>
+    /// <param name="path">The explicit policy, plan, manifest or <c>--diff-file</c> input path.</param>
     /// <returns>A readable stream owned and disposed by the Evidence workflow.</returns>
     Stream OpenRead(string path);
 }
 
 /// <summary>
-/// Opens Evidence diff files through the local physical file system.
+/// Opens Evidence inputs through the local physical file system.
 /// </summary>
-internal sealed class PhysicalEvidenceDiffFileAccess : IEvidenceDiffFileAccess
+internal sealed class PhysicalEvidenceInputFileAccess : IEvidenceInputFileAccess
 {
     /// <inheritdoc />
     public Stream OpenRead(string path) => new FileStream(
@@ -825,12 +923,12 @@ internal sealed record EvidenceInitializationResult(string RootPath, IReadOnlyLi
 /// <summary>
 /// Describes one environment or capability prerequisite observed by the evidence doctor.
 /// </summary>
-internal sealed record EvidenceDoctorCheck(string Id, bool Satisfied, string Status, string Message, string? NextAction);
+internal sealed record EvidenceDoctorCheck(string Id, string Status, string Message, string? NextAction);
 
 /// <summary>
 /// Describes the plan and prerequisite checks produced by the evidence doctor.
 /// </summary>
-internal sealed record EvidenceDoctorReport(string Status, EvidencePlan Plan, IReadOnlyList<EvidenceDoctorCheck> Checks);
+internal sealed record EvidenceDoctorReport(EvidencePlan Plan, IReadOnlyList<EvidenceDoctorCheck> Checks);
 
 /// <summary>
 /// Represents a stable, user-actionable EvidenceHost CLI failure.

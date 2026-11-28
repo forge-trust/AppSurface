@@ -283,16 +283,6 @@ public sealed class EvidenceReuseContractTests
         Assert.Equal(EvidenceDigest.Sha256(legacyBytes), EvidenceDigest.CanonicalSha256(value));
     }
 
-    [Fact]
-    public void PolicyReaderRetainsDefinedNumericEnumCompatibility()
-    {
-        const string policyJson = """{"Id":"policy","Version":"1","ConservativeProfileId":"targeted","Profiles":[{"Id":"targeted","Scope":0,"Resources":[],"Producers":[],"Obligations":[]}],"Rules":[]}""";
-
-        var policy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(Encoding.UTF8.GetBytes(policyJson));
-
-        Assert.Equal(EvidenceProfileScope.Targeted, policy.Profiles[0].Scope);
-    }
-
     [Theory]
     [InlineData("1.0")]
     [InlineData("1.1")]
@@ -397,8 +387,12 @@ public sealed class EvidenceReuseContractTests
         var read = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(Encoding.UTF8.GetBytes(json));
         Assert.Equal(1, read.ReuseCount);
         Assert.True(EvidenceManifestBuilder.Verify(plan, read));
-        Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidenceManifest>(Encoding.UTF8.GetBytes(json.Replace("\"ReuseCount\":1", "\"ReuseCount\":0", StringComparison.Ordinal))));
+        var wrongCount = json.Replace("\"ReuseCount\":1", "\"ReuseCount\":0", StringComparison.Ordinal);
+        Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidenceManifest>(Encoding.UTF8.GetBytes(wrongCount)));
         Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidenceManifest>(Encoding.UTF8.GetBytes(json.Replace("\"ReuseCount\":1", "\"ReuseCount\":\"1\"", StringComparison.Ordinal))));
+        Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidenceManifest[]>(Encoding.UTF8.GetBytes($"[{wrongCount}]")));
+        var nested = Assert.Single(EvidenceCanonicalJson.Deserialize<EvidenceManifest[]>(Encoding.UTF8.GetBytes($"[{json}]")));
+        Assert.Equal(1, nested.ReuseCount);
         Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(plan, [result with { Outcome = EvidenceProducerOutcome.Passed }]).ExecutionVerdict);
     }
 
@@ -596,6 +590,28 @@ public sealed class EvidenceReuseContractTests
         Assert.Equal([a, b], first.ProducerResults[0].Artifacts);
         Assert.True(EvidenceManifestBuilder.Verify(plan, first));
         Assert.False(EvidenceArtifactValidation.AreValid(producer, [a, a with { RelativePath = "reports/A" }]));
+    }
+
+    [Fact]
+    public void Version11IncompleteProducerMayOmitRequiredArtifacts()
+    {
+        var profile = ReusePlan().Profile;
+        var slot = new EvidenceArtifactSlot("report", "reports", "text/plain", true, 10);
+        var producer = profile.Producers[0] with { ArtifactSlots = [slot] };
+        profile = profile with { Producers = [producer] };
+        var plan = CreatePlan(profile, "1.1");
+        var unavailable = new EvidenceProducerResult("p", EvidenceProducerOutcome.Unavailable, []);
+        var oversized = new EvidenceArtifactResult("report", "reports/result.txt", slot.MediaType, slot.MaximumBytes + 1, new string('a', 64));
+
+        var incomplete = EvidenceManifestBuilder.Build(plan, [unavailable]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, incomplete.ExecutionVerdict);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, incomplete));
+        Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, incomplete));
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(plan, [unavailable with { Artifacts = [oversized] }]).ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(plan, [new("p", EvidenceProducerOutcome.Passed, ["assert"])]).ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(plan, [ValidReusedResult()]).ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, EvidenceManifestBuilder.Build(CreatePlan(profile, "1.0"), [unavailable]).ExecutionVerdict);
     }
 
     [Theory]

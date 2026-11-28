@@ -80,8 +80,8 @@ internal static class EvidenceReceiptQuota
             var entry = FindForMutation(index, repositoryNamespace, key);
             AddEssentialReservation(index, entry, repositoryNamespace, key, reservationId, EssentialReservationBytes);
         }
-        using var namespaceRoot = EnsureChildDirectory(root, repositoryNamespace);
-        foreach (var key in keys) using (EnsureChildDirectory(namespaceRoot, key)) { }
+        using var namespaceRoot = root.OpenOrCreateArtifactChildDirectory(repositoryNamespace, requirePrivate: true);
+        foreach (var key in keys) using (namespaceRoot.OpenOrCreateArtifactChildDirectory(key, requirePrivate: true)) { }
         WriteIndex(root, rootPath, index, protectedKeys, unixDirectoryFsyncForTests);
         return reservationId;
     }
@@ -133,12 +133,8 @@ internal static class EvidenceReceiptQuota
             WriteIndex(root, rootPath, index, protectedKeys);
             entry = FindForMutation(index, repositoryNamespace, key);
         }
-        var minimumMetadataBytes = EssentialReservationBytes;
-        if (entry is not null)
-        {
-            var stateBytes = entry.AuthorityState is null ? 0 : JsonSerializer.SerializeToUtf8Bytes(entry.AuthorityState).Length;
-            minimumMetadataBytes = Math.Max(0, EssentialReservationBytes - stateBytes);
-        }
+        var stateBytes = EvidenceReceiptState.GetSerializedByteCount(entry?.AuthorityState);
+        var minimumMetadataBytes = RemainingEssentialMetadataBytes(stateBytes);
         AddEssentialReservation(index, entry, repositoryNamespace, key, reservationId, minimumMetadataBytes);
         WriteIndex(root, rootPath, index, protectedKeys);
     }
@@ -195,13 +191,13 @@ internal static class EvidenceReceiptQuota
         }
         else
         {
-            var stateBytes = state is null ? 0 : JsonSerializer.SerializeToUtf8Bytes(state).Length;
+            var stateBytes = EvidenceReceiptState.GetSerializedByteCount(state);
             var essential = remaining.Length != 0 || authority.RequiresEssentialHold;
             Replace(index, entry, entry with
             {
                 EssentialReservationIds = remaining,
                 EssentialReserved = essential,
-                MetadataBytes = essential ? Math.Max(0, EssentialReservationBytes - stateBytes) : 0
+                MetadataBytes = essential ? RemainingEssentialMetadataBytes(stateBytes) : 0
             });
         }
         WriteIndex(root, rootPath, index);
@@ -371,9 +367,12 @@ internal static class EvidenceReceiptQuota
     internal static void RecordState(string rootPath, string repositoryNamespace, string key, EvidenceReceiptState state)
         => RecordStateCore(rootPath, repositoryNamespace, key, state, MeasureAuthorityState(state));
 
+    private static int RemainingEssentialMetadataBytes(int stateBytes)
+        => Math.Max(0, EssentialReservationBytes - stateBytes);
+
     private static int MeasureAuthorityState(EvidenceReceiptState state)
     {
-        var stateBytes = JsonSerializer.SerializeToUtf8Bytes(state).Length;
+        var stateBytes = EvidenceReceiptState.GetSerializedByteCount(state);
         if (stateBytes > EvidenceReceiptState.MaximumSerializedBytes)
             throw new IOException("Essential receipt authority capacity is unavailable.");
         return stateBytes;
@@ -392,7 +391,7 @@ internal static class EvidenceReceiptQuota
         var essential = authority.RequiresEssentialHold || reservationIds.Count != 0;
         Replace(index, entry, entry with
         {
-            MetadataBytes = essential ? Math.Max(0, EssentialReservationBytes - stateBytes) : 0,
+            MetadataBytes = essential ? RemainingEssentialMetadataBytes(stateBytes) : 0,
             EssentialReserved = essential,
             HasInFlight = authority.HasInFlight,
             HasAuditIntent = authority.HasAuditIntent,
@@ -469,7 +468,7 @@ internal static class EvidenceReceiptQuota
                 throw new InvalidDataException("Receipt batch state does not describe the committed settled payload.");
             if (commit.State.PassedProducerRecord is { Length: > EvidenceReceiptState.MaximumPassedProducerBase64Characters })
                 throw new EvidenceReceiptQuotaUnavailableException("receipt-passed-producer-record-capacity-unavailable");
-            if (JsonSerializer.SerializeToUtf8Bytes(commit.State).Length > EvidenceReceiptState.MaximumSerializedBytes)
+            if (EvidenceReceiptState.GetSerializedByteCount(commit.State) > EvidenceReceiptState.MaximumSerializedBytes)
                 throw new EvidenceReceiptQuotaUnavailableException("receipt-state-capacity-unavailable");
             var payloadReservation = (entry.PayloadReservations ?? [])
                 .SingleOrDefault(item => item.PayloadDirectoryName == commit.PayloadDirectoryName);
@@ -566,11 +565,11 @@ internal static class EvidenceReceiptQuota
             return;
         if (entry.PayloadDirectoryName is not null && entry.RetiredPayloads.Count >= MaximumRetiredPayloadsPerKey)
             throw new EvidenceReceiptQuotaUnavailableException("receipt-retired-payload-capacity-unavailable");
-        var stateBytes = JsonSerializer.SerializeToUtf8Bytes(invalidatedState).Length;
+        var stateBytes = EvidenceReceiptState.GetSerializedByteCount(invalidatedState);
         Replace(index, entry, entry with
         {
             MetadataBytes = (entry.EssentialReservationIds?.Count ?? 0) != 0
-                ? Math.Max(0, EssentialReservationBytes - stateBytes) : 0,
+                ? RemainingEssentialMetadataBytes(stateBytes) : 0,
             EssentialReserved = (entry.EssentialReservationIds?.Count ?? 0) != 0,
             HasInFlight = false,
             HasAuditIntent = false,
@@ -793,24 +792,7 @@ internal static class EvidenceReceiptQuota
                 }
                 else
                 {
-                    Replace(index, current, current with
-                    {
-                        MetadataBytes = 0,
-                        ReservedPayloadBytes = 0,
-                        EssentialReservationBytes = 0,
-                        EssentialReserved = false,
-                        HasInFlight = false,
-                        HasAuditIntent = false,
-                        Quarantined = false,
-                        OriginCompletedAt = null,
-                        LastSuccessfulUse = null,
-                        AuthorityState = null,
-                        ProducerId = null,
-                        InputIdentityDigest = null,
-                        EssentialReservationIds = [],
-                        PayloadReservations = [],
-                        EvictionPending = true
-                    });
+                    Replace(index, current, CreateEvictionTombstone(current));
                     tombstoned = current;
                 }
                 ReportCapacityChange(tombstoned);
@@ -1014,14 +996,6 @@ internal static class EvidenceReceiptQuota
         }
     }
 
-    private static CoverageRunOutputLease EnsureChildDirectory(CoverageRunOutputLease parent, string name)
-    {
-        CoverageRunOutputLease.ValidateArtifactComponent(name);
-        var path = Path.Combine(parent.ArtifactDirectoryPath, name);
-        return CoverageRunOutputLease.AcquireArtifactDirectory(path, false, true)
-            ?? parent.CreateArtifactDirectory(name);
-    }
-
     private static EvidenceReceiptQuotaIndex ReadIndex(CoverageRunOutputLease root)
     {
         try
@@ -1054,7 +1028,7 @@ internal static class EvidenceReceiptQuota
                 || entry.EssentialReservationIds is not { } essentialReservationIds
                 || HasInvalidReservationBindings(entry, essentialReservationIds)
                 || HasInvalidRetiredPayloads(entry)
-                || HasInvalidAuthority(entry, essentialReservationIds.Count))
+                || HasInvalidAuthority(entry))
                 throw new InvalidDataException("Receipt quota index contains unsupported or invalid authority.");
         }
     }
@@ -1085,15 +1059,28 @@ internal static class EvidenceReceiptQuota
             || (entry.PayloadReservations is { } bindings && bindings.Any(binding =>
                 string.Equals(retired.DirectoryName, binding.PayloadDirectoryName, StringComparison.OrdinalIgnoreCase))));
 
-    private static bool HasInvalidAuthority(EvidenceReceiptQuotaEntry entry, int essentialReservationCount)
+    private static EvidenceReceiptQuotaEntry CreateEvictionTombstone(EvidenceReceiptQuotaEntry entry) =>
+        new(entry.RepositoryNamespace, entry.Key, MetadataBytes: 0, PayloadBytes: entry.PayloadBytes,
+            ReservedPayloadBytes: 0, EssentialReservationBytes: 0, EssentialReserved: false,
+            HasInFlight: false, HasAuditIntent: false, PayloadDirectoryName: entry.PayloadDirectoryName,
+            OriginCompletedAt: null, LastSuccessfulUse: null, Quarantined: false,
+            RetiredPayloads: entry.RetiredPayloads, EssentialReservationIds: [], PayloadReservations: [], EvictionPending: true);
+
+    private static bool HasInvalidAuthority(EvidenceReceiptQuotaEntry entry)
     {
-        if (entry.EvictionPending && (entry.AuthorityState is not null || entry.MetadataBytes != 0
-            || entry.ReservedPayloadBytes != 0 || entry.EssentialReservationBytes != 0
-            || entry.EssentialReserved || entry.HasInFlight || entry.HasAuditIntent || entry.Quarantined
-            || entry.OriginCompletedAt is not null || entry.LastSuccessfulUse is not null
-            || entry.ProducerId is not null || entry.InputIdentityDigest is not null
-            || essentialReservationCount != 0 || entry.PayloadReservations is { Count: > 0 }))
-            return true;
+        if (entry.EvictionPending)
+        {
+            if (entry.EssentialReservationIds is not { Count: 0 } || entry.PayloadReservations is { Count: > 0 })
+                return true;
+
+            // Compare only after checking the lists are empty. This also accepts legacy absent payload bindings.
+            var expected = CreateEvictionTombstone(entry);
+            return expected != (entry with
+            {
+                EssentialReservationIds = expected.EssentialReservationIds,
+                PayloadReservations = expected.PayloadReservations,
+            });
+        }
 
         if (entry.AuthorityState is not { } state)
             return entry.HasInFlight || entry.HasAuditIntent || entry.Quarantined;

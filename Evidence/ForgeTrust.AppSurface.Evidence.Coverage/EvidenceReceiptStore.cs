@@ -315,7 +315,7 @@ internal sealed class EvidenceReceiptStore
             var authority = authoritySnapshot
                 ?? EvidenceReceiptQuota.ReadAuthority(_root, _namespace, normalizedKey, readOnly: _readOnly);
             var proposed = ClassifyAuthority(authority, _clock);
-            if (!proposed.IsCandidate) return proposed;
+            if (proposed.Outcome != EvidenceReceiptReadOutcome.AuthorityEligible) return proposed;
             var state = proposed.State!;
             using var payload = CoverageRunOutputLease.AcquireArtifactDirectory(
                 Path.Combine(_root, _namespace, normalizedKey, state.PayloadDirectoryName!), false, true);
@@ -356,7 +356,7 @@ internal sealed class EvidenceReceiptStore
             return EvidenceReceiptReadResult.Miss(ageMissReason, state);
         if (state.PayloadDirectoryName is null || state.PassedProducerRecord is null || state.OriginManifestDigest is null)
             return EvidenceReceiptReadResult.Miss("no-passed-receipt", state);
-        return EvidenceReceiptReadResult.Candidate(state);
+        return EvidenceReceiptReadResult.AuthorityEligible(state);
     }
 
     /// <summary>Finds the latest verified same-producer origin for a bounded read-only difference explanation.</summary>
@@ -468,11 +468,26 @@ internal sealed class EvidenceReceiptStore
         }
 
         /// <summary>Clears only matching settled execution authority, retaining any audit refusal.</summary>
-        internal void SettleExecution(string executionId)
+        /// <param name="executionId">The identifier of the settled execution.</param>
+        /// <exception cref="InvalidOperationException">No authority exists or it belongs to another execution.</exception>
+        internal void SettleExecution(string executionId) => SettleExecutionCore(executionId, requireMatchingOwner: true);
+
+        /// <summary>Clears settled execution authority if it still belongs to this execution.</summary>
+        /// <param name="executionId">The identifier of the settled execution.</param>
+        /// <remarks>Used for cleanup and retries. Missing or foreign authority is preserved without an index write.</remarks>
+        internal void SettleExecutionIfOwned(string executionId) => SettleExecutionCore(executionId, requireMatchingOwner: false);
+
+        private void SettleExecutionCore(string executionId, bool requireMatchingOwner)
         {
-            var state = ReadState() ?? throw new InvalidOperationException("No execution authority exists.");
-            if (!StringComparer.Ordinal.Equals(state.InFlightExecutionId, executionId))
-                throw new InvalidOperationException("Execution authority belongs to another execution.");
+            var state = ReadState();
+            if (state is null || !StringComparer.Ordinal.Equals(state.InFlightExecutionId, executionId))
+            {
+                if (requireMatchingOwner)
+                    throw new InvalidOperationException(state is null ? "No execution authority exists."
+                        : "Execution authority belongs to another execution.");
+                return;
+            }
+
             EvidenceReceiptQuota.RecordState(this, state with { InFlightExecutionId = null });
         }
 
@@ -494,8 +509,8 @@ internal sealed class EvidenceReceiptStore
             });
         }
 
-        /// <summary>Returns the currently admissible receipt candidate without changing LRU metadata.</summary>
-        /// <remarks>Pending intent, mismatch quarantine, or unresolved execution authority always denies reuse.</remarks>
+        /// <summary>Classifies the leased authority before opening the receipt payload.</summary>
+        /// <remarks>Eligible authority still requires payload validation. This method leaves LRU metadata unchanged.</remarks>
         internal EvidenceReceiptReadResult ProposeReadReceipt() => ClassifyAuthority(ReadState(), clock);
 
         /// <summary>Verifies a complete origin receipt and restores its artifacts through the bounded writer.</summary>
@@ -537,7 +552,7 @@ internal sealed class EvidenceReceiptStore
         private async Task<EvidenceReceiptReadResult> RestoreProposedReceiptAsync(EvidenceProducerDeclaration producer,
             EvidenceArtifactWriter writer, EvidenceReceiptReadResult proposed, CancellationToken cancellationToken)
         {
-            if (!proposed.IsCandidate) return proposed;
+            if (proposed.Outcome != EvidenceReceiptReadOutcome.AuthorityEligible) return proposed;
             Verify();
             var state = proposed.State!;
             try
@@ -570,7 +585,7 @@ internal sealed class EvidenceReceiptStore
                         ProducerKey = Key,
                         OriginManifestDigest = origin.Manifest.ManifestDigest,
                         OriginCompletedAt = completedAt,
-                        Diagnostic = producer.Kind.Equals("coverage", StringComparison.OrdinalIgnoreCase)
+                        Diagnostic = producer.IsCoverageProducer()
                             ? "Coverage report: coverage/coverage-gate.md (relative to the producer artifact root)."
                             : originResult.Diagnostic
                     };
@@ -757,59 +772,30 @@ internal sealed class EvidenceReceiptStore
                     throw new InvalidDataException("Receipt origin completion time is in the future.");
                 var documents = new EvidenceReceiptPayload.ReceiptDocumentBytes(
                     preparedOrigin.PlanBytes, preparedOrigin.ManifestBytes, producerBytes, identityBytes);
-                // Reservation can evict settled receipts. Reject unwritable documents before it runs.
+                // Reservation can evict settled receipts. Preflight every document and the final authority first.
                 documents.ValidateBounds();
                 var reservedBytes = EvidenceReceiptQuota.EstimatePayloadReservation(artifacts.Sum(static artifact => artifact.LengthBytes),
                     documents.Plan.Length, documents.Manifest.Length, documents.Producer.Length, documents.Identity.Length, artifacts.Count);
                 var reservation = EvidenceReceiptPayloadReservation.Create(Guid.NewGuid().ToString("N"), reservedBytes);
-                if (!EvidenceReceiptQuota.TryReservePayload(storeRoot, repositoryNamespace, Key, clock.GetUtcNow(), reservation))
-                    return StagePublicationOutcome.Refused("payload-quota-full");
-                var stageName = reservation.StageDirectoryName;
                 var payloadName = reservation.PayloadDirectoryName;
-                string? stageIdentity = null;
-                try
+                var next = state with
                 {
-                    using var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(directory, false, true)
-                        ?? throw new IOException("Receipt key directory is unavailable.");
-                    using (var stage = keyRoot.CreateArtifactDirectory(stageName))
-                    {
-                        stageIdentity = stage.ArtifactDirectoryIdentity;
-                        await EvidenceReceiptPayload.WriteStageAsync(stage, sourceRoot, documents, artifacts,
-                            beforeArtifactCopyForTests is null ? null : artifact => beforeArtifactCopyForTests(request, artifact),
-                            cancellationToken).ConfigureAwait(false);
-                    }
-                    cancellationToken.ThrowIfCancellationRequested();
-                    using var destination = CoverageRunOutputLease.AcquireArtifactDirectory(directory, false, true)
-                        ?? throw new IOException("Receipt key directory is unavailable.");
-                    destination.MoveArtifactEntry(stageName, destination, payloadName, expectedSourceIdentity: stageIdentity);
-                    using var payload = CoverageRunOutputLease.AcquireArtifactDirectory(Path.Combine(directory, payloadName), false, true)
-                        ?? throw new IOException("Staged receipt payload is unavailable.");
-                    var payloadBytes = EvidenceReceiptQuota.MeasurePayload(payload);
-                    var next = state with
-                    {
-                        InFlightExecutionId = null,
-                        AuditIntentExecutionId = null,
-                        OriginManifestDigest = preparedOrigin.Manifest.ManifestDigest,
-                        OriginCompletedAt = request.CompletedAt,
-                        PayloadDirectoryName = payloadName,
-                        PassedProducerRecord = Convert.ToBase64String(producerBytes),
-                        LastSuccessfulUse = null,
-                        AuditMismatch = false,
-                        AuditExpectedAssertions = null,
-                        InputIdentityDigest = identityBytes.Length == 0 ? null : EvidenceDigest.Sha256(identityBytes)
-                    };
-                    if (JsonSerializer.SerializeToUtf8Bytes(next).Length > EvidenceReceiptState.MaximumSerializedBytes)
-                        throw new IOException("Serialized receipt authority exceeds its encoded-byte bound.");
-                    return StagePublicationOutcome.Ready(new(this, request.ProducerId, reservation, request.CompletedAt,
-                        payloadBytes, next, state));
-                }
-                catch
-                {
-                    var payloadDeleted = EvidenceReceiptPayload.TryDeleteExactDirectory(directory, payloadName);
-                    var stageDeleted = EvidenceReceiptPayload.TryDeleteExactDirectory(directory, stageName, stageIdentity);
-                    ReleaseReservationAfterConfirmedCleanup(reservation, payloadDeleted && stageDeleted);
-                    throw;
-                }
+                    InFlightExecutionId = null,
+                    AuditIntentExecutionId = null,
+                    OriginManifestDigest = preparedOrigin.Manifest.ManifestDigest,
+                    OriginCompletedAt = request.CompletedAt,
+                    PayloadDirectoryName = payloadName,
+                    PassedProducerRecord = Convert.ToBase64String(producerBytes),
+                    LastSuccessfulUse = null,
+                    AuditMismatch = false,
+                    AuditExpectedAssertions = null,
+                    InputIdentityDigest = identityBytes.Length == 0 ? null : EvidenceDigest.Sha256(identityBytes)
+                };
+                if (EvidenceReceiptState.GetSerializedByteCount(next) > EvidenceReceiptState.MaximumSerializedBytes)
+                    throw new IOException("Serialized receipt authority exceeds its encoded-byte bound.");
+                return await StagePreparedPayloadAsync(request,
+                    new(sourceRoot, documents, artifacts, reservation, NextState: next, PreviousState: state),
+                    cancellationToken, beforeArtifactCopyForTests).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (CoverageEvidenceInventoryException exception)
@@ -817,6 +803,48 @@ internal sealed class EvidenceReceiptStore
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
                 or JsonException or ArgumentException or InvalidOperationException or KeyNotFoundException)
             { return StagePublicationOutcome.Refused("payload-publication-failed"); }
+        }
+
+        /// <summary>Reserves quota and stages a payload after all publication preflight checks have passed.</summary>
+        /// <remarks>Receipt authority is committed by the batch. A staging failure releases quota only after confirming cleanup.</remarks>
+        private async Task<StagePublicationOutcome> StagePreparedPayloadAsync(EvidenceReceiptPublicationRequest request,
+            PreparedReceiptPayload prepared, CancellationToken cancellationToken,
+            Action<EvidenceReceiptPublicationRequest, EvidenceArtifactResult>? beforeArtifactCopyForTests)
+        {
+            var reservation = prepared.Reservation;
+            if (!EvidenceReceiptQuota.TryReservePayload(storeRoot, repositoryNamespace, Key, clock.GetUtcNow(), reservation))
+                return StagePublicationOutcome.Refused("payload-quota-full");
+            var stageName = reservation.StageDirectoryName;
+            var payloadName = reservation.PayloadDirectoryName;
+            string? stageIdentity = null;
+            try
+            {
+                using var keyRoot = CoverageRunOutputLease.AcquireArtifactDirectory(directory, false, true)
+                    ?? throw new IOException("Receipt key directory is unavailable.");
+                using (var stage = keyRoot.CreateArtifactDirectory(stageName))
+                {
+                    stageIdentity = stage.ArtifactDirectoryIdentity;
+                    await EvidenceReceiptPayload.WriteStageAsync(stage, prepared.SourceRoot, prepared.Documents, prepared.Artifacts,
+                        beforeArtifactCopyForTests is null ? null : artifact => beforeArtifactCopyForTests(request, artifact),
+                        cancellationToken).ConfigureAwait(false);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                using var destination = CoverageRunOutputLease.AcquireArtifactDirectory(directory, false, true)
+                    ?? throw new IOException("Receipt key directory is unavailable.");
+                destination.MoveArtifactEntry(stageName, destination, payloadName, expectedSourceIdentity: stageIdentity);
+                using var payload = CoverageRunOutputLease.AcquireArtifactDirectory(Path.Combine(directory, payloadName), false, true)
+                    ?? throw new IOException("Staged receipt payload is unavailable.");
+                var payloadBytes = EvidenceReceiptQuota.MeasurePayload(payload);
+                return StagePublicationOutcome.Ready(new(this, request.ProducerId, reservation, request.CompletedAt,
+                    payloadBytes, prepared.NextState, prepared.PreviousState));
+            }
+            catch
+            {
+                var payloadDeleted = EvidenceReceiptPayload.TryDeleteExactDirectory(directory, payloadName);
+                var stageDeleted = EvidenceReceiptPayload.TryDeleteExactDirectory(directory, stageName, stageIdentity);
+                ReleaseReservationAfterConfirmedCleanup(reservation, payloadDeleted && stageDeleted);
+                throw;
+            }
         }
 
         /// <summary>Releases one exact payload reservation only after cleanup confirms its owned entries are absent.</summary>
@@ -860,6 +888,11 @@ internal sealed class EvidenceReceiptStore
                 return new(plan, manifest, EvidenceCanonicalJson.Serialize(plan), EvidenceCanonicalJson.Serialize(manifest));
             }
         }
+
+        /// <summary>Holds validated source and authority data for staging before the batch commits it.</summary>
+        private readonly record struct PreparedReceiptPayload(string SourceRoot, EvidenceReceiptPayload.ReceiptDocumentBytes Documents,
+            IReadOnlyList<EvidenceArtifactResult> Artifacts, EvidenceReceiptPayloadReservation Reservation,
+            EvidenceReceiptState NextState, EvidenceReceiptState PreviousState);
 
         private sealed record StagedReceiptPublication(EvidenceReceiptKeyLease Lease, string ProducerId,
             EvidenceReceiptPayloadReservation Reservation, DateTimeOffset CompletedAt, long PayloadBytes,
@@ -945,8 +978,20 @@ internal sealed class EvidenceReceiptStore
     }
 }
 
-/// <summary>Distinguishes a receipt candidate from a completed current-run restore.</summary>
-internal enum EvidenceReceiptReadOutcome { Miss, Unavailable, Candidate, Restored }
+/// <summary>Distinguishes authority eligibility, read-only inspection, and current-run restoration.</summary>
+internal enum EvidenceReceiptReadOutcome
+{
+    /// <summary>The receipt is absent or ineligible.</summary>
+    Miss,
+    /// <summary>The store or authority could not be used safely.</summary>
+    Unavailable,
+    /// <summary>The authority permits inspecting the receipt payload.</summary>
+    AuthorityEligible,
+    /// <summary>Read-only inspection verified the receipt's origin metadata.</summary>
+    Candidate,
+    /// <summary>Leased restoration verified and restored the receipt artifacts.</summary>
+    Restored,
+}
 
 /// <summary>Outcome of receipt lookup, inspection, or leased restoration.</summary>
 internal sealed record EvidenceReceiptReadResult
@@ -961,6 +1006,7 @@ internal sealed record EvidenceReceiptReadResult
     internal EvidenceReceiptReadOutcome Outcome { get; }
     internal string Reason { get; }
     internal EvidenceReceiptState? State { get; }
+    /// <summary>Gets whether read-only inspection verified the receipt's origin metadata.</summary>
     internal bool IsCandidate => Outcome == EvidenceReceiptReadOutcome.Candidate;
     internal bool IsUnavailable => Outcome == EvidenceReceiptReadOutcome.Unavailable;
     internal EvidenceProducerResult? Result { get; private init; }
@@ -969,12 +1015,17 @@ internal sealed record EvidenceReceiptReadResult
     internal EvidenceReceiptInputIdentity? InputIdentity { get; private init; }
     internal DateTimeOffset? OriginCompletedAt { get; private init; }
     internal long? OriginElapsedMilliseconds { get; private init; }
-    internal static EvidenceReceiptReadResult Candidate(EvidenceReceiptState state)
-        => new(EvidenceReceiptReadOutcome.Candidate, "candidate", state);
+    /// <summary>Records an eligible authority snapshot before any payload verification.</summary>
+    /// <param name="state">The classified authority with a passed payload binding.</param>
+    internal static EvidenceReceiptReadResult AuthorityEligible(EvidenceReceiptState state)
+        => new(EvidenceReceiptReadOutcome.AuthorityEligible, "authority-eligible", state);
 
-    /// <summary>Attaches verified historical metadata to a read-only candidate.</summary>
+    /// <summary>Creates a read-only candidate with verified historical metadata.</summary>
+    /// <param name="state">The inspected authority snapshot.</param>
+    /// <param name="origin">The historical metadata verified against that snapshot.</param>
     internal static EvidenceReceiptReadResult Inspected(EvidenceReceiptState state, EvidenceReceiptPayload.ReceiptOriginMetadata origin)
-        => Candidate(state).WithVerifiedOrigin(origin, origin.Result, state.OriginCompletedAt);
+        => new EvidenceReceiptReadResult(EvidenceReceiptReadOutcome.Candidate, "candidate", state)
+            .WithVerifiedOrigin(origin, origin.Result, state.OriginCompletedAt);
 
     /// <summary>Creates a successful restore result after the invocation writer has verified the restored artifacts.</summary>
     /// <param name="result">The current invocation's reused producer result.</param>
@@ -1035,6 +1086,12 @@ internal sealed record EvidenceReceiptState(int SchemaVersion, string Key, strin
 
     /// <summary>Maximum UTF-8 length of the serialized authority state.</summary>
     internal const int MaximumSerializedBytes = 64 * 1024;
+
+    /// <summary>Measures the authority using the JSON encoding of the persisted quota index.</summary>
+    /// <param name="state">The authority to measure, or null when the entry has no authority.</param>
+    /// <returns>The encoded byte count, or zero for absent authority.</returns>
+    internal static int GetSerializedByteCount(EvidenceReceiptState? state)
+        => state is null ? 0 : JsonSerializer.SerializeToUtf8Bytes(state).Length;
 
     /// <summary>Maximum character count of the Base64 passed-producer record inside authority state.</summary>
     internal const int MaximumPassedProducerBase64Characters = 64 * 1024;

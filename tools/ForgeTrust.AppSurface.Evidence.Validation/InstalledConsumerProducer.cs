@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -14,6 +16,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     private const string ProducerId = "installed-consumer";
     private const string PackageId = "ForgeTrust.AppSurface.Cli";
     private const string CliAssembly = "ForgeTrust.AppSurface.Cli.dll";
+    private static readonly EvidenceCoverageGateRequirements GateRequirements = new(95, 85, 95, 85, TolerancePercent: 0);
     private static readonly string[] AssertionIds =
     [
         "consumer/package-identity@1",
@@ -23,7 +26,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     ];
 
     private readonly ValidationSettings _settings;
-    private readonly EvidenceCommandRunner _runner;
+    private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _command;
     private EvidenceWorkspace? _workspace;
     private int _disposed;
     private string? _settingsHash;
@@ -35,9 +38,18 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     /// <summary>Creates an installed-consumer producer with immutable caller settings.</summary>
     public InstalledConsumerProducer(ValidationSettings settings, EvidenceCommandRunner? runner = null)
+        : this(settings, (runner ?? new EvidenceCommandRunner()).RunAsync)
+    {
+    }
+
+    /// <summary>Creates the producer with the repository workflow's command runner.</summary>
+    /// <param name="settings">The immutable consumer validation settings.</param>
+    /// <param name="command">The bounded command runner, optionally observed for local scratch retention.</param>
+    internal InstalledConsumerProducer(ValidationSettings settings,
+        Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> command)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _runner = runner ?? new EvidenceCommandRunner();
+        _command = command ?? throw new ArgumentNullException(nameof(command));
     }
 
     /// <summary>Gets the stable producer identifier.</summary>
@@ -329,10 +341,9 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         _stageDetail = "run";
         await RunCheckedAsync(package.Executable, args, source.Root, MergeEnvironment(package.Environment, options.Environment), budget, cancellationToken).ConfigureAwait(false);
 
-        var gateArgs = new List<string> { "coverage", "gate", "--coverage", Path.Join(output, "coverage.cobertura.xml"), "--output", output, "--min-line", "95", "--min-branch", "85", "--tolerance", "0", "--no-github-summary" };
-        if (options.DiffBase is not null) gateArgs.AddRange(["--diff-base", options.DiffBase, "--min-patch-line", "95", "--min-patch-branch", "85"]);
         _stageDetail = "gate";
-        await RunCheckedAsync(package.Executable, gateArgs, source.Root, MergeEnvironment(package.Environment, options.Environment), budget, cancellationToken).ConfigureAwait(false);
+        await RunCheckedAsync(package.Executable, BuildGateArguments(output, options.DiffBase), source.Root,
+            MergeEnvironment(package.Environment, options.Environment), budget, cancellationToken).ConfigureAwait(false);
 
         _stageDetail = "junit";
         var testCases = ReadJUnitReports(output, source.ExpectedProjectCount, cancellationToken);
@@ -467,7 +478,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     private async Task<EvidenceCommandResult> RunCheckedAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IReadOnlyDictionary<string, string> environment, Func<CancellationToken, ValueTask> budget, CancellationToken cancellationToken)
     {
-        var result = await _runner.RunAsync(new EvidenceCommandRequest(fileName, arguments, workingDirectory, TimeSpan.FromMinutes(20)) { Environment = environment, MaximumOutputBytes = 4 * 1024 * 1024, CheckBudget = budget }, cancellationToken).ConfigureAwait(false);
+        var result = await _command(new EvidenceCommandRequest(fileName, arguments, workingDirectory, TimeSpan.FromMinutes(20)) { Environment = environment, MaximumOutputBytes = 4 * 1024 * 1024, CheckBudget = budget }, cancellationToken).ConfigureAwait(false);
         _commandSummaries.Add(new CommandSummary(
             Path.GetFileName(fileName),
             result.ExitCode,
@@ -489,12 +500,12 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     {
         try
         {
-            var result = await _runner.RunAsync(new EvidenceCommandRequest("git", args, directory, TimeSpan.FromMinutes(2)) { MaximumOutputBytes = 256 * 1024, CheckBudget = budget }, token).ConfigureAwait(false);
+            var result = await _command(new EvidenceCommandRequest("git", args, directory, TimeSpan.FromMinutes(2)) { MaximumOutputBytes = 256 * 1024, CheckBudget = budget }, token).ConfigureAwait(false);
             ValidationProof.Require(!result.OutputTruncated, "complete git output");
             if (result.ExitCode != 0 && !allowMissing) throw new InvalidDataException("Required source identity command failed.");
             return result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
         }
-        catch (EvidenceCommandException) when (allowMissing)
+        catch (EvidenceCommandException exception) when (allowMissing && !RepositoryCommandSettlement.IsUnconfirmedCleanup(exception))
         {
             return string.Empty;
         }
@@ -619,20 +630,42 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         return path;
     }
 
+    /// <summary>Builds the installed CLI gate invocation from the policy used to verify its report.</summary>
+    /// <param name="output">The managed coverage directory containing the merged report.</param>
+    /// <param name="diffBase">The selected base for the optional patch gate.</param>
+    /// <returns>Ordered, culture-invariant CLI arguments.</returns>
+    internal static IReadOnlyList<string> BuildGateArguments(string output, string? diffBase)
+    {
+        static string Number(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+
+        var arguments = new List<string>
+        {
+            "coverage", "gate", "--coverage", PathUtils.PathUnder(output, "coverage.cobertura.xml"), "--output", output,
+            "--min-line", Number(GateRequirements.MinLinePercent), "--min-branch", Number(GateRequirements.MinBranchPercent),
+            "--tolerance", Number(GateRequirements.TolerancePercent), "--no-github-summary",
+        };
+        if (diffBase is not null)
+            arguments.AddRange(["--diff-base", diffBase, "--min-patch-line", Number(GateRequirements.MinPatchLinePercent!.Value),
+                "--min-patch-branch", Number(GateRequirements.MinPatchBranchPercent!.Value)]);
+        return arguments;
+    }
+
     private static void ValidateGateReport(string output, bool hasPatch, CancellationToken cancellationToken)
     {
         using var document = ValidationProof.ReadJsonFile(Path.Join(output, "coverage-gate.json"), 1024 * 1024, cancellationToken);
         var root = document.RootElement;
-        ValidationProof.Require(root.GetProperty("passed").GetBoolean(), "coverage gate passed");
-        ValidationProof.Require(root.GetProperty("tolerancePercent").GetDecimal() == 0m, "coverage gate zero tolerance");
-        var thresholds = root.GetProperty("thresholds");
-        ValidationProof.Require(thresholds.GetProperty("line").GetDecimal() == 95m && thresholds.GetProperty("branch").GetDecimal() == 85m, "coverage gate thresholds");
-        var effective = root.GetProperty("effectiveThresholds");
-        ValidationProof.Require(effective.GetProperty("line").GetDecimal() == 95m && effective.GetProperty("branch").GetDecimal() == 85m, "coverage gate effective thresholds");
+        ValidationProof.RequireOverallCoverageGate(root, GateRequirements);
         if (hasPatch)
         {
-            ValidationProof.Require(thresholds.GetProperty("patchLine").GetDecimal() == 95m && thresholds.GetProperty("patchBranch").GetDecimal() == 85m, "patch gate thresholds");
-            ValidationProof.Require(effective.GetProperty("patchLine").GetDecimal() == 95m && effective.GetProperty("patchBranch").GetDecimal() == 85m, "patch gate effective thresholds");
+            var thresholds = root.GetProperty("thresholds");
+            var effective = root.GetProperty("effectiveThresholds");
+            var patchLine = GateRequirements.MinPatchLinePercent!.Value;
+            var patchBranch = GateRequirements.MinPatchBranchPercent!.Value;
+            var tolerance = GateRequirements.TolerancePercent;
+            ValidationProof.Require(thresholds.GetProperty("patchLine").GetDecimal() == patchLine
+                && thresholds.GetProperty("patchBranch").GetDecimal() == patchBranch, "patch gate thresholds");
+            ValidationProof.Require(effective.GetProperty("patchLine").GetDecimal() == Math.Max(0m, patchLine - tolerance)
+                && effective.GetProperty("patchBranch").GetDecimal() == Math.Max(0m, patchBranch - tolerance), "patch gate effective thresholds");
         }
     }
 

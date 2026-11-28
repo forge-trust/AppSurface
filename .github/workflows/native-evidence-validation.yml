@@ -137,19 +137,15 @@ jobs:
         shell: pwsh
         env:
           SOURCE_COMMIT: ${{ steps.diff.outputs.source_commit }}
+          PACKAGE_PATH: ${{ steps.pack.outputs.package }}
+          PACKAGE_VERSION: ${{ steps.pack.outputs.version }}
         run: |
-          $version = "0.0.0-native.${env:GITHUB_RUN_NUMBER}.${env:GITHUB_RUN_ATTEMPT}"
           $feed = Join-Path $env:RUNNER_TEMP 'native-coverage-library-feed'
-          New-Item -ItemType Directory -Path $feed -Force | Out-Null
-          Copy-Item (Join-Path $env:EVIDENCE_ROOT "feed/ForgeTrust.AppSurface.Cli.$version.nupkg") $feed
-          dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet pack Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet pack Coverage/ForgeTrust.AppSurface.Coverage/ForgeTrust.AppSurface.Coverage.csproj --configuration Release --output $feed "/p:PackageVersion=$version" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
+          $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
+          dotnet $validation --operation pack-candidate-feed --mode neutral --repository $env:GITHUB_WORKSPACE --output $feed --version $env:PACKAGE_VERSION --source-commit $env:SOURCE_COMMIT --dotnet (Get-Command dotnet).Source --package $env:PACKAGE_PATH
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "feed=$feed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          "version=$env:PACKAGE_VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
       - name: Prove installed neutral coverage package and published application
         if: ${{ !cancelled() && steps.prepare-neutral-feed.outcome == 'success' }}
         shell: pwsh
@@ -170,12 +166,9 @@ jobs:
           NATIVE_PACKAGE_VERSION: ${{ steps.prepare-neutral-feed.outputs.version }}
         run: |
           $proof = Join-Path $env:RUNNER_TEMP 'native-evidence-reuse-package-proof'
-          foreach ($name in @('Planner', 'Readiness', 'Cli', 'Aspire')) {
-            $project = "Evidence/ForgeTrust.AppSurface.Evidence.$name/ForgeTrust.AppSurface.Evidence.$name.csproj"
-            dotnet pack $project --configuration Release --output $env:NATIVE_PACKAGE_FEED "/p:PackageVersion=$env:NATIVE_PACKAGE_VERSION" "/p:RepositoryCommit=$env:SOURCE_COMMIT" "/p:SourceRevisionId=$env:SOURCE_COMMIT"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
           $validation = Join-Path $env:GITHUB_WORKSPACE 'tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll'
+          dotnet $validation --operation pack-candidate-feed --mode extend-neutral --repository $env:GITHUB_WORKSPACE --output $env:NATIVE_PACKAGE_FEED --version $env:NATIVE_PACKAGE_VERSION --source-commit $env:SOURCE_COMMIT --dotnet (Get-Command dotnet).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet $validation --operation reuse-package-proof --feed $env:NATIVE_PACKAGE_FEED --version $env:NATIVE_PACKAGE_VERSION --source-commit $env:SOURCE_COMMIT --dotnet (Get-Command dotnet).Source --output $proof
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Reject case-varied engine version skew before proof output
@@ -218,20 +211,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $cliSelectors = @(
-            'FullyQualifiedName~CoverageFanInSolutionCoverageProducerTests'
-            'FullyQualifiedName~CoverageArtifactMetadataDurabilityTests'
-            'FullyQualifiedName~CoverageArtifactEnumerationDecisionTests'
-          )
           $dogfoodProject = 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/ForgeTrust.AppSurface.Coverage.Dogfood.csproj'
           dotnet restore $dogfoodProject --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build $dogfoodProject --configuration Release --no-restore
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $dogfood = 'tools/ForgeTrust.AppSurface.Coverage.Dogfood/bin/Release/net10.0/ForgeTrust.AppSurface.Coverage.Dogfood.dll'
-          $sharedCliFilter = & dotnet $dogfood --print-test-filter shared-cli
+          $cliFilter = & dotnet $dogfood --print-test-filter lifecycle-cli
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $cliFilter = ($cliSelectors -join '|') + '|' + $sharedCliFilter
           dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Release --no-restore --filter $cliFilter
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve evidence inputs, plan, proof, and artifacts
@@ -242,10 +229,12 @@ jobs:
           name: native-evidence-${{ matrix.os }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
+            ${{ runner.temp }}/native-coverage-library-feed/pack-logs/pack-*.log
             ${{ runner.temp }}/native-coverage-library-proof/proof.json
             ${{ runner.temp }}/native-coverage-library-proof/*.log
             ${{ runner.temp }}/native-coverage-library-proof/direct/runs/**
             ${{ runner.temp }}/native-evidence-reuse-package-proof/proof.json
+            ${{ runner.temp }}/native-evidence-reuse-package-proof/packed-progress.jsonl
             ${{ runner.temp }}/native-evidence-reuse-package-proof/*.log
             ${{ runner.temp }}/native-evidence-reuse-package-proof/cli-fresh/**
             ${{ runner.temp }}/native-evidence-reuse-package-proof/cli-warm/**

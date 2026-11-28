@@ -17,7 +17,7 @@ public sealed class CoverageEvidenceReceiptInventoryTests
     [InlineData(0, false)]
     [InlineData(129, false)]
     [InlineData(128, true)]
-    public void ReceiptCaptureRejectsIneligibleCountsBeforeInspectingPublications(int count, bool sidecar)
+    public async Task ReceiptCaptureRejectsIneligibleCountsBeforeInspectingPublications(int count, bool sidecar)
     {
         using var directory = TestDirectory.Create();
         var sidecarPath = Path.Join(directory.Path, "coverage", CoverageArtifactSession.SidecarName);
@@ -30,8 +30,8 @@ public sealed class CoverageEvidenceReceiptInventoryTests
             new("coverage.xml", new(1, 1, 100), new(1, 1, 100), 95, 85, true, "gate.json", "gate.md"));
         var publications = new CountOnlyPublications(count);
 
-        var exception = Assert.Throws<CoverageEvidenceInventoryException>(() =>
-            CoverageEvidenceInventory.Capture(directory.Path, result, publications, CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(() =>
+            CoverageEvidenceInventory.CaptureAsync(directory.Path, result, publications, CancellationToken.None));
 
         Assert.Equal("inventory-file-limit", exception.Reason);
         if (sidecar) Assert.Equal("not JSON; an oversized receipt must never read this metadata", File.ReadAllText(sidecarPath));
@@ -411,14 +411,19 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         var staged = Path.Join(directory.Path, "custody");
         var writer = custody ? new EvidenceArtifactWriter(declaration, staged) : null;
         await using var childLifetime = EvidenceChildLifetimeSession.Start(Guid.NewGuid().ToString("N"));
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer, childLifetime);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: output,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: childLifetime), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         foreach (var file in new[] { "coverage.cobertura.xml", "coverage-gate.json", "coverage-gate.md", "timings.json", "summary.txt" })
             Assert.True(File.Exists(TestPathUtils.PathUnder(output, "coverage", file)), file);
         if (!custody || oversized)
         {
-            Assert.Null(execution.Inventory);
             Assert.Null(execution.Result.Artifacts);
             Assert.NotNull(execution.InventoryIneligibilityReason);
             Assert.False(Directory.Exists(staged));
@@ -426,17 +431,20 @@ public sealed class CoverageEvidenceReceiptInventoryTests
             return;
         }
         Assert.Null(execution.InventoryIneligibilityReason);
-        Assert.NotNull(execution.Inventory);
-        Assert.DoesNotContain(execution.Inventory.Files, file => file.RelativePath.EndsWith("/unrelated.txt", StringComparison.Ordinal));
-        Assert.Contains(execution.Inventory.Files, file => file.RelativePath.EndsWith("/coverage-project.json", StringComparison.Ordinal));
-        Assert.Contains(execution.Inventory.Files, file => file.RelativePath.EndsWith("/attachment.txt", StringComparison.Ordinal));
-        Assert.Contains(execution.Inventory.Files, file => file.RelativePath.Contains("junit-coverage-", StringComparison.Ordinal));
+        var artifacts = execution.Result.Artifacts;
+        Assert.NotNull(artifacts);
+        Assert.DoesNotContain(artifacts, artifact => artifact.RelativePath.EndsWith("/unrelated.txt", StringComparison.Ordinal));
+        Assert.Contains(artifacts, artifact => artifact.RelativePath.EndsWith("/coverage-project.json", StringComparison.Ordinal));
+        Assert.Contains(artifacts, artifact => artifact.RelativePath.EndsWith("/attachment.txt", StringComparison.Ordinal));
+        Assert.Contains(artifacts, artifact => artifact.RelativePath.Contains("junit-coverage-", StringComparison.Ordinal));
         if (File.Exists(Path.Join(output, "coverage", CoverageArtifactSession.SidecarName)))
-            Assert.Contains(execution.Inventory.Files, file => file.RelativePath.EndsWith(CoverageArtifactSession.SidecarName, StringComparison.Ordinal));
-        Assert.Equal(execution.Inventory.Files.Count, execution.Result.Artifacts!.Count);
-        Assert.True(await writer!.VerifyWrittenArtifactsAsync());
-        foreach (var file in execution.Inventory.Files)
-            Assert.Equal(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, file.RelativePath)), await File.ReadAllBytesAsync(TestPathUtils.PathUnder(staged, file.RelativePath)));
+            Assert.Contains(artifacts, artifact => artifact.RelativePath.EndsWith(CoverageArtifactSession.SidecarName, StringComparison.Ordinal));
+        Assert.NotNull(writer);
+        Assert.Equal(writer.WrittenArtifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.Ordinal),
+            artifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.Ordinal));
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+        foreach (var artifact in artifacts)
+            Assert.Equal(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output, artifact.RelativePath)), await File.ReadAllBytesAsync(TestPathUtils.PathUnder(staged, artifact.RelativePath)));
     }
 
     [Theory]
@@ -519,8 +527,14 @@ public sealed class CoverageEvidenceReceiptInventoryTests
         var target = Path.Join(directory.Path, "custody");
         var writer = new EvidenceArtifactWriter(declaration, target);
         await using var childLifetime = EvidenceChildLifetimeSession.Start(Guid.NewGuid().ToString("N"));
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, output, null,
-            CoverageTextWriters.Create(outputWriter, TextWriter.Null), CancellationToken.None, writer, childLifetime);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: output,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(outputWriter, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: childLifetime), CancellationToken.None);
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         if (changesSidecar)
         {
@@ -534,7 +548,6 @@ public sealed class CoverageEvidenceReceiptInventoryTests
                 else Assert.Empty(sidecar["inventory"]!.AsArray());
             }
         }
-        Assert.Null(execution.Inventory);
         Assert.NotNull(execution.InventoryIneligibilityReason);
         if (failure == "unsafe-attachment")
             Assert.Equal("inventory-path-invalid", execution.InventoryIneligibilityReason);

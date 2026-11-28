@@ -4,6 +4,7 @@ using System.Text;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
@@ -69,7 +70,7 @@ internal sealed partial class EvidenceInitCommand(EvidenceCliWorkflow workflow) 
 /// <summary>
 /// Checks selected EvidenceHost prerequisites without provisioning resources or executing tests.
 /// </summary>
-[Command("evidence doctor", Description = "Check policy, diff, envelope, Docker, and browser prerequisites without provisioning resources.")]
+[Command("evidence doctor", Description = "Check policy, diff, Docker, and browser prerequisites and report envelope verification status.")]
 internal sealed partial class EvidenceDoctorCommand(EvidenceCliWorkflow workflow) : EvidencePlanningCommandBase(workflow)
 {
     /// <inheritdoc />
@@ -78,7 +79,7 @@ internal sealed partial class EvidenceDoctorCommand(EvidenceCliWorkflow workflow
         try
         {
             var report = await Workflow.DoctorAsync(CreatePlanningRequest(), console.RegisterCancellationHandler());
-            await console.Output.WriteLineAsync($"Evidence doctor: {report.Status}");
+            await console.Output.WriteLineAsync("Evidence doctor: ready_with_external_prerequisites");
             foreach (var check in report.Checks)
             {
                 await console.Output.WriteLineAsync($"  {check.Status} {check.Id}: {check.Message}");
@@ -86,11 +87,6 @@ internal sealed partial class EvidenceDoctorCommand(EvidenceCliWorkflow workflow
                 {
                     await console.Output.WriteLineAsync($"    Next: {check.NextAction}");
                 }
-            }
-
-            if (string.Equals(report.Status, "blocked", StringComparison.Ordinal))
-            {
-                throw new CommandException("ASEVD210: Evidence doctor is blocked. Fix the named prerequisite before running evidence.");
             }
         }
         catch (EvidencePlanningException exception)
@@ -264,7 +260,6 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             var plan = resolution.Plan;
             EvidenceReuseCommandOptions.ValidateContext(Reuse, plan);
             TestEvidenceRunSupport.ValidateSelection(plan);
-
             var hasTestProducer = plan.Profile.Producers.Any(TestEvidenceRunSupport.IsTestProducer);
             var testReports = new List<string>();
             string outputDirectory;
@@ -280,12 +275,15 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             {
                 throw new CommandException($"ASEVD217: A fresh Evidence output root could not be claimed ({exception.GetType().Name}). Choose a new --output path or repair access to TestResults/evidence/runs. Code: reuse.output_unavailable.");
             }
-            if (!Reuse)
+            if (Reuse)
             {
-                TestEvidenceRunSupport.RetireOutputs(outputDirectory, plan);
+                await Workflow.WritePlanAsync(plan, outputDirectory, cancellationToken);
+            }
+            else
+            {
+                await Workflow.WriteRunPlanAsync(plan, outputDirectory, cancellationToken);
             }
 
-            await Workflow.WritePlanAsync(plan, outputDirectory, cancellationToken);
             if (hasTestProducer)
             {
                 await console.Output.WriteLineAsync(TestEvidenceRunSupport.PreviewLine);
@@ -381,14 +379,15 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
 
         // A scoped producer writes its receipt under artifacts/<id>; the planner guarantees the id is one safe segment.
         var execution = await _coverageProducer.RunWithInventoryAsync(
-            producer,
-            SolutionPath,
-            outputDirectory,
-            diffSnapshot,
-            writers,
-            cancellationToken,
-            artifactWriter: new EvidenceArtifactWriter(producer, Path.Join(artifactRoot, producer.Id)),
-            repositoryRoot: RepositoryRootResolver());
+            new(
+                Producer: producer,
+                SolutionPath: SolutionPath,
+                ExecutionRoot: outputDirectory,
+                DiffSnapshot: diffSnapshot,
+                Writers: writers,
+                ArtifactWriter: new EvidenceArtifactWriter(producer, PathUtils.PathUnder(artifactRoot, producer.Id)),
+                RepositoryRoot: RepositoryRootResolver()),
+            cancellationToken);
         return execution.Result;
     }
 

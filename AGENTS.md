@@ -28,7 +28,8 @@ These guidelines apply to all changes made in this repository.
 - Do not use reflection in tests to access private members.
 - If code is difficult to verify without reflection, improve the design or add an appropriate test seam instead of breaking encapsulation.
 - Add regression tests for bug fixes.
-- When practical, verify solution-level coverage with `./scripts/coverage-solution.sh`.
+- During ordinary iteration, build the affected projects and run focused tests using the existing worktree build outputs and shared developer caches. Follow [local verification](./CONTRIBUTING.md#local-verification) for final proof and output retention.
+- Run the repository-selected final evidence after the last relevant edit. Use a fresh proof output only when running a command that requires one. See the [validation tool reference](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development).
 
 ### Code Quality
 

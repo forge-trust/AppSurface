@@ -62,7 +62,7 @@ public static class EvidenceOwnedChild
         catch (Exception exception) { workFailure = exception; }
 
         Exception? completionFailure = null;
-        try { await enrollment.CompleteAsync(CancellationToken.None).ConfigureAwait(false); }
+        try { await enrollment.CompleteAsync().ConfigureAwait(false); }
         catch (Exception exception) { completionFailure = exception; }
         if (workFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(workFailure).Throw();
         if (completionFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(completionFailure).Throw();
@@ -121,7 +121,7 @@ public static class EvidenceOwnedChild
         {
             if (enrollment is not null)
             {
-                try { await enrollment.CompleteAsync(CancellationToken.None).ConfigureAwait(false); }
+                try { await enrollment.CompleteAsync().ConfigureAwait(false); }
                 catch (InvalidOperationException completionFailure)
                 {
                     exception.Data[StartupCompletionFailureDataKey] = completionFailure;
@@ -158,7 +158,7 @@ public static class EvidenceOwnedChild
         cancelled |= cancellationToken.IsCancellationRequested;
 
         var exitCode = process.ExitCode;
-        if (enrollment is not null) await enrollment.CompleteAsync(CancellationToken.None).ConfigureAwait(false);
+        if (enrollment is not null) await enrollment.CompleteAsync().ConfigureAwait(false);
         if (cancelled) throw new OperationCanceledException(cancellationToken);
         return exitCode;
     }
@@ -199,28 +199,31 @@ public static class EvidenceOwnedChild
     private static async Task<Enrollment> EnrollAsync(EvidenceOwnedChildChannel channel, CancellationToken cancellationToken)
     {
         var pipe = new NamedPipeClientStream(".", channel.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        using var protocolDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        protocolDeadline.CancelAfter(ProtocolIoDeadline);
+        var transferred = false;
         try
         {
+            using var protocolDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            protocolDeadline.CancelAfter(ProtocolIoDeadline);
             await pipe.ConnectAsync((int)ProtocolIoDeadline.TotalMilliseconds, protocolDeadline.Token).ConfigureAwait(false);
             await WriteFrameAsync(pipe, FormatBegin(channel.ExecutionId, channel.Nonce), protocolDeadline.Token).ConfigureAwait(false);
             var response = await ReadFrameAsync(pipe, protocolDeadline.Token).ConfigureAwait(false);
             if (!TryParseAcknowledgement(response, out var childId))
                 throw new InvalidOperationException("Cooperative child enrollment was rejected or the invocation channel was unavailable.");
-            return new Enrollment(pipe, childId);
+            var enrollment = new Enrollment(pipe, childId);
+            transferred = true;
+            return enrollment;
         }
-        catch (InvalidOperationException) { pipe.Dispose(); throw; }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            pipe.Dispose();
             throw new InvalidOperationException("Cooperative child enrollment did not complete before its protocol deadline.");
         }
-        catch (OperationCanceledException) { pipe.Dispose(); throw; }
         catch (Exception exception) when (exception is IOException or TimeoutException or UnauthorizedAccessException or ArgumentException)
         {
-            pipe.Dispose();
             throw new InvalidOperationException("Cooperative child enrollment could not connect to the current-user Evidence invocation channel.");
+        }
+        finally
+        {
+            if (!transferred) pipe.Dispose();
         }
     }
 
@@ -232,12 +235,12 @@ public static class EvidenceOwnedChild
     {
         private bool _completed;
 
-        internal async Task CompleteAsync(CancellationToken cancellationToken)
+        /// <summary>Reports actual work settlement under the protocol deadline, independently of caller cancellation.</summary>
+        internal async Task CompleteAsync()
         {
             if (_completed) return;
             _completed = true;
-            using var protocolDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            protocolDeadline.CancelAfter(ProtocolIoDeadline);
+            using var protocolDeadline = new CancellationTokenSource(ProtocolIoDeadline);
             try
             {
                 await WriteFrameAsync(pipe, FormatCompletion(childId), protocolDeadline.Token).ConfigureAwait(false);
@@ -245,11 +248,10 @@ public static class EvidenceOwnedChild
                 if (!IsDoneAcknowledgement(response, childId))
                     throw new InvalidOperationException("The invocation did not acknowledge cooperative child completion.");
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
                 throw new InvalidOperationException("The invocation channel did not acknowledge cooperative child completion before its protocol deadline.");
             }
-            catch (OperationCanceledException) { throw; }
             catch (Exception exception) when (exception is IOException or ObjectDisposedException)
             {
                 throw new InvalidOperationException("The invocation channel was lost before cooperative child completion was acknowledged.");

@@ -260,6 +260,7 @@ public sealed class EvidenceContractEdgeCoverageTests
             [new EvidenceProducerDeclaration("p", "kind", "1", [], [], [], 30)], []);
         var plan = BindPatch(CreatePlan(profile, "1.1"), new string('a', 64));
         EvidenceProducerResult[] results = [new("p", EvidenceProducerOutcome.Passed, [])];
+        Assert.True(EvidenceManifestBuilder.VerifyPlanIntegrity(plan));
         Assert.True(EvidenceManifestBuilder.VerifyForGate(plan, EvidenceManifestBuilder.Build(plan, results)));
         var invalid = defect switch
         {
@@ -270,6 +271,7 @@ public sealed class EvidenceContractEdgeCoverageTests
         plan = BindPatch(plan, invalid);
         var manifest = EvidenceManifestBuilder.Build(plan, results);
 
+        Assert.False(EvidenceManifestBuilder.VerifyPlanIntegrity(plan));
         Assert.False(EvidenceManifestBuilder.Verify(plan, manifest));
         Assert.False(EvidenceManifestBuilder.VerifyForGate(plan, manifest));
 

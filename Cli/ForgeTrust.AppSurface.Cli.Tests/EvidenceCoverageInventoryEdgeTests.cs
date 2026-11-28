@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidenceCoverageInventoryEdgeTests
 {
     [Fact]
-    public void EscapedUnicodeMetadataBudgetIsCheckedBeforeAnySourceFileIsOpened()
+    public async Task EscapedUnicodeMetadataBudgetIsCheckedBeforeAnySourceFileIsOpened()
     {
         using var directory = TestDirectory.Create();
         var missingRoot = TestPathUtils.PathUnder(directory.Path, "not-created");
@@ -18,7 +18,7 @@ public sealed class EvidenceCoverageInventoryEdgeTests
             .Select(index => new CoverageReportFile($"{prefix}/{index:D3}", 0, new string('a', 64))).ToArray();
         var inventory = new CoverageEvidenceInventory(CoverageEvidenceInventory.CurrentVersion, files);
 
-        var failure = Assert.Throws<CoverageEvidenceInventoryException>(() => inventory.Validate(missingRoot));
+        var failure = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(() => inventory.ValidateAsync(missingRoot));
 
         Assert.Equal("inventory-metadata-limit", failure.Reason);
         Assert.False(Directory.Exists(missingRoot));
@@ -71,38 +71,38 @@ public sealed class EvidenceCoverageInventoryEdgeTests
             Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
         var inventory = new CoverageEvidenceInventory(CoverageEvidenceInventory.CurrentVersion, [file]);
 
-        inventory.Validate(directory.Path);
+        await inventory.ValidateAsync(directory.Path);
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
-        Assert.ThrowsAny<OperationCanceledException>(() => inventory.Validate(directory.Path, cancelled.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => inventory.ValidateAsync(directory.Path, cancelled.Token));
 
         await File.WriteAllTextAsync(report, "changed");
-        var error = Assert.Throws<CoverageEvidenceInventoryException>(() => inventory.Validate(directory.Path));
+        var error = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(() => inventory.ValidateAsync(directory.Path));
         Assert.Equal("inventory-file-changed", error.Reason);
     }
 
     [Fact]
-    public void CaptureRefusesFailedCollectionBeforeConsideringPublicationFiles()
+    public async Task CaptureRefusesFailedCollectionBeforeConsideringPublicationFiles()
     {
         var coveragePath = TestPathUtils.PathUnder(Path.GetTempPath(), "coverage.cobertura.xml");
         var gate = new CoverageGateResult(coveragePath, new(1, 1, 100), new(1, 1, 100), 95, 85, true,
             "unused-root/coverage-gate.json", "unused-root/coverage-gate.md");
         var execution = new CoverageEvidenceExecutionResult(new CoverageRunResult(false, "unused-root", coveragePath), gate);
 
-        var error = Assert.Throws<CoverageEvidenceInventoryException>(() =>
-            CoverageEvidenceInventory.Capture("unused-root", execution, [], CancellationToken.None));
+        var error = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(() =>
+            CoverageEvidenceInventory.CaptureAsync("unused-root", execution, [], CancellationToken.None));
 
         Assert.Equal("inventory-result-not-passed", error.Reason);
     }
 
     [Fact]
-    public void CaptureRefusesMissingGateAfterSuccessfulCollection()
+    public async Task CaptureRefusesMissingGateAfterSuccessfulCollection()
     {
         var coveragePath = TestPathUtils.PathUnder(Path.GetTempPath(), "coverage.cobertura.xml");
         var execution = new CoverageEvidenceExecutionResult(new CoverageRunResult(true, "unused-root", coveragePath), null);
 
-        var error = Assert.Throws<CoverageEvidenceInventoryException>(() =>
-            CoverageEvidenceInventory.Capture("unused-root", execution, [], CancellationToken.None));
+        var error = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(() =>
+            CoverageEvidenceInventory.CaptureAsync("unused-root", execution, [], CancellationToken.None));
 
         Assert.Equal("inventory-result-not-passed", error.Reason);
     }
@@ -135,8 +135,8 @@ public sealed class EvidenceCoverageInventoryEdgeTests
             TestPathUtils.PathUnder(directory.Path, "coverage", "coverage-gate.md"));
         var result = new CoverageEvidenceExecutionResult(new CoverageRunResult(true, directory.Path, coveragePath), gate);
 
-        var error = Assert.Throws<CoverageEvidenceInventoryException>(() =>
-            CoverageEvidenceInventory.Capture(directory.Path, result, publications, CancellationToken.None));
+        var error = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(() =>
+            CoverageEvidenceInventory.CaptureAsync(directory.Path, result, publications, CancellationToken.None));
 
         Assert.Equal("inventory-required-file-missing", error.Reason);
         Assert.False(File.Exists(TestPathUtils.PathUnder(coverageRoot, "summary.txt")));
@@ -169,13 +169,18 @@ public sealed class EvidenceCoverageInventoryEdgeTests
             runner, new FixtureReportGenerator(), TimeProvider.System)));
         await using var childLifetime = EvidenceChildLifetimeSession.Start("inventory-cap-" + Guid.NewGuid().ToString("N"));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, runRoot, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer,
-            childLifetime, finalReportRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: runRoot,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: childLifetime,
+            FinalReportRoot: finalReportRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Equal(new[] { "coverage/assertion@1" }, execution.Result.SatisfiedAssertionIds);
-        Assert.Null(execution.Inventory);
         Assert.Null(execution.Result.Artifacts);
         Assert.Equal("inventory-slot-ineligible", execution.InventoryIneligibilityReason);
         Assert.Empty(writer.WrittenArtifacts);
@@ -218,14 +223,17 @@ public sealed class EvidenceCoverageInventoryEdgeTests
         var adapter = new CoverageEvidenceProducer(new CoverageEvidenceExecutionWorkflow(new CoverageRunWorkflow(
             runner, new FixtureReportGenerator(), TimeProvider.System)));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, runRoot, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None,
-            finalReportRoot: finalRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: runRoot,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            FinalReportRoot: finalRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Failed, execution.Result.Outcome);
         Assert.Empty(execution.Result.SatisfiedAssertionIds);
         Assert.Null(execution.Result.Artifacts);
-        Assert.Null(execution.Inventory);
         Assert.Equal("inventory-result-not-passed", execution.InventoryIneligibilityReason);
         Assert.Contains("Ordinary report promotion is unavailable", execution.Result.Diagnostic!, StringComparison.Ordinal);
         Assert.Contains("Original reports remain in the execution output", execution.Result.Diagnostic!, StringComparison.Ordinal);
@@ -255,14 +263,17 @@ public sealed class EvidenceCoverageInventoryEdgeTests
         var adapter = new CoverageEvidenceProducer(new CoverageEvidenceExecutionWorkflow(new CoverageRunWorkflow(
             runner, new FixtureReportGenerator(), TimeProvider.System)));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, runRoot, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None,
-            finalReportRoot: runRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: runRoot,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            FinalReportRoot: runRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Equal(new[] { "coverage/assertion@1" }, execution.Result.SatisfiedAssertionIds);
         Assert.Null(execution.Result.Artifacts);
-        Assert.Null(execution.Inventory);
         Assert.Equal("reuse.child_lifetime_required", execution.InventoryIneligibilityReason);
         Assert.Contains(runRoot, execution.Result.Diagnostic!, StringComparison.Ordinal);
         Assert.Equal(Cobertura, await File.ReadAllTextAsync(TestPathUtils.PathUnder(runRoot, "coverage", "coverage.cobertura.xml")));
@@ -275,12 +286,12 @@ public sealed class EvidenceCoverageInventoryEdgeTests
     [Theory]
     [InlineData(0, "inventory-version-unsupported")]
     [InlineData(2, "inventory-version-unsupported")]
-    public void ClosedInventoryRejectsUnsupportedVersionBeforeReadingFiles(int version, string reason)
+    public async Task ClosedInventoryRejectsUnsupportedVersionBeforeReadingFiles(int version, string reason)
     {
         var inventory = new CoverageEvidenceInventory(version,
             [new CoverageReportFile("coverage/missing.xml", 0, new string('0', 64))]);
 
-        var error = Assert.Throws<CoverageEvidenceInventoryException>(() => inventory.Validate(Path.GetTempPath()));
+        var error = await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(() => inventory.ValidateAsync(Path.GetTempPath()));
 
         Assert.Equal(reason, error.Reason);
     }
@@ -309,12 +320,16 @@ public sealed class EvidenceCoverageInventoryEdgeTests
             case "invalid-retention": declaration = declaration with { CoverageArtifactRetention = "unknown" }; break;
         }
 
-        var result = await adapter.RunWithInventoryAsync(declaration, solution, "unused-output", null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+        var result = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: "unused-output",
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null)), CancellationToken.None);
 
         Assert.Equal(outcome, result.Result.Outcome);
         Assert.Empty(result.Result.SatisfiedAssertionIds);
-        Assert.Null(result.Inventory);
+        Assert.Null(result.Result.Artifacts);
         Assert.Equal(inventoryReason, result.InventoryIneligibilityReason);
         Assert.NotEmpty(result.Result.Diagnostic!);
     }
@@ -340,13 +355,18 @@ public sealed class EvidenceCoverageInventoryEdgeTests
         var adapter = new CoverageEvidenceProducer(new CoverageEvidenceExecutionWorkflow(new CoverageRunWorkflow(
             new FixtureProcessRunner("tests/Sample.Tests/Sample.Tests.csproj"), new FixtureReportGenerator(), TimeProvider.System)));
 
-        var execution = await adapter.RunWithInventoryAsync(declaration, solution, runRoot, null,
-            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None, writer,
-            childLifetime: null, finalReportRoot: reportRoot);
+        var execution = await adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: runRoot,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            FinalReportRoot: reportRoot), CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, execution.Result.Outcome);
         Assert.Equal(new[] { "coverage/assertion@1" }, execution.Result.SatisfiedAssertionIds);
-        Assert.Null(execution.Inventory);
+        Assert.Null(execution.Result.Artifacts);
         Assert.Equal("reuse.child_lifetime_session_required", execution.InventoryIneligibilityReason);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(Directory.Exists(custodyRoot));

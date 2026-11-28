@@ -43,9 +43,16 @@ public sealed class EvidenceCoverageCustodyDeadlineTests
             if (cancelCaller) cancellation.Cancel();
             else clock.Advance(TimeSpan.FromSeconds(31));
         }
-        Task<CoverageEvidenceProducerExecutionResult> Run() => adapter.RunWithInventoryAsync(declaration, solution, source,
-            null, CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), cancellation.Token, writer, children,
-            final, ExpireAfterDelivery);
+        Task<CoverageEvidenceProducerExecutionResult> Run() => adapter.RunWithInventoryAsync(new(
+            Producer: declaration,
+            SolutionPath: solution,
+            ExecutionRoot: source,
+            DiffSnapshot: null,
+            Writers: CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null),
+            ArtifactWriter: writer,
+            ChildLifetime: children,
+            FinalReportRoot: final,
+            BeforeCustodyForTests: ExpireAfterDelivery), cancellation.Token);
 
         if (cancelCaller)
             await Assert.ThrowsAnyAsync<OperationCanceledException>(Run);
@@ -54,7 +61,6 @@ public sealed class EvidenceCoverageCustodyDeadlineTests
             var result = await Run();
             Assert.Equal(EvidenceProducerOutcome.Passed, result.Result.Outcome);
             Assert.Equal("inventory-deadline", result.InventoryIneligibilityReason);
-            Assert.Null(result.Inventory);
             Assert.Null(result.Result.Artifacts);
             Assert.Equal(!required, EvidenceArtifactValidation.AreValid(declaration, result.Result.Artifacts ?? []));
         }
@@ -90,18 +96,18 @@ public sealed class EvidenceCoverageCustodyDeadlineTests
         using var cancellation = new CancellationTokenSource();
         if (scenario == "changed") await File.WriteAllTextAsync(report, "changed");
         if (scenario == "cancel") cancellation.Cancel();
-        IReadOnlyList<EvidenceArtifactResult> Adopt() => inventory.AdoptDelivered(writer, slot, directory.Path, cancellation.Token);
+        Task<IReadOnlyList<EvidenceArtifactResult>> AdoptAsync() => inventory.AdoptDeliveredAsync(writer, slot, directory.Path, cancellation.Token);
 
         if (scenario == "success")
         {
-            Assert.Equal(file.Sha256, Assert.Single(Adopt()).Sha256);
+            Assert.Equal(file.Sha256, Assert.Single(await AdoptAsync()).Sha256);
             Assert.True(EvidenceArtifactValidation.AreValid(producer, writer.WrittenArtifacts));
             Assert.Equal(originalTime, File.GetLastWriteTimeUtc(report));
         }
         else
         {
-            if (scenario == "cancel") Assert.ThrowsAny<OperationCanceledException>(Adopt);
-            else Assert.Throws<CoverageEvidenceInventoryException>(Adopt);
+            if (scenario == "cancel") await Assert.ThrowsAnyAsync<OperationCanceledException>(AdoptAsync);
+            else await Assert.ThrowsAsync<CoverageEvidenceInventoryException>(AdoptAsync);
             Assert.Empty(writer.WrittenArtifacts);
         }
         Assert.Equal(scenario == "changed" ? "changed"u8.ToArray() : bytes, await File.ReadAllBytesAsync(report));
