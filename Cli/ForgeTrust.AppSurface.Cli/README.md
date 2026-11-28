@@ -642,6 +642,8 @@ The built-in producer reuses the private [`ForgeTrust.AppSurface.Evidence.Covera
 
 `run` also dispatches the preview built-in [`test` producer](../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#test-producer-preview) for policies that declare test projects for paths with no production code to cover; it reports per-project counts and makes no coverage claim. A filter declared in the policy for a `test` producer is part of the selection, so that producer can still pass when every selected test runs and passes. Profiles that select the preview test producer require fresh execution. A fresh run deletes the earlier manifest, summary, and the selected test producers’ artifact directories before it starts. See [Verifying evidence](../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#verifying-evidence) for artifact layout, `--artifact-root`, and `--for-gate`.
 
+The `run` summary and successful `verify` output remind readers to check manifest provenance and gate requirements separately.
+
 The v1 workflow has no outbound telemetry, no automatic assembly or test-project discovery, no Docker sandbox, no independent artifact attestation, and no semantic classifier that silently labels arbitrary getters or constructors low value. Keep generated-code exclusions and the coverage thresholds in the reviewed Evidence policy explicit. See the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md) for policy, E2E, release-envelope, and incomplete-profile patterns.
 
 ### `appsurface coverage run`

@@ -14,6 +14,9 @@ namespace ForgeTrust.AppSurface.Evidence.Cli;
 /// </summary>
 internal sealed class EvidenceCliWorkflow
 {
+    /// <summary>The separate provenance and gate checks to perform after reading an evidence report.</summary>
+    internal const string ManifestProvenanceNotice = "Check manifest provenance and gate requirements separately.";
+
     private const string GeneratedMarker = "appsurface-evidence-starter-v1";
     private const string LocalReusedNextAction = "Local reused evidence is complete for this invocation, but it is informational and cannot satisfy a gate. Run fresh evidence for gate admission.";
     private readonly EvidencePlanner _planner;
@@ -396,6 +399,7 @@ internal sealed class EvidenceCliWorkflow
     /// <summary>
     /// Formats a deterministic, human-readable summary of an evidence claim and any remaining obligations.
     /// </summary>
+    /// <remarks>The final line directs readers to verify provenance and apply gate requirements separately.</remarks>
     public static string FormatSummary(EvidenceManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -406,7 +410,8 @@ internal sealed class EvidenceCliWorkflow
             $"Execution: {manifest.ExecutionVerdict}",
             $"Closed obligations: {FormatIds(manifest.ClosedObligationIds)}",
             $"Unmediated obligations: {FormatIds(manifest.UnmediatedObligationIds)}",
-            $"Next: {guidance.Console}");
+            $"Next: {guidance.Console}",
+            ManifestProvenanceNotice);
     }
 
     internal static string FormatSummary(EvidenceManifest manifest, IReadOnlyList<EvidenceReuseSummaryDecision> decisions)
