@@ -95,11 +95,23 @@ public sealed class EvidenceTestProducerReadmeContractTests
         Assert.Contains("A filtered test suite cannot close a coverage assertion; it can close the [`test` assertion](#test-producer-preview)", Readme, StringComparison.Ordinal);
         Assert.Contains("it does not scan consumer assemblies, discover test projects,", Readme, StringComparison.Ordinal);
         Assert.DoesNotContain("A skipped test project, filtered test suite, unavailable browser", Readme, StringComparison.Ordinal);
-        Assert.Contains("**`verify` proves integrity, not that the gate passed.**", Readme, StringComparison.Ordinal);
         foreach (var code in new[] { "ASEVD203", "ASEVD208", "ASEVD209", "ASEVD213", "ASEVD214", "ASEVD215", "ASEVD216" })
         {
             Assert.Contains(code, Readme, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void Readme_ShouldDocumentProvenanceAndGateFieldsInVerificationSection()
+    {
+        var sections = Readme.ReplaceLineEndings("\n").Split("\n## ", StringSplitOptions.None);
+        var verification = Assert.Single(
+            sections,
+            static section => section.StartsWith("Verifying evidence\n", StringComparison.Ordinal));
+
+        Assert.Contains("provenance", verification, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("`ClaimKind`", verification, StringComparison.Ordinal);
+        Assert.Contains("`Eligibility`", verification, StringComparison.Ordinal);
     }
 
     private static string Fragment(string marker)
