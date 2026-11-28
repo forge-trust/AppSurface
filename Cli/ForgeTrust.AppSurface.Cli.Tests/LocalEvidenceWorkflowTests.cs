@@ -128,9 +128,11 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false, typeof(InvalidOperationException))]
-    [InlineData(true, typeof(FileNotFoundException))]
-    public async Task PolicyVerificationAfterCompleteRun_RetainsObservationAndOriginalError(bool removePolicy, Type expectedFailure)
+    [InlineData(false, false, typeof(InvalidOperationException))]
+    [InlineData(true, false, typeof(FileNotFoundException))]
+    [InlineData(true, true, typeof(FileNotFoundException))]
+    public async Task PolicyVerificationAfterCompleteRun_RetainsObservationAndOriginalError(
+        bool removePolicy, bool summaryUnavailable, Type expectedFailure)
     {
         var fixture = await CreateFixtureAsync();
         await ChangeAsync(fixture, "src/feature.cs", "class Feature { }");
@@ -140,6 +142,8 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
         var workflow = new LocalEvidenceWorkflow(workflow: async (runOptions, cancellationToken) =>
         {
             var candidate = await BuildCompleteProofAsync(runOptions, cancellationToken);
+            if (summaryUnavailable)
+                Directory.CreateDirectory(TestPathUtils.PathUnder(runOptions["--output"], RepositoryEvidenceLayout.SummaryFile));
             if (removePolicy)
                 File.Delete(policy);
             else
@@ -161,8 +165,11 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
         Assert.Equal(EvidenceClaimKind.ObservationOnly, manifest.ClaimKind);
         Assert.Equal(EvidenceClaimEligibility.Informational, manifest.Eligibility);
         Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-        Assert.Contains("Source verification failed during execution. Claim downgraded to ObservationOnly.",
-            ReadArchive(retained, archive, "proof/evidence-summary.md"));
+        var summary = ReadArchive(retained, archive, "proof/evidence-summary.md");
+        if (summaryUnavailable)
+            Assert.Null(summary);
+        else
+            Assert.Contains("Source verification failed during execution. Claim downgraded to ObservationOnly.", summary);
         Assert.Contains(failure.Message, ReadArchive(retained, archive, "run-status.txt"));
     }
 
@@ -436,6 +443,7 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
             Directory.CreateDirectory(nested);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, "package-checks", "verify.log"), "verify log", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, "package-checks", "verify-packages.log"), "package verification log", token);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(output, "package-checks", "generated.md"), "generated scratch", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(packages, "package-validation-report.md"), "package report", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(packages, "package-artifact-manifest.json"), "package manifest", token);
             await File.WriteAllTextAsync(TestPathUtils.PathUnder(packages, "candidate.nupkg"), "generated package", token);
@@ -484,6 +492,7 @@ public sealed partial class LocalEvidenceWorkflowTests : IDisposable
         Assert.Equal("package manifest", ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/package-artifact-manifest.json"));
         Assert.Equal("verify log", ReadArchive(retained, "latest.zip", "proof/package-checks/verify.log"));
         Assert.Equal("package verification log", ReadArchive(retained, "latest.zip", "proof/package-checks/verify-packages.log"));
+        Assert.Null(ReadArchive(retained, "latest.zip", "proof/package-checks/generated.md"));
         Assert.Null(ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/candidate.nupkg"));
         Assert.Null(ReadArchive(retained, "latest.zip", "proof/package-checks/artifacts/generated/generated.md"));
         Assert.Empty(Directory.EnumerateDirectories(scratch, "evidence-workspace-*"));
