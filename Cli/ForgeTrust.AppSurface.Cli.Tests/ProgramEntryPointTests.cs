@@ -3489,7 +3489,10 @@ public sealed class ProgramEntryPointTests
         var verify = await InvokeEntryPointAsync(["evidence", "verify", Path.Join(outputDirectory, "evidence-manifest.json")]);
         var missingVerify = await InvokeEntryPointAsync(["evidence", "verify"]);
         var invalidExplain = await InvokeEntryPointAsync(["evidence", "explain", "--policy", policyPath, "--path", "./src/Feature.cs"]);
-        var coverage = await InvokeEntryPointAsync(["evidence", "run", "--policy", policyPath, "--path", "src/Feature.cs", "--output", Path.Join(directory.Path, "coverage-output")]);
+        var coverageOutput = TestPathUtils.PathUnder(directory.Path, "coverage-output");
+        var coverage = await InvokeEntryPointAsync(["evidence", "run", "--policy", policyPath, "--path", "src/Feature.cs", "--output", coverageOutput]);
+        var incompleteManifest = TestPathUtils.PathUnder(coverageOutput, "evidence-manifest.json");
+        var verifyIncomplete = await InvokeEntryPointAsync(["evidence", "verify", incompleteManifest]);
         const string provenanceNotice = "Check manifest provenance and gate requirements separately.";
 
         Assert.Equal(0, doctor.ExitCode);
@@ -3515,7 +3518,12 @@ public sealed class ProgramEntryPointTests
         Assert.Contains(provenanceNotice, coverage.Stdout, StringComparison.Ordinal);
         Assert.Contains(
             "requires --solution",
-            await File.ReadAllTextAsync(Path.Join(directory.Path, "coverage-output", "evidence-manifest.json")),
+            await File.ReadAllTextAsync(incompleteManifest),
+            StringComparison.Ordinal);
+        Assert.Equal(0, verifyIncomplete.ExitCode);
+        Assert.StartsWith(
+            $"Evidence manifest verified: None (None){Environment.NewLine}{provenanceNotice}{Environment.NewLine}",
+            verifyIncomplete.Stdout,
             StringComparison.Ordinal);
     }
 
