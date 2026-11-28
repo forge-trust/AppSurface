@@ -388,7 +388,7 @@ internal static class CoverageFanInComposer
         return count;
     }
 
-    private static (long Covered, long Valid) ReadBranchCounts(XElement line)
+    internal static (long Covered, long Valid) ReadBranchCounts(XElement line)
     {
         var conditionCoverage = line.Attribute("condition-coverage")?.Value;
         if (conditionCoverage is null)

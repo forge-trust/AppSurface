@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Coverage;
 using ForgeTrust.AppSurface.Evidence.Aspire;
@@ -168,20 +169,24 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 Assert.True(File.Exists(assembly));
                 Assert.True(File.Exists(Path.ChangeExtension(assembly, ".pdb")));
             });
-            Assert.Equal(7, Directory.EnumerateFileSystemEntries(symbolsDirectory).Count());
+            Assert.Equal(6, Directory.EnumerateFileSystemEntries(symbolsDirectory).Count());
             using var receipt = JsonDocument.Parse(await File.ReadAllBytesAsync(
                 TestPathUtils.PathUnder(collection, "coverage", "collection-receipt.json")));
-            var inventoryPath = TestPathUtils.PathUnder(symbolsDirectory, "inventory.json");
-            var inventoryHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
-                await File.ReadAllBytesAsync(inventoryPath)));
-            Assert.Equal(inventoryHash, receipt.RootElement.GetProperty("CompilerSymbolsInventorySha256").GetString());
+            Assert.Equal(2, receipt.RootElement.GetProperty("SchemaVersion").GetInt32());
+            var hashes = receipt.RootElement.GetProperty("CompilerSymbols");
+            Assert.Equal(6, hashes.EnumerateObject().Count());
+            foreach (var source in Directory.EnumerateFiles(symbolsDirectory))
+            {
+                var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(source)));
+                Assert.Equal(digest, hashes.GetProperty(Path.GetFileName(source)).GetString());
+            }
 
             var run = new[] { "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT" }
                 .ToDictionary(key => key, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
             await SolutionCoverageHandoff.ImportAsync(collection, TestPathUtils.PathUnder(fixture.Root, "imported", "coverage"),
                 new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
                 requireKeycloakNativeCoverage: true);
-            Assert.Equal(7, Directory.EnumerateFileSystemEntries(
+            Assert.Equal(6, Directory.EnumerateFileSystemEntries(
                 TestPathUtils.PathUnder(fixture.Root, "imported", "coverage", "compiler-symbols")).Count());
 
             await File.AppendAllTextAsync(TestPathUtils.PathUnder(symbolsDirectory, Path.GetFileName(assemblyPaths[0])), "changed");
@@ -189,6 +194,60 @@ public sealed class CoverageFanInSolutionCoverageProducerTests
                 TestPathUtils.PathUnder(fixture.Root, "tampered", "coverage"),
                 new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
                 requireKeycloakNativeCoverage: true));
+        });
+    }
+
+    [Theory]
+    [InlineData("missing-entry")]
+    [InlineData("extra-entry")]
+    [InlineData("linked-file")]
+    [InlineData("oversized-file")]
+    [InlineData("legacy-v1")]
+    [InlineData("wrong-profile")]
+    public async Task ImportAsync_RejectsInvalidCompilerSymbolHandoff(string defect)
+    {
+        using var fixture = new Fixture();
+        await WithWorkflowAsync(async () =>
+        {
+            await fixture.CreateKeycloakCompilerInputsAsync();
+            var collection = TestPathUtils.PathUnder(fixture.Root, "collection");
+            var coverage = TestPathUtils.PathUnder(collection, "coverage");
+            Directory.CreateDirectory(coverage);
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(coverage, "coverage.cobertura.xml"), "<coverage />");
+            await fixture.WriteCoverageAsync(TestPathUtils.PathUnder(coverage, "timings.json"));
+            await SolutionCoverageHandoff.StageCompilerSymbolsAsync(fixture.Root, coverage, "Release", CancellationToken.None);
+            var run = new[] { "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT" }
+                .ToDictionary(key => key, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
+            await SolutionCoverageHandoff.WriteAsync(coverage,
+                new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
+                includeKeycloakNativeCoverage: true);
+
+            var symbols = TestPathUtils.PathUnder(coverage, "compiler-symbols");
+            var first = Directory.EnumerateFiles(symbols).First();
+            switch (defect)
+            {
+                case "missing-entry": File.Delete(first); break;
+                case "extra-entry": await File.WriteAllTextAsync(TestPathUtils.PathUnder(symbols, "extra.dll"), "extra"); break;
+                case "linked-file":
+                    File.Delete(first);
+                    File.CreateSymbolicLink(first, TestPathUtils.PathUnder(fixture.Root, "linked-target"));
+                    await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture.Root, "linked-target"), "linked");
+                    break;
+                case "oversized-file": await File.WriteAllBytesAsync(first, new byte[1024 * 1024 + 1]); break;
+                case "legacy-v1":
+                case "wrong-profile":
+                    var receiptPath = TestPathUtils.PathUnder(coverage, "collection-receipt.json");
+                    var receipt = JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!.AsObject();
+                    if (defect == "legacy-v1") receipt["SchemaVersion"] = 1;
+                    else receipt.Remove("CompilerSymbols");
+                    await File.WriteAllTextAsync(receiptPath, receipt.ToJsonString());
+                    break;
+            }
+
+            await Assert.ThrowsAsync<InvalidDataException>(() => SolutionCoverageHandoff.ImportAsync(collection,
+                TestPathUtils.PathUnder(fixture.Root, "imported", "coverage"),
+                new(Fixture.Commit, new string('b', 40), "10.0.100"), run, CancellationToken.None,
+                requireKeycloakNativeCoverage: defect != "wrong-profile"));
         });
     }
 

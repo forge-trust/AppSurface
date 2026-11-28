@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
@@ -9,10 +8,6 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// </summary>
 internal static class CoverageAsyncPairing
 {
-    private static readonly Regex BranchCoveragePattern = new(
-        @"\A[0-9.]+% \((\d+)/(\d+)\)\z",
-        RegexOptions.CultureInvariant);
-
     internal static IReadOnlyList<(XDocument Document, string SourceRoot)> Project(
         IReadOnlyList<(XDocument Document, string SourceRoot)> inputs,
         IReadOnlyList<IReadOnlyList<CoverageAsyncMethod>> metadata)
@@ -26,50 +21,25 @@ internal static class CoverageAsyncPairing
         }
 
         var primaryMethods = GetUniqueMethods(metadata[0]);
-        var matchesByNativeIndex = new Dictionary<int, List<MetadataPair>>();
-        for (var nativeIndex = 1; nativeIndex < inputs.Count; nativeIndex++)
-        {
-            if (metadata[nativeIndex].Count == 0)
-            {
-                continue;
-            }
-
-            var nativeMethods = GetUniqueMethods(metadata[nativeIndex]);
-            foreach (var (identity, primaryMethod) in primaryMethods)
-            {
-                if (!nativeMethods.TryGetValue(identity, out var nativeMethod)
-                    || !string.Equals(primaryMethod.Fingerprint, nativeMethod.Fingerprint, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                if (!matchesByNativeIndex.TryGetValue(nativeIndex, out var matches))
-                {
-                    matches = [];
-                    matchesByNativeIndex.Add(nativeIndex, matches);
-                }
-
-                matches.Add(new MetadataPair(primaryMethod, nativeMethod));
-            }
-        }
-
-        if (matchesByNativeIndex.Count == 0)
-        {
-            return inputs;
-        }
-
         var result = inputs.ToArray();
-        var primaryDocument = NormalizeCopy(inputs[0]);
-        result[0] = (primaryDocument, inputs[0].SourceRoot);
         var promotions = new Dictionary<XElement, LinePromotion>();
-        foreach (var (nativeIndex, metadataPairs) in matchesByNativeIndex)
+        XDocument? primaryDocument = null;
+        for (var index = 1; index < inputs.Count; index++)
         {
-            var nativeDocument = NormalizeCopy(inputs[nativeIndex]);
-            result[nativeIndex] = (nativeDocument, inputs[nativeIndex].SourceRoot);
-            foreach (var pair in metadataPairs)
-                AddObservations(primaryDocument, pair.PrimaryMethod, metadata[0],
-                    nativeDocument, pair.NativeMethod, promotions);
+            var nativeMethods = GetUniqueMethods(metadata[index]);
+            var pairs = primaryMethods.Select(entry => (Primary: entry.Value, Native: nativeMethods.GetValueOrDefault(entry.Key)))
+                .Where(pair => pair.Native is not null && pair.Primary.Fingerprint == pair.Native.Fingerprint)
+                .ToArray();
+            if (pairs.Length == 0) continue;
+
+            primaryDocument ??= NormalizeCopy(inputs[0]);
+            var nativeDocument = NormalizeCopy(inputs[index]);
+            result[index] = (nativeDocument, inputs[index].SourceRoot);
+            foreach (var pair in pairs)
+                AddObservations(primaryDocument, pair.Primary, metadata[0], nativeDocument, pair.Native!, promotions);
         }
+        if (primaryDocument is null) return inputs;
+        result[0] = (primaryDocument, inputs[0].SourceRoot);
 
         foreach (var (line, promotion) in promotions)
         {
@@ -92,21 +62,9 @@ internal static class CoverageAsyncPairing
         IReadOnlyList<CoverageAsyncMethod> methods)
     {
         return methods
-            .Where(IsUsable)
             .GroupBy(CreateIdentity)
             .Where(group => group.Count() == 1)
             .ToDictionary(group => group.Key, group => group.Single());
-    }
-
-    private static bool IsUsable(CoverageAsyncMethod method)
-    {
-        return !string.IsNullOrWhiteSpace(method.Assembly)
-            && !string.IsNullOrWhiteSpace(method.SourceType)
-            && !string.IsNullOrWhiteSpace(method.SourceMethod)
-            && !string.IsNullOrWhiteSpace(method.StateMachineType)
-            && !string.IsNullOrWhiteSpace(method.File)
-            && !string.IsNullOrWhiteSpace(method.Fingerprint)
-            && method.Lines is not null;
     }
 
     private static MetadataIdentity CreateIdentity(CoverageAsyncMethod method)
@@ -232,7 +190,8 @@ internal static class CoverageAsyncPairing
             return false;
         }
 
-        var matchingRecords = sourceSymbols.Count(symbol => IsUsable(symbol)
+        var matchingRecords = sourceSymbols.Count(symbol =>
+            string.Equals(symbol.Assembly, sourceMetadata.Assembly, StringComparison.Ordinal)
             && string.Equals(GetProjectedClassName(symbol.SourceType), outerClassName, StringComparison.Ordinal)
             && string.Equals(symbol.File, sourceMetadata.File, StringComparison.Ordinal)
             && string.Equals(symbol.SourceMethod, sourceMetadata.SourceMethod, StringComparison.Ordinal)
@@ -291,8 +250,7 @@ internal static class CoverageAsyncPairing
         var generatedClassObservation = ReadObservation(generatedClassLine);
         if (sourceClassObservation is null || generatedClassObservation is null
             || sourceClassObservation != sourceMethodObservation
-            || generatedClassObservation != generatedMethodObservation
-            || !HaveSameBranchDenominator(sourceClassObservation, generatedClassObservation))
+            || generatedClassObservation != generatedMethodObservation)
         {
             return;
         }
@@ -335,45 +293,17 @@ internal static class CoverageAsyncPairing
 
     private static LineObservation? ReadObservation(XElement line)
     {
-        if (!int.TryParse(line.Attribute("number")?.Value, NumberStyles.Integer,
-                CultureInfo.InvariantCulture, out var number)
-            || number <= 0
-            || !long.TryParse(line.Attribute("hits")?.Value, NumberStyles.Integer,
-                CultureInfo.InvariantCulture, out var hits)
+        if (!long.TryParse(line.Attribute("hits")?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var hits)
             || hits < 0)
-        {
             return null;
-        }
-
-        var branch = line.Attribute("branch")?.Value;
-        var hasBranches = string.Equals(branch, "true", StringComparison.OrdinalIgnoreCase);
-        if (!hasBranches && !string.Equals(branch, "false", StringComparison.OrdinalIgnoreCase))
-        {
+        var flag = line.Attribute("branch")?.Value;
+        var hasBranches = string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase);
+        if (hasBranches != (line.Attribute("condition-coverage") is not null)
+            || (!hasBranches && !string.Equals(flag, "false", StringComparison.OrdinalIgnoreCase)))
             return null;
-        }
 
-        var coverage = line.Attribute("condition-coverage")?.Value;
-        if (!hasBranches)
-        {
-            return coverage is null ? new LineObservation(hits, false, 0, 0) : null;
-        }
-
-        if (coverage is null)
-        {
-            return null;
-        }
-
-        var match = BranchCoveragePattern.Match(coverage);
-        if (!match.Success
-            || !long.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var covered)
-            || !long.TryParse(match.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var valid)
-            || valid <= 0
-            || covered > valid)
-        {
-            return null;
-        }
-
-        return new LineObservation(hits, true, covered, valid);
+        var (covered, valid) = CoverageFanInComposer.ReadBranchCounts(line);
+        return new LineObservation(hits, hasBranches, covered, valid);
     }
 
     private readonly record struct MetadataIdentity(
@@ -382,8 +312,6 @@ internal static class CoverageAsyncPairing
         string SourceType,
         string SourceMethod,
         string StateMachineType);
-
-    private sealed record MetadataPair(CoverageAsyncMethod PrimaryMethod, CoverageAsyncMethod NativeMethod);
 
     private readonly record struct LinePromotion(long Hits, long? FullBranches);
 

@@ -22,7 +22,7 @@ internal static class CoverageAsyncMethodMetadata
             if (!metadata.IsAssembly) throw new InvalidDataException("Compiler symbol input is not an assembly.");
             using var provider = MetadataReaderProvider.FromPortablePdbStream(new MemoryStream(pdb, writable: false));
             var debug = provider.GetMetadataReader();
-            if (!IsBound(pe, debug)) throw new InvalidDataException("Portable PDB does not match its assembly.");
+            if (!IsBound(pe, debug, pdb)) throw new InvalidDataException("Portable PDB does not match its assembly.");
 
             var candidates = new List<(MethodDefinitionHandle MoveNext, MethodDefinitionHandle Kickoff)>();
             foreach (var handle in metadata.MethodDefinitions)
@@ -79,22 +79,33 @@ internal static class CoverageAsyncMethodMetadata
         {
             throw;
         }
-        catch (Exception exception) when (exception is BadImageFormatException or InvalidDataException
-            or ArgumentException or EndOfStreamException)
+        catch (Exception exception) when (exception is BadImageFormatException or ArgumentException or EndOfStreamException)
         {
             throw new InvalidDataException("Compiler symbol metadata could not be read.", exception);
         }
     }
 
-    private static bool IsBound(PEReader pe, MetadataReader pdb)
+    private static bool IsBound(PEReader pe, MetadataReader pdb, byte[] pdbBytes)
     {
-        var id = pdb.DebugMetadataHeader?.Id;
-        var codeView = pe.ReadDebugDirectory().Where(static entry => entry.Type == DebugDirectoryEntryType.CodeView).ToArray();
-        if (id is null || id.Value.Length != 20 || codeView.Length != 1) return false;
-        var bytes = id.Value.AsSpan();
+        var header = pdb.DebugMetadataHeader;
+        var directory = pe.ReadDebugDirectory();
+        var codeView = directory.Where(static entry => entry.Type == DebugDirectoryEntryType.CodeView).ToArray();
+        var checksums = directory.Where(static entry => entry.Type == DebugDirectoryEntryType.PdbChecksum).ToArray();
+        if (header is null || header.Id.Length != 20 || codeView.Length != 1 || checksums.Length != 1) return false;
+
+        var id = header.Id.AsSpan();
         var data = pe.ReadCodeViewDebugDirectoryData(codeView[0]);
-        return data.Age == 1 && data.Guid == new Guid(bytes[..16])
-            && codeView[0].Stamp == System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes[16..]);
+        if (data.Age != 1 || data.Guid != new Guid(id[..16])
+            || codeView[0].Stamp != System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(id[16..])) return false;
+        var checksum = pe.ReadPdbChecksumDebugDirectoryData(checksums[0]);
+        if (checksum.AlgorithmName != "SHA256" || checksum.Checksum.Length != SHA256.HashSizeInBytes) return false;
+
+        // The compiler hashes the portable PDB before filling the content ID with a value derived from that hash.
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(pdbBytes.AsSpan(0, header.IdStartOffset));
+        hash.AppendData(new byte[20]);
+        hash.AppendData(pdbBytes.AsSpan(header.IdStartOffset + 20));
+        return hash.GetHashAndReset().AsSpan().SequenceEqual(checksum.Checksum.AsSpan());
     }
 
     private static bool HasAsyncStateMachineAttribute(MetadataReader metadata, MethodDefinition kickoff, string stateMachineType)

@@ -208,8 +208,8 @@ acceptance manifest or close any obligation. It requires `GITHUB_REPOSITORY`, `G
 Selected Keycloak pull-request lanes pass `--include-keycloak-native true` during collection. After the
 complete Release suite succeeds and the checkout is rechecked, collection copies the three fixed Keycloak
 assemblies and matching PDBs from the `Auth.Aspire.Keycloak.Tests` output into
-`coverage/compiler-symbols`. A schema-v1 exact inventory records each file hash, and the collection receipt
-binds the inventory digest. Import requires the exact six files, matching hashes and an unlinked directory
+`coverage/compiler-symbols`. The schema-v2 collection receipt binds the six file hashes directly to
+the successful same-run collection. Import requires the exact files and hashes in an unlinked directory
 when the Keycloak profile is selected. The final fan-in receives that imported directory through
 `--primary-compiler-symbols` and validates the `coverlet-collector-cobertura-async-v1` proof profile.
 

@@ -27,7 +27,9 @@ public sealed class CoverageFanInNativeCommandTests
     [Fact]
     public void Indexed_native_request_round_trips_the_exact_project_map_and_selectors()
     {
-        var parsed = CoverageFanInRequestReader.Parse(JsonSerializer.SerializeToUtf8Bytes(Envelope()));
+        var envelope = Envelope();
+        Assert.False(envelope["request"]!.AsObject().ContainsKey("compilerSymbolAssemblies"));
+        var parsed = CoverageFanInRequestReader.Parse(JsonSerializer.SerializeToUtf8Bytes(envelope));
         CoverageFanInRequestReader.ValidateCanonicalPolicy(parsed);
         CoverageFanInRequestReader.ValidateOperationRequest(parsed);
         var request = Assert.IsType<CoverageCaptureRequest>(parsed.Request);
@@ -35,6 +37,20 @@ public sealed class CoverageFanInNativeCommandTests
         Assert.Null(request.CoveragePath);
         Assert.Null(request.RawCoveragePath);
         Assert.Equal("/producer/timings.json", request.TimingsPath);
+    }
+
+    [Fact]
+    public void Legacy_native_collection_round_trips_without_compiler_symbols()
+    {
+        var request = new CoverageCollectRequest(Request().Policy, "/source", "/capture", "/collection", "native", 60);
+        var envelope = JsonSerializer.SerializeToNode(
+            new { schemaVersion = 2, operation = "collect", request }, CoveragePolicyEncoding.Json)!.AsObject();
+        Assert.False(envelope["request"]!.AsObject().ContainsKey("compilerSymbolAssemblies"));
+
+        var parsed = CoverageFanInRequestReader.Parse(JsonSerializer.SerializeToUtf8Bytes(envelope));
+        CoverageFanInRequestReader.ValidateCanonicalPolicy(parsed);
+        CoverageFanInRequestReader.ValidateOperationRequest(parsed);
+        Assert.Equal(request.CollectionDirectory, Assert.IsType<CoverageCollectRequest>(parsed.Request).CollectionDirectory);
     }
 
     [Theory]

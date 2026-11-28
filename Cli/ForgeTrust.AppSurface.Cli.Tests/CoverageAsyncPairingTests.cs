@@ -46,20 +46,46 @@ public sealed class CoverageFanInAsyncPairingTests
     [InlineData("no-sequence-point")]
     [InlineData("different-denominator")]
     [InlineData("duplicate-method")]
+    [InlineData("duplicate-primary-class")]
+    [InlineData("missing-state-machine-class")]
+    [InlineData("renamed-source-method")]
+    [InlineData("repeated-method-line")]
+    [InlineData("inconsistent-branch-flag")]
+    [InlineData("missing-symbol")]
     public void Ambiguous_or_different_records_keep_their_original_measurement(string defect)
     {
         var confirmed = Method();
         var primary = Report(SourceType, "WorkAsync", 0, 0, 2);
         var native = Report(StateMachine, "MoveNext", 1, 2, defect == "different-denominator" ? 3 : 2);
-        if (defect == "duplicate-method")
+        var nativeMethod = native.Descendants("method").Single();
+        var primaryClass = primary.Descendants("class").Single();
+        switch (defect)
         {
-            var method = native.Descendants("method").Single();
-            method.Parent!.Add(new XElement(method));
+            case "duplicate-method":
+                nativeMethod.Parent!.Add(new XElement(nativeMethod));
+                break;
+            case "duplicate-primary-class":
+                primaryClass.Parent!.Add(new XElement(primaryClass));
+                break;
+            case "missing-state-machine-class":
+                nativeMethod.Ancestors("class").Single().SetAttributeValue("name", "Unrelated");
+                break;
+            case "renamed-source-method":
+                primaryClass.Descendants("method").Single().SetAttributeValue("name", "Unrelated");
+                break;
+            case "repeated-method-line":
+                var line = nativeMethod.Descendants("line").Single();
+                line.Parent!.Add(new XElement(line));
+                break;
+            case "inconsistent-branch-flag":
+                nativeMethod.Descendants("line").Single().SetAttributeValue("branch", "false");
+                break;
         }
         IReadOnlyList<CoverageAsyncMethod> nativeSymbols = defect switch
         {
             "fingerprint" => [confirmed with { Fingerprint = "compiled-other-shape" }],
             "duplicate-symbol" => [confirmed, confirmed],
+            "missing-symbol" => [],
             "different-source" => [confirmed with { File = "elsewhere.cs" }],
             _ => [confirmed]
         };
@@ -87,6 +113,46 @@ public sealed class CoverageFanInAsyncPairingTests
 
         Assert.All(projected[0].Document.Descendants("line"),
             line => Assert.Equal(ambiguous ? "0% (0/2)" : "100% (2/2)", Branches(line)));
+    }
+
+    [Fact]
+    public void Branchless_records_share_hits_and_unqualified_native_documents_are_unchanged()
+    {
+        var method = Method();
+        var primary = Report(SourceType, "WorkAsync", 0, 0, 2);
+        var native = Report(StateMachine, "MoveNext", 2, 2, 2);
+        foreach (var line in primary.Descendants("line").Concat(native.Descendants("line")))
+        {
+            line.SetAttributeValue("condition-coverage", null);
+            line.SetAttributeValue("branch", "false");
+        }
+        var baseline = Report("Other", "Unrelated", 0, 0, 2);
+
+        var projected = CoverageAsyncPairing.Project([(primary, Root), (baseline, Root), (native, Root)],
+            [[method], [], [method]]);
+
+        Assert.All(projected[0].Document.Descendants("line"), line =>
+        {
+            Assert.Equal("2", line.Attribute("hits")!.Value);
+            Assert.Null(line.Attribute("condition-coverage"));
+        });
+        Assert.Same(baseline, projected[1].Document);
+        Assert.All(primary.Descendants("line"), line => Assert.Equal("0", line.Attribute("hits")!.Value));
+    }
+
+    [Fact]
+    public void Class_line_with_a_distinct_condition_observation_is_untouched()
+    {
+        var method = Method();
+        var primary = Report(SourceType, "WorkAsync", 0, 0, 2);
+        var native = Report(StateMachine, "MoveNext", 7, 2, 2);
+        var nativeClass = native.Descendants("class").Single();
+        nativeClass.Element("lines")!.Element("line")!.SetAttributeValue("condition-coverage", "50% (1/2)");
+
+        var projected = CoverageAsyncPairing.Project([(primary, Root), (native, Root)], [[method], [method]]);
+        var primaryClass = projected[0].Document.Descendants("class").Single();
+        Assert.Equal("0% (0/2)", Branches(primaryClass.Element("lines")!.Element("line")!));
+        Assert.Equal("100% (2/2)", Branches(primaryClass.Descendants("method").Single().Descendants("line").Single()));
     }
 
     [Fact]

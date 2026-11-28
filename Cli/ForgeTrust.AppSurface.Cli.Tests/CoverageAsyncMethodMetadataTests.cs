@@ -68,25 +68,19 @@ public sealed class CoverageFanInAsyncMethodMetadataTests
         var other = Compile("DifferentAssembly", "namespace Other; public sealed class TypeName { public void Run() { } }",
             documentPath);
         Assert.Throws<InvalidDataException>(() => CoverageAsyncMethodMetadata.Read(fixture.Assembly, other.Pdb, sourceRoot));
+        Assert.Empty(CoverageAsyncMethodMetadata.Read(other.Assembly, other.Pdb, sourceRoot));
+        Assert.Throws<InvalidDataException>(() => CoverageAsyncMethodMetadata.Read([1, 2, 3], fixture.Pdb, sourceRoot));
+        Assert.Throws<InvalidDataException>(() => CoverageAsyncMethodMetadata.Read(fixture.Assembly, [1, 2, 3], sourceRoot));
+        var tampered = (byte[])fixture.Pdb.Clone();
+        tampered[^1] ^= 1;
+        var error = Assert.Throws<InvalidDataException>(() => CoverageAsyncMethodMetadata.Read(fixture.Assembly, tampered, sourceRoot));
+        Assert.Equal("Portable PDB does not match its assembly.", error.Message);
+
         Assert.Empty(CoverageAsyncMethodMetadata.Read(fixture.Assembly, fixture.Pdb,
             TestPathUtils.PathUnder(temporaryDirectory.Path, "elsewhere")));
     }
 
-    [Fact]
-    public void Read_LocalCoverageModule_ProvesAsyncMethods()
-    {
-        var output = AppContext.BaseDirectory;
-        var assemblyPath = Path.Combine(output, "ForgeTrust.AppSurface.Evidence.Coverage.dll");
-        var pdbPath = Path.ChangeExtension(assemblyPath, ".pdb");
-        Assert.True(File.Exists(assemblyPath), $"Expected local module at {assemblyPath}.");
-        Assert.True(File.Exists(pdbPath), $"Expected local symbols at {pdbPath}.");
-
-        var sourceRoot = FindRepositoryRoot();
-        var methods = CoverageAsyncMethodMetadata.Read(File.ReadAllBytes(assemblyPath), File.ReadAllBytes(pdbPath), sourceRoot);
-        Assert.NotEmpty(methods);
-    }
-
-    private static CompiledFixture Compile(string assemblyName, string source, string documentPath)
+    internal static CompiledFixture Compile(string assemblyName, string source, string documentPath)
     {
         var sourceText = SourceText.From(source, Encoding.UTF8, SourceHashAlgorithm.Sha256);
         var tree = CSharpSyntaxTree.ParseText(sourceText, path: documentPath);
@@ -101,14 +95,5 @@ public sealed class CoverageFanInAsyncMethodMetadataTests
         return new CompiledFixture(assembly.ToArray(), pdb.ToArray());
     }
 
-    private static string FindRepositoryRoot()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "global.json"))) return directory.FullName;
-        }
-        throw new DirectoryNotFoundException("Could not find the repository root containing global.json.");
-    }
-
-    private sealed record CompiledFixture(byte[] Assembly, byte[] Pdb);
+    internal sealed record CompiledFixture(byte[] Assembly, byte[] Pdb);
 }

@@ -173,6 +173,7 @@ public sealed record CoverageCaptureRequest(CoverageFanInPolicy Policy, string R
     /// <remarks>Supported only by the v3 <c>coverlet-collector-cobertura-async-v1</c> profile, with at most eight
     /// assemblies. A primary capture requires at least one pair. Imported captures must carry pairs in their
     /// already-hashed payload instead of supplying filesystem paths.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? CompilerSymbolAssemblies { get; init; }
 }
 /// <summary>Collect the complete explicit inventory or declared native filter through the existing supervised engine.</summary>
@@ -187,6 +188,7 @@ public sealed record CoverageCollectRequest(CoverageFanInPolicy Policy, string R
     /// <summary>Absolute assembly paths whose adjacent PDBs are read after successful test execution.</summary>
     /// <remarks>Supported only by the v3 <c>coverlet-collector-cobertura-async-v1</c> profile, with at most eight
     /// assemblies. A primary collection requires at least one pair.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? CompilerSymbolAssemblies { get; init; }
 }
 /// <summary>Conservatively compose exactly one primary plus the policy's exact supplementary set.</summary>

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Evidence.Validation;
@@ -28,9 +29,8 @@ internal static class SolutionCoverageHandoff
 {
     private const string ReceiptName = "collection-receipt.json";
     private const string CompilerSymbolsDirectoryName = "compiler-symbols";
-    private const string CompilerSymbolsInventoryName = "inventory.json";
+    private const int CompilerSymbolMaximumBytes = 1024 * 1024;
     private static readonly string[] RunKeys = ["GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"];
-    private static readonly JsonSerializerOptions CompilerSymbolsJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] CompilerSymbolFileNames = CreateCompilerSymbolFileNames();
 
     /// <summary>Requires repository, workflow run and attempt identity for both sides of the handoff.</summary>
@@ -48,12 +48,12 @@ internal static class SolutionCoverageHandoff
     {
         identity.Validate();
         RequireRun(run);
-        var compilerSymbolsSha256 = includeKeycloakNativeCoverage
-            ? await ValidateCompilerSymbolsAsync(PathUtils.PathUnder(coverage, CompilerSymbolsDirectoryName), null, cancellationToken).ConfigureAwait(false)
+        var compilerSymbols = includeKeycloakNativeCoverage
+            ? await ReadCompilerSymbolHashesAsync(coverage, cancellationToken).ConfigureAwait(false)
             : null;
-        var receipt = new Receipt(1, identity, "Release", run,
+        var receipt = new Receipt(includeKeycloakNativeCoverage ? 2 : 1, identity, "Release", run,
             await DigestAsync(Path.Join(coverage, "coverage.cobertura.xml"), cancellationToken).ConfigureAwait(false),
-            await DigestAsync(Path.Join(coverage, "timings.json"), cancellationToken).ConfigureAwait(false), compilerSymbolsSha256);
+            await DigestAsync(Path.Join(coverage, "timings.json"), cancellationToken).ConfigureAwait(false), compilerSymbols);
         await using var output = new FileStream(Path.Join(coverage, ReceiptName), FileMode.CreateNew, FileAccess.Write);
         await JsonSerializer.SerializeAsync(output, receipt, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
@@ -69,31 +69,16 @@ internal static class SolutionCoverageHandoff
             throw new InvalidDataException("Primary compiler-symbol output must be fresh.");
 
         Directory.CreateDirectory(destinationDirectory);
-        var files = new List<CompilerSymbolFile>(CompilerSymbolFileNames.Length);
-        foreach (var assembly in KeycloakCoverageCompilerInputs.AssemblyPaths(sourceDirectory))
+        foreach (var name in CompilerSymbolFileNames)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var pair = new[] { assembly, Path.ChangeExtension(assembly, ".pdb") };
-            foreach (var source in pair)
-            {
-                RejectLinks(source);
-                if (Directory.Exists(source))
-                    throw new InvalidDataException("Primary compiler-symbol inputs must be files.");
-                var fileName = Path.GetFileName(source);
-                var sourceSha256 = await DigestAsync(source, cancellationToken).ConfigureAwait(false);
-                var destination = PathUtils.PathUnder(destinationDirectory, fileName);
-                File.Copy(source, destination, overwrite: false);
-                if (await DigestAsync(destination, cancellationToken).ConfigureAwait(false) != sourceSha256)
-                    throw new InvalidDataException("A staged primary compiler-symbol file changed while copying.");
-                files.Add(new CompilerSymbolFile(fileName, sourceSha256));
-            }
+            var source = PathUtils.PathUnder(sourceDirectory, name);
+            var sourceSha256 = await DigestCompilerSymbolAsync(source, cancellationToken).ConfigureAwait(false);
+            var destination = PathUtils.PathUnder(destinationDirectory, name);
+            File.Copy(source, destination, overwrite: false);
+            if (await DigestCompilerSymbolAsync(destination, cancellationToken).ConfigureAwait(false) != sourceSha256)
+                throw new InvalidDataException("A staged primary compiler-symbol file changed while copying.");
         }
-
-        var inventory = new CompilerSymbolInventory(1, files);
-        var inventoryPath = PathUtils.PathUnder(destinationDirectory, CompilerSymbolsInventoryName);
-        await File.WriteAllBytesAsync(inventoryPath,
-            JsonSerializer.SerializeToUtf8Bytes(inventory, CompilerSymbolsJsonOptions), cancellationToken).ConfigureAwait(false);
-        _ = await ValidateCompilerSymbolsAsync(destinationDirectory, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -125,16 +110,16 @@ internal static class SolutionCoverageHandoff
         {
             throw new InvalidDataException("Coverage collection receipt is invalid.", exception);
         }
-        if (receipt.SchemaVersion != 1 || receipt.Identity != identity || receipt.Configuration != "Release"
+        if (receipt.SchemaVersion != (requireKeycloakNativeCoverage ? 2 : 1)
+            || receipt.Identity != identity || receipt.Configuration != "Release"
             || receipt.Run is null || receipt.Run.Count != RunKeys.Length
             || RunKeys.Any(key => !receipt.Run.TryGetValue(key, out var value) || value != run[key]))
             throw new InvalidDataException("Coverage collection does not match this source, SDK or workflow attempt.");
-        if (requireKeycloakNativeCoverage && receipt.CompilerSymbolsInventorySha256 is null)
-            throw new InvalidDataException("Keycloak coverage collection is missing its primary compiler-symbol inventory.");
-        var compilerSymbols = PathUtils.PathUnder(input, CompilerSymbolsDirectoryName);
-        if (receipt.CompilerSymbolsInventorySha256 is { } compilerSymbolsSha256)
-            await ValidateCompilerSymbolsAsync(compilerSymbols, compilerSymbolsSha256, cancellationToken).ConfigureAwait(false);
-        else if (Directory.Exists(compilerSymbols) || File.Exists(compilerSymbols))
+        if (requireKeycloakNativeCoverage != (receipt.CompilerSymbols is not null))
+            throw new InvalidDataException("Coverage receipt compiler symbols do not match the selected profile.");
+        if (receipt.CompilerSymbols is { } compilerSymbols)
+            await VerifyCompilerSymbolsAsync(input, compilerSymbols, cancellationToken).ConfigureAwait(false);
+        else if (Path.Exists(PathUtils.PathUnder(input, CompilerSymbolsDirectoryName)))
             throw new InvalidDataException("Coverage collection has unbound primary compiler-symbol inputs.");
         var destination = Path.GetFullPath(coverage);
         // Reject case aliases conservatively even on case-sensitive hosts; artifact output never needs them.
@@ -147,9 +132,8 @@ internal static class SolutionCoverageHandoff
         if (await DigestAsync(Path.Join(destination, "coverage.cobertura.xml"), cancellationToken).ConfigureAwait(false) != receipt.ReportSha256
             || await DigestAsync(Path.Join(destination, "timings.json"), cancellationToken).ConfigureAwait(false) != receipt.TimingsSha256)
             throw new InvalidDataException("Coverage collection report or timings were altered.");
-        if (receipt.CompilerSymbolsInventorySha256 is { } importedSymbolsSha256)
-            await ValidateCompilerSymbolsAsync(PathUtils.PathUnder(destination, CompilerSymbolsDirectoryName), importedSymbolsSha256,
-                cancellationToken).ConfigureAwait(false);
+        if (receipt.CompilerSymbols is { } importedSymbols)
+            await VerifyCompilerSymbolsAsync(destination, importedSymbols, cancellationToken).ConfigureAwait(false);
     }
 
     private static void CopyDirectory(string source, string destination, CancellationToken cancellationToken)
@@ -191,79 +175,35 @@ internal static class SolutionCoverageHandoff
         return Convert.ToHexStringLower(await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false));
     }
 
-    private static async Task<string> ValidateCompilerSymbolsAsync(string directory, string? expectedInventorySha256,
-        CancellationToken cancellationToken)
+    private static async Task<Dictionary<string, string>> ReadCompilerSymbolHashesAsync(string coverage, CancellationToken token)
     {
+        var directory = PathUtils.PathUnder(coverage, CompilerSymbolsDirectoryName);
         RejectLinks(directory);
-        if (!Directory.Exists(directory))
-            throw new InvalidDataException("Primary compiler-symbol directory is missing.");
-        var expectedEntries = CompilerSymbolFileNames.Append(CompilerSymbolsInventoryName).Order(StringComparer.Ordinal).ToArray();
-        var actualEntries = Directory.EnumerateFileSystemEntries(directory).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray();
-        if (!actualEntries.SequenceEqual(expectedEntries, StringComparer.Ordinal))
+        var entries = Directory.EnumerateFileSystemEntries(directory).Select(Path.GetFileName).ToArray();
+        if (entries.Length != CompilerSymbolFileNames.Length
+            || !entries.ToHashSet(StringComparer.Ordinal).SetEquals(CompilerSymbolFileNames))
             throw new InvalidDataException("Primary compiler-symbol directory does not contain the exact required file set.");
 
-        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
-        {
-            RejectLinks(entry);
-            if (Directory.Exists(entry))
-                throw new InvalidDataException("Primary compiler-symbol entries must be files.");
-        }
-
-        var inventoryPath = PathUtils.PathUnder(directory, CompilerSymbolsInventoryName);
-        var inventoryBytes = await ReadBoundedFileAsync(inventoryPath, 16384, cancellationToken).ConfigureAwait(false);
-        var inventorySha256 = Convert.ToHexStringLower(SHA256.HashData(inventoryBytes));
-        if (expectedInventorySha256 is not null && inventorySha256 != expectedInventorySha256)
-            throw new InvalidDataException("Primary compiler-symbol inventory differs from the collection receipt.");
-
-        using var document = JsonDocument.Parse(inventoryBytes);
-        var inventory = document.RootElement;
-        if (!HasExactProperties(inventory, "schemaVersion", "files")
-            || inventory.GetProperty("schemaVersion").ValueKind != JsonValueKind.Number
-            || inventory.GetProperty("schemaVersion").GetInt32() != 1
-            || inventory.GetProperty("files").ValueKind != JsonValueKind.Array
-            || inventory.GetProperty("files").GetArrayLength() != CompilerSymbolFileNames.Length)
-            throw new InvalidDataException("Primary compiler-symbol inventory schema is invalid.");
-
-        var fileEntries = inventory.GetProperty("files").EnumerateArray().ToArray();
-        for (var index = 0; index < CompilerSymbolFileNames.Length; index++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var fileEntry = fileEntries[index];
-            var fileName = CompilerSymbolFileNames[index];
-            if (!HasExactProperties(fileEntry, "path", "sha256")
-                || fileEntry.GetProperty("path").ValueKind != JsonValueKind.String
-                || fileEntry.GetProperty("path").GetString() != fileName
-                || fileEntry.GetProperty("sha256").ValueKind != JsonValueKind.String)
-                throw new InvalidDataException("Primary compiler-symbol inventory file entry is invalid.");
-
-            var expectedFileSha256 = fileEntry.GetProperty("sha256").GetString();
-            if (expectedFileSha256 is null || !IsSha256(expectedFileSha256)
-                || await DigestAsync(PathUtils.PathUnder(directory, fileName), cancellationToken).ConfigureAwait(false) != expectedFileSha256)
-                throw new InvalidDataException("Primary compiler-symbol file hash does not match its inventory.");
-        }
-        return inventorySha256;
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in CompilerSymbolFileNames)
+            hashes.Add(name, await DigestCompilerSymbolAsync(PathUtils.PathUnder(directory, name), token).ConfigureAwait(false));
+        return hashes;
     }
 
-    private static async Task<byte[]> ReadBoundedFileAsync(string path, int maximumBytes, CancellationToken cancellationToken)
+    private static async Task VerifyCompilerSymbolsAsync(string coverage, Dictionary<string, string> expected, CancellationToken token)
+    {
+        var actual = await ReadCompilerSymbolHashesAsync(coverage, token).ConfigureAwait(false);
+        if (expected.Count != actual.Count || actual.Any(entry => expected.GetValueOrDefault(entry.Key) != entry.Value))
+            throw new InvalidDataException("Primary compiler-symbol hashes differ from the collection receipt.");
+    }
+
+    private static Task<string> DigestCompilerSymbolAsync(string path, CancellationToken token)
     {
         RejectLinks(path);
-        if (Directory.Exists(path))
-            throw new InvalidDataException("Primary compiler-symbol inventory must be a file.");
-        var info = new FileInfo(path);
-        if (info.Length is <= 0 || info.Length > maximumBytes)
-            throw new InvalidDataException("Primary compiler-symbol inventory is missing, empty or oversized.");
-        return await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        if (new FileInfo(path).Length > CompilerSymbolMaximumBytes)
+            throw new InvalidDataException("Primary compiler-symbol file exceeds the per-file byte budget.");
+        return DigestAsync(path, token);
     }
-
-    private static bool HasExactProperties(JsonElement element, params string[] expected)
-    {
-        if (element.ValueKind != JsonValueKind.Object) return false;
-        var actual = element.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
-        return actual.SequenceEqual(expected.Order(StringComparer.Ordinal), StringComparer.Ordinal);
-    }
-
-    private static bool IsSha256(string value) => value.Length == 64
-        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static string[] CreateCompilerSymbolFileNames() => KeycloakCoverageCompilerInputs.AssemblyPaths(Path.GetTempPath())
         .SelectMany(assembly => new[] { Path.GetFileName(assembly), Path.GetFileName(Path.ChangeExtension(assembly, ".pdb")) })
@@ -271,7 +211,5 @@ internal static class SolutionCoverageHandoff
 
     private sealed record Receipt(int SchemaVersion, SolutionCoverageIdentity Identity, string Configuration,
         IReadOnlyDictionary<string, string?> Run, string ReportSha256, string TimingsSha256,
-        string? CompilerSymbolsInventorySha256 = null);
-    private sealed record CompilerSymbolInventory(int SchemaVersion, IReadOnlyList<CompilerSymbolFile> Files);
-    private sealed record CompilerSymbolFile(string Path, string Sha256);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Dictionary<string, string>? CompilerSymbols = null);
 }
