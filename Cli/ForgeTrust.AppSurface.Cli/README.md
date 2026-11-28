@@ -644,6 +644,8 @@ The built-in producer reuses the private [`ForgeTrust.AppSurface.Evidence.Covera
 
 The test producer defaults to `Release`. Use `--configuration Debug` to override it and `--locked-mode` to require a locked NuGet restore. See [Build configuration and locked restore](../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#build-configuration-and-locked-restore).
 
+The `run` summary and successful `verify` output remind readers to check manifest provenance and gate requirements separately.
+
 The v1 workflow has no outbound telemetry, no automatic assembly or test-project discovery, no Docker sandbox, no independent artifact attestation, and no semantic classifier that silently labels arbitrary getters or constructors low value. Keep generated-code exclusions and the coverage thresholds in the reviewed Evidence policy explicit. See the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md) for policy, E2E, release-envelope, and incomplete-profile patterns.
 
 ### `appsurface coverage run`

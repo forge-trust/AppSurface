@@ -156,6 +156,7 @@ Execution: Passed
 Closed obligations: tooling-tests-complete
 Unmediated obligations: none
 Next: Targeted evidence is complete.
+Check manifest provenance and gate requirements separately.
 Test producer 'tooling-tests':
 | Project | Discovered | Executed | Passed | Failed | Skipped | Reason |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -163,7 +164,13 @@ Test producer 'tooling-tests':
 No coverage claim was made.
 ```
 
-`verify` prints `Evidence manifest verified: TargetedComplete (PullRequestGate)`.
+`verify` prints the manifest's claim and eligibility on its first line, followed by a reminder about
+provenance and gate requirements.
+
+```text
+Evidence manifest verified: TargetedComplete (PullRequestGate)
+Check manifest provenance and gate requirements separately.
+```
 
 An incomplete run exits non-zero with `ASEVD211`. Its first line names the operation and the project, and each incomplete project gets its reason, the next action, a documentation anchor and the command to rerun:
 
@@ -343,7 +350,12 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <
 | `ASEVD209` | The plan or manifest could not be read as supported JSON within the input limit. | Regenerate the input using the current supported schema. |
 | `ASEVD213` | A listed artifact is missing, linked, outside the artifact root, or has a different length or SHA-256. The message names the artifact, the producer and the status. | Rerun `appsurface evidence run` and verify the plan, manifest and artifacts from that one run. |
 
-**`verify` proves integrity, not that the gate passed.** It exits 0 for an intact manifest whose claim is `None`. A gate must also read the manifest's `ClaimKind` and `Eligibility`.
+By default, `verify` checks integrity and exits 0 for an intact manifest whose claim is `None`.
+Use `--for-gate` to also require a gate-eligible claim.
+
+Before using the manifest as gate evidence, establish its provenance through the consumer's workflow and
+apply that workflow's claim and eligibility requirements. Read `ClaimKind` and `Eligibility` from the
+[manifest JSON](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) in automation.
 
 ## Pitfalls
 
