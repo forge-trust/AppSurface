@@ -38,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -53,7 +53,7 @@ jobs:
         run: python scripts/verify_config_package_consumer.py --work-directory "${{ runner.temp }}/config-package-contract"
       - name: Upload contract evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: config-package-contract-${{ matrix.os }}
           path: |
@@ -79,7 +79,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -128,7 +128,7 @@ jobs:
           "v3_diff_base=$v3DiffBase" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
       - name: Preserve coverage selection plan
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-evidence-plan-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage-plan-${{ github.run_id }}-${{ github.run_attempt }}
@@ -153,7 +153,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -194,7 +194,7 @@ jobs:
             > "$candidate_feed/candidate.json"
 
       - name: Upload same-run candidate CLI package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-cli-candidate-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage-candidate-feed
@@ -236,7 +236,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -273,7 +273,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Download same-source CLI candidate package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-cli-candidate-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage-candidate-feed
@@ -401,7 +401,7 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "capture-path=$env:COVERAGE_DOGFOOD_OUTPUT"
 
       - name: Upload attested native coverage
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-native-${{ matrix.os }}-${{ github.run_attempt }}
           path: ${{ steps.capture-native-coverage.outputs.capture-path }}
@@ -410,7 +410,7 @@ jobs:
 
       - name: Upload failed native capture result
         if: ${{ !cancelled() && steps.capture-native-coverage.outcome == 'failure' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-capture-failure-${{ matrix.os }}-${{ github.run_attempt }}
           path: |
@@ -421,7 +421,7 @@ jobs:
 
       - name: Upload coverage security diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-security-diagnostics-${{ matrix.os }}
           path: |
@@ -451,7 +451,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -674,7 +674,7 @@ jobs:
           diagnostic="pass"
 
       - name: Upload secret-safe Keycloak theme evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: keycloak-theme-evidence
@@ -695,7 +695,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -728,7 +728,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -774,7 +774,7 @@ jobs:
 
       - name: Setup .NET SDK
         id: setup-dotnet
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -814,7 +814,7 @@ jobs:
 
       - name: Download same-source CLI candidate package
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-cli-candidate-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage-candidate-feed
@@ -860,12 +860,12 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 11.1.3
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -935,7 +935,7 @@ jobs:
 
       - name: Preserve same-attempt coverage collection
         if: ${{ success() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: solution-coverage-collection-${{ github.run_attempt }}
           path: ${{ runner.temp }}/solution-coverage-collection
@@ -944,7 +944,7 @@ jobs:
 
       - name: Publish advisory coverage scheduling timings
         if: ${{ success() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-schedule-timings
           path: ${{ runner.temp }}/solution-coverage-collection/coverage/timings.json
@@ -953,14 +953,14 @@ jobs:
 
       - name: Upload docs outline layout evidence
         if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docs-outline-layout-evidence
           path: ${{ runner.temp }}/docs-outline-layout-evidence
           if-no-files-found: warn
 
       - name: Upload test-result diagnostics
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         with:
           name: coverage-collection-diagnostics
@@ -1022,7 +1022,7 @@ jobs:
 
       - name: Setup .NET SDK
         id: setup-dotnet
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
@@ -1065,14 +1065,14 @@ jobs:
 
       - name: Download same-attempt coverage collection
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: solution-coverage-collection-${{ github.run_attempt }}
           path: ${{ runner.temp }}/solution-coverage-collection
 
       - name: Download same-source CLI candidate package
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-cli-candidate-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage-candidate-feed
@@ -1123,7 +1123,7 @@ jobs:
 
       - name: Download same-run native coverage evidence
         if: ${{ needs.coverage-evidence-plan.outputs.requires_native_coverage == 'true' && github.event_name == 'pull_request' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: coverage-native-*-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage-native-inputs
@@ -1244,7 +1244,7 @@ jobs:
           jq -e '.process.peakWorkingSetBytes | type == "number" and . > 0' "$fanin/shadow-proof.json" >/dev/null
 
       - name: Upload test-result diagnostics
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         with:
           name: test-result-diagnostics
@@ -1254,7 +1254,7 @@ jobs:
           retention-days: 14
 
       - name: Upload coverage gate reports
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         with:
           name: coverage-gate-reports
@@ -1267,7 +1267,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload unselected coverage manifest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && !cancelled() && needs.coverage-evidence-plan.outputs.requires_coverage != 'true' }}
         with:
           name: coverage-selection-manifest
@@ -1316,7 +1316,7 @@ jobs:
 
       - name: Setup .NET SDK
         id: setup-dotnet
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/appsurface-dotnet
         with:
