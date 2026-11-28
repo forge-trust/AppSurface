@@ -16,10 +16,6 @@ jobs:
     timeout-minutes: 15
     outputs:
       digest: ${{ steps.seed.outputs.digest }}
-    env:
-      NUGET_PACKAGES: ${{ runner.temp }}/study-caches/dotnet
-      NUGET_HTTP_CACHE_PATH: ${{ runner.temp }}/study-caches/http
-      npm_config_store_dir: ${{ runner.temp }}/study-caches/pnpm
     steps:
       - name: Checkout definition
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

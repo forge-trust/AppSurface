@@ -8,6 +8,9 @@ project="tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.E
 root="$RUNNER_TEMP/study"
 repo="$GITHUB_WORKSPACE/subject"
 cd "$repo"
+export NUGET_PACKAGES="$RUNNER_TEMP/study-caches/dotnet"
+export NUGET_HTTP_CACHE_PATH="$RUNNER_TEMP/study-caches/http"
+export npm_config_store_dir="$RUNNER_TEMP/study-caches/pnpm"
 
 fact() { jq -er "$1" "$definition"; }
 digest() { sha256sum "$1" | cut -d ' ' -f 1; }
@@ -26,6 +29,10 @@ case "$1" in
     test "$(git merge-base "$(fact .base)" HEAD)" = "$(fact .base)"
     test "$(git rev-parse HEAD:.github/workflows/package-gate.yml)" = "$(fact .ordinaryPackageWorkflowBlob)"
     test "$(digest .github/evidence.policy.json)" = "$(fact .baselinePolicySha256)"
+    {
+      printf 'NUGET_PACKAGES=%s\n' "$NUGET_PACKAGES"
+      printf 'NUGET_HTTP_CACHE_PATH=%s\n' "$NUGET_HTTP_CACHE_PATH"
+    } >> "$GITHUB_ENV"
     mkdir "$root"
     mkdir -p "$NUGET_PACKAGES" "$NUGET_HTTP_CACHE_PATH" "$npm_config_store_dir"
     test -z "$(find "$RUNNER_TEMP/study-caches" -type f -print -quit)"
@@ -43,7 +50,7 @@ case "$1" in
     test "$(node --version)" = "v$(fact .runner.node)"
     test "$(pnpm --version)" = "$(fact .runner.pnpm)"
     dotnet restore "$project" --locked-mode
-    pnpm --dir Web install --frozen-lockfile
+    pnpm --dir Web install --frozen-lockfile --store-dir "$npm_config_store_dir"
     mkdir -p "$RUNNER_TEMP/seed"
     tar -C "$RUNNER_TEMP/study-caches" -czf "$RUNNER_TEMP/seed/caches.tar.gz" dotnet pnpm
     echo "digest=$(digest "$RUNNER_TEMP/seed/caches.tar.gz")" >> "$GITHUB_OUTPUT"
@@ -89,7 +96,7 @@ case "$1" in
   web)
     test "$(node --version)" = "v$(fact .runner.node)"
     test "$(pnpm --version)" = "$(fact .runner.pnpm)"
-    pnpm --dir Web install --frozen-lockfile
+    pnpm --dir Web install --frozen-lockfile --store-dir "$npm_config_store_dir"
     pnpm --dir Web run assets:typecheck
     pnpm --dir Web run assets:test
     pnpm --dir Web run assets:verify
