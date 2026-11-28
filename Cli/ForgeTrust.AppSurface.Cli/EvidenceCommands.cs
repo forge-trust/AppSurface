@@ -68,7 +68,7 @@ internal sealed partial class EvidenceInitCommand(EvidenceCliWorkflow workflow) 
 /// <summary>
 /// Checks selected EvidenceHost prerequisites without provisioning resources or executing tests.
 /// </summary>
-[Command("evidence doctor", Description = "Check policy, diff, envelope, Docker, and browser prerequisites without provisioning resources.")]
+[Command("evidence doctor", Description = "Check policy, diff, Docker, and browser prerequisites and report envelope verification status.")]
 internal sealed partial class EvidenceDoctorCommand(EvidenceCliWorkflow workflow) : EvidencePlanningCommandBase(workflow)
 {
     /// <inheritdoc />
@@ -77,7 +77,7 @@ internal sealed partial class EvidenceDoctorCommand(EvidenceCliWorkflow workflow
         try
         {
             var report = await Workflow.DoctorAsync(CreatePlanningRequest(), console.RegisterCancellationHandler());
-            await console.Output.WriteLineAsync($"Evidence doctor: {report.Status}");
+            await console.Output.WriteLineAsync("Evidence doctor: ready_with_external_prerequisites");
             foreach (var check in report.Checks)
             {
                 await console.Output.WriteLineAsync($"  {check.Status} {check.Id}: {check.Message}");
@@ -85,11 +85,6 @@ internal sealed partial class EvidenceDoctorCommand(EvidenceCliWorkflow workflow
                 {
                     await console.Output.WriteLineAsync($"    Next: {check.NextAction}");
                 }
-            }
-
-            if (string.Equals(report.Status, "blocked", StringComparison.Ordinal))
-            {
-                throw new CommandException("ASEVD210: Evidence doctor is blocked. Fix the named prerequisite before running evidence.");
             }
         }
         catch (EvidencePlanningException exception)

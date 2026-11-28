@@ -16,6 +16,10 @@ appsurface evidence doctor --path docs/README.md
 appsurface evidence explain --path src/Orders/SubmitOrder.cs
 ```
 
+[`doctor`](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md#doctor-preflight) reports structural
+prerequisites. Each profile shows `unverified trusted-envelope`. A registered verifier in the consumer's
+protected workflow validates the release envelope.
+
 The generated policy maps `docs/**` to an explicit `no-evidence` profile and sends every unmatched path to a non-empty conservative coverage profile. `explain` tells a developer, before tests start, which profile won, which rule selected it, which producers must run, and which obligations they must close.
 
 ```text
