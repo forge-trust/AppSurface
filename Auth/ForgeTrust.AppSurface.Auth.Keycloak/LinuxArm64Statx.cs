@@ -23,7 +23,10 @@ internal readonly ref struct LinuxArm64Statx
     private readonly ReadOnlySpan<byte> _bytes;
 
     /// <summary>Creates a view over a complete native result buffer.</summary>
-    internal LinuxArm64Statx(ReadOnlySpan<byte> bytes) => _bytes = bytes;
+    internal LinuxArm64Statx(ReadOnlySpan<byte> bytes)
+    {
+        _bytes = bytes;
+    }
 
     internal uint Mask => BinaryPrimitives.ReadUInt32LittleEndian(_bytes);
     internal uint LinkCount => BinaryPrimitives.ReadUInt32LittleEndian(_bytes[16..]);
