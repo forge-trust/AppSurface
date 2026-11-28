@@ -479,7 +479,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         await RepositoryEvidenceWorkflow.VerifyAsync(ReadPlan(extracted), ReadManifest(extracted),
             TestPathUtils.PathUnder(extracted, "proof", "artifacts"), CancellationToken.None);
         Assert.Null(ReadArchive(retained, "latest.zip", "proof/coverage/generated.bin"));
-        Assert.Empty(Directory.EnumerateDirectories(retained, "evidence-workspace-*"));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(TestPathUtils.PathUnder(retained, ".scratch")));
     }
 
     [Fact]
@@ -508,7 +508,7 @@ public sealed class LocalEvidenceWorkflowTests : IDisposable
         Assert.Equal(0, await workflow.RunAsync(options, CancellationToken.None));
 
         Assert.True(File.Exists(TestPathUtils.PathUnder(retained, "latest.zip")));
-        var scratch = Assert.Single(Directory.EnumerateDirectories(retained, "evidence-workspace-*"));
+        var scratch = Assert.Single(Directory.EnumerateDirectories(TestPathUtils.PathUnder(retained, ".scratch")));
         Assert.Equal(EvidenceClaimKind.TargetedComplete, ReadManifest(TestPathUtils.PathUnder(scratch, "run")).ClaimKind);
     }
 

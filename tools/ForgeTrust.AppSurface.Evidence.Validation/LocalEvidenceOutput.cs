@@ -74,7 +74,9 @@ internal static class LocalEvidenceOutput
 
         var packageCache = PathUtils.PathUnder(root, "package-restore");
         RequirePlainPath(packageCache);
-        var workspace = EvidenceWorkspace.Create(root, new(MinimumFreeBytes: 0));
+        // Package discovery skips hidden directories. Generated consumer projects belong in scratch.
+        var scratch = RequireDirectory(PathUtils.PathUnder(root, ".scratch"));
+        var workspace = EvidenceWorkspace.Create(scratch, new(MinimumFreeBytes: 0));
         var output = workspace.GetPath("run");
         var settlement = new RepositoryCommandSettlement();
         var cleanup = false;

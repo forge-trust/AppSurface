@@ -18,7 +18,9 @@ dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configura
 current checkout, `.github/evidence.policy.json`, and `--base origin/main`. Use `--base COMMIT_OR_REF` for
 another comparison or `--repository /absolute/checkout` from elsewhere. The default uses
 `TestResults/repository-evidence/local/` in the selected worktree and prints the retained archive as
-`Local evidence output:`. Each invocation validates in fresh scratch. It replaces only its own
+`Local evidence output:`. Each invocation validates in fresh workspaces under `.scratch/` in that
+directory. Package discovery skips hidden directories, keeping generated consumer projects out of
+the repository's package inventory. Each run replaces only its own
 archive (`latest.zip`, `latest-failure.zip`, `latest-plan.zip`, or `latest-plan-failure.zip`), so a
 failure keeps the last success available. Runs using the managed output are serialized per worktree.
 The archives keep the source identity, plan, manifest and its files, validation logs and coverage

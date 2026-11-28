@@ -19,6 +19,7 @@ public sealed class LocalEvidenceOutputTests : IDisposable
         var exitCode = await LocalEvidenceOutput.RunAsync(_repository, operation, (scratch, _) =>
         {
             output = scratch;
+            Assert.Equal(Under(LocalRoot, ".scratch"), Directory.GetParent(scratch)?.Parent?.FullName);
             return Task.FromResult(0);
         });
 
@@ -293,15 +294,17 @@ public sealed class LocalEvidenceOutputTests : IDisposable
         Assert.True(File.Exists(Under(LocalRoot, "latest.zip")));
     }
 
-    [Fact]
-    public async Task LinkedLocalOutputRoot_IsRejectedBeforeTheRunDelegateStarts()
+    [Theory]
+    [InlineData("local")]
+    [InlineData("local/.scratch")]
+    public async Task LinkedManagedDirectory_IsRejectedBeforeTheRunDelegateStarts(string relativeLink)
     {
         var results = Under(_repository, "TestResults");
         var evidence = Under(results, "repository-evidence");
         var target = Under(_repository, "alternate-local-output");
-        Directory.CreateDirectory(evidence);
         Directory.CreateDirectory(target);
-        var linkedRoot = Under(evidence, "local");
+        var linkedRoot = Under(evidence, relativeLink);
+        Directory.CreateDirectory(Path.GetDirectoryName(linkedRoot)!);
         if (!TryCreateDirectorySymbolicLink(linkedRoot, target))
             return;
 
