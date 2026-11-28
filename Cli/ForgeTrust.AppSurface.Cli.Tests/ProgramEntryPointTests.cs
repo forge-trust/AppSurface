@@ -3490,6 +3490,7 @@ public sealed class ProgramEntryPointTests
         var missingVerify = await InvokeEntryPointAsync(["evidence", "verify"]);
         var invalidExplain = await InvokeEntryPointAsync(["evidence", "explain", "--policy", policyPath, "--path", "./src/Feature.cs"]);
         var coverage = await InvokeEntryPointAsync(["evidence", "run", "--policy", policyPath, "--path", "src/Feature.cs", "--output", Path.Join(directory.Path, "coverage-output")]);
+        const string provenanceNotice = "Check manifest provenance and gate requirements separately.";
 
         Assert.Equal(0, doctor.ExitCode);
         Assert.Contains("Evidence doctor: ready_with_external_prerequisites", doctor.AllText, StringComparison.Ordinal);
@@ -3497,14 +3498,21 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, explain.ExitCode);
         Assert.Contains("Evidence plan: no-evidence", explain.AllText, StringComparison.Ordinal);
         Assert.Equal(0, run.ExitCode);
-        Assert.Contains("NoEvidenceRequired", run.AllText, StringComparison.Ordinal);
+        Assert.StartsWith($"Evidence result: NoEvidenceRequired{Environment.NewLine}", run.Stdout, StringComparison.Ordinal);
+        Assert.Contains(provenanceNotice, run.Stdout, StringComparison.Ordinal);
         Assert.Equal(0, verify.ExitCode);
-        Assert.Contains("Evidence manifest verified", verify.AllText, StringComparison.Ordinal);
+        Assert.StartsWith(
+            $"Evidence manifest verified: NoEvidenceRequired (PullRequestGate){Environment.NewLine}{provenanceNotice}{Environment.NewLine}",
+            verify.Stdout,
+            StringComparison.Ordinal);
         Assert.Equal(1, missingVerify.ExitCode);
         Assert.Contains("ASEVD212", missingVerify.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain(provenanceNotice, missingVerify.Stdout, StringComparison.Ordinal);
         Assert.Equal(1, invalidExplain.ExitCode);
         Assert.Contains("ASEVD120", invalidExplain.AllText, StringComparison.Ordinal);
         Assert.Equal(1, coverage.ExitCode);
+        Assert.Contains($"Evidence result: None{Environment.NewLine}", coverage.Stdout, StringComparison.Ordinal);
+        Assert.Contains(provenanceNotice, coverage.Stdout, StringComparison.Ordinal);
         Assert.Contains(
             "requires --solution",
             await File.ReadAllTextAsync(Path.Join(directory.Path, "coverage-output", "evidence-manifest.json")),

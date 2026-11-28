@@ -324,6 +324,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
 /// <summary>
 /// Verifies that an immutable evidence manifest binds to its resolved plan and that its retained artifacts are intact, without rerunning producers.
 /// </summary>
+/// <remarks>Success reports the manifest's claim and eligibility and directs readers to separate provenance and gate checks.</remarks>
 [Command("evidence verify", Description = "Verify plan and manifest digests and retained artifacts without rerunning producers.")]
 internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow) : ICommand
 {
@@ -356,6 +357,7 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
                 : PlanPath;
             var (_, manifest) = await _workflow.VerifyAsync(planPath, ManifestPath, ArtifactRoot, console.RegisterCancellationHandler());
             await console.Output.WriteLineAsync($"Evidence manifest verified: {manifest.ClaimKind} ({manifest.Eligibility})");
+            await console.Output.WriteLineAsync(EvidenceCliWorkflow.ManifestProvenanceNotice);
         }
         catch (EvidenceCliException exception)
         {

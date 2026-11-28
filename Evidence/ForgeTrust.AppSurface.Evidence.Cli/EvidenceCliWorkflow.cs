@@ -12,6 +12,9 @@ namespace ForgeTrust.AppSurface.Evidence.Cli;
 /// </summary>
 internal sealed class EvidenceCliWorkflow
 {
+    /// <summary>The separate provenance and gate checks to perform after reading an evidence report.</summary>
+    internal const string ManifestProvenanceNotice = "Check manifest provenance and gate requirements separately.";
+
     private const string GeneratedMarker = "appsurface-evidence-starter-v1";
     private readonly EvidencePlanner _planner;
     private readonly IEvidenceInputFileAccess _inputFileAccess;
@@ -335,6 +338,7 @@ internal sealed class EvidenceCliWorkflow
     /// <summary>
     /// Formats a deterministic, human-readable summary of an evidence claim and any remaining obligations.
     /// </summary>
+    /// <remarks>The final line directs readers to verify provenance and apply gate requirements separately.</remarks>
     public static string FormatSummary(EvidenceManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -352,7 +356,8 @@ internal sealed class EvidenceCliWorkflow
             $"Execution: {manifest.ExecutionVerdict}",
             $"Closed obligations: {FormatIds(manifest.ClosedObligationIds)}",
             $"Unmediated obligations: {FormatIds(manifest.UnmediatedObligationIds)}",
-            $"Next: {action}");
+            $"Next: {action}",
+            ManifestProvenanceNotice);
     }
 
     private async Task<(IReadOnlyList<NormalizedDiffPath> Paths, EvidenceDiffSnapshot? Snapshot)> ReadPathsAndSnapshotAsync(
