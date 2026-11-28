@@ -1,4 +1,4 @@
-"""Public CLI regressions for packed consumer input and output path guards.
+"""Regressions for packed consumer fixture discovery and path guards.
 
 Run: python3 -m unittest discover -s tests/config-package-consumer -p 'test_*.py'
 """
@@ -12,6 +12,13 @@ import unittest
 
 
 VERIFIER = Path(__file__).resolve().parents[2] / "scripts/verify_config_package_consumer.py"
+
+
+class ConsumerFixtureDiscoveryTests(unittest.TestCase):
+    def test_domain_fixture_is_only_a_template_in_checkout(self):
+        domain_source = Path(__file__).resolve().parent / "fixtures" / "domain"
+        self.assertTrue((domain_source / "DomainFixture.csproj.template").is_file())
+        self.assertEqual([], list(domain_source.glob("*.csproj")))
 
 
 class ConsumerOutputGuardTests(unittest.TestCase):

@@ -230,6 +230,9 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     consumer = work / "consumer"
     domain_project = work / "domain-project"
+    domain_project_file = domain_project / "DomainFixture.csproj"
+    domain_fixture_source = repo / "tests/config-package-consumer/fixtures/domain"
+    domain_project_template = domain_fixture_source / (domain_project_file.name + ".template")
     domain_feed = work / "domain-feed"
     package_ids = ["ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Config", "ForgeTrust.AppSurface.Config.Testing"]
     log_stages = [
@@ -301,7 +304,7 @@ def main():
         input_paths = [
             repo / "scripts/verify_config_package_consumer.py",
             *sorted((repo / "tests/config-package-consumer").rglob("*.cs")),
-            repo / "tests/config-package-consumer/fixtures/domain/DomainFixture.csproj",
+            domain_project_template,
             repo / "tests/config-package-consumer/pinned-inventory.md",
             repo / "tests/config-package-consumer/appsettings.json",
         ]
@@ -334,17 +337,16 @@ def main():
             package_id: hashlib.sha256((artifacts / f"{package_id}.{args.package_version}.nupkg").read_bytes()).hexdigest()
             for package_id in package_ids
         }
-        fixture_source = repo / "tests/config-package-consumer/fixtures/domain"
-        for filename in ["DomainFixture.csproj", "DomainConfigs.cs"]:
-            shutil.copyfile(fixture_source / filename, domain_project / filename)
+        shutil.copyfile(domain_project_template, domain_project_file)
+        shutil.copyfile(domain_fixture_source / "DomainConfigs.cs", domain_project / "DomainConfigs.cs")
         write_nuget_config(domain_project / "NuGet.Config", [
             ("candidate", artifacts),
             ("nuget.org", "https://api.nuget.org/v3/index.json"),
         ])
-        if project_reference_count(domain_project / "DomainFixture.csproj") != 0:
+        if project_reference_count(domain_project_file) != 0:
             raise RuntimeError("Packed Domain fixture must use package references only.")
         run("domain-restore", [
-            "dotnet", "restore", "DomainFixture.csproj", "--configfile", "NuGet.Config",
+            "dotnet", "restore", domain_project_file.name, "--configfile", "NuGet.Config",
             "-p:PackageVersion=" + args.package_version, "-p:Version=" + args.package_version,
         ], cwd=domain_project)
         domain_graph = package_graph(domain_project / "obj/project.assets.json")
@@ -352,7 +354,7 @@ def main():
             if domain_graph.get(package_id) != args.package_version:
                 raise RuntimeError("Domain restore graph did not select the requested candidate package identity.")
         run("pack-domain-fixture", [
-            "dotnet", "pack", "DomainFixture.csproj", "--no-restore", "--configuration", args.configuration,
+            "dotnet", "pack", domain_project_file.name, "--no-restore", "--configuration", args.configuration,
             "--output", str(domain_feed), "-p:PackageVersion=" + args.package_version,
             "-p:Version=" + args.package_version,
         ], cwd=domain_project)

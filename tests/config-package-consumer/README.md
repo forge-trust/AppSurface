@@ -14,9 +14,11 @@ From the repository root, with Python 3 and the .NET 10 SDK installed:
 
 The [verifier](../../scripts/verify_config_package_consumer.py) packs
 `ForgeTrust.AppSurface.Core`, `ForgeTrust.AppSurface.Config`, and
-`ForgeTrust.AppSurface.Config.Testing` from the current source at one candidate version. It restores
-the separate [Domain fixture project](fixtures/domain/DomainFixture.csproj) against
-those exact Core and Config packages, then packs it as
+`ForgeTrust.AppSurface.Config.Testing` from the current source at one candidate version.
+It copies the [Domain project template](fixtures/domain/DomainFixture.csproj.template)
+to `DomainFixture.csproj` in the external work directory. The template keeps the
+project out of checkout-wide restore scans because it needs the generated candidate feed.
+The verifier restores it against those exact Core and Config packages, then packs it as
 `ForgeTrust.AppSurface.Config.PackageConsumer.DomainFixture` at the same version.
 The generated consumer references Config, Config.Testing, and that Domain package;
 Core is transitive. The verifier checks both restore graphs for the exact candidate
