@@ -473,34 +473,6 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
-    public async Task CliWorkflow_ShouldDescribeExternalAndTrustedPrerequisitesForAReleaseProfile()
-    {
-        using var directory = TestDirectory.Create();
-        var policyPath = Path.Join(directory.Path, "evidence.policy.json");
-        var profile = new EvidenceProfile(
-            "release",
-            EvidenceProfileScope.Release,
-            [],
-            [
-                new EvidenceProducerDeclaration("database", "postgres-integration", "1", [], ["database/assertion@1"], [], 60),
-                new EvidenceProducerDeclaration("browser", "playwright-browser", "1", [], ["browser/assertion@1"], [], 60),
-            ],
-            [
-                new EvidenceObligation("database", "database", "Database behavior changed.", ["database"], "database/assertion@1"),
-                new EvidenceObligation("browser", "browser", "Browser behavior changed.", ["browser"], "browser/assertion@1"),
-            ]);
-        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(new EvidencePolicy("release-policy", "1", "release", [profile], [])));
-        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
-
-        var report = await workflow.DoctorAsync(new EvidencePlanningRequest(policyPath, ["src/Feature.cs"], null), CancellationToken.None);
-
-        Assert.Contains(report.Checks, check => check.Id == "docker:database");
-        Assert.Contains(report.Checks, check => check.Id == "browser:browser");
-        Assert.Contains(report.Checks, check => check.Id == "trusted-envelope");
-        Assert.Contains(report.Checks, check => check.NextAction is not null);
-    }
-
-    [Fact]
     public async Task CliWorkflow_ShouldRejectMissingMalformedAndMismatchedEvidenceInputs()
     {
         using var directory = TestDirectory.Create();

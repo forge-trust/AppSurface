@@ -81,15 +81,19 @@ internal sealed class EvidenceCliWorkflow
     }
 
     /// <summary>
-    /// Resolves an evidence plan and reports prerequisite readiness without provisioning resources or running producers.
+    /// Resolves an evidence plan and reports structural prerequisites without provisioning resources or running producers.
     /// </summary>
+    /// <remarks>
+    /// A registered verifier must validate the execution envelope in the consumer's protected workflow.
+    /// Planning and CI environment values provide no admission.
+    /// </remarks>
     public async Task<EvidenceDoctorReport> DoctorAsync(EvidencePlanningRequest request, CancellationToken cancellationToken)
     {
         var plan = await ExplainAsync(request, cancellationToken).ConfigureAwait(false);
         var checks = new List<EvidenceDoctorCheck>
         {
-            new("policy", true, "ready", $"Policy '{plan.PolicyId}' resolved profile '{plan.Profile.Id}'.", null),
-            new("diff", true, "ready", $"Resolved {plan.ChangedPaths.Count} normalized changed path(s).", null),
+            new("policy", "ready", $"Policy '{plan.PolicyId}' resolved profile '{plan.Profile.Id}'.", null),
+            new("diff", "ready", $"Resolved {plan.ChangedPaths.Count} normalized changed path(s).", null),
         };
         foreach (var producer in plan.Profile.Producers)
         {
@@ -107,23 +111,13 @@ internal sealed class EvidenceCliWorkflow
             }
         }
 
-        if (plan.Profile.Scope == EvidenceProfileScope.Release)
-        {
-            var githubActions = string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
-            checks.Add(new EvidenceDoctorCheck(
-                "trusted-envelope",
-                githubActions,
-                githubActions ? "ready" : "blocked",
-                githubActions ? "GitHub Actions environment is available for the consumer envelope verifier." : "Release evidence requires a CI-provided trusted envelope.",
-                githubActions ? null : "Run from the consumer's protected CI workflow or request observation-only evidence."));
-        }
+        checks.Add(new EvidenceDoctorCheck(
+            "trusted-envelope",
+            "unverified",
+            "The execution envelope is unverified. Planning and CI environment values grant no admission.",
+            "For release evidence, use the registered verifier in the consumer's protected workflow. See https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#release-evidence"));
 
-        var blocked = checks.Any(static check => string.Equals(check.Status, "blocked", StringComparison.Ordinal));
-        var external = checks.Any(static check => string.Equals(check.Status, "external-prerequisite", StringComparison.Ordinal));
-        return new EvidenceDoctorReport(
-            blocked ? "blocked" : external ? "ready_with_external_prerequisites" : "ready",
-            plan,
-            checks);
+        return new EvidenceDoctorReport(plan, checks);
     }
 
     /// <summary>
@@ -514,7 +508,6 @@ internal sealed class EvidenceCliWorkflow
             || File.Exists("/var/run/docker.sock");
         return new EvidenceDoctorCheck(
             $"docker:{producerId}",
-            available,
             available ? "ready" : "external-prerequisite",
             available ? "Docker capability is available." : $"Producer '{producerId}' requires Docker-backed disposable dependencies.",
             available ? null : "Start Docker Desktop or use the consumer CI runner that provides Docker.");
@@ -525,7 +518,6 @@ internal sealed class EvidenceCliWorkflow
         var available = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
         return new EvidenceDoctorCheck(
             $"browser:{producerId}",
-            available,
             available ? "ready" : "external-prerequisite",
             available ? "Browser capability is configured." : $"Producer '{producerId}' requires the consumer's browser test runtime.",
             available ? null : "Install the consumer browser runtime or use its CI browser image.");
@@ -926,12 +918,12 @@ internal sealed record EvidenceInitializationResult(string RootPath, IReadOnlyLi
 /// <summary>
 /// Describes one environment or capability prerequisite observed by the evidence doctor.
 /// </summary>
-internal sealed record EvidenceDoctorCheck(string Id, bool Satisfied, string Status, string Message, string? NextAction);
+internal sealed record EvidenceDoctorCheck(string Id, string Status, string Message, string? NextAction);
 
 /// <summary>
 /// Describes the plan and prerequisite checks produced by the evidence doctor.
 /// </summary>
-internal sealed record EvidenceDoctorReport(string Status, EvidencePlan Plan, IReadOnlyList<EvidenceDoctorCheck> Checks);
+internal sealed record EvidenceDoctorReport(EvidencePlan Plan, IReadOnlyList<EvidenceDoctorCheck> Checks);
 
 /// <summary>
 /// Represents a stable, user-actionable EvidenceHost CLI failure.
