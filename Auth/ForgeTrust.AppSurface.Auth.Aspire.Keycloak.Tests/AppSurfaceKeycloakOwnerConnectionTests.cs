@@ -8,8 +8,9 @@ public sealed class AppSurfaceKeycloakOwnerConnectionTests
 {
     [Theory]
     [InlineData(1023, "0123456789abcdef0123456789abcdef")]
+    [InlineData(1024, "0123456789abcdef0123456789abcdef")]
     [InlineData(65536, "0123456789abcdef0123456789abcdef")]
-    [InlineData(1024, "not-a-guid")]
+    [InlineData(1025, "not-a-guid")]
     public async Task InvalidOwnerEndpointOrIdentityIsRejectedBeforeConnecting(int port, string owner)
     {
         var losses = 0;

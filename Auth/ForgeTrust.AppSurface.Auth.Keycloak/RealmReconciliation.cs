@@ -109,7 +109,7 @@ internal static class RealmReconciler
     internal static async Task<RealmReconcileResult> ReconcileAsync(HttpClient http, RealmReconcileDesired desired,
         RealmReconcileCredentials credentials, CancellationToken cancellationToken)
     {
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        using var deadline = new CancellationTokenSource(KeycloakWorkerProtocol.ReconciliationTimeout);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         var session = new Session(http, desired, credentials, stop.Token);
         try
@@ -141,6 +141,7 @@ internal static class RealmReconciler
     {
         private const string OwnerKey = "appsurface.issue888.managed";
         private const string Owner = "generic-feasibility";
+        private const string ClientAuthenticatorField = "clientAuthenticatorType";
         private const int MaximumResponseBytes = 1024 * 1024;
         private static readonly (string Key, string Value)[] DisabledBrokerEndpoints =
         [
@@ -151,7 +152,6 @@ internal static class RealmReconciler
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private string stage = "validation";
         private string? bearer, realmId, clientId, managedDigest;
-        private JsonObject clientAttributes = new();
         private readonly HashSet<string> acknowledgedGoogleWrites = new(StringComparer.Ordinal);
         private string Admin => "admin/realms/" + Uri.EscapeDataString(desired.Realm);
         internal int Writes { get; private set; }
@@ -200,34 +200,37 @@ internal static class RealmReconciler
                 if (string.IsNullOrEmpty(bearer)) throw new Failure("AuthenticationRejected");
             }
             stage = "realm-reconcile";
+            var realmFields = RealmFields();
+            async Task<bool> ConfirmRealmWriteAsync() => ManagedFieldsMatch(await ReadAsync(Admin, true).ConfigureAwait(false), realmFields);
             var realm = await ReadAsync(Admin, true).ConfigureAwait(false);
             if (realm is null)
             {
-                await WriteAsync(HttpMethod.Post, "admin/realms", RealmPatch(), async () => RealmMatches(await ReadAsync(Admin, true).ConfigureAwait(false))).ConfigureAwait(false);
+                await WriteAsync(HttpMethod.Post, "admin/realms", realmFields, ConfirmRealmWriteAsync).ConfigureAwait(false);
                 realm = await ReadAsync(Admin).ConfigureAwait(false);
             }
             realmId = realm!["id"]?.GetValue<string>();
-            if (!RealmMatches(realm))
-                await WriteAsync(HttpMethod.Put, Admin, RealmPatch(), async () => RealmMatches(await ReadAsync(Admin, true).ConfigureAwait(false))).ConfigureAwait(false);
+            if (!ManagedFieldsMatch(realm, realmFields))
+                await WriteAsync(HttpMethod.Put, Admin, realmFields, ConfirmRealmWriteAsync).ConfigureAwait(false);
             stage = "client-reconcile";
+            var clientFields = ClientFields();
+            Task<bool> ConfirmClientWriteAsync() => ClientConfirmedAsync(clientFields);
             var client = await FindClientAsync().ConfigureAwait(false);
             if (client is not null && client["publicClient"]?.GetValue<bool>() == false && !desired.Confidential && !desired.AllowPublicDowngrade)
                 throw new Failure("DowngradeDenied");
             if (client is null)
             {
-                await WriteAsync(HttpMethod.Post, Admin + "/clients", ClientPatch(), ClientConfirmedAsync).ConfigureAwait(false);
+                await WriteAsync(HttpMethod.Post, Admin + "/clients", ClientPatch(clientFields, null), ConfirmClientWriteAsync).ConfigureAwait(false);
                 client = await FindClientAsync().ConfigureAwait(false) ?? throw new Failure("ReadbackMismatch");
             }
             clientId = client["id"]?.GetValue<string>() ?? throw new Failure("ReadbackMismatch");
-            clientAttributes = client["attributes"]?.DeepClone() as JsonObject ?? new JsonObject();
-            if (!ClientMatches(client) || desired.Confidential && !await SecretMatchesAsync().ConfigureAwait(false))
-                await WriteAsync(HttpMethod.Put, Admin + "/clients/" + Uri.EscapeDataString(clientId), ClientPatch(), ClientConfirmedAsync).ConfigureAwait(false);
+            if (!ClientMatches(client, clientFields) || desired.Confidential && !await SecretMatchesAsync().ConfigureAwait(false))
+                await WriteAsync(HttpMethod.Put, Admin + "/clients/" + Uri.EscapeDataString(clientId), ClientPatch(clientFields, client), ConfirmClientWriteAsync).ConfigureAwait(false);
             await ReconcileMappersAsync().ConfigureAwait(false);
             await ReconcileBrokersAsync().ConfigureAwait(false);
             stage = "effective-readback";
             var verifiedRealm = await ReadAsync(Admin).ConfigureAwait(false);
             var verifiedClient = await FindClientAsync().ConfigureAwait(false);
-            if (!RealmMatches(verifiedRealm) || !ClientMatches(verifiedClient) || desired.Confidential && !await SecretMatchesAsync().ConfigureAwait(false))
+            if (!ManagedFieldsMatch(verifiedRealm, realmFields) || !ClientMatches(verifiedClient, clientFields) || desired.Confidential && !await SecretMatchesAsync().ConfigureAwait(false))
                 throw new Failure("ReadbackMismatch");
             await VerifyManagedAsync().ConfigureAwait(false);
             stage = "metadata-challenge";
@@ -237,68 +240,86 @@ internal static class RealmReconciler
             return Result(true, "Ready", Writes == 0 ? "None" : "Observed", "NoRetry");
         }
 
-        private JsonObject RealmPatch()
+        /// <summary>Defines the realm settings to write and verify, leaving an undeclared theme unmanaged.</summary>
+        private JsonObject RealmFields()
         {
-            var patch = new JsonObject { ["realm"] = desired.Realm, ["enabled"] = true, ["registrationAllowed"] = false, ["sslRequired"] = "external" };
-            if (desired.LoginThemeName is not null) patch["loginTheme"] = desired.LoginThemeName;
-            return patch;
-        }
-        private JsonObject ClientPatch()
-        {
-            var attributes = (JsonObject)clientAttributes.DeepClone();
-            attributes["post.logout.redirect.uris"] = string.Join("##", desired.PostLogoutRedirectUris);
-            var result = new JsonObject
+            var fields = new JsonObject
             {
-                ["clientId"] = desired.ClientId,
+                ["realm"] = desired.Realm,
                 ["enabled"] = true,
-                ["protocol"] = "openid-connect",
-                ["publicClient"] = !desired.Confidential,
-                ["clientAuthenticatorType"] = "client-secret",
-                ["standardFlowEnabled"] = true,
-                ["implicitFlowEnabled"] = false,
-                ["directAccessGrantsEnabled"] = false,
-                ["serviceAccountsEnabled"] = false,
-                ["redirectUris"] = Array(desired.RedirectUris),
-                ["webOrigins"] = Array(desired.WebOrigins),
-                ["attributes"] = attributes
+                ["registrationAllowed"] = false,
+                ["sslRequired"] = "external"
             };
-            if (desired.Confidential) result["secret"] = credentials.ClientSecret;
-            return result;
+            if (desired.LoginThemeName is not null) fields["loginTheme"] = desired.LoginThemeName;
+            return fields;
+        }
+
+        /// <summary>Defines the nonsecret client settings owned by reconciliation and checked on readback.</summary>
+        private JsonObject ClientFields() => new()
+        {
+            ["clientId"] = desired.ClientId,
+            ["enabled"] = true,
+            ["publicClient"] = !desired.Confidential,
+            ["protocol"] = "openid-connect",
+            ["standardFlowEnabled"] = true,
+            ["implicitFlowEnabled"] = false,
+            ["directAccessGrantsEnabled"] = false,
+            ["serviceAccountsEnabled"] = false,
+            ["redirectUris"] = Array(desired.RedirectUris),
+            ["webOrigins"] = Array(desired.WebOrigins),
+            ["attributes"] = new JsonObject
+            {
+                [KeycloakPostLogoutRedirectUris.AttributeName] = KeycloakPostLogoutRedirectUris.Format(desired.PostLogoutRedirectUris)
+            },
+            [ClientAuthenticatorField] = "client-secret"
+        };
+
+        private JsonObject ClientPatch(JsonObject fields, JsonNode? current)
+        {
+            var patch = CreateManagedPatch(fields, current, "attributes");
+            if (desired.Confidential) patch["secret"] = credentials.ClientSecret;
+            return patch;
         }
         private static JsonArray Array(IEnumerable<string> values) => new(values.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
         private static string? Text(JsonNode? node, string key) => node?[key]?.GetValue<string>();
         private static bool Bool(JsonNode? node, string key, bool expected) => node?[key]?.GetValue<bool>() == expected;
-        private bool RealmMatches(JsonNode? node) => Text(node, "realm") == desired.Realm && Bool(node, "enabled", true)
-            && Bool(node, "registrationAllowed", false) && Text(node, "sslRequired") == "external"
-            && (desired.LoginThemeName is null || Text(node, "loginTheme") == desired.LoginThemeName);
-        private bool ClientMatches(JsonNode? node) => Text(node, "clientId") == desired.ClientId
-            && Bool(node, "enabled", true) && Bool(node, "publicClient", !desired.Confidential) && Text(node, "protocol") == "openid-connect"
-            && Bool(node, "standardFlowEnabled", true) && Bool(node, "implicitFlowEnabled", false)
-            && Bool(node, "directAccessGrantsEnabled", false) && Bool(node, "serviceAccountsEnabled", false)
-            && StringsMatch(node?["redirectUris"], desired.RedirectUris) && StringsMatch(node?["webOrigins"], desired.WebOrigins)
-            && Text(node?["attributes"], "post.logout.redirect.uris") == string.Join("##", desired.PostLogoutRedirectUris)
-            && (!desired.Confidential || Text(node, "clientAuthenticatorType") == "client-secret");
-        private static bool StringsMatch(JsonNode? node, IEnumerable<string> expected) => node is JsonArray array
-            && array.Select(value => value!.GetValue<string>()).Order(StringComparer.Ordinal).SequenceEqual(expected.Order(StringComparer.Ordinal));
+        // Public clients can omit the authenticator in readback even though the write includes it.
+        private bool ClientMatches(JsonNode? node, JsonObject fields) =>
+            ManagedFieldsMatch(node, desired.Confidential ? fields : fields.Where(field => field.Key != ClientAuthenticatorField));
+
+        private static bool StringsMatch(JsonNode? node, JsonArray expected) => node is JsonArray array
+            && array.Select(value => value!.GetValue<string>()).Order(StringComparer.Ordinal)
+                .SequenceEqual(expected.Select(value => value!.GetValue<string>()).Order(StringComparer.Ordinal));
         private async Task<JsonNode?> FindClientAsync()
         {
             var clients = (await ReadAsync(Admin + "/clients?clientId=" + Uri.EscapeDataString(desired.ClientId)).ConfigureAwait(false))!.AsArray();
             if (clients.Count > 1) throw new Failure("AmbiguousIdentity");
             return clients.SingleOrDefault();
         }
-        private async Task<bool> ClientConfirmedAsync()
+        private async Task<bool> ClientConfirmedAsync(JsonObject fields)
         {
             var found = await FindClientAsync().ConfigureAwait(false);
-            if (!ClientMatches(found)) return false;
+            if (!ClientMatches(found, fields)) return false;
             clientId = found!["id"]!.GetValue<string>();
             return !desired.Confidential || await SecretMatchesAsync().ConfigureAwait(false);
         }
         private async Task<bool> SecretMatchesAsync()
         {
             var value = await ReadAsync(Admin + "/clients/" + Uri.EscapeDataString(clientId!) + "/client-secret").ConfigureAwait(false);
-            var actual = Text(value, "value");
-            if (string.IsNullOrEmpty(actual) || actual.All(c => c == '*')) throw new Failure("CredentialReadbackUnavailable", UnknownPending);
-            return CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(actual)), SHA256.HashData(Encoding.UTF8.GetBytes(credentials.ClientSecret!)));
+            var comparison = CompareSecretReadback(Text(value, "value"), credentials.ClientSecret!);
+            if (comparison == SecretReadback.Unavailable) throw new Failure("CredentialReadbackUnavailable", UnknownPending);
+            return comparison == SecretReadback.Match;
+        }
+
+        private enum SecretReadback { Unavailable, Match, Mismatch }
+
+        /// <summary>Classifies missing or masked readback before comparing available values in fixed time.</summary>
+        private static SecretReadback CompareSecretReadback(string? actual, string expected)
+        {
+            if (string.IsNullOrEmpty(actual) || actual.All(c => c == '*')) return SecretReadback.Unavailable;
+            var matches = CryptographicOperations.FixedTimeEquals(
+                SHA256.HashData(Encoding.UTF8.GetBytes(actual)), SHA256.HashData(Encoding.UTF8.GetBytes(expected)));
+            return matches ? SecretReadback.Match : SecretReadback.Mismatch;
         }
 
         private static JsonObject MapperFields(RealmReconcileMapper mapper)
@@ -323,29 +344,31 @@ internal static class RealmReconciler
         private static bool Owned(JsonNode? node) => Text(node?["config"], OwnerKey) == Owner;
         private static bool ManagedItemMatches(JsonNode? node, JsonObject fields) => Owned(node) && ManagedFieldsMatch(node, fields);
 
-        private static bool ManagedFieldsMatch(JsonNode? node, JsonObject fields)
+        private static bool ManagedFieldsMatch(JsonNode? node, IEnumerable<KeyValuePair<string, JsonNode?>> fields)
         {
             return fields.All(field => field.Value switch
             {
                 null => node?[field.Key] is null,
                 JsonObject section => ManagedFieldsMatch(node?[field.Key], section),
+                JsonArray values => StringsMatch(node?[field.Key], values),
                 JsonValue value when value.TryGetValue<bool>(out var flag) => Bool(node, field.Key, flag),
                 _ => Text(node, field.Key) == field.Value.GetValue<string>()
             });
         }
 
-        private static JsonObject CreateManagedPatch(JsonObject fields, JsonNode? current)
+        /// <summary>Merges managed fields into the current nested section while preserving unrelated entries.</summary>
+        private static JsonObject CreateManagedPatch(JsonObject fields, JsonNode? current, string sectionName)
         {
             var patch = (JsonObject)fields.DeepClone();
-            var config = current?["config"]?.DeepClone() as JsonObject ?? new JsonObject();
-            foreach (var (key, value) in fields["config"]!.AsObject())
+            var section = current?[sectionName]?.DeepClone() as JsonObject ?? new JsonObject();
+            foreach (var (key, value) in fields[sectionName]!.AsObject())
             {
                 if (value is null)
-                    config.Remove(key);
+                    section.Remove(key);
                 else
-                    config[key] = value.DeepClone();
+                    section[key] = value.DeepClone();
             }
-            patch["config"] = config;
+            patch[sectionName] = section;
             return patch;
         }
 
@@ -386,20 +409,18 @@ internal static class RealmReconciler
 
         private bool BrokerMatches(JsonNode? node, RealmReconcileBroker broker, JsonObject fields) =>
             ManagedItemMatches(node, fields)
-                && (broker.ProviderId != "google" || GoogleSecretIsMaskedOrMatches(node, broker));
+                && (broker.ProviderId != "google" || CompareGoogleSecretReadback(node, broker) != SecretReadback.Mismatch);
+
         private bool GoogleSecretMatches(JsonNode? node, RealmReconcileBroker broker)
         {
-            var actual = Text(node?["config"], "clientSecret");
-            if (string.IsNullOrEmpty(actual) || actual.All(c => c == '*')) throw new Failure("UnknownWriteOutcome", true);
-            return CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(actual)),
-                SHA256.HashData(Encoding.UTF8.GetBytes(credentials.BrokerSecrets![broker.Alias])));
+            var comparison = CompareGoogleSecretReadback(node, broker);
+            if (comparison == SecretReadback.Unavailable) throw new Failure("UnknownWriteOutcome", true);
+            return comparison == SecretReadback.Match;
         }
-        private bool GoogleSecretIsMaskedOrMatches(JsonNode? node, RealmReconcileBroker broker)
-        {
-            var actual = Text(node?["config"], "clientSecret");
-            return string.IsNullOrEmpty(actual) || actual.All(c => c == '*') || CryptographicOperations.FixedTimeEquals(
-                SHA256.HashData(Encoding.UTF8.GetBytes(actual)), SHA256.HashData(Encoding.UTF8.GetBytes(credentials.BrokerSecrets![broker.Alias])));
-        }
+
+        private SecretReadback CompareGoogleSecretReadback(JsonNode? node, RealmReconcileBroker broker) =>
+            CompareSecretReadback(Text(node?["config"], "clientSecret"), credentials.BrokerSecrets![broker.Alias]);
+
         private static JsonNode? Find(JsonArray nodes, string key, string value)
         {
             var matching = nodes.Where(node => Text(node, key) == value).ToArray();
@@ -416,7 +437,7 @@ internal static class RealmReconciler
                 if (current is not null && !Owned(current)) throw new Failure("UnmanagedCollision");
                 var fields = MapperFields(mapper);
                 if (ManagedItemMatches(current, fields)) continue;
-                var patch = CreateManagedPatch(fields, current);
+                var patch = CreateManagedPatch(fields, current, "config");
                 if (current is not null) patch["id"] = current["id"]!.GetValue<string>();
                 await WriteAsync(current is null ? HttpMethod.Post : HttpMethod.Put,
                     current is null ? MapperRoot : MapperRoot + "/" + Uri.EscapeDataString(current["id"]!.GetValue<string>()), patch,
@@ -446,7 +467,7 @@ internal static class RealmReconciler
                 var fields = BrokerFields(broker);
                 var google = broker.ProviderId == "google";
                 if (BrokerMatches(current, broker, fields) && (!google || acknowledgedGoogleWrites.Contains(broker.Alias))) continue;
-                var patch = CreateManagedPatch(fields, current);
+                var patch = CreateManagedPatch(fields, current, "config");
                 if (google)
                 {
                     if (broker.DisplayName is null && current?["displayName"] is { } existingDisplayName)
@@ -462,9 +483,7 @@ internal static class RealmReconciler
                     patch, async () =>
                     {
                         var observed = Find((await ReadAsync(BrokerRoot).ConfigureAwait(false))!.AsArray(), "alias", broker.Alias);
-                        if (!BrokerMatches(observed, broker, fields)) return false;
-                        if (google && !GoogleSecretMatches(observed, broker)) return false;
-                        return true;
+                        return ManagedItemMatches(observed, fields) && (!google || GoogleSecretMatches(observed, broker));
                     }).ConfigureAwait(false);
                 if (google) acknowledgedGoogleWrites.Add(broker.Alias);
             }
@@ -557,7 +576,7 @@ internal static class RealmReconciler
             var delay = TimeSpan.FromMilliseconds(retries == 0 ? 500 : 1000);
             var requested = response?.Headers.RetryAfter?.Delta;
             if (response?.Headers.RetryAfter?.Date is { } date) requested = date - DateTimeOffset.UtcNow;
-            if (requested > delay || clock.Elapsed + delay >= TimeSpan.FromSeconds(120)) throw new Failure("RetryBudgetRejected", UnknownPending);
+            if (requested > delay || clock.Elapsed + delay >= KeycloakWorkerProtocol.ReconciliationTimeout) throw new Failure("RetryBudgetRejected", UnknownPending);
             retries++;
             await Task.Delay(delay, token).ConfigureAwait(false);
         }

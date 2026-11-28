@@ -8,9 +8,12 @@ namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 /// </summary>
 public sealed class AppSurfaceKeycloakResource
 {
+    private const string LegacyImportUnavailable = "Supervised Keycloak uses the RealmReady() reconciliation gate. Import metadata is available for legacy registration.";
     private readonly object _localSeedsLock = new();
     private readonly List<AppSurfaceKeycloakLocalSeed> _localSeeds = [];
     private readonly object _realmReadyLock = new();
+    private readonly AppSurfaceKeycloakReadinessProbe? _readiness;
+    private readonly string? _realmImportFile;
     private readonly AppSurfaceKeycloakRealmReadyConfiguration? _realmReadyConfiguration;
     private readonly HashSet<ParameterResource> _usedLocalSeedParameters = new(ReferenceEqualityComparer.Instance);
     private volatile AppSurfaceKeycloakRealmReady? _realmReady;
@@ -56,18 +59,43 @@ public sealed class AppSurfaceKeycloakResource
         string realmImportFile,
         AppSurfaceKeycloakThemeRegistration? theme,
         AppSurfaceKeycloakRealmReadyConfiguration? realmReadyConfiguration)
+        : this(resource, configuration, theme)
     {
-        ArgumentNullException.ThrowIfNull(resource);
-        ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(readiness);
         ArgumentException.ThrowIfNullOrWhiteSpace(realmImportFile);
 
+        _readiness = readiness;
+        _realmImportFile = realmImportFile;
+        _realmReadyConfiguration = realmReadyConfiguration;
+    }
+
+    /// <summary>Wraps a supervised resource whose realm readiness comes from its reconciliation worker.</summary>
+    /// <param name="resource">The underlying Aspire Keycloak resource builder.</param>
+    /// <param name="configuration">The secret-safe web configuration projection.</param>
+    /// <param name="run">The registered supervised run and its completion gate.</param>
+    /// <param name="theme">Optional secret-safe login-theme evidence.</param>
+    internal AppSurfaceKeycloakResource(
+        IResourceBuilder<KeycloakResource> resource,
+        AppSurfaceKeycloakConfigurationProjection configuration,
+        AppSurfaceKeycloakSupervisedRun run,
+        AppSurfaceKeycloakThemeRegistration? theme)
+        : this(resource, configuration, theme)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        SupervisedRun = run;
+    }
+
+    private AppSurfaceKeycloakResource(
+        IResourceBuilder<KeycloakResource> resource,
+        AppSurfaceKeycloakConfigurationProjection configuration,
+        AppSurfaceKeycloakThemeRegistration? theme)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        ArgumentNullException.ThrowIfNull(configuration);
+
         Resource = resource;
         Configuration = configuration;
-        Readiness = readiness;
-        RealmImportFile = realmImportFile;
         Theme = theme;
-        _realmReadyConfiguration = realmReadyConfiguration;
     }
 
     /// <summary>
@@ -77,22 +105,20 @@ public sealed class AppSurfaceKeycloakResource
     public IResourceBuilder<KeycloakResource> Resource { get; }
 
     /// <summary>Gets the explicit supervised lifetime helper, or null for the legacy local proof path.</summary>
-    public AppSurfaceKeycloakSupervisedRun? SupervisedRun { get; internal set; }
+    public AppSurfaceKeycloakSupervisedRun? SupervisedRun { get; }
 
     /// <summary>
     /// Gets the secret-safe web configuration projection.
     /// </summary>
     public AppSurfaceKeycloakConfigurationProjection Configuration { get; }
 
-    /// <summary>
-    /// Gets the readiness probe.
-    /// </summary>
-    public AppSurfaceKeycloakReadinessProbe Readiness { get; }
+    /// <summary>Gets the legacy readiness probe for the generated import.</summary>
+    /// <exception cref="InvalidOperationException">The resource is supervised. Use <see cref="RealmReady"/>.</exception>
+    public AppSurfaceKeycloakReadinessProbe Readiness => _readiness ?? throw new InvalidOperationException(LegacyImportUnavailable);
 
-    /// <summary>
-    /// Gets the generated realm import file path.
-    /// </summary>
-    public string RealmImportFile { get; }
+    /// <summary>Gets the generated realm import file path for legacy registration.</summary>
+    /// <exception cref="InvalidOperationException">The resource is supervised. Use <see cref="RealmReady"/>.</exception>
+    public string RealmImportFile => _realmImportFile ?? throw new InvalidOperationException(LegacyImportUnavailable);
 
     /// <summary>
     /// Gets secret-safe evidence for the optional local login theme.
@@ -100,14 +126,13 @@ public sealed class AppSurfaceKeycloakResource
     public AppSurfaceKeycloakThemeRegistration? Theme { get; }
 
     /// <summary>
-    /// Gets the lazily registered finite resource that proves the local Keycloak realm baseline is ready.
+    /// Gets the finite resource that confirms realm readiness for this registration mode.
     /// </summary>
-    /// <returns>A cached completion-bearing resource that consumers can use as the first dependency for local seed projects.</returns>
+    /// <returns>The completion-bearing resource that local seeds depend on.</returns>
     /// <remarks>
-    /// The returned resource waits for the official Keycloak resource to become healthy, then performs the package's
-    /// bounded metadata, generated-realm, and public authorization-challenge checks in a separate finite process.
-    /// It performs no Keycloak administration and receives no credentials. Calling this method repeatedly for the
-    /// same wrapper returns the same resource and never adds a second gate to the AppHost graph.
+    /// Legacy registration creates a credential-free baseline gate that waits for Keycloak and checks metadata,
+    /// generated import evidence, and the authorization challenge. Supervised registration returns the gate
+    /// for the managed realm reconciliation worker. Repeated calls return the same resource.
     /// </remarks>
     /// <exception cref="AppSurfaceKeycloakException">The wrapper was not created by <c>AddAppSurfaceKeycloak(...)</c>
     /// or the package-owned worker cannot be resolved.</exception>

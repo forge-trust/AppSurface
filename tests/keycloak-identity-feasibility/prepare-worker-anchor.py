@@ -15,7 +15,7 @@ import shutil
 import tempfile
 import zipfile
 
-from replay_environment import run_offline_build, verify_offline_restore
+from replay_environment import run_offline_build
 from worker_payload import PURE_LIBRARY, read_worker_payload, worker_payload_target
 
 
@@ -61,10 +61,12 @@ def main():
 </Project>
 ''')
     dotnet = args.sdk.resolve() / "dotnet"
-    steps = run_offline_build(dotnet, project, cache_root=root, publish_to=root / "fixture-publish",
-                              logs=(args.evidence / "0.log", args.evidence / "1.log"))
-    outcomes = [{"command": step.command, "exitCode": step.exit_code, "seconds": step.seconds} for step in steps]
-    success = steps[-1].exit_code == 0
+    result = run_offline_build(dotnet, project, cache_root=root, publish_to=root / "fixture-publish",
+                               logs=(args.evidence / "0.log", args.evidence / "1.log"),
+                               exact_package_folder=True)
+    outcomes = [{"command": step.command, "exitCode": step.exit_code, "seconds": step.seconds}
+                for step in result.commands]
+    success = result.failed_stage is None
     if success:
         for path in (root / "fixture-publish").rglob("*"):
             if not path.is_file():
@@ -74,12 +76,7 @@ def main():
                 raise ValueError("fixture output would replace candidate bytes")
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, destination)
-        try:
-            verify_offline_restore(root / "source/obj/project.assets.json", root / "nuget", exact_package_folder=True)
-        except ValueError:
-            success = False
-        else:
-            success = all((root / "code" / name).read_bytes() == data for name, data in closure.items())
+        success = all((root / "code" / name).read_bytes() == data for name, data in closure.items())
     receipt = {"schema": 1, "kind": "extracted-worker-anchor-preparation", "passed": success,
                "preparedRoot": str(root), "sdk": str(args.sdk.resolve()), "commands": outcomes,
                "emptyPackageCache": not any((root / "nuget").iterdir()),
@@ -88,6 +85,8 @@ def main():
                "workerClosure": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(closure.items())},
                "runtimePayload": {str(path.relative_to(root / "code")): digest(path)
                                   for path in sorted((root / "code").rglob("*")) if path.is_file()}}
+    if result.verification_failure is not None:
+        receipt["verificationFailure"] = result.verification_failure
     (args.evidence / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps({"passed": success, "preparedRoot": str(root), "workerFiles": len(closure)}))
     return 0 if success else 1

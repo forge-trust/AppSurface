@@ -38,8 +38,10 @@ public sealed class RealmBaselineVerifierTests
         }
     }
 
-    [Fact]
-    public async Task RealmBaselineAcceptsVerifiedUserAndRedirectedAuthorizationChallenge()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("application")]
+    public async Task RealmBaselineAcceptsVerifiedUserAndRedirectedAuthorizationChallenge(string? expectedTheme)
     {
         var directory = TestPathUtils.PathUnder(System.IO.Path.GetTempPath(), "issue888-baseline-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -51,13 +53,40 @@ public sealed class RealmBaselineVerifierTests
 
             await RealmBaselineVerifier.CheckOnceAsync(
                 client,
-                BaselineDesired(directory),
+                BaselineDesired(directory) with { LoginThemeName = expectedTheme },
                 File.ReadAllText,
                 CancellationToken.None);
 
             Assert.Equal(2, handler.Requests.Count);
             Assert.Contains(handler.Requests, request => request.PathAndQuery.StartsWith(
                 "/realms/sample/protocol/openid-connect/auth?", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("other-theme", "local-user", "expected login theme")]
+    [InlineData("application", "missing-user", "does not contain seeded user 'missing-user'")]
+    public async Task RealmBaselineRejectsMismatchedThemeOrSeededUser(string expectedTheme, string expectedUser, string diagnostic)
+    {
+        var directory = TestPathUtils.PathUnder(System.IO.Path.GetTempPath(), "issue888-baseline-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(TestPathUtils.PathUnder(directory, "sample-realm.json"), BaselineImport("true"));
+            var handler = BaselineRedirectHandler();
+            using var client = new HttpClient(handler);
+            var desired = BaselineDesired(directory) with { LoginThemeName = expectedTheme, SeededUserNames = [expectedUser] };
+
+            var error = await Assert.ThrowsAsync<RealmBaselineException>(() => RealmBaselineVerifier.CheckOnceAsync(
+                client, desired, File.ReadAllText, CancellationToken.None));
+
+            Assert.Equal("ASKEYC005", error.Code);
+            Assert.Contains(diagnostic, error.SafeMessage, StringComparison.Ordinal);
+            Assert.Single(handler.Requests);
         }
         finally
         {
@@ -119,7 +148,7 @@ public sealed class RealmBaselineVerifierTests
         "web-app",
         "sample",
         ["http://localhost:5055/callback"],
-        ["http://localhost:5055/signed-out"],
+        ["http://localhost:5055/signed-out", "http://localhost:5055/alternate-signed-out"],
         ["local-user"],
         realmImportDirectory,
         LoginThemeName: null);
@@ -130,11 +159,12 @@ public sealed class RealmBaselineVerifierTests
         return $$"""
             {
               "realm": "sample",
+              "loginTheme": "application",
               "clients": [
                 {
                   "clientId": "web-app",
                   "redirectUris": ["http://localhost:5055/callback"],
-                  "attributes": { "post.logout.redirect.uris": "http://localhost:5055/signed-out" }
+                  "attributes": { "post.logout.redirect.uris": "http://localhost:5055/signed-out ## http://localhost:5055/alternate-signed-out" }
                 }
               ],
               "users": [

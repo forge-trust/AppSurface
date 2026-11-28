@@ -861,10 +861,12 @@ public sealed class RealmReconciliationTests
         Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post && request.PathAndQuery == "/admin/realms/sample/identity-provider/instances");
     }
 
-    [Fact]
-    public async Task ExistingRealmDriftIsUpdatedAndReadBackBeforeClientReconciliation()
+    [Theory]
+    [InlineData("branded")]
+    [InlineData(null)]
+    public async Task ExistingRealmDriftIsUpdatedAndReadBackBeforeClientReconciliation(string? loginTheme)
     {
-        const string loginTheme = "branded";
+        const string existingTheme = "previous";
         var realmUpdated = false;
         var handler = new ScriptedHandler((request, _) =>
         {
@@ -872,17 +874,22 @@ public sealed class RealmReconciliationTests
             if (path == "/realms/master/protocol/openid-connect/token") return Json(HttpStatusCode.OK, "{\"access_token\":\"test-token\"}");
             if (path == "/admin/realms/sample" && request.Method == HttpMethod.Put)
             {
-                var patch = JsonNode.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
-                Assert.Equal(loginTheme, patch?["loginTheme"]?.GetValue<string>());
+                var patch = Assert.IsType<JsonObject>(JsonNode.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()));
+                if (loginTheme is null)
+                    Assert.False(patch.ContainsKey("loginTheme"));
+                else
+                    Assert.Equal(loginTheme, patch["loginTheme"]?.GetValue<string>());
                 realmUpdated = true;
                 return Json(HttpStatusCode.NoContent, "{}");
             }
             if (path == "/admin/realms/sample")
             {
                 if (!realmUpdated)
-                    return Json(HttpStatusCode.OK, "{\"id\":\"realm-internal\",\"realm\":\"sample\",\"enabled\":false,\"registrationAllowed\":true,\"sslRequired\":\"none\"}");
+                    return Json(HttpStatusCode.OK, $$"""
+                        {"id":"realm-internal","realm":"sample","enabled":false,"registrationAllowed":true,"sslRequired":"none","loginTheme":"{{existingTheme}}"}
+                        """);
                 var observedRealm = JsonNode.Parse(RealmJson())!;
-                observedRealm["loginTheme"] = loginTheme;
+                observedRealm["loginTheme"] = loginTheme ?? existingTheme;
                 return Json(HttpStatusCode.OK, observedRealm.ToJsonString());
             }
             if (path == "/admin/realms/sample/clients?clientId=web-app") return Json(HttpStatusCode.OK, "[" + ReconcileClientJson() + "]");
@@ -955,20 +962,41 @@ public sealed class RealmReconciliationTests
             || request.Method == HttpMethod.Post && request.PathAndQuery != "/realms/master/protocol/openid-connect/token");
     }
 
-    [Fact]
-    public async Task MissingClientAttributesAreRebuiltAndVerified()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ClientPatchMergesAttributesAndVerifiesEffectiveFields(bool hasUnmanagedAttribute)
     {
         const string clientPath = "/admin/realms/sample/clients/client-internal";
-        var clientWithoutAttributes = JsonNode.Parse(ReconcileClientJson())!.AsObject();
-        clientWithoutAttributes.Remove("attributes");
+        const string postLogoutAttribute = "https://localhost:8443/signed-out##https://localhost:9443/signed-out";
+        var desired = Desired() with
+        {
+            RedirectUris = ["https://localhost:8443/callback", "https://localhost:9443/callback"],
+            PostLogoutRedirectUris = ["https://localhost:8443/signed-out", "https://localhost:9443/signed-out"],
+            WebOrigins = ["https://localhost:8443", "https://localhost:9443"]
+        };
+        var effectiveClient = JsonNode.Parse(ReconcileClientJson())!.AsObject();
+        effectiveClient["redirectUris"] = new JsonArray(desired.RedirectUris[1], desired.RedirectUris[0]);
+        effectiveClient["webOrigins"] = new JsonArray(desired.WebOrigins[1], desired.WebOrigins[0]);
+        effectiveClient["attributes"]!["post.logout.redirect.uris"] = postLogoutAttribute;
+        effectiveClient.Remove("clientAuthenticatorType");
+        if (hasUnmanagedAttribute)
+            effectiveClient["attributes"]!["unmanaged"] = "preserved";
+
+        var existingClient = (JsonObject)effectiveClient.DeepClone();
+        if (hasUnmanagedAttribute)
+            existingClient["attributes"]!["post.logout.redirect.uris"] = "https://localhost:8443/old";
+        else
+            existingClient.Remove("attributes");
+
         var updated = false;
         JsonObject? clientPatch = null;
-        var handler = SuccessfulHandler(CommonSuccessRoutes.AdministratorToken | CommonSuccessRoutes.Realm | CommonSuccessRoutes.Client,
+        var handler = SuccessfulHandler(CommonSuccessRoutes.AdministratorToken | CommonSuccessRoutes.Realm,
             (request, _) =>
         {
             var path = request.RequestUri!.PathAndQuery;
             if (path == "/admin/realms/sample/clients?clientId=web-app")
-                return Json(HttpStatusCode.OK, "[" + (updated ? ReconcileClientJson() : clientWithoutAttributes.ToJsonString()) + "]");
+                return Json(HttpStatusCode.OK, "[" + (updated ? effectiveClient : existingClient).ToJsonString() + "]");
             if (path == clientPath && request.Method == HttpMethod.Put)
             {
                 clientPatch = JsonNode.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult())!.AsObject();
@@ -989,12 +1017,14 @@ public sealed class RealmReconciliationTests
         });
         using var client = Client(handler);
 
-        var result = await RealmReconciler.ReconcileAsync(client, Desired(), Credentials(), CancellationToken.None);
+        var result = await RealmReconciler.ReconcileAsync(client, desired, Credentials(), CancellationToken.None);
 
         Assert.True(result.Ready, $"Expected ready reconciliation, got {result.Code} at {result.Stage}.");
         Assert.Equal(1, result.Writes);
-        Assert.Equal("https://localhost:8443/signed-out", clientPatch?["attributes"]?["post.logout.redirect.uris"]?.GetValue<string>());
-        Assert.Equal(1, handler.Requests.Count(request => request.Method == HttpMethod.Put && request.PathAndQuery == clientPath));
+        Assert.Equal("client-secret", clientPatch?["clientAuthenticatorType"]?.GetValue<string>());
+        Assert.Equal(postLogoutAttribute, clientPatch?["attributes"]?["post.logout.redirect.uris"]?.GetValue<string>());
+        Assert.Equal(hasUnmanagedAttribute ? "preserved" : null, clientPatch?["attributes"]?["unmanaged"]?.GetValue<string>());
+        Assert.Single(handler.Requests, request => request.Method == HttpMethod.Put && request.PathAndQuery == clientPath);
     }
 
     [Theory]

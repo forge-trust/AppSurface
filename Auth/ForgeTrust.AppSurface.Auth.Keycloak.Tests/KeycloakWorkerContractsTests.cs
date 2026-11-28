@@ -7,6 +7,22 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 public sealed class KeycloakWorkerContractsTests
 {
     [Fact]
+    public void MemoryAnchorInputPreservesTheLiteralJsonContractAndRedactsItsStringRepresentation()
+    {
+        const string json = """
+            {"RunId":"0123456789abcdef0123456789abcdef","Authority":"https://localhost:8443/realms/demo","ClientId":"fixture-client","ClientSecret":"fixture-anchor-secret"}
+            """;
+        var declaration = new KeycloakMemoryAnchorInput(
+            "0123456789abcdef0123456789abcdef", "https://localhost:8443/realms/demo", "fixture-client", "fixture-anchor-secret");
+
+        Assert.Equal(declaration, JsonSerializer.Deserialize<KeycloakMemoryAnchorInput>(json));
+        using var expected = JsonDocument.Parse(json);
+        using var written = JsonDocument.Parse(JsonSerializer.Serialize(declaration));
+        Assert.True(JsonElement.DeepEquals(expected.RootElement, written.RootElement));
+        Assert.Equal(nameof(KeycloakMemoryAnchorInput), declaration.ToString());
+    }
+
+    [Fact]
     public void BindingsPreserveWorkerJsonMembersAndNullableFields()
     {
         var bindings = new KeycloakWorkerBindings(

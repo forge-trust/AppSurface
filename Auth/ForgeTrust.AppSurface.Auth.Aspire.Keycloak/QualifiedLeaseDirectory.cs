@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using ForgeTrust.AppSurface.Auth.Keycloak;
 using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
@@ -32,6 +33,8 @@ internal static class QualifiedProcessIdentity
 /// <remarks>Root ancestors are trusted; extended ACL validation remains a separate gate.</remarks>
 internal sealed class QualifiedLeaseDirectory : IDisposable
 {
+    private const int MaximumMarkerLength = 65_536;
+
     // Darwin fcntl.h, errno.h, stat.h, and stdio.h values for this ARM64 lease boundary.
     private const int OpenReadOnly = 0x0000;
     private const int OpenReadWrite = 0x0002;
@@ -146,10 +149,17 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
     internal byte[] Read(string name)
     {
         using var handle = OpenAt(_directory, name, OpenReadOnly); ValidateFile(handle);
-        var stat = Inspect(handle); if (stat.Size < 2 || stat.Size > 65536) throw new QualifiedOwnershipFailure("InvalidMarker");
+        var stat = Inspect(handle);
+        ValidateMarkerLength(stat.Size);
         using var file = new FileStream(handle, FileAccess.Read); var bytes = new byte[(int)stat.Size]; file.ReadExactly(bytes);
         if (file.ReadByte() != -1 || Id(handle) != ToId(stat)) throw new QualifiedOwnershipFailure("MarkerChanged");
         return bytes;
+    }
+
+    /// <summary>Rejects marker lengths outside the supported range before write or read allocation.</summary>
+    internal static void ValidateMarkerLength(long length)
+    {
+        if (length is < 2 or > MaximumMarkerLength) throw new QualifiedOwnershipFailure("InvalidMarker");
     }
     internal FileId Identity(string name) { using var handle = OpenAt(_directory, name, OpenReadOnly); ValidateFile(handle); return Id(handle); }
     internal void WriteNew(string name, byte[] bytes) => Write(name, bytes, false);
@@ -209,9 +219,14 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
         var fd = openat(parent, name, flags | OpenAtFlags);
         if (fd < 0) throw new QualifiedOwnershipFailure("UnsafeRecord"); return new((IntPtr)fd, true);
     }
-    private static Stat Inspect(SafeFileHandle fd)
-    { if (fstat(fd, out var s) != 0) throw new QualifiedOwnershipFailure("InventoryUnavailable"); return s; }
-    private static FileId ToId(Stat s) => new(s.Device, s.Inode, s.BirthSeconds, s.BirthNanoseconds);
+    private static DarwinArm64FileMetadata Inspect(SafeFileHandle fd)
+    {
+        if (DarwinArm64FileMetadata.ReadNative(fd, out var metadata) != 0)
+            throw new QualifiedOwnershipFailure("InventoryUnavailable");
+        return metadata;
+    }
+    private static FileId ToId(DarwinArm64FileMetadata metadata) =>
+        new(metadata.Device, metadata.Inode, metadata.BirthSeconds, metadata.BirthNanoseconds);
     private static FileId Id(SafeFileHandle fd) => ToId(Inspect(fd));
     private static FileId ValidateDirectory(SafeFileHandle fd)
     {
@@ -228,18 +243,10 @@ internal sealed class QualifiedLeaseDirectory : IDisposable
             || (status.Mode & PermissionModeMask) != PrivateFileMode || status.Owner != getuid() || status.Links != 1)
             throw new QualifiedOwnershipFailure("UnsafeRecord");
     }
-    [StructLayout(LayoutKind.Explicit, Size = 144)]
-    private struct Stat
-    {
-        [FieldOffset(0)] internal int Device; [FieldOffset(4)] internal ushort Mode; [FieldOffset(6)] internal ushort Links;
-        [FieldOffset(8)] internal ulong Inode; [FieldOffset(16)] internal uint Owner;
-        [FieldOffset(80)] internal long BirthSeconds; [FieldOffset(88)] internal long BirthNanoseconds; [FieldOffset(96)] internal long Size;
-    }
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int open(string path, int flags);
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int openat(SafeFileHandle fd, string path, int flags);
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int mkdirat(SafeFileHandle fd, string path, int mode);
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int flock(SafeFileHandle fd, int operation);
-    [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int fstat(SafeFileHandle fd, out Stat stat);
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int renameat(SafeFileHandle source, string name, SafeFileHandle target, string targetName);
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int renameatx_np(SafeFileHandle source, string name, SafeFileHandle target, string targetName, uint flags);
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int unlinkat(SafeFileHandle fd, string path, int flags);

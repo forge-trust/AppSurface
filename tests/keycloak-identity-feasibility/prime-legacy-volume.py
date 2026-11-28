@@ -8,9 +8,10 @@ import re
 import subprocess
 import time
 
+from replay_environment import keycloak_fixture_image
 
 RUNTIME_IMAGE = 'mcr.microsoft.com/dotnet/sdk@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b'
-KEYCLOAK_IMAGE = 'quay.io/keycloak/keycloak@sha256:831330513f55695572286e521f94fcd3c7e285250ed5b848090265a33192f669'
+KEYCLOAK_IMAGE = keycloak_fixture_image(tagged=False)
 WORKER = 'ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker.dll'
 
 

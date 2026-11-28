@@ -81,6 +81,50 @@ public sealed class AppSurfaceKeycloakSupervisedLeaseTests
     }
 
     [Fact]
+    public async Task RetentionReportsPresentAndUnverifiableMarkersWhileTheLeaseIsHeld()
+    {
+        if (!Supported()) return;
+        using var folder = new PrivateFolder();
+        using var lease = await SupervisedVolumeLease.Acquire(folder.Path, "daemon", "volume");
+        Assert.False(lease.HasRetainedActiveMarker());
+
+        lease.WriteNewActive("{}"u8.ToArray());
+        Assert.True(lease.HasRetainedActiveMarker());
+        lease.ClearActive();
+        Assert.False(lease.HasRetainedActiveMarker());
+
+        var markerPath = TestPathUtils.PathUnder(lease.Path, "active.json");
+        File.CreateSymbolicLink(markerPath, TestPathUtils.PathUnder(lease.Path, "missing.json"));
+        Assert.Throws<QualifiedOwnershipFailure>(() => lease.ReadActive());
+        Assert.True(lease.HasRetainedActiveMarker());
+    }
+
+    [Fact]
+    public async Task MaximumMarkerRoundTripsAcrossLeasesAndAnOversizedReplacementPreservesIt()
+    {
+        if (!Supported()) return;
+        using var folder = new PrivateFolder();
+        var marker = new byte[65_536];
+        Array.Fill(marker, (byte)' ');
+        marker[0] = (byte)'{';
+        marker[^1] = (byte)'}';
+
+        using (var original = await SupervisedVolumeLease.Acquire(folder.Path, "daemon", "volume"))
+        {
+            original.WriteNewActive(marker);
+        }
+
+        using var recovery = await SupervisedVolumeLease.Acquire(folder.Path, "daemon", "volume");
+        Assert.Equal(marker, recovery.ReadActive());
+
+        var error = Assert.Throws<QualifiedOwnershipFailure>(() => recovery.ReplaceActive(new byte[65_537]));
+
+        Assert.Equal("InvalidMarker", error.Kind);
+        Assert.Equal(marker, File.ReadAllBytes(TestPathUtils.PathUnder(recovery.Path, "active.json")));
+        Assert.Equal(marker, recovery.ReadActive());
+    }
+
+    [Fact]
     public async Task NativeLeaseSerializesSameDaemonVolumeAndExposesExistingMarkerForRecovery()
     {
         if (!Supported()) return;

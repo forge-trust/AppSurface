@@ -10,10 +10,10 @@ using Microsoft.Extensions.Hosting;
 if(args is not [var root,var scenario])return 64;
 var input=JsonSerializer.Deserialize<Input>(File.ReadAllBytes(Path.Join(root,"input.json")))!;
 var projectDirectory = input.ProjectDirectory is null ? root : Path.GetFullPath(input.ProjectDirectory);
-const string executionKeycloakImage = "quay.io/keycloak/keycloak:26.7.2@sha256:831330513f55695572286e521f94fcd3c7e285250ed5b848090265a33192f669";
 AppSurfaceKeycloakThemeOptions? AcceptanceTheme() => input.ThemeDirectory is null ? null :
     new AppSurfaceKeycloakThemeOptions("acceptance", input.ThemeDirectory,
-        AppSurfaceKeycloakImageReference.Parse(executionKeycloakImage)) { Platform = "linux/arm64" };
+        AppSurfaceKeycloakImageReference.Parse(input.ThemeImageReference
+            ?? throw new InvalidDataException("A pinned theme image reference is required."))) { Platform = "linux/arm64" };
 var execution=new AppSurfaceKeycloakSupervisedOptions{LeaseRoot=input.LeaseRoot,RunRoot=Path.Join(Directory.GetParent(root)!.FullName,"runs")};
 if (Environment.GetEnvironmentVariable("DOCKER_HOST") is { } dockerEndpoint)
     execution.DockerEndpoint = dockerEndpoint;
@@ -191,7 +191,7 @@ File.WriteAllText(Path.Join(root,"host-result.json"),JsonSerializer.Serialize(re
 return result.ExitCode;
 
 sealed record Input(string LeaseRoot,string VolumeName,int KeycloakPort,int WebPort,string Payload,string? ExpectedOwner,
-    string? ProjectDirectory = null,string? ThemeDirectory = null);
+    string? ProjectDirectory = null,string? ThemeDirectory = null,string? ThemeImageReference = null);
 sealed class ControlledLifetime:IHostLifetime
 {
     public Task WaitForStartAsync(CancellationToken cancellationToken)=>Task.CompletedTask;

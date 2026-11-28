@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
@@ -35,27 +34,13 @@ internal sealed record KeycloakVolumeIncarnation(
     private const int AtFdcwd = -100;
     private const int AtSymlinkNoFollow = 0x100;
     private const int OpenDirectoryNoFollowCloseOnExec = 0x00004000 | 0x00008000 | 0x00080000;
-    private const uint StatxType = 0x001;
-    private const uint StatxUid = 0x008;
-    private const uint StatxGid = 0x010;
-    private const uint StatxNlink = 0x004;
-    private const uint StatxInode = 0x100;
-    private const uint StatxBirthTime = 0x800;
-    private const uint DatabaseOwnershipStatxMask = StatxType | StatxNlink | StatxUid | StatxGid | StatxInode;
-    private const uint RequestedStatxMask = StatxType | StatxInode | StatxBirthTime;
-    private const int StatxBufferSize = 256;
+    private const uint OwnerFields = LinuxArm64Statx.UserIdField | LinuxArm64Statx.GroupIdField;
+    private const uint DatabaseOwnershipStatxMask =
+        LinuxArm64Statx.TypeField | LinuxArm64Statx.LinkCountField | LinuxArm64Statx.InodeField | OwnerFields;
+    private const uint RequestedStatxMask = LinuxArm64Statx.TypeField | LinuxArm64Statx.InodeField | LinuxArm64Statx.BirthTimeField;
     private const ushort FileTypeMask = 0xF000;
     private const ushort DirectoryType = 0x4000;
     private const ushort RegularFileType = 0x8000;
-    private const int ModeOffset = 28;
-    private const int LinkCountOffset = 16;
-    private const int UserIdOffset = 20;
-    private const int GroupIdOffset = 24;
-    private const int InodeOffset = 32;
-    private const int BirthSecondsOffset = 80;
-    private const int BirthNanosecondsOffset = 88;
-    private const int DeviceMajorOffset = 136;
-    private const int DeviceMinorOffset = 140;
 
     /// <summary>Reads only the mount root's filesystem identity metadata.</summary>
     /// <param name="volumeRoot">The fixed worker mount or an isolated native test directory.</param>
@@ -107,7 +92,7 @@ internal sealed record KeycloakVolumeIncarnation(
         IKeycloakVolumeIncarnationNativeOperations nativeOperations)
     {
         ArgumentNullException.ThrowIfNull(nativeOperations);
-        return ParseOwnership(ReadStatCore(volumeRoot, RequestedStatxMask | StatxUid | StatxGid, nativeOperations));
+        return ParseOwnership(ReadStatCore(volumeRoot, RequestedStatxMask | OwnerFields, nativeOperations));
     }
 
     /// <summary>Reads only the owner of the existing H2 database file using no-follow directory-relative metadata calls.</summary>
@@ -163,7 +148,7 @@ internal sealed record KeycloakVolumeIncarnation(
             if (h2Descriptor is null) return null;
             directories.Add(h2Descriptor);
 
-            var stat = new byte[StatxBufferSize];
+            var stat = new byte[LinuxArm64Statx.BufferSize];
             if (nativeOperations.Statx(
                     h2Descriptor.DangerousGetHandle().ToInt32(), "keycloakdb.mv.db",
                     AtSymlinkNoFollow, DatabaseOwnershipStatxMask, stat, out var error) != 0)
@@ -172,16 +157,12 @@ internal sealed record KeycloakVolumeIncarnation(
                 throw new IOException("The pinned H2 database metadata could not be read.");
             }
 
-            var mask = BinaryPrimitives.ReadUInt32LittleEndian(stat);
-            var mode = BinaryPrimitives.ReadUInt16LittleEndian(stat.AsSpan(ModeOffset));
-            var links = BinaryPrimitives.ReadUInt32LittleEndian(stat.AsSpan(LinkCountOffset));
-            var inode = BinaryPrimitives.ReadUInt64LittleEndian(stat.AsSpan(InodeOffset));
-            if ((mask & DatabaseOwnershipStatxMask) != DatabaseOwnershipStatxMask
-                || (mode & FileTypeMask) != RegularFileType || links == 0 || inode == 0)
+            var status = new LinuxArm64Statx(stat);
+            if (!status.HasFields(DatabaseOwnershipStatxMask)
+                || (status.Mode & FileTypeMask) != RegularFileType || status.LinkCount == 0 || status.Inode == 0)
                 throw new InvalidDataException("The pinned H2 database metadata was incomplete or unsafe.");
 
-            return (BinaryPrimitives.ReadUInt32LittleEndian(stat.AsSpan(UserIdOffset)),
-                BinaryPrimitives.ReadUInt32LittleEndian(stat.AsSpan(GroupIdOffset)));
+            return (status.UserId, status.GroupId);
         }
         finally
         {
@@ -193,10 +174,10 @@ internal sealed record KeycloakVolumeIncarnation(
     internal static (KeycloakVolumeIncarnation Incarnation, uint Uid, uint Gid) ParseOwnership(ReadOnlySpan<byte> stat)
     {
         var incarnation = Parse(stat);
-        if ((BinaryPrimitives.ReadUInt32LittleEndian(stat) & (StatxUid | StatxGid)) != (StatxUid | StatxGid))
+        var status = new LinuxArm64Statx(stat);
+        if (!status.HasFields(OwnerFields))
             throw InvalidMetadata();
-        return (incarnation, BinaryPrimitives.ReadUInt32LittleEndian(stat[20..]),
-            BinaryPrimitives.ReadUInt32LittleEndian(stat[24..]));
+        return (incarnation, status.UserId, status.GroupId);
     }
 
     private static byte[] ReadStatCore(
@@ -204,7 +185,7 @@ internal sealed record KeycloakVolumeIncarnation(
         uint mask,
         IKeycloakVolumeIncarnationNativeOperations nativeOperations)
     {
-        var stat = new byte[StatxBufferSize];
+        var stat = new byte[LinuxArm64Statx.BufferSize];
         if (nativeOperations.Statx(AtFdcwd, volumeRoot, AtSymlinkNoFollow, mask, stat, out _) != 0)
             throw new IOException("Keycloak volume root metadata could not be read.");
         return stat;
@@ -215,29 +196,23 @@ internal sealed record KeycloakVolumeIncarnation(
     /// <exception cref="InvalidDataException">The result has the wrong size or lacks a supported directory identity.</exception>
     internal static KeycloakVolumeIncarnation Parse(ReadOnlySpan<byte> stat)
     {
-        if (stat.Length != StatxBufferSize)
+        if (stat.Length != LinuxArm64Statx.BufferSize)
             throw InvalidMetadata();
 
-        var mask = BinaryPrimitives.ReadUInt32LittleEndian(stat);
-        if ((mask & RequestedStatxMask) != RequestedStatxMask)
+        var status = new LinuxArm64Statx(stat);
+        if (!status.HasFields(RequestedStatxMask))
             throw InvalidMetadata();
 
-        var mode = BinaryPrimitives.ReadUInt16LittleEndian(stat[ModeOffset..]);
-        if ((mode & FileTypeMask) != DirectoryType)
+        if ((status.Mode & FileTypeMask) != DirectoryType)
             throw InvalidMetadata();
 
-        var inode = BinaryPrimitives.ReadUInt64LittleEndian(stat[InodeOffset..]);
-        var birthSeconds = BinaryPrimitives.ReadInt64LittleEndian(stat[BirthSecondsOffset..]);
-        var birthNanoseconds = BinaryPrimitives.ReadUInt32LittleEndian(stat[BirthNanosecondsOffset..]);
+        var inode = status.Inode;
+        var birthSeconds = status.BirthSeconds;
+        var birthNanoseconds = status.BirthNanoseconds;
         if (inode == 0 || birthSeconds <= 0 || birthNanoseconds >= 1_000_000_000)
             throw InvalidMetadata();
 
-        return new KeycloakVolumeIncarnation(
-            BinaryPrimitives.ReadUInt32LittleEndian(stat[DeviceMajorOffset..]),
-            BinaryPrimitives.ReadUInt32LittleEndian(stat[DeviceMinorOffset..]),
-            inode,
-            birthSeconds,
-            birthNanoseconds);
+        return new KeycloakVolumeIncarnation(status.DeviceMajor, status.DeviceMinor, inode, birthSeconds, birthNanoseconds);
     }
 
     private static void EnsureSupportedPlatform()
@@ -278,7 +253,7 @@ internal sealed record KeycloakVolumeIncarnation(
 
         public int Statx(int directoryDescriptor, string path, int flags, uint mask, byte[] buffer, out int error)
         {
-            var result = Native.statx(directoryDescriptor, path, flags, mask, buffer);
+            var result = LinuxArm64Statx.ReadNative(directoryDescriptor, path, flags, mask, buffer);
             error = result != 0 ? Marshal.GetLastPInvokeError() : 0;
             return result;
         }
@@ -291,13 +266,5 @@ internal sealed record KeycloakVolumeIncarnation(
             int directoryDescriptor,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
             int flags);
-
-        [DllImport("libc", SetLastError = true, EntryPoint = "statx")]
-        internal static extern int statx(
-            int directoryDescriptor,
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
-            int flags,
-            uint mask,
-            [Out] byte[] buffer);
     }
 }

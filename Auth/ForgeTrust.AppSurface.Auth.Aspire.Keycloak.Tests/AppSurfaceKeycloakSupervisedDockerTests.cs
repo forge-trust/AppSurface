@@ -38,6 +38,17 @@ public sealed class AppSurfaceKeycloakSupervisedDockerTests
     }
 
     [Fact]
+    public async Task RunAcceptsTheSupervisedDefaultAndSystemDockerEndpoints()
+    {
+        var endpoints = new[] { new AppSurfaceKeycloakSupervisedOptions().DockerEndpoint, "unix:///var/run/docker.sock" };
+        foreach (var endpoint in endpoints)
+        {
+            var docker = new SupervisedDocker(endpoint, (_, _) => Task.FromResult("accepted"));
+            Assert.Equal("accepted", await docker.RunAsync(default, "info"));
+        }
+    }
+
+    [Fact]
     public async Task RunHidesRunnerErrorsAndHonorsCancellation()
     {
         var docker = Docker((_, _) => throw new InvalidOperationException("sensitive daemon output"));
@@ -240,6 +251,33 @@ public sealed class AppSurfaceKeycloakSupervisedDockerTests
         foreach (var output in new[] { "short", Id + "\n" + Id })
             await Assert.ThrowsAsync<IOException>(() => Docker((_, _) => Task.FromResult(output)).AttachmentsAsync("volume", default));
         await Assert.ThrowsAsync<IOException>(() => Docker((_, _) => Task.FromResult("")).AttachmentsAsync("bad name", default));
+    }
+
+    [Theory]
+    [InlineData(128, true)]
+    [InlineData(129, false)]
+    public async Task VolumeInventoryUsesTheLeaseNameLengthLimit(int length, bool accepted)
+    {
+        var name = new string('v', length);
+        var calls = 0;
+        var docker = Docker((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(string.Empty);
+        });
+
+        if (accepted)
+        {
+            Assert.Null(await docker.VolumeAsync(name, default));
+            Assert.Empty(await docker.AttachmentsAsync(name, default));
+            Assert.Equal(2, calls);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<IOException>(() => docker.VolumeAsync(name, default));
+            await Assert.ThrowsAsync<IOException>(() => docker.AttachmentsAsync(name, default));
+            Assert.Equal(0, calls);
+        }
     }
 
     [Fact]

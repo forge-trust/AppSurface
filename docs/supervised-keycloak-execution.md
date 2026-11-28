@@ -29,6 +29,8 @@ AddAppSurfaceKeycloak(
 
 It returns the ordinary [`AppSurfaceKeycloakResource`](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/AppSurfaceKeycloakResource.cs). Its `SupervisedRun` property exposes the `AppSurfaceKeycloakSupervisedRun` helper for this candidate. Registration snapshots declarations and typed parameter identities; it does not resolve credential values or create run directories, imports, containers, or volumes. Credential values are resolved only after the run has acquired its owner lease.
 
+Use `RealmReady()` for the supervised reconciliation completion gate. The legacy `Readiness` and `RealmImportFile` properties throw `InvalidOperationException` on a supervised resource because that mode manages the realm through reconciliation.
+
 This example assumes `builder`, `payloadDirectory`, and `volumeName` are supplied by the local AppHost. The payload directory must contain the complete portable publish closure for both assemblies. The seed and web arguments shown are nonsecret paths understood by those consumer programs.
 
 ```csharp
@@ -88,7 +90,7 @@ return result.ExitCode;
 
 `WithPublicInputs`, `WithSeed`, and `WithWeb` return the supervised helper or an Aspire executable resource handle. Register all inputs and workloads before the AppHost starts. `WithSeed` adds a required finite workload to the completion chain; each seed must exit successfully before the next starts. `WithWeb` adds the single web workload after the last seed. The web receives public configuration and the public certificate/reference files, but it cannot receive `PrivateInputs`. Seed credentials belong in same-AppHost typed parameter bindings, never in public inputs, command arguments, or ordinary environment settings. Keep `Environment` values nonsecret as well.
 
-Call `RunAsync` with the `DistributedApplication` built from the same builder and return its `ExitCode` from the AppHost entry point. It starts the app and remains active until cancellation, host shutdown, or a required failure. It then owns teardown and returns a process-level result. Do not replace this call with `app.RunAsync()` when the caller needs the supervised teardown result. `ActiveRetained` reports whether the active owner marker remains; `OwnerId` identifies the run but does not by itself authorize recovery.
+Call `RunAsync` with the `DistributedApplication` built from the same builder and return its `ExitCode` from the AppHost entry point. It starts the app and remains active until cancellation, host shutdown, or a required failure. It then owns teardown and returns a process-level result. Do not replace this call with `app.RunAsync()` when the caller needs the supervised teardown result. `ActiveRetained` is true when this run's marker remains or its absence cannot be verified after a reservation attempt. `OwnerId` identifies the run. Guarded recovery also requires the matching owner marker and stopped-state proof.
 
 ## Defaults and constraints
 
@@ -105,6 +107,8 @@ Call `RunAsync` with the `DistributedApplication` built from the same builder an
 | `LocalSeedTimeout` | 120 seconds per seed | Must be greater than zero and at most 10 minutes. |
 
 Both paths must be fully qualified and cannot contain control characters or commas. Both image references must use a lowercase 64-character SHA-256 digest. The Docker endpoint, lease root, run root, image digests, and exact physical volume name are part of the owner/recovery context; keep them unchanged when recovering a retained owner.
+
+Reconciliation has a 120-second execution budget that also limits retry admission. The adapter allows five additional seconds for receipt publication and process exit. After the worker and each required seed, the adapter requires an exited container with zero PID and exit code zero before starting the next workload.
 
 Each [`AppSurfaceKeycloakSupervisedWorkload`](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/AppSurfaceKeycloakSupervisedOptions.cs) uses an absolute payload directory and a simple `.dll` assembly filename. Payload files are copied after ownership acquisition; symlinks/reparse points are rejected and the copy is bounded to 4,096 entries. Arguments are nonsecret, bounded to 32 entries, and each must be at most 4,096 characters. Nonsecret environment has bounded names and values. Workload names must be unique lowercase Docker-style names from 3 to 63 characters. `PrivateInputs` are typed parameters from the same AppHost; secret parameters must be secret, except the same registered admin username may be bound under `AdminUsername`.
 
@@ -132,6 +136,8 @@ that name. Check the old app's exact volume before moving the AppHost. If the ge
 startup fails with `ASKEYC028` before bootstrap or credential resolution. Set `PersistentVolumeName` to the existing
 name to keep it after a move. Set a new explicit name when you intend to create a volume. Both paths use the same
 daemon-and-volume lease. Keep persistent data and use [guarded recovery](#shutdown-and-guarded-recovery) for a retained owner.
+Explicit volume names must be 1–128 characters long and start with an ASCII letter or digit. The remaining characters may
+also include periods, underscores, and hyphens.
 
 For the pinned Keycloak 26.7.2 image, a read-only observer checks the volume root and the existing H2 data
 file under the volume lease. The adapter uses `1000:0` when the root and database have that owner, or when

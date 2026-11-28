@@ -268,7 +268,7 @@ internal static class RealmBaselineVerifier
             throw RealmEvidence($"realm import does not contain redirect URI '{missingRedirectUri}'.");
         }
 
-        var logoutUris = GetPostLogoutRedirectUris(client);
+        var logoutUris = KeycloakPostLogoutRedirectUris.Read(client);
         var missingLogoutUri = desired.PostLogoutRedirectUris
             .Where(logoutUri => !logoutUris.Contains(logoutUri))
             .FirstOrDefault();
@@ -276,29 +276,6 @@ internal static class RealmBaselineVerifier
         {
             throw RealmEvidence($"realm import does not contain post-logout redirect URI '{missingLogoutUri}'.");
         }
-    }
-
-    private static HashSet<string> GetPostLogoutRedirectUris(JsonElement client)
-    {
-        if (!client.TryGetProperty("attributes", out var attributes) || attributes.ValueKind != JsonValueKind.Object)
-        {
-            return [];
-        }
-
-        if (!attributes.TryGetProperty("post.logout.redirect.uris", out var postLogout) || postLogout.ValueKind != JsonValueKind.String)
-        {
-            return [];
-        }
-
-        var postLogoutValue = postLogout.GetString();
-        if (string.IsNullOrEmpty(postLogoutValue))
-        {
-            return [];
-        }
-
-        return postLogoutValue
-            .Split("##", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToHashSet(StringComparer.Ordinal);
     }
 
     private static async Task CheckAuthorizationChallengeAsync(

@@ -8,8 +8,6 @@
     <PackageTags>appsurface;dotnet;aspire;authentication;oidc;keycloak</PackageTags>
     <RealmReadyWorkerAssemblyName>ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker</RealmReadyWorkerAssemblyName>
     <RealmReadyWorkerProject>$(MSBuildProjectDirectory)/realm-ready/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker.csproj</RealmReadyWorkerProject>
-    <RealmReadyWorkerPackageClosureDirectory>$(MSBuildProjectDirectory)/obj/$(Configuration)/$(TargetFramework)/realm-ready-package/</RealmReadyWorkerPackageClosureDirectory>
-    <RealmReadyWorkerPublishDirectory>$(RealmReadyWorkerPackageClosureDirectory)publish/</RealmReadyWorkerPublishDirectory>
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddRealmReadyWorkerToPackage</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
@@ -29,6 +27,11 @@
   </ItemGroup>
 
   <Target Name="BuildRealmReadyWorker">
+    <PropertyGroup>
+      <RealmReadyWorkerPackageClosureDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'realm-ready-package'))</RealmReadyWorkerPackageClosureDirectory>
+      <RealmReadyWorkerPublishDirectory>$(RealmReadyWorkerPackageClosureDirectory)publish/</RealmReadyWorkerPublishDirectory>
+    </PropertyGroup>
+
     <RemoveDir Directories="$(RealmReadyWorkerPackageClosureDirectory)" />
     <MakeDir Directories="$(RealmReadyWorkerPublishDirectory)" />
     <MSBuild

@@ -26,7 +26,7 @@ internal sealed class AppSurfaceKeycloakOwnerConnection : IDisposable
     }
 
     /// <summary>Connects to an exact loopback publication and returns only after the anchor acknowledged its first frame.</summary>
-    /// <param name="port">The run's separately reserved loopback control port.</param>
+    /// <param name="port">The run's separately reserved loopback control port in the heartbeat protocol's supported range.</param>
     /// <param name="ownerId">Nonsecret GUID run identifier carried by every frame.</param>
     /// <param name="lost">Latches a safe host failure if the channel fails while the owner is running.</param>
     /// <param name="cancellationToken">Cancels connection setup and the entire subsequent heartbeat lifetime.</param>
@@ -38,11 +38,12 @@ internal sealed class AppSurfaceKeycloakOwnerConnection : IDisposable
         CancellationToken cancellationToken,
         Func<TcpClient, int, CancellationToken, ValueTask>? connect = null)
     {
-        if (port is < 1024 or > 65535 || !Guid.TryParseExact(ownerId, "N", out _)) throw new ArgumentException("Invalid owner connection.");
+        if (!KeycloakWorkerProtocol.IsOwnerHeartbeatPort(port) || !Guid.TryParseExact(ownerId, "N", out _))
+            throw new ArgumentException("Invalid owner connection.");
         connect ??= static (client, port, token) => client.ConnectAsync(IPAddress.Loopback, port, token);
         var frame = KeycloakWorkerProtocol.EncodeOwnerHeartbeatFrame(ownerId);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(8));
+        deadline.CancelAfter(KeycloakWorkerProtocol.OwnerHeartbeatOperationTimeout);
         while (true)
         {
             deadline.Token.ThrowIfCancellationRequested();
@@ -72,7 +73,7 @@ internal sealed class AppSurfaceKeycloakOwnerConnection : IDisposable
             {
                 await Task.Delay(TimeSpan.FromSeconds(1), _lifetime.Token);
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-                deadline.CancelAfter(TimeSpan.FromSeconds(8));
+                deadline.CancelAfter(KeycloakWorkerProtocol.OwnerHeartbeatOperationTimeout);
                 await RoundAsync(_client.GetStream(), _frame, deadline.Token);
             }
         }

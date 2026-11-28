@@ -17,6 +17,10 @@ internal readonly record struct SupervisedKeycloakContainerProfile(OwnedContaine
     private const string DroppedCapabilities = "ALL";
     private const string IsolatedNetwork = "none";
     private const string AnchorNetwork = "bridge";
+    // The schema-3 HistoricalServerUser flag binds this identity for launch and recovery.
+    private const uint HistoricalServerUid = 1000;
+    private const uint HistoricalServerGid = 0;
+    private static readonly string HistoricalServerUser = FormattableString.Invariant($"{HistoricalServerUid}:{HistoricalServerGid}");
     private static readonly string[] InitializationCapabilities = ["CHOWN", "FOWNER"];
 
     internal bool VolumeHelper => Container.Role is VolumeObservationRole or VolumeInitializationRole
@@ -25,8 +29,17 @@ internal readonly record struct SupervisedKeycloakContainerProfile(OwnedContaine
     internal bool ReadOnlyRoot => !Container.Server;
     internal int MemoryMiB => Container.Server ? 1024 : 512;
     internal string User => VolumeHelper ? "0:0"
-        : Container.HistoricalServerUser && Container.Server ? "1000:0"
+        : Container.HistoricalServerUser && Container.Server ? HistoricalServerUser
         : UserId() + ":" + (Container.Server ? "0" : getgid().ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>Checks whether the qualified image can use its historical user for the observed volume.</summary>
+    /// <remarks>The root must match. A present H2 database must also match, since the host user may have created it.</remarks>
+    internal static bool CanUseHistoricalServerUser(KeycloakWorkerVolumeOwnership? ownership) =>
+        ownership is
+        {
+            Uid: HistoricalServerUid, Gid: HistoricalServerGid,
+            Database: null or { Uid: HistoricalServerUid, Gid: HistoricalServerGid }
+        };
 
     /// <summary>Builds the create command for the already recorded intent.</summary>
     internal string[] CreateArguments(string ownerId, bool disposableData, IReadOnlyList<string> arguments,

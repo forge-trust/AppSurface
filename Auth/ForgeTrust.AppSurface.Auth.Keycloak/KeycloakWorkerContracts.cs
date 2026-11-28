@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak;
 
-/// <summary>Stable command and environment names shared by the Keycloak host and its package-owned worker.</summary>
+/// <summary>Stable command, environment, and timing contracts shared by the Keycloak host and its package-owned worker.</summary>
 /// <remarks>These values cross a process boundary and must remain compatible with existing callers.</remarks>
 internal static class KeycloakWorkerProtocol
 {
@@ -27,6 +27,12 @@ internal static class KeycloakWorkerProtocol
 
     /// <summary>Starts the realm-reconciliation worker mode.</summary>
     internal const string Reconcile = "--appsurface-keycloak-reconcile";
+
+    /// <summary>Execution budget for reconciliation and for admitting retries inside the reconciler.</summary>
+    internal static readonly TimeSpan ReconciliationTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>Additional time the host allows for the worker to publish its receipt and exit.</summary>
+    internal static readonly TimeSpan ReconciliationReceiptAllowance = TimeSpan.FromSeconds(5);
 
     /// <summary>Starts the fenced memory-anchor worker mode.</summary>
     internal const string FencedMemoryAnchor = "--appsurface-keycloak-fenced-memory-anchor";
@@ -55,8 +61,27 @@ internal static class KeycloakWorkerProtocol
     /// <summary>Single byte sent by the anchor after accepting an owner heartbeat.</summary>
     internal const byte OwnerHeartbeatAcknowledgement = (byte)'R';
 
+    /// <summary>Inclusive lower bound for ports used by either heartbeat endpoint.</summary>
+    internal const int MinimumOwnerHeartbeatPort = 1025;
+
+    /// <summary>Inclusive upper bound for ports used by either heartbeat endpoint.</summary>
+    internal const int MaximumOwnerHeartbeatPort = 65535;
+
+    /// <summary>Default time budget for each endpoint to complete a heartbeat protocol operation.</summary>
+    internal static readonly TimeSpan OwnerHeartbeatOperationTimeout = TimeSpan.FromSeconds(8);
+
+    /// <summary>Checks the port range shared by the heartbeat client and listener.</summary>
+    internal static bool IsOwnerHeartbeatPort(int port) => port is >= MinimumOwnerHeartbeatPort and <= MaximumOwnerHeartbeatPort;
+
     /// <summary>Encodes an already validated owner identifier verbatim with its ASCII newline terminator.</summary>
     internal static byte[] EncodeOwnerHeartbeatFrame(string ownerId) => Encoding.ASCII.GetBytes(ownerId + "\n");
+}
+
+/// <summary>Private JSON declaration shared by the host-side stager and the sealed-memory anchor.</summary>
+internal sealed record KeycloakMemoryAnchorInput(string RunId, string Authority, string ClientId, string ClientSecret)
+{
+    /// <summary>Returns the contract type name without printing the credential or run metadata.</summary>
+    public override string ToString() => nameof(KeycloakMemoryAnchorInput);
 }
 
 /// <summary>JSON bindings shared by the package-owned Keycloak worker and its host-side stager.</summary>

@@ -22,6 +22,9 @@ public sealed class AppSurfaceKeycloakOptionsTests
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
+    [InlineData(".volume")]
+    [InlineData("_volume")]
+    [InlineData("-volume")]
     [InlineData("skoolit/identity")]
     [InlineData("skoolit:identity")]
     [InlineData("skoolit identity")]
@@ -426,6 +429,19 @@ public sealed class AppSurfaceKeycloakOptionsTests
         Assert.Equal(["appsurface-admin", "appsurface-viewer"], subjects);
         Assert.DoesNotContain(AppSurfaceKeycloakDefaults.AdminPasswordParameterName, json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("clientSecret", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RealmGenerator_EmitsPostLogoutUrisInDeclarationOrder()
+    {
+        var options = new AppSurfaceKeycloakOptions();
+        options.PostLogoutRedirectUris.Add(new Uri("http://localhost:5059/signout-callback-appsurface-oidc"));
+        options.PostLogoutRedirectUris.Add(new Uri("http://127.0.0.1:5059/signout-callback-appsurface-oidc"));
+
+        using var document = JsonDocument.Parse(AppSurfaceKeycloakRealmGenerator.Generate(options));
+        var attributes = document.RootElement.GetProperty("clients")[0].GetProperty("attributes");
+        Assert.Equal("http://localhost:5059/signout-callback-appsurface-oidc##http://127.0.0.1:5059/signout-callback-appsurface-oidc",
+            attributes.GetProperty("post.logout.redirect.uris").GetString());
     }
 
     [Fact]

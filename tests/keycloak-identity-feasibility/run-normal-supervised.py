@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Qualify the normal public adapter caller, persistent restarts, contention and guarded recovery."""
 import argparse
+from dataclasses import dataclass
+from enum import Enum
 import fcntl
 import hashlib
 import importlib.util
@@ -13,10 +15,12 @@ import socket
 import subprocess
 import tempfile
 import time
+from typing import Optional
 import urllib.request
 import uuid
 
-from replay_environment import docker_endpoint, dotnet_host, verify_empty_cache, verify_prepared_closure
+from replay_environment import (docker_endpoint, dotnet_host, keycloak_fixture_image,
+                                verify_empty_cache, verify_prepared_closure)
 
 _readback_spec = importlib.util.spec_from_file_location('managed_seed_readback', Path(__file__).with_name('managed-seed-readback.py'))
 readback = importlib.util.module_from_spec(_readback_spec)
@@ -24,6 +28,27 @@ _readback_spec.loader.exec_module(readback)
 
 _legacy_spec = importlib.util.spec_from_file_location('prime_legacy_volume', Path(__file__).with_name('prime-legacy-volume.py'))
 
+class StartupOutcome(Enum):
+    WEB_READY = 'web-ready'
+    PREFLIGHT_REJECTED = 'preflight-rejected'
+    MISSING_VOLUME = 'missing-volume'
+    SEED_FAILED = 'seed-failed'
+    DRIFT_REJECTED = 'drift-rejected'
+    PUBLIC_INPUT_REJECTED = 'public-input-rejected'
+
+
+@dataclass(frozen=True)
+class CaseExpectation:
+    """Expected startup boundary and host result for one replay case."""
+
+    startup: StartupOutcome = StartupOutcome.WEB_READY
+    exit_code: int = 0
+    diagnostic: Optional[str] = None
+    retains_owner: bool = False
+
+
+DEFAULT_CASES = ('success', 'restart', 'public-secret', 'seed-failure', 'uncertain-stop')
+POST_SEED_CASES = ('post-seed-clean', 'drift-client', 'drift-mapper', 'drift-broker')
 ACCEPTANCE_CASES = {
     'neutral': ('neutral-fresh', 'neutral-repeat'),
     'skoolit': ('skoolit-fresh', 'skoolit-repeat', 'skoolit-google', 'skoolit-google-removed',
@@ -33,11 +58,46 @@ ACCEPTANCE_CASES = {
     'legacy-uid1000': ('legacy-missing', 'legacy-repeat', 'legacy-moved', 'legacy-explicit'),
     'tunnel': ('skoolit-tunnel', 'skoolit-unapproved-issuer'),
 }
-PREFLIGHT_REJECTIONS = {'skoolit-google-id-only', 'skoolit-google-secret-only', 'skoolit-unapproved-issuer'}
-MISSING_LEGACY = {'legacy-missing', 'legacy-moved'}
-SEED_FAILURES = {'seed-failure', 'skoolit-seed-failure'}
-KEYCLOAK_IMAGE = 'quay.io/keycloak/keycloak@sha256:831330513f55695572286e521f94fcd3c7e285250ed5b848090265a33192f669'
-KEYCLOAK_IMAGE_TAGGED = KEYCLOAK_IMAGE.replace('@', ':26.7.2@')
+CASE_EXPECTATIONS = {
+    'success': CaseExpectation(),
+    'restart': CaseExpectation(),
+    'public-secret': CaseExpectation(StartupOutcome.PUBLIC_INPUT_REJECTED, 1),
+    'seed-failure': CaseExpectation(StartupOutcome.SEED_FAILED, 1),
+    'uncertain-stop': CaseExpectation(exit_code=1, retains_owner=True),
+    'post-seed-clean': CaseExpectation(),
+    'drift-client': CaseExpectation(StartupOutcome.DRIFT_REJECTED, 1, 'ASKEYC031'),
+    'drift-mapper': CaseExpectation(StartupOutcome.DRIFT_REJECTED, 1, 'ASKEYC031'),
+    'drift-broker': CaseExpectation(StartupOutcome.DRIFT_REJECTED, 1, 'ASKEYC031'),
+    'neutral-fresh': CaseExpectation(),
+    'neutral-repeat': CaseExpectation(),
+    'skoolit-fresh': CaseExpectation(),
+    'skoolit-repeat': CaseExpectation(),
+    'skoolit-google': CaseExpectation(),
+    'skoolit-google-removed': CaseExpectation(),
+    'skoolit-seed-failure': CaseExpectation(StartupOutcome.SEED_FAILED, 1),
+    'skoolit-google-id-only': CaseExpectation(StartupOutcome.PREFLIGHT_REJECTED, 44, 'ASKEYC027'),
+    'skoolit-google-secret-only': CaseExpectation(StartupOutcome.PREFLIGHT_REJECTED, 44, 'ASKEYC027'),
+    'skoolit-unapproved-issuer': CaseExpectation(StartupOutcome.PREFLIGHT_REJECTED, 44, 'ASKEYC001'),
+    'legacy-missing': CaseExpectation(StartupOutcome.MISSING_VOLUME, 1, 'ASKEYC028'),
+    'legacy-repeat': CaseExpectation(),
+    'legacy-moved': CaseExpectation(StartupOutcome.MISSING_VOLUME, 1, 'ASKEYC028'),
+    'legacy-explicit': CaseExpectation(),
+    'skoolit-tunnel': CaseExpectation(),
+}
+KEYCLOAK_IMAGE = keycloak_fixture_image(tagged=False)
+KEYCLOAK_IMAGE_TAGGED = keycloak_fixture_image(tagged=True)
+
+
+def add_tunnel_theme_input(scenario, case, inputs):
+    if scenario != 'skoolit-tunnel':
+        return
+    theme = case/'theme'
+    css = theme/'login/resources/css/acceptance.css'
+    css.parent.mkdir(parents=True)
+    (theme/'login/theme.properties').write_text('parent=keycloak\nstyles=css/acceptance.css\n')
+    css.write_text('/* issue888-theme-first */\n')
+    inputs['ThemeDirectory'] = str(theme)
+    inputs['ThemeImageReference'] = KEYCLOAK_IMAGE_TAGGED
 
 
 def main():
@@ -49,7 +109,7 @@ def main():
     p.add_argument('--docker-endpoint', help='Qualified local Docker Unix endpoint')
     mode = p.add_mutually_exclusive_group()
     mode.add_argument('--pilot',action='store_true')
-    mode.add_argument('--post-seed', choices=['post-seed-clean', 'drift-client', 'drift-mapper', 'drift-broker'])
+    mode.add_argument('--post-seed', choices=POST_SEED_CASES)
     mode.add_argument('--acceptance', choices=ACCEPTANCE_CASES)
     a=p.parse_args();os.umask(0o077)
     historical_uid = a.acceptance == 'legacy-uid1000'
@@ -97,13 +157,7 @@ def main():
         inputs={'LeaseRoot':str(leases),'VolumeName':volume,'KeycloakPort':port(),'WebPort':port(),'Payload':str(closure/'payload'),'ExpectedOwner':expected,'Scenario':scenario}
         if project is not None:
             inputs['ProjectDirectory'] = str(project)
-        if scenario == 'skoolit-tunnel':
-            theme = case/'theme'
-            css = theme/'login/resources/css/acceptance.css'
-            css.parent.mkdir(parents=True)
-            (theme/'login/theme.properties').write_text('parent=keycloak\nstyles=css/acceptance.css\n')
-            css.write_text('/* issue888-theme-first */\n')
-            inputs['ThemeDirectory'] = str(theme)
+        add_tunnel_theme_input(scenario, case, inputs)
         (case/'input.json').write_text(json.dumps(inputs))
         base_env = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME') if key in os.environ}
         env=dict(base_env,DOTNET_ROOT=str(dotnet.parent),DOTNET_ENVIRONMENT='Testing',NUGET_PACKAGES=str(nuget),NUGET_HTTP_CACHE_PATH=str(root/'http'),NUGET_SCRATCH=str(root/'scratch'),
@@ -267,7 +321,14 @@ def main():
         return existing.isdisjoint(names)
     try:
         first_subject = first_identity = first_volume = None
-        scenarios = ACCEPTANCE_CASES[a.acceptance] if a.acceptance else [a.post_seed] if a.post_seed else ['success'] if a.pilot else ['success','restart','public-secret','seed-failure','uncertain-stop']
+        if a.acceptance:
+            scenarios = ACCEPTANCE_CASES[a.acceptance]
+        elif a.post_seed:
+            scenarios = (a.post_seed,)
+        elif a.pilot:
+            scenarios = ('success',)
+        else:
+            scenarios = DEFAULT_CASES
         if legacy:
             legacy_project = root/'original'
             moved_project = root/'moved'
@@ -281,19 +342,18 @@ def main():
         for scenario in scenarios:
             launch_time = time.monotonic()
             timing = {}
-            reject = scenario in PREFLIGHT_REJECTIONS
-            needs_readback = a.post_seed or a.acceptance and not reject
-            positive = scenario not in SEED_FAILURES | PREFLIGHT_REJECTIONS | MISSING_LEGACY | {'public-secret'} and not scenario.startswith('drift-')
+            expected_case = CASE_EXPECTATIONS[scenario]
+            expect_web = expected_case.startup is StartupOutcome.WEB_READY
             marker_before = (lease_directory/'active.json').exists()
             project = moved_project if scenario == 'legacy-moved' else legacy_project
             case,inputs,proc,log=launch(scenario, project=project)
-            if scenario in MISSING_LEGACY:
-                result = finish(case, inputs, proc, log, 1)
+            if expected_case.startup is StartupOutcome.MISSING_VOLUME:
+                result = finish(case, inputs, proc, log, expected_case.exit_code)
                 registration = json.loads((case/'registration.json').read_text())
                 missing = volume if scenario == 'legacy-missing' else moved_volume
                 missing_lease = leases / hashlib.sha256((daemon+'\n'+missing).encode()).hexdigest()
                 check('missing-generated-name-does-not-create-or-stage',
-                      absent({missing}) and result['result']['Code'] == 'ASKEYC028'
+                      absent({missing}) and result['result']['Code'] == expected_case.diagnostic
                       and not result['result']['ActiveRetained'] and result['preclean'] is None
                       and not missing_lease.exists() and not Path(registration['RunDirectory']).exists()
                       and not list(case.glob('lifecycle-*')))
@@ -309,11 +369,10 @@ def main():
                           and bootstrap['stopSeconds'] < 30)
                     (a.evidence/'legacy-bootstrap.json').write_text(json.dumps(bootstrap, indent=2)+'\n')
                 continue
-            if reject:
-                result = finish(case, inputs, proc, log, 44)
-                expected_code = 'ASKEYC001' if scenario == 'skoolit-unapproved-issuer' else 'ASKEYC027'
+            if expected_case.startup is StartupOutcome.PREFLIGHT_REJECTED:
+                result = finish(case, inputs, proc, log, expected_case.exit_code)
                 check('pregraph-binding-or-issuer-rejection',
-                      json.loads((case/'registration-rejection.json').read_text())['Code'] == expected_code
+                      json.loads((case/'registration-rejection.json').read_text())['Code'] == expected_case.diagnostic
                       and not (case/'registration.json').exists() and not list(case.glob('lifecycle-*'))
                       and not marker_before and not (lease_directory/'active.json').exists())
                 check('pregraph-no-preclean-needed', result['result'] is None and result['preclean'] is None)
@@ -322,7 +381,8 @@ def main():
             web=False;registration=None
             baseline = after_seed = rejection_started = None
             worker_seconds = None
-            drift = scenario.startswith('drift-')
+            needs_readback = bool(a.post_seed or a.acceptance)
+            drift = expected_case.startup is StartupOutcome.DRIFT_REJECTED
             while proc.poll() is None:
                 if a.acceptance and 'keycloakStarted' not in timing and (case/'lifecycle-keycloak-started.json').exists():
                     timing['keycloakStarted'] = time.monotonic() - launch_time
@@ -404,14 +464,14 @@ def main():
                         if drift:
                             rejection_started = time.monotonic()
                         release(case/'seeds-completed.release', 'drift' if drift else 'unchanged')
-                if positive and registration:
+                if expect_web and registration:
                     try:
                         with urllib.request.urlopen('http://localhost:'+str(inputs['WebPort'])+'/state',timeout=1) as response:state=json.load(response)
                         if state['authenticated'] is False:web=True;break
                     except Exception:pass
                 if time.monotonic()>deadline:raise TimeoutError('normal supervised startup')
                 time.sleep(.1)
-            if positive:
+            if expect_web:
                 if not web:
                     finish(case,inputs,proc,log,1)
                 check('real-web-started:'+scenario,web)
@@ -472,7 +532,7 @@ def main():
                     live,li,lp,ll=launch('recover-live',registration['OwnerId']);finish(live,li,lp,ll,33)
                     check('live-recovery-did-not-build-graph',not (live/'registration.json').exists())
                 (case/'stop.request').write_text('stop')
-            result=finish(case,inputs,proc,log,0 if positive and scenario!='uncertain-stop' else 1)
+            result=finish(case,inputs,proc,log,expected_case.exit_code)
             if a.acceptance:
                 result['reconciliationSeconds'] = worker_seconds
                 phase_times[scenario] = timing
@@ -485,16 +545,17 @@ def main():
                     check('same-as-primed-volume', volume_identity['Name'] == bootstrap['volume']
                           and volume_identity['CreatedAt'] == bootstrap['createdAt']
                           and volume_identity['Root']['Inode'] == bootstrap['ownership']['root']['inode'])
-                if not positive: check('required-seed-failure-withholds-web', baseline is not None and after_seed is None
-                                       and not (case/'lifecycle-real-web-intent.json').exists())
+                if expected_case.startup is StartupOutcome.SEED_FAILED:
+                    check('required-seed-failure-withholds-web', baseline is not None and after_seed is None
+                          and not (case/'lifecycle-real-web-intent.json').exists())
             if drift:
                 check('post-seed-rejection-latched', rejection_started is not None and after_seed is not None
-                      and result['result']['Code'] == 'ASKEYC031' and result['preclean'] is not None)
+                      and result['result']['Code'] == expected_case.diagnostic and result['preclean'] is not None)
                 check('drift-rejection-under30', time.monotonic() - rejection_started < 30)
                 check('web-never-launched', not (case/'lifecycle-real-web-intent.json').exists())
             if a.post_seed:
                 check('post-seed-observation-complete', baseline is not None and after_seed is not None)
-            if scenario=='uncertain-stop':
+            if expected_case.retains_owner:
                 check('uncertain-stop-retains-active',result['result']['ActiveRetained'])
                 owner=registration['OwnerId']
                 other,oi,op,ol=launch('blocked-restart');finish(other,oi,op,ol,1)

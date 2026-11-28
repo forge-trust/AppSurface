@@ -102,8 +102,7 @@ public sealed class KeycloakVolumeIncarnationTests
         var incarnation = KeycloakVolumeIncarnation.ReadCore("/volume", native);
 
         Assert.Equal(KeycloakVolumeIncarnation.Parse(ValidStat()), incarnation);
-        Assert.NotNull(native.LastStatxCall);
-        Assert.Equal(new StatxCall(-100, "/volume", SymlinkNoFollowFlag, RequiredMask), native.LastStatxCall.Value);
+        Assert.Equal<StatxCall?>(new StatxCall(-100, "/volume", SymlinkNoFollowFlag, RequiredMask), native.LastStatxCall);
         Assert.Empty(native.OpenCalls);
     }
 
@@ -121,8 +120,7 @@ public sealed class KeycloakVolumeIncarnationTests
         Assert.Equal(KeycloakVolumeIncarnation.Parse(stat), incarnation);
         Assert.Equal(1000u, uid);
         Assert.Equal(42u, gid);
-        Assert.NotNull(native.LastStatxCall);
-        Assert.Equal(new StatxCall(-100, "/volume", SymlinkNoFollowFlag, RequiredMask | 0x018), native.LastStatxCall.Value);
+        Assert.Equal<StatxCall?>(new StatxCall(-100, "/volume", SymlinkNoFollowFlag, RequiredMask | 0x018), native.LastStatxCall);
         Assert.Empty(native.OpenCalls);
     }
 
@@ -133,8 +131,7 @@ public sealed class KeycloakVolumeIncarnationTests
 
         Assert.Throws<IOException>(() => KeycloakVolumeIncarnation.ReadCore("/volume", native));
 
-        Assert.NotNull(native.LastStatxCall);
-        Assert.Equal(new StatxCall(-100, "/volume", SymlinkNoFollowFlag, RequiredMask), native.LastStatxCall.Value);
+        Assert.Equal<StatxCall?>(new StatxCall(-100, "/volume", SymlinkNoFollowFlag, RequiredMask), native.LastStatxCall);
     }
 
     [Fact]
@@ -148,8 +145,7 @@ public sealed class KeycloakVolumeIncarnationTests
 
         var ownership = KeycloakVolumeIncarnation.ReadPinnedDatabaseOwnershipCore("/mnt/volume", native);
 
-        Assert.NotNull(ownership);
-        Assert.Equal((1000u, 42u), ownership.Value);
+        Assert.Equal<(uint, uint)?>((1000u, 42u), ownership);
         Assert.Equal(new[]
         {
             new OpenAtCall(-100, "/", DirectoryOpenFlags),
@@ -157,10 +153,9 @@ public sealed class KeycloakVolumeIncarnationTests
             new OpenAtCall(102, "volume", DirectoryOpenFlags),
             new OpenAtCall(103, "h2", DirectoryOpenFlags)
         }, native.OpenCalls);
-        Assert.NotNull(native.LastStatxCall);
-        Assert.Equal(
+        Assert.Equal<StatxCall?>(
             new StatxCall(104, "keycloakdb.mv.db", SymlinkNoFollowFlag, DatabaseOwnershipMask),
-            native.LastStatxCall.Value);
+            native.LastStatxCall);
         Assert.Equal(new[] { 104, 103, 102, 101 }, native.DisposedDescriptors);
     }
 

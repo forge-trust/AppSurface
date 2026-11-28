@@ -32,10 +32,17 @@
   <Target Name="CopyAppSurfaceKeycloakRealmReadyWorker"
           DependsOnTargets="ResolveAppSurfaceKeycloakRealmReadyWorker"
           AfterTargets="CopyFilesToOutputDirectory">
+    <PropertyGroup>
+      <_AppSurfaceKeycloakWorkerOutput>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)', 'appsurface-keycloak-realm-ready'))</_AppSurfaceKeycloakWorkerOutput>
+    </PropertyGroup>
+
+    <!-- Replace the package-owned tree after validating the new payload. Older packages did not track their copied files. -->
+    <RemoveDir Directories="$(_AppSurfaceKeycloakWorkerOutput)" />
     <Copy
       SourceFiles="@(_AppSurfaceKeycloakRealmReadyWorker)"
-      DestinationFiles="@(_AppSurfaceKeycloakRealmReadyWorker->'$(OutDir)appsurface-keycloak-realm-ready\%(RecursiveDir)%(Filename)%(Extension)')"
-      SkipUnchangedFiles="true" />
+      DestinationFiles="@(_AppSurfaceKeycloakRealmReadyWorker->'$(_AppSurfaceKeycloakWorkerOutput)\%(RecursiveDir)%(Filename)%(Extension)')">
+      <Output TaskParameter="CopiedFiles" ItemName="FileWrites" />
+    </Copy>
   </Target>
 
   <Target Name="PublishAppSurfaceKeycloakRealmReadyWorker"
@@ -48,6 +55,13 @@
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </ResolvedFileToPublish>
     </ItemGroup>
+  </Target>
+
+  <Target Name="RefreshAppSurfaceKeycloakRealmReadyWorkerPublishOutput"
+          DependsOnTargets="ResolveAppSurfaceKeycloakRealmReadyWorker"
+          BeforeTargets="_IncrementalCleanPublishDirectory">
+    <!-- NuGet preserves archive timestamps, so the SDK's publish copy can skip changed files across versions. -->
+    <RemoveDir Directories="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(PublishDir)', 'appsurface-keycloak-realm-ready'))" />
   </Target>
 
 </Project>

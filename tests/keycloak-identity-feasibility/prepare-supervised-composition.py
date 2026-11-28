@@ -9,7 +9,7 @@ import shutil
 import tempfile
 import zipfile
 
-from replay_environment import dotnet_host, run_offline_build, verify_offline_restore, verify_sdk_version
+from replay_environment import dotnet_host, run_offline_build, verify_sdk_version
 from worker_payload import read_worker_payload, worker_payload_target
 
 def sha(path):
@@ -80,12 +80,11 @@ def main():
         project = source/'Fixture.csproj'
         project.write_text('<Project Sdk="Microsoft.NET.Sdk'+('.Web' if web else '')+'"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><AssemblyName>'+assembly+'</AssemblyName><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><UseAppHost>false</UseAppHost><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup><ItemGroup>'+refs+'</ItemGroup></Project>')
         cache = source/'build-cache'
-        steps = run_offline_build(dotnet, project, cache_root=cache, publish_to=source/'publish',
-                                  logs=(a.evidence/(folder+'-restore.log'), a.evidence/(folder+'-publish.log')))
-        if steps[-1].exit_code:
-            raise RuntimeError(folder+' '+steps[-1].stage+' failed; inspect saved log')
-        outcomes.extend({'command': step.command, 'exitCode': step.exit_code} for step in steps)
-        verify_offline_restore(source/'obj/project.assets.json', cache/'nuget')
+        result = run_offline_build(dotnet, project, cache_root=cache, publish_to=source/'publish',
+                                   logs=(a.evidence/(folder+'-restore.log'), a.evidence/(folder+'-publish.log')))
+        if result.failed_stage is not None:
+            raise RuntimeError(folder+' '+result.failed_stage+' failed; inspect saved log')
+        outcomes.extend({'command': step.command, 'exitCode': step.exit_code} for step in result.commands)
         for path in (source/'publish').iterdir():
             if path.suffix in ['.dll','.json']:
                 destination=root/'code'/path.name

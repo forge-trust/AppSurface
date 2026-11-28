@@ -9,9 +9,19 @@ import os
 from pathlib import Path
 import subprocess
 import time
+from xml.sax.saxutils import quoteattr
 
 
 SDK_VERSION = '10.0.402'
+KEYCLOAK_FIXTURE_REPOSITORY = 'quay.io/keycloak/keycloak'
+KEYCLOAK_FIXTURE_RELEASE = '26.7.2'
+KEYCLOAK_FIXTURE_DIGEST = 'sha256:831330513f55695572286e521f94fcd3c7e285250ed5b848090265a33192f669'
+
+
+def keycloak_fixture_image(*, tagged: bool) -> str:
+    """Build tagged and digest-only references from the independent fixture release pin."""
+    release = ':' + KEYCLOAK_FIXTURE_RELEASE if tagged else ''
+    return f'{KEYCLOAK_FIXTURE_REPOSITORY}{release}@{KEYCLOAK_FIXTURE_DIGEST}'
 
 
 def docker_endpoint(requested: str | None = None, recorded: str | None = None) -> str:
@@ -57,7 +67,7 @@ def verify_sdk_version(dotnet: Path, directory: Path) -> None:
 
 @dataclass(frozen=True)
 class OfflineBuildStep:
-    """One bounded preparation command and its exit status."""
+    """One completed SDK command and its real exit status."""
 
     stage: str
     command: list[str]
@@ -65,50 +75,112 @@ class OfflineBuildStep:
     seconds: float
 
 
-def run_offline_build(dotnet: Path, project: Path, *, cache_root: Path, logs: tuple[Path, Path],
-                      publish_to: Path | None = None) -> list[OfflineBuildStep]:
-    """Restore under private caches and build or publish without a second restore."""
-    packages = cache_root / 'nuget'
-    http_cache = cache_root / 'http-cache'
-    scratch = cache_root / 'scratch'
-    for directory in (packages, http_cache, scratch):
-        directory.mkdir(mode=0o700, parents=True)
-    config = project.with_name('NuGet.Config')
-    config.write_text('<configuration><packageSources><clear /></packageSources>'
+@dataclass(frozen=True)
+class OfflineBuildResult:
+    """Completed SDK commands and the verification stage that rejected the result, if any."""
+
+    commands: tuple[OfflineBuildStep, ...]
+    verification_failure: str | None = None
+
+    @property
+    def failed_stage(self) -> str | None:
+        """Return the stage that stopped preparation, or None after a verified build or publish."""
+        if self.verification_failure is not None:
+            return self.verification_failure
+        final_command = self.commands[-1]
+        return final_command.stage if final_command.exit_code else None
+
+
+def prepare_offline_nuget(dotnet: Path, directory: Path, packages: Path, *,
+                          feed: Path | None = None) -> tuple[Path, dict[str, str]]:
+    """Write a restore config and create private caches for an isolated SDK consumer.
+
+    The config clears all sources and fallbacks. An optional local feed is the only source added.
+    Use the returned config with --configfile, then verify the effective sources from the assets file.
+    """
+    http_cache = packages.parent / 'http-cache'
+    scratch = packages.parent / 'scratch'
+    for cache in (packages, http_cache, scratch):
+        cache.mkdir(mode=0o700, parents=True)
+    source = '' if feed is None else f'<add key="fixture" value={quoteattr(str(feed.resolve(strict=True)))} />'
+    config = directory / 'NuGet.Config'
+    config.write_text(f'<configuration><packageSources><clear />{source}</packageSources>'
                       '<fallbackPackageFolders><clear /></fallbackPackageFolders></configuration>\n')
-    env = dict(os.environ, DOTNET_ROOT=str(dotnet.parent), NUGET_PACKAGES=str(packages),
+
+    # MSBuild reads environment variables as properties, which can override the isolated config.
+    restore_overrides = {'restoresources', 'restoreadditionalprojectsources', 'restorefallbackfolders',
+                         'restoreadditionalprojectfallbackfolders', 'restoreconfigfile', 'restorepackagespath'}
+    env = {key: value for key, value in os.environ.items() if key.casefold() not in restore_overrides}
+    env.update(DOTNET_ROOT=str(dotnet.parent), NUGET_PACKAGES=str(packages),
                NUGET_HTTP_CACHE_PATH=str(http_cache), NUGET_SCRATCH=str(scratch),
                DOTNET_CLI_TELEMETRY_OPTOUT='1', DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1',
                MSBUILDDISABLENODEREUSE='1')
+    return config, env
+
+
+def run_offline_build(dotnet: Path, project: Path, *, cache_root: Path, logs: tuple[Path, Path],
+                      publish_to: Path | None = None, exact_package_folder: bool = False) -> OfflineBuildResult:
+    """Verify private restore assets before building or publishing, then verify the final state.
+
+    Require the restore log and the build or publish log before preparing the private caches.
+    SDK exit codes are recorded as returned. A verification rejection stops preparation, records
+    its stage separately in the result, and saves the reason in the preceding command's log.
+    """
+    if len(logs) != 2 or any(not isinstance(path, Path) for path in logs):
+        raise ValueError('provide both the restore log path and the build or publish log path')
+    restore_log, output_log = logs
+    packages = cache_root / 'nuget'
+    config, env = prepare_offline_nuget(dotnet, project.parent, packages)
+    assets = project.parent / 'obj/project.assets.json'
     stage = 'build' if publish_to is None else 'publish'
     build = [str(dotnet), stage, str(project), '--no-restore', '-c', 'Release',
              '-m:1', '-nr:false', '-p:UseSharedCompilation=false']
     if publish_to is not None:
         build.extend(['--output', str(publish_to)])
-    commands = [
-        ('restore', [str(dotnet), 'restore', str(project), '--configfile', str(config), '--packages', str(packages)]),
-        (stage, build),
-    ]
+    restore = [str(dotnet), 'restore', str(project), '--configfile', str(config), '--packages', str(packages)]
+    commands = [('restore', restore, restore_log), (stage, build, output_log)]
     outcomes = []
-    for (stage, command), log_path in zip(commands, logs):
+    for stage, command, log_path in commands:
         started = time.monotonic()
         with log_path.open('x') as log:
             result = subprocess.run(command, cwd=project.parent, env=env, stdout=log,
                                     stderr=subprocess.STDOUT, timeout=120)
-        outcomes.append(OfflineBuildStep(stage, command, result.returncode, time.monotonic() - started))
-        if result.returncode:
-            break
-    return outcomes
+            outcomes.append(OfflineBuildStep(stage, command, result.returncode, time.monotonic() - started))
+            if result.returncode:
+                break
+            try:
+                verify_offline_restore(assets, packages, exact_package_folder=exact_package_folder)
+            except (OSError, ValueError) as error:
+                verification = f'verify-{stage}'
+                log.write(f'\n{verification} failed: {error}\n')
+                return OfflineBuildResult(tuple(outcomes), verification_failure=verification)
+    return OfflineBuildResult(tuple(outcomes))
 
 
-def verify_offline_restore(assets: Path, packages: Path, *, exact_package_folder: bool = False) -> None:
-    """Reject package dependencies or a populated private cache before recording proof."""
+def verify_offline_restore(assets: Path, packages: Path, *, exact_package_folder: bool = False,
+                           feed: Path | None = None) -> None:
+    """Require the approved source set and optionally the exact private package folder.
+
+    With no feed, restore may resolve no package libraries and the package cache must remain empty.
+    With a feed, packages are allowed and the assets must name that local feed as their only source.
+    """
     restored = json.loads(assets.read_text())
-    if restored['libraries']:
+    project = restored.get('project') if isinstance(restored, dict) else None
+    restore = project.get('restore') if isinstance(project, dict) else None
+    if not isinstance(restore, dict):
+        raise ValueError('offline restore metadata is missing')
+    sources = restore.get('sources', {})
+    expected_sources = set() if feed is None else {str(feed.resolve(strict=True))}
+    if not isinstance(sources, dict) or set(sources) != expected_sources:
+        raise ValueError('offline restore recorded unexpected package sources')
+    if feed is None and restored.get('libraries') != {}:
         raise ValueError('offline restore resolved package libraries')
-    if exact_package_folder and set(restored['packageFolders']) != {str(packages)}:
-        raise ValueError('offline restore recorded unexpected package folders')
-    verify_empty_cache(packages)
+    if exact_package_folder:
+        folders = restored.get('packageFolders')
+        if not isinstance(folders, dict) or set(folders) != {str(packages)}:
+            raise ValueError('offline restore recorded unexpected package folders')
+    if feed is None:
+        verify_empty_cache(packages)
 
 
 def verify_empty_cache(packages: Path) -> None:

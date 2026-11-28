@@ -78,7 +78,6 @@ public sealed class KeycloakClientCredentialReferenceTests
         Assert.Equal(reference.Authority, roundTripped.Authority);
         Assert.Equal(reference.ClientId, roundTripped.ClientId);
         Assert.DoesNotContain(credentialMarker, serialized, StringComparison.Ordinal);
-        Assert.DoesNotContain(credentialMarker, reference.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

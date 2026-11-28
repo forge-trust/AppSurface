@@ -29,6 +29,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
     private readonly AppSurfaceKeycloakSupervisedOptions _execution;
     private readonly AppSurfaceKeycloakCredentialSnapshot _bindings;
     private readonly AppSurfaceKeycloakThemeRegistrationState? _theme;
+    private readonly string _keycloakImage;
     private readonly string _transportOrigin;
     private readonly List<(AppSurfaceKeycloakSupervisedWorkload Workload, bool Web, IResourceBuilder<ExecutableResource> Handle)> _workloads = [];
     private readonly TaskCompletionSource<string> _failure = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -60,6 +61,8 @@ public sealed class AppSurfaceKeycloakSupervisedRun
         _bindings = bindings;
         _docker = docker ?? new(_execution.DockerEndpoint);
         _theme = registration.Theme;
+        _keycloakImage = _theme?.BaseImage.Value
+            ?? (_execution.KeycloakImage == QualifiedKeycloakImage ? TaggedQualifiedKeycloakImage : _execution.KeycloakImage);
         _transportOrigin = registration.TransportOrigin.OriginalString;
         _httpClient = httpClient;
         OwnerId = Guid.NewGuid().ToString("N");
@@ -165,9 +168,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
         else if (options.UsePersistentDataVolume) keycloak.WithDataVolume();
         run.RealmReady = new(builder.AddExecutable(name + "-realm-ready", "/usr/bin/false", AppContext.BaseDirectory)
             .WithExplicitStart().WaitFor(keycloak));
-        var wrapper = new AppSurfaceKeycloakResource(keycloak, registration.Projection,
-            new AppSurfaceKeycloakReadinessProbe(registration), Desired.HostPath(run.RunDirectory), theme?.Registration)
-        { SupervisedRun = run };
+        var wrapper = new AppSurfaceKeycloakResource(keycloak, registration.Projection, run, theme?.Registration);
         builder.OnBeforeStart(async (BeforeStartEvent e, CancellationToken ct) =>
         {
             run._sealed = true;
@@ -226,19 +227,9 @@ public sealed class AppSurfaceKeycloakSupervisedRun
     private IResourceBuilder<ExecutableResource> AddWorkload(AppSurfaceKeycloakSupervisedWorkload workload, bool web)
     {
         ArgumentNullException.ThrowIfNull(workload);
-        if (_sealed || _workloads.Count >= 8 || _workloads.Any(w => w.Web) || web && !_workloads.Any()
-            || !Path.IsPathFullyQualified(workload.PayloadDirectory) || workload.PayloadDirectory.Any(c => char.IsControl(c) || c == ',')
-            || string.IsNullOrEmpty(workload.Name) || workload.Name.Length is < 3 or > 63
-            || workload.Name.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-'))
-            || IsReservedWorkloadName(workload.Name) || _workloads.Any(w => w.Workload.Name == workload.Name)
-            || string.IsNullOrEmpty(workload.AssemblyName) || Path.GetFileName(workload.AssemblyName) != workload.AssemblyName || !workload.AssemblyName.EndsWith(".dll", StringComparison.Ordinal)
-            || workload.Arguments.IsDefault || workload.Arguments.Length > 32 || workload.Arguments.Any(a => a is null || a.Length > 4096 || a.Any(char.IsControl))
-            || workload.Environment is null || workload.Environment.Count > 32 || workload.Environment.Any(p => string.IsNullOrEmpty(p.Key) || p.Key.Length > 128
-                || p.Key.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '_') || p.Value is null || p.Value.Length > 4096 || p.Value.Any(char.IsControl))
-            || workload.PrivateInputs is null || web && workload.PrivateInputs.Count != 0 || workload.PrivateInputs.Count > 32
-            || workload.PrivateInputs.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Key.Length > 128 || p.Value is null
-                || !p.Value.Resource.Secret && !(p.Key == "AdminUsername" && ReferenceEquals(p.Value.Resource, _bindings.AdminUsername.Resource))
-                || !ReferenceEquals(p.Value.ApplicationBuilder, _builder))) throw SafeException();
+        ValidateWorkloadRegistration(web);
+        ValidateWorkloadDefinition(workload);
+        ValidateWorkloadInputs(workload, web);
         var copy = workload with
         {
             PayloadDirectory = Path.GetFullPath(workload.PayloadDirectory),
@@ -250,6 +241,36 @@ public sealed class AppSurfaceKeycloakSupervisedRun
         handle.WaitForCompletion(_workloads.LastOrDefault().Handle ?? RealmReady.Resource);
         _workloads.Add((copy, web, handle));
         return handle;
+    }
+
+    private void ValidateWorkloadRegistration(bool web)
+    {
+        if (_sealed || _workloads.Count >= 8 || _workloads.Any(w => w.Web) || web && !_workloads.Any())
+            throw SafeException();
+    }
+
+    private void ValidateWorkloadDefinition(AppSurfaceKeycloakSupervisedWorkload workload)
+    {
+        if (!Path.IsPathFullyQualified(workload.PayloadDirectory) || workload.PayloadDirectory.Any(c => char.IsControl(c) || c == ',')
+            || string.IsNullOrEmpty(workload.Name) || workload.Name.Length is < 3 or > 63
+            || workload.Name.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-'))
+            || IsReservedWorkloadName(workload.Name) || _workloads.Any(w => w.Workload.Name == workload.Name)
+            || string.IsNullOrEmpty(workload.AssemblyName) || Path.GetFileName(workload.AssemblyName) != workload.AssemblyName
+            || !workload.AssemblyName.EndsWith(".dll", StringComparison.Ordinal)
+            || workload.Arguments.IsDefault || workload.Arguments.Length > 32
+            || workload.Arguments.Any(a => a is null || a.Length > 4096 || a.Any(char.IsControl)))
+            throw SafeException();
+    }
+
+    private void ValidateWorkloadInputs(AppSurfaceKeycloakSupervisedWorkload workload, bool web)
+    {
+        if (workload.Environment is null || workload.Environment.Count > 32 || workload.Environment.Any(p => string.IsNullOrEmpty(p.Key) || p.Key.Length > 128
+                || p.Key.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '_') || p.Value is null || p.Value.Length > 4096 || p.Value.Any(char.IsControl))
+            || workload.PrivateInputs is null || web && workload.PrivateInputs.Count != 0 || workload.PrivateInputs.Count > 32
+            || workload.PrivateInputs.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Key.Length > 128 || p.Value is null
+                || !p.Value.Resource.Secret && !(p.Key == "AdminUsername" && ReferenceEquals(p.Value.Resource, _bindings.AdminUsername.Resource))
+                || !ReferenceEquals(p.Value.ApplicationBuilder, _builder)))
+            throw SafeException();
     }
 
     /// <summary>Starts the normal Aspire app and returns only after owned shutdown has passed or failed its fixed 30-second bound.</summary>
@@ -277,6 +298,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
         var clock = Stopwatch.StartNew();
         using var stop = new CancellationTokenSource(StopBound);
         string? shutdownFailure = null;
+        var activeRetained = false;
         try
         {
             if (_ownership is { } ownership)
@@ -308,11 +330,14 @@ public sealed class AppSurfaceKeycloakSupervisedRun
                 ClearVerifiedMarker(_lease!, () => clock.Elapsed, stop.Token);
             }
         }
-        catch { shutdownFailure = OwnedShutdownUnverified; }
+        catch
+        {
+            shutdownFailure = OwnedShutdownUnverified;
+            activeRetained = _ownership is not null && _lease!.HasRetainedActiveMarker();
+        }
         finally { _lease?.Dispose(); }
         var failureCode = shutdownFailure ?? operationalFailure;
         var code = failureCode ?? "Completed";
-        var activeRetained = shutdownFailure is not null;
         _terminalCode = code;
         if (failureCode is not null)
             System.Console.Error.WriteLine($"AppSurface Keycloak failed. Code: {code}. Owner: {OwnerId}. Active retained: {activeRetained}. Docs: docs/supervised-keycloak-execution.md.");
@@ -346,7 +371,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
             new("apphost", self.Id, self.StartTime.ToUniversalTime().Ticks), [], false, false, false);
         var ownership = new SupervisedKeycloakOwnership(_docker, _execution.RuntimeImage, _lease, active, SafeException, ObserveLifecycleAsync);
         _ownership = ownership;
-        ownership.Save(active); // durable reservation precedes directory staging, volume creation and value resolution
+        ownership.Reserve(); // durable reservation precedes directory staging, volume creation and value resolution
         await ObserveLifecycleAsync("reserved", ct);
         _stager.StageWorker(_execution.RunRoot, _workerSource);
         if (persistent)
@@ -359,19 +384,15 @@ public sealed class AppSurfaceKeycloakSupervisedRun
                 created = true;
             }
             if ((await _docker.AttachmentsAsync(volume!, ct)).Length != 0) throw SafeException();
-            var imageReference = _theme?.BaseImage.Value ?? _execution.KeycloakImage;
-            var observePinnedDataOwnership = !created && imageReference is QualifiedKeycloakImage or TaggedQualifiedKeycloakImage;
-            var beforeObservation = ownership.Active;
+            var observePinnedDataOwnership = !created && _keycloakImage is QualifiedKeycloakImage or TaggedQualifiedKeycloakImage;
             var observed = await ownership.ObserveVolumeAsync(existing, ct, selectServerUser: observePinnedDataOwnership);
-            ownership.Save(beforeObservation with { Volume = observed.Identity });
-            // A newly mounted image can leave a UID 1000 root above an H2 database written by the host UID.
-            // Keep the host server profile for that volume and preserve the qualified native profile for UID 1000 data.
-            _useHistoricalServerUser = observed.Owner is { Uid: 1000, Gid: 0, Database: null or { Uid: 1000, Gid: 0 } };
+            ownership.RecordVolumeIdentity(observed.Identity);
+            _useHistoricalServerUser = SupervisedKeycloakContainerProfile.CanUseHistoricalServerUser(observed.Owner);
             if (created) await ownership.InitializeNewVolumeAsync(volume!, ct);
         }
         _privateValues = await _stager.StageInputsAsync(
             _bindings, _workloads.Select(item => item.Workload), _publicInputs, _useHistoricalServerUser, ct);
-        ownership.Save(ownership.Active with { StagingComplete = true });
+        ownership.MarkStagingComplete();
         await ObserveLifecycleAsync("staged", ct);
     }
 
@@ -380,9 +401,17 @@ public sealed class AppSurfaceKeycloakSupervisedRun
         try
         {
             var ct = _work.Token;
-            var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-            do { listener.Start(); _ownerPort = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); }
-            while (_ownerPort == _options.KeycloakPort || _ownerPort == _options.WebProofPort);
+            using (var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0))
+            {
+                do
+                {
+                    listener.Start();
+                    _ownerPort = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+                    listener.Stop();
+                }
+                while (_ownerPort == _options.KeycloakPort || _ownerPort == _options.WebProofPort);
+            }
+
             var confidential = _options.ClientMode == KeycloakClientMode.Confidential;
             var ownerPort = _ownerPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
             var fence = confidential ? ClientReference : OwnerFence;
@@ -392,7 +421,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
             var anchorMounts = new List<OwnedMount>
                 { Mount(Worker), Mount(State, writable: true), Mount(EmptyNuGet) };
             if (confidential) anchorMounts.Add(Mount(AnchorPrivate));
-            await LaunchAsync(AnchorRole, _execution.RuntimeImage,
+            var anchor = await LaunchAsync(AnchorRole, _execution.RuntimeImage,
                 [WorkerAssembly.ContainerPath, .. anchorCommand],
                 anchorMounts, ct);
             var listeningFile = PathUtils.PathUnder(RunDirectory, fence.Mount.HostDirectory, KeycloakWorkerProtocol.ListeningMarkerPath(fence.Name));
@@ -404,7 +433,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
             _ownerConnection = await AppSurfaceKeycloakOwnerConnection.ConnectAsync(_ownerPort, OwnerId,
                 () => _failure.TrySetResult(OwnedShutdownUnverified), ct);
             var ownership = _ownership!;
-            ownership.Save(ownership.Active with { OwnerFenceEstablished = true });
+            ownership.MarkOwnerFenceEstablished();
             await ObserveLifecycleAsync("fence-ready", ct);
             if (confidential && !File.Exists(ClientReference.HostPath(RunDirectory))) throw SafeException();
             var serverMounts = new List<OwnedMount> { Mount(ServerPrivate), Mount(Public) };
@@ -425,9 +454,7 @@ public sealed class AppSurfaceKeycloakSupervisedRun
                 serverMounts.Add(new(_theme.SourceDirectory, "/opt/keycloak/themes/" + _theme.Registration.Name, false, false));
                 serverArgs.AddRange(["--spi-theme--static-max-age=-1", "--spi-theme--cache-themes=false", "--spi-theme--cache-templates=false"]);
             }
-            var keycloakImage = _theme?.BaseImage.Value
-                ?? (_execution.KeycloakImage == QualifiedKeycloakImage ? TaggedQualifiedKeycloakImage : _execution.KeycloakImage);
-            await LaunchAsync(ServerRole, keycloakImage, serverArgs, serverMounts, ct);
+            var server = await LaunchAsync(ServerRole, _keycloakImage, serverArgs, serverMounts, ct);
             using (var ready = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 ready.CancelAfter(_execution.TransportReadyTimeout);
@@ -449,8 +476,10 @@ public sealed class AppSurfaceKeycloakSupervisedRun
                 [WorkerAssembly.ContainerPath, KeycloakWorkerProtocol.Reconcile, Desired.ContainerPath,
                     WorkerBindings.ContainerPath, WorkerReceipt.ContainerPath],
                 [Mount(Worker), Mount(Public), Mount(WorkerPrivate), Mount(State, writable: true), Mount(EmptyNuGet)], ct);
-            await CompleteAsync(worker, RealmReady.Resource.Resource, TimeSpan.FromSeconds(125), ct);
+            await CompleteAsync(worker, RealmReady.Resource.Resource,
+                KeycloakWorkerProtocol.ReconciliationTimeout + KeycloakWorkerProtocol.ReconciliationReceiptAllowance, ct);
             await ObserveLifecycleAsync("worker-completed", ct);
+            var runningContainers = new List<OwnedContainer> { anchor, server };
             foreach (var item in _workloads)
             {
                 if (item.Web) await ObserveLifecycleAsync("seeds-completed", ct);
@@ -459,17 +488,21 @@ public sealed class AppSurfaceKeycloakSupervisedRun
                 if (!item.Web) mounts.Add(Mount(WorkloadPrivate(item.Workload.Name)));
                 var container = await LaunchAsync(item.Workload.Name, _execution.RuntimeImage,
                     [payload.ContainerFile(item.Workload.AssemblyName), .. item.Workload.Arguments], mounts, ct, item.Workload.Environment);
-                if (item.Web) await Publish(item.Handle.Resource, true, null);
+                if (item.Web)
+                {
+                    runningContainers.Add(container);
+                    await Publish(item.Handle.Resource, true, null);
+                }
                 else await CompleteAsync(container, item.Handle.Resource, _execution.LocalSeedTimeout, ct);
             }
             _ready = true;
             await ObserveLifecycleAsync("ready", ct);
-            // Successful development runs remain live. Unexpected anchor/web termination latches a host failure.
+            // Unexpected exit of any long-lived container latches a host failure.
             while (!ct.IsCancellationRequested)
             {
-                foreach (var item in ownership.Active.Containers.Where(c => (c.Role is AnchorRole or ServerRole) || _workloads.Any(w => w.Web && w.Workload.Name == c.Role)))
+                foreach (var container in runningContainers)
                 {
-                    var observed = await _docker.ContainerAsync(item.Name, item.Id, OwnerId, ct);
+                    var observed = await _docker.ContainerAsync(container.Name, container.Id, OwnerId, ct);
                     if (observed is null || !observed.Running) throw new IOException();
                 }
                 await Task.Delay(200, ct);
@@ -487,7 +520,8 @@ public sealed class AppSurfaceKeycloakSupervisedRun
             var observed = await _docker.ContainerAsync(container.Name, container.Id, OwnerId, deadline.Token) ?? throw SafeException();
             if (!observed.Running)
             {
-                var exit = observed.ExitCode ?? throw SafeException();
+                RequireStopped(observed);
+                if (observed.Status != "exited" || observed.ExitCode is not { } exit) throw SafeException();
                 await Publish(handle, false, exit);
                 if (exit != 0) throw SafeException();
                 return;

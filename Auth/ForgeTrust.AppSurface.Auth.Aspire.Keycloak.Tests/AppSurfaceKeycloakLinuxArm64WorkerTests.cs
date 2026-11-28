@@ -107,7 +107,7 @@ public sealed class AppSurfaceKeycloakLinuxArm64WorkerTests
 
             var exit = await AppSurfaceKeycloakRealmReadyEntryPoint.RunAsync(
                 ["--appsurface-keycloak-reconcile", desired, bindings, output], _ => null,
-                TextWriter.Null, error, CancellationToken.None,
+                TextWriter.Null, TextWriter.Null, CancellationToken.None,
                 reconcile: (_, observedDesired, credentials, _) =>
                 {
                     Assert.True(observedDesired.Confidential);
@@ -136,6 +136,10 @@ public sealed class AppSurfaceKeycloakLinuxArm64WorkerTests
         }
 
         Assert.Equal(fenced ? 71 : 0, await anchor);
+        var diagnostics = error.ToString();
+        Assert.Contains("AppSurface Keycloak sealed-memory anchor ready.", diagnostics, StringComparison.Ordinal);
+        Assert.Equal(fenced, diagnostics.Contains("AppSurface Keycloak owner connection lost; namespace fencing.", StringComparison.Ordinal));
+        Assert.DoesNotContain(Secret, diagnostics, StringComparison.Ordinal);
         var published = JsonSerializer.Deserialize<KeycloakClientCredentialReference>(await File.ReadAllTextAsync(ready));
         Assert.NotNull(published);
         Assert.True(Record.Exception(() => published.Read()) is IOException or InvalidDataException);
@@ -317,9 +321,8 @@ public sealed class AppSurfaceKeycloakLinuxArm64WorkerTests
 
         var ownership = KeycloakVolumeIncarnation.ReadPinnedDatabaseOwnership(volume.Path);
 
-        Assert.NotNull(ownership);
-        Assert.Equal(GetUid(), ownership.Value.Uid);
-        Assert.Equal(GetGid(), ownership.Value.Gid);
+        Assert.Equal<uint?>(GetUid(), ownership?.Uid);
+        Assert.Equal<uint?>(GetGid(), ownership?.Gid);
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("linux")]

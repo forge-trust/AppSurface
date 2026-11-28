@@ -19,7 +19,6 @@ internal sealed class KeycloakOwnerHeartbeat : IAsyncDisposable
     private const int Acknowledged = 2;
     private const int Monitoring = 3;
     private const int Disposed = 4;
-    private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(8);
     private static readonly byte[] Acknowledgement = [KeycloakWorkerProtocol.OwnerHeartbeatAcknowledgement];
 
     private readonly TcpClient _client;
@@ -51,7 +50,7 @@ internal sealed class KeycloakOwnerHeartbeat : IAsyncDisposable
         int port,
         string expectedOwner,
         CancellationToken cancellationToken, Action? listenerReady = null)
-        => AcceptAsync(port, expectedOwner, OperationTimeout, cancellationToken, listenerReady);
+        => AcceptAsync(port, expectedOwner, KeycloakWorkerProtocol.OwnerHeartbeatOperationTimeout, cancellationToken, listenerReady);
 
     /// <summary>Accepts one owner connection with an injectable deadline for focused protocol tests.</summary>
     /// <param name="port">The TCP port to bind; ports must be greater than 1024.</param>
@@ -71,8 +70,9 @@ internal sealed class KeycloakOwnerHeartbeat : IAsyncDisposable
         TimeSpan operationTimeout,
         CancellationToken cancellationToken, Action? listenerReady = null)
     {
-        if (port is <= 1024 or > 65535)
-            throw new ArgumentOutOfRangeException(nameof(port), "The owner heartbeat port must be between 1025 and 65535.");
+        if (!KeycloakWorkerProtocol.IsOwnerHeartbeatPort(port))
+            throw new ArgumentOutOfRangeException(nameof(port), FormattableString.Invariant(
+                $"The owner heartbeat port must be between {KeycloakWorkerProtocol.MinimumOwnerHeartbeatPort} and {KeycloakWorkerProtocol.MaximumOwnerHeartbeatPort}."));
         ArgumentNullException.ThrowIfNull(expectedOwner);
         if (!Guid.TryParseExact(expectedOwner, "N", out _))
             throw new ArgumentException("The expected owner identifier must be a GUID in N format.", nameof(expectedOwner));
@@ -80,7 +80,7 @@ internal sealed class KeycloakOwnerHeartbeat : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(operationTimeout));
 
         var expectedFrame = KeycloakWorkerProtocol.EncodeOwnerHeartbeatFrame(expectedOwner);
-        var listener = new TcpListener(IPAddress.Any, port);
+        using var listener = new TcpListener(IPAddress.Any, port);
         TcpClient? client = null;
         var initialDeadline = new Deadline(operationTimeout);
         try

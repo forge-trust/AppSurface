@@ -32,8 +32,19 @@ internal sealed class SupervisedKeycloakOwnership(
     /// <summary>Gets the supplied baseline or the latest successfully persisted ownership snapshot.</summary>
     internal ActiveRecord Active { get; private set; } = active;
 
-    /// <summary>Persists current ownership state with the exact collected launch intents.</summary>
-    internal void Save(ActiveRecord owner)
+    /// <summary>Persists the initial owner reservation before staging or creating workloads.</summary>
+    internal void Reserve() => Save(Active);
+
+    /// <summary>Records the verified physical volume identity on the latest ownership snapshot.</summary>
+    internal void RecordVolumeIdentity(VolumeIdentity volume) => Save(Active with { Volume = volume });
+
+    /// <summary>Records that the owned runtime and its inputs have been staged.</summary>
+    internal void MarkStagingComplete() => Save(Active with { StagingComplete = true });
+
+    /// <summary>Records the owner fence after the anchor acknowledges the connection.</summary>
+    internal void MarkOwnerFenceEstablished() => Save(Active with { OwnerFenceEstablished = true });
+
+    private void Save(ActiveRecord owner)
     {
         var snapshot = owner with { Containers = _containers.ToArray() };
         var bytes = JsonSerializer.SerializeToUtf8Bytes(snapshot);

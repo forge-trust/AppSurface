@@ -79,7 +79,7 @@ internal sealed class SupervisedKeycloakRunStager(
         WritePrivate(Desired, desired);
         CreateCertificate();
         if (client is not null)
-            WritePrivate(AnchorInput, new { RunId = ownerId, Authority = desired.Authority, ClientId = desired.ClientId, ClientSecret = client });
+            WritePrivate(AnchorInput, new KeycloakMemoryAnchorInput(ownerId, desired.Authority, desired.ClientId, client));
         var serverConfig = $"bootstrap-admin-username={user}\nbootstrap-admin-password={password}\n";
         WritePrivateBytes(Bootstrap, Encoding.UTF8.GetBytes(serverConfig));
         if (historicalServerUser)

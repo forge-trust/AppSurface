@@ -28,6 +28,7 @@ def main():
             raise ValueError('unqualified generated proof volume')
     elif not volume.startswith('appsurface-issue888-normal-') or len(volume.removeprefix('appsurface-issue888-normal-'))!=32:
         raise ValueError('unqualified fixture volume')
+    a.evidence.mkdir(parents=True,exist_ok=False)
     started=time.monotonic();deadline=started+30
     docker=['docker','--host',docker_endpoint(a.docker_endpoint, r.get('dockerEndpoint'))]
     def command(*args):
@@ -105,7 +106,6 @@ def main():
         after=active.read_bytes() if active.exists() else None
         if after!=before:raise ValueError('retained marker changed')
         if time.monotonic()>=deadline:raise TimeoutError('fixture cleanup deadline')
-        a.evidence.mkdir(parents=True,exist_ok=False)
         result={'schema':1,'passed':True,'kind':'stopped-normal-fixture-cleanup','seconds':time.monotonic()-started,
                 'workloadsStarted':False,'workloadsStopped':False,'containersRemoved':observations,'volumeRemoved':volumeRemoved,
                 'retainedMarkerUnchanged':True,'activeMarkerRetained':before is not None,'originalReceiptUnchanged':hashlib.sha256(a.receipt.read_bytes()).hexdigest()}

@@ -6,15 +6,17 @@ namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
 
 public sealed class AppSurfaceKeycloakOwnerConnectionRegressionTests
 {
-    [Fact]
-    public async Task CancellationDuringRefusedConnectionRetriesDoesNotLatchFailure()
+    [Theory]
+    [InlineData(1025)]
+    [InlineData(65535)]
+    public async Task CancellationDuringRefusedConnectionRetriesDoesNotLatchFailure(int port)
     {
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         var retryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var losses = 0;
         var attempts = 0;
         var connecting = AppSurfaceKeycloakOwnerConnection.ConnectAsync(
-            1024,
+            port,
             Guid.NewGuid().ToString("N"),
             () => Interlocked.Increment(ref losses),
             stop.Token,

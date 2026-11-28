@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using ForgeTrust.AppSurface.Auth.Keycloak;
+using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -16,7 +17,17 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
 
     internal static AppSurfaceKeycloakRealmReadyWorkerInvocation Resolve(string? assemblyPath = null)
     {
-        assemblyPath ??= typeof(AppSurfaceKeycloakRealmReadyWorker).Assembly.Location;
+        var useProcessPath = assemblyPath is null;
+        if (useProcessPath)
+        {
+            assemblyPath = typeof(AppSurfaceKeycloakRealmReadyWorker).Assembly.Location;
+            if (assemblyPath.Length == 0)
+            {
+                // Bundled assemblies lack a file path. The publish target leaves the worker beside the AppHost.
+                return ResolveBundled(AppContext.BaseDirectory);
+            }
+        }
+
         var assemblyDirectory = Path.GetDirectoryName(assemblyPath);
         if (string.IsNullOrWhiteSpace(assemblyPath) || string.IsNullOrWhiteSpace(assemblyDirectory))
         {
@@ -37,8 +48,7 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
             return packageWorker;
         }
 
-        var consumerOutputWorker = CreateInvocation(
-            Path.Join(assemblyDirectory, ConsumerOutputWorkerDirectoryName));
+        var consumerOutputWorker = CreateConsumerOutputInvocation(assemblyDirectory);
         if (consumerOutputWorker is not null)
         {
             return consumerOutputWorker;
@@ -50,8 +60,27 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
             return projectReferenceWorker;
         }
 
+        // Self-extracting bundles put both the adapter and AppContext.BaseDirectory in the extraction cache.
+        // The shared muxer loads hostfxr from its own host/fxr directory.
+        if (useProcessPath && Path.GetDirectoryName(Environment.ProcessPath) is { } executableDirectory
+            && !Directory.Exists(PathUtils.PathUnder(executableDirectory, "host", "fxr")))
+        {
+            return ResolveBundled(executableDirectory);
+        }
+
         throw AppSurfaceKeycloakRealmReadyConfiguration.WorkerUnavailable();
     }
+
+    /// <summary>Resolves the external worker directory beside a bundled AppHost.</summary>
+    /// <param name="appDirectory">The base directory of the bundled AppHost executable.</param>
+    /// <returns>The worker invocation when all required files are present.</returns>
+    /// <exception cref="AppSurfaceKeycloakException">A required worker file is missing.</exception>
+    internal static AppSurfaceKeycloakRealmReadyWorkerInvocation ResolveBundled(string appDirectory) =>
+        CreateConsumerOutputInvocation(appDirectory)
+        ?? throw AppSurfaceKeycloakRealmReadyConfiguration.WorkerUnavailable();
+
+    private static AppSurfaceKeycloakRealmReadyWorkerInvocation? CreateConsumerOutputInvocation(string directory) =>
+        CreateInvocation(PathUtils.PathUnder(directory, ConsumerOutputWorkerDirectoryName));
 
     private static AppSurfaceKeycloakRealmReadyWorkerInvocation? CreateInvocation(string workingDirectory)
     {

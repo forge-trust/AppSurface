@@ -191,16 +191,26 @@ public sealed class KeycloakOwnerHeartbeatTests
     }
 
     [Fact]
-    public async Task RequiresGuidNFormatAndPortAbove1024()
+    public async Task RequiresGuidNFormatAndBoundedTimeout()
     {
         await Assert.ThrowsAsync<ArgumentException>(() =>
             KeycloakOwnerHeartbeat.AcceptAsync(12000, "not-a-guid", TestTimeout, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            KeycloakOwnerHeartbeat.AcceptAsync(1024, Guid.NewGuid().ToString("N"), TestTimeout, CancellationToken.None));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             KeycloakOwnerHeartbeat.AcceptAsync(12000, Guid.NewGuid().ToString("N"), TimeSpan.Zero, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             KeycloakOwnerHeartbeat.AcceptAsync(12000, Guid.NewGuid().ToString("N"), TimeSpan.FromDays(25), CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(1023)]
+    [InlineData(1024)]
+    [InlineData(65536)]
+    public async Task RejectsPortsOutsideTheOwnerHeartbeatRange(int port)
+    {
+        var error = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            KeycloakOwnerHeartbeat.AcceptAsync(port, Guid.NewGuid().ToString("N"), TestTimeout, CancellationToken.None));
+
+        Assert.Equal("port", error.ParamName);
     }
 
     [Fact]

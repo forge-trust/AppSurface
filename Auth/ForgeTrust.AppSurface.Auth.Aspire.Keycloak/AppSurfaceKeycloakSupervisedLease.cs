@@ -17,15 +17,15 @@ namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 internal sealed class SupervisedVolumeLease : IDisposable
 {
     private const int MaximumDaemonIdLength = 1024;
-    private const int MaximumMarkerLength = 65_536;
     private const string ActiveMarkerName = "active.json";
     private static readonly ConcurrentDictionary<string, byte> Held = new(StringComparer.Ordinal);
 
     private readonly QualifiedLeaseDirectory _directory;
     private readonly string _registryKey;
-    private QualifiedLeaseDirectory.FileId? _expectedActiveId;
-    private byte[]? _expectedActiveBytes;
+    private MarkerSnapshot? _expectedActive;
     private bool _disposed;
+
+    private sealed record MarkerSnapshot(QualifiedLeaseDirectory.FileId Id, byte[] Bytes);
 
     /// <summary>Gets the private directory containing this lease's durable records.</summary>
     internal string Path => _directory.Path;
@@ -49,7 +49,7 @@ internal sealed class SupervisedVolumeLease : IDisposable
     internal static Task<SupervisedVolumeLease> Acquire(string leaseRoot, string daemonId, string volumeName)
     {
         ValidateDaemonId(daemonId);
-        ValidateVolumeName(volumeName);
+        if (!SupervisedDocker.IsSupportedVolumeName(volumeName)) throw new QualifiedOwnershipFailure("InvalidVolumeName");
         if (IsFileLockingDisabled()) throw new QualifiedOwnershipFailure("LockingDisabled");
 
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(daemonId + "\n" + volumeName)))
@@ -79,12 +79,28 @@ internal sealed class SupervisedVolumeLease : IDisposable
         {
             ThrowIfDisposed();
             _directory.VerifyAnchor();
-            if (_expectedActiveId is not null)
+            if (_expectedActive is not null)
             {
                 VerifyActiveUnchanged();
                 return true;
             }
             return _directory.Exists(ActiveMarkerName);
+        }
+    }
+
+    /// <summary>Reports marker retention for a run that attempted its own reservation under this lease.</summary>
+    /// <remarks>Unverifiable absence is reported as retained. Cleanup and recovery still require the full marker comparison.</remarks>
+    internal bool HasRetainedActiveMarker()
+    {
+        ThrowIfDisposed();
+        try
+        {
+            _directory.VerifyAnchor();
+            return _directory.Exists(ActiveMarkerName);
+        }
+        catch (QualifiedOwnershipFailure)
+        {
+            return true;
         }
     }
 
@@ -96,9 +112,10 @@ internal sealed class SupervisedVolumeLease : IDisposable
     internal byte[] ReadActive()
     {
         ThrowIfDisposed();
-        if (_expectedActiveId is null) CaptureActive();
+        var snapshot = _expectedActive;
+        if (snapshot is null) snapshot = CaptureActive();
         else VerifyActiveUnchanged();
-        return _expectedActiveBytes!.ToArray();
+        return snapshot.Bytes.ToArray();
     }
 
     /// <summary>Creates a new active marker only when no marker currently exists.</summary>
@@ -106,7 +123,7 @@ internal sealed class SupervisedVolumeLease : IDisposable
     internal void WriteNewActive(byte[] bytes)
     {
         ThrowIfDisposed();
-        ValidateMarker(bytes);
+        ValidateMarkerBytes(bytes);
         _directory.VerifyAnchor();
         if (_directory.Exists(ActiveMarkerName)) throw new QualifiedOwnershipFailure("QualifiedActiveOwner");
 
@@ -122,7 +139,7 @@ internal sealed class SupervisedVolumeLease : IDisposable
     internal void ReplaceActive(byte[] bytes)
     {
         ThrowIfDisposed();
-        ValidateMarker(bytes);
+        ValidateMarkerBytes(bytes);
         VerifyActiveUnchanged();
 
         _directory.Replace(ActiveMarkerName, bytes.ToArray());
@@ -135,8 +152,7 @@ internal sealed class SupervisedVolumeLease : IDisposable
         ThrowIfDisposed();
         VerifyActiveUnchanged();
         _directory.Delete(ActiveMarkerName);
-        _expectedActiveId = null;
-        _expectedActiveBytes = null;
+        _expectedActive = null;
     }
 
     /// <summary>
@@ -161,32 +177,33 @@ internal sealed class SupervisedVolumeLease : IDisposable
         }
     }
 
-    private void CaptureActive()
+    private MarkerSnapshot CaptureActive()
     {
         _directory.VerifyAnchor();
         if (!_directory.Exists(ActiveMarkerName)) throw new QualifiedOwnershipFailure("MarkerChanged");
 
-        var initialId = _directory.Identity(ActiveMarkerName);
-        var bytes = _directory.Read(ActiveMarkerName);
-        ValidateMarker(bytes);
-        var finalId = _directory.Identity(ActiveMarkerName);
-        if (initialId != finalId) throw new QualifiedOwnershipFailure("MarkerChanged");
-
-        _expectedActiveId = finalId;
-        _expectedActiveBytes = bytes;
+        return _expectedActive = ReadActiveSnapshot();
     }
 
     private void VerifyActiveUnchanged()
     {
         _directory.VerifyAnchor();
-        if (_expectedActiveId is not { } expectedId || _expectedActiveBytes is not { } expectedBytes)
+        if (_expectedActive is not { } expected)
             throw new QualifiedOwnershipFailure("MarkerChanged");
 
-        var actualId = _directory.Identity(ActiveMarkerName);
-        var actualBytes = _directory.Read(ActiveMarkerName);
-        var finalId = _directory.Identity(ActiveMarkerName);
-        if (actualId != finalId || actualId != expectedId || !actualBytes.AsSpan().SequenceEqual(expectedBytes))
+        var actual = ReadActiveSnapshot();
+        if (actual.Id != expected.Id || !actual.Bytes.AsSpan().SequenceEqual(expected.Bytes))
             throw new QualifiedOwnershipFailure("MarkerChanged");
+    }
+
+    /// <summary>Reads the bounded marker between two name-based identity observations.</summary>
+    private MarkerSnapshot ReadActiveSnapshot()
+    {
+        var initialId = _directory.Identity(ActiveMarkerName);
+        var bytes = _directory.Read(ActiveMarkerName);
+        var finalId = _directory.Identity(ActiveMarkerName);
+        if (initialId != finalId) throw new QualifiedOwnershipFailure("MarkerChanged");
+        return new(finalId, bytes);
     }
 
     private void ThrowIfDisposed()
@@ -199,17 +216,6 @@ internal sealed class SupervisedVolumeLease : IDisposable
         if (string.IsNullOrWhiteSpace(daemonId) || daemonId.Length > MaximumDaemonIdLength)
             throw new QualifiedOwnershipFailure("DaemonIdentityUnavailable");
     }
-
-    private static void ValidateVolumeName(string volumeName)
-    {
-        if (string.IsNullOrEmpty(volumeName) || volumeName.Length > 128
-            || !IsAsciiAlphaNumeric(volumeName[0])
-            || volumeName.Any(character => !IsAsciiAlphaNumeric(character) && character is not '_' and not '.' and not '-'))
-            throw new QualifiedOwnershipFailure("InvalidVolumeName");
-    }
-
-    private static bool IsAsciiAlphaNumeric(char value) =>
-        value is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9';
 
     private static bool IsFileLockingDisabled()
     {
@@ -224,9 +230,6 @@ internal sealed class SupervisedVolumeLease : IDisposable
     internal static void ValidateMarkerBytes(byte[] bytes)
     {
         ArgumentNullException.ThrowIfNull(bytes);
-        if (bytes.Length is < 2 or > MaximumMarkerLength)
-            throw new QualifiedOwnershipFailure("InvalidMarker");
+        QualifiedLeaseDirectory.ValidateMarkerLength(bytes.LongLength);
     }
-
-    private static void ValidateMarker(byte[] bytes) => ValidateMarkerBytes(bytes);
 }

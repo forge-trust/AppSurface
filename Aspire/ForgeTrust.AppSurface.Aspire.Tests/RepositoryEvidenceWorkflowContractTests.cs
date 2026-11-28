@@ -301,10 +301,12 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         Assert.True(IndexOf(securitySteps, canonicalCheckout) < IndexOf(securitySteps, FindStep(securitySteps, "Checkout code")));
         var captureStep = FindStep(securitySteps, "Attest successful native coverage evidence");
         Assert.Equal("pwsh", captureStep["shell"].AsScalar());
+        Assert.DoesNotContain(new YamlScalarNode("continue-on-error"), captureStep.Children.Keys);
         var capture = captureStep["run"].AsScalar();
         Assert.Contains("'--operation', 'native'", capture);
         Assert.Contains("'--include-keycloak-native', 'true'", capture);
         Assert.Contains("'--native-producer', $producer, '--collection', $collection", capture);
+        Assert.Matches("Test-Path -LiteralPath \\$collection[^\\n]*\\n\\s*Add-Content -LiteralPath \\$env:GITHUB_OUTPUT -Value \"collection-path=\\$collection\"", capture);
         Assert.Contains("'--report'", capture);
         Assert.Contains("'--raw'", capture);
         const string restoreCommand = "dotnet restore \"$env:COVERAGE_TEST_PROJECT\" --locked-mode";
@@ -344,14 +346,30 @@ public sealed class RepositoryEvidenceWorkflowContractTests
         var nativeUpload = FindStep(securitySteps, "Upload attested native coverage")["with"].AsMapping();
         Assert.Equal("coverage-native-${{ matrix.producerId }}-${{ github.run_attempt }}", nativeUpload["name"].AsScalar());
         Assert.Equal("${{ steps.capture-native-coverage.outputs.capture-path }}", nativeUpload["path"].AsScalar());
+        var summarizeFailure = FindStep(securitySteps, "Summarize failed Keycloak native collection");
+        Assert.Equal("summarize-native-collection-failure", summarizeFailure["id"].AsScalar());
+        Assert.Equal("${{ !cancelled() && matrix.keycloak && steps.capture-native-coverage.outcome == 'failure' && steps.capture-native-coverage.outputs.collection-path != '' }}",
+            summarizeFailure["if"].AsScalar());
+        Assert.Equal("pwsh", summarizeFailure["shell"].AsScalar());
+        var summaryEnvironment = summarizeFailure["env"].AsMapping();
+        Assert.Equal("${{ steps.capture-native-coverage.outputs.collection-path }}", summaryEnvironment["COVERAGE_NATIVE_COLLECTION"].AsScalar());
+        Assert.Equal("${{ matrix.testProject }}", summaryEnvironment["COVERAGE_TEST_PROJECT"].AsScalar());
+        Assert.Contains("write-keycloak-native-failure-summary.ps1 -CollectionDirectory $env:COVERAGE_NATIVE_COLLECTION", summarizeFailure["run"].AsScalar());
+        Assert.Contains("summary-path=$summary", summarizeFailure["run"].AsScalar());
+        Assert.True(IndexOf(securitySteps, captureStep) < IndexOf(securitySteps, summarizeFailure));
         var failureUpload = FindStep(securitySteps, "Upload failed native capture result");
+        Assert.True(IndexOf(securitySteps, summarizeFailure) < IndexOf(securitySteps, failureUpload));
         Assert.Equal("${{ !cancelled() && steps.capture-native-coverage.outcome == 'failure' }}", failureUpload["if"].AsScalar());
         var failureArtifact = failureUpload["with"].AsMapping();
         Assert.Equal("coverage-capture-failure-${{ matrix.producerId }}-${{ github.run_attempt }}", failureArtifact["name"].AsScalar());
-        Assert.Equal(captureOutput + "/native-result.json\n" + captureOutput + ".time.log\n", failureArtifact["path"].AsScalar());
+        Assert.Equal(captureOutput + "/native-result.json\n" + captureOutput + ".time.log\n"
+            + "${{ steps.summarize-native-collection-failure.outputs.summary-path }}\n", failureArtifact["path"].AsScalar());
         Assert.Equal("ignore", failureArtifact["if-no-files-found"].AsScalar());
-        var diagnosticsArtifact = FindStep(securitySteps, "Upload coverage security diagnostics")["with"].AsMapping();
+        var diagnosticsUpload = FindStep(securitySteps, "Upload coverage security diagnostics");
+        Assert.Equal("${{ always() && !matrix.keycloak }}", diagnosticsUpload["if"].AsScalar());
+        var diagnosticsArtifact = diagnosticsUpload["with"].AsMapping();
         Assert.Equal("coverage-security-diagnostics-${{ matrix.producerId }}", diagnosticsArtifact["name"].AsScalar());
+        Assert.Equal("${{ runner.temp }}/coverage-native-results", diagnosticsArtifact["path"].AsScalar());
         Assert.Contains("capture-path=$env:COVERAGE_DOGFOOD_OUTPUT", capture);
         Assert.DoesNotContain("python", capture, StringComparison.OrdinalIgnoreCase);
 
@@ -445,6 +463,8 @@ public sealed class RepositoryEvidenceWorkflowContractTests
     public void InstalledCoverageCandidateAndConsumersUseTheSameEventHead()
     {
         var expected = "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        Assert.True(File.Exists(TestPathUtils.PathUnder(repository, ".github", "scripts", "install-coverage-candidate.ps1")));
         var jobs = _buildWorkflow["jobs"].AsMapping();
         Assert.Equal(expected, _buildWorkflow["env"].AsMapping()["COVERAGE_SOURCE_COMMIT"].AsScalar());
         foreach (var name in new[] { "coverage-cli-candidate", "coverage-security-platform", "coverage-collection", "build" })
@@ -462,14 +482,94 @@ public sealed class RepositoryEvidenceWorkflowContractTests
             else
             {
                 Assert.Contains("coverage-cli-candidate", job["needs"].AsSequence().Select(node => node.AsScalar()));
-                var install = FindStep(job["steps"].AsSequence(), "Verify and install candidate CLI")["run"].AsScalar();
-                Assert.Contains("$manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT", install);
-                Assert.Contains("$manifest.commit -ne $commit", install);
-                Assert.Contains("$manifest.tree -ne $tree", install);
+                var steps = job["steps"].AsSequence();
+                var install = FindStep(steps, "Verify and install candidate CLI");
+                Assert.Equal("pwsh", install["shell"].AsScalar());
+                Assert.Equal("./.github/scripts/install-coverage-candidate.ps1", install["run"].AsScalar());
+                Assert.True(IndexOf(steps, FindStep(steps, "Download same-source CLI candidate package")) < IndexOf(steps, install));
             }
         }
         Assert.Equal("${{ needs.coverage-evidence-plan.outputs.diff_base }}",
             jobs["coverage-security-platform"].AsMapping()["env"].AsMapping()["COVERAGE_GATE_DIFF_BASE"].AsScalar());
+    }
+
+    [Fact]
+    public void CoverageCandidateWorkflowContractsFailBeforePackingAndUploading()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        Assert.True(File.Exists(TestPathUtils.PathUnder(repository, "tests", "coverage-candidate", "install-coverage-candidate.tests.ps1")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(repository, "tests", "coverage-native-failure", "contracts.ps1")));
+
+        var steps = _buildWorkflow["jobs"].AsMapping()["coverage-cli-candidate"].AsMapping()["steps"].AsSequence();
+        var contracts = FindStep(steps, "Test coverage candidate workflow contracts");
+        Assert.Equal("pwsh", contracts["shell"].AsScalar());
+        Assert.False(contracts.Children.ContainsKey(new YamlScalarNode("if")));
+        Assert.False(contracts.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+
+        var command = contracts["run"].AsScalar();
+        Assert.Contains("$ErrorActionPreference = 'Stop'", command);
+        const string candidateTests = "& ./tests/coverage-candidate/install-coverage-candidate.tests.ps1";
+        const string nativeFailureTests = "& ./tests/coverage-native-failure/contracts.ps1";
+        var candidateTestsIndex = command.IndexOf(candidateTests, StringComparison.Ordinal);
+        var nativeFailureTestsIndex = command.IndexOf(nativeFailureTests, StringComparison.Ordinal);
+        Assert.True(candidateTestsIndex >= 0);
+        Assert.True(nativeFailureTestsIndex > candidateTestsIndex);
+
+        var pack = FindStep(steps, "Pack source and SDK bound candidate CLI");
+        var upload = FindStep(steps, "Upload same-run candidate CLI package");
+        Assert.True(IndexOf(steps, contracts) < IndexOf(steps, pack));
+        Assert.True(IndexOf(steps, pack) < IndexOf(steps, upload));
+        foreach (var step in new[] { pack, upload })
+        {
+            Assert.False(step.Children.ContainsKey(new YamlScalarNode("if")));
+            Assert.False(step.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        }
+        Assert.Equal("error", upload["with"].AsMapping()["if-no-files-found"].AsScalar());
+    }
+
+    [Fact]
+    public void KeycloakThemeEvidenceRunsOfflineWorkerConsumerBeforeLockedRestoreAndProof()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        Assert.True(File.Exists(TestPathUtils.PathUnder(repository, "tests", "keycloak-identity-feasibility", "verify-worker-consumer.py")));
+
+        var steps = _buildWorkflow["jobs"].AsMapping()["keycloak-theme-evidence"].AsMapping()["steps"].AsSequence();
+        var sdk = FindStep(steps, "Setup .NET SDK");
+        var consumer = FindStep(steps, "Verify offline worker consumer upgrade and clean");
+        var restore = FindStep(steps, "Restore focused Keycloak proof (locked)");
+        var lifecycleProof = FindStep(steps, "Verify theme lifecycle contracts");
+        var themeProof = FindStep(steps, "Prove the pinned sample theme image and disposable realm");
+
+        Assert.Equal("10.0.402", sdk["with"].AsMapping()["dotnet-version"].AsScalar());
+        Assert.Equal("bash", consumer["shell"].AsScalar());
+        Assert.Equal("python3 -B tests/keycloak-identity-feasibility/verify-worker-consumer.py --dotnet \"$(command -v dotnet)\"",
+            consumer["run"].AsScalar());
+        Assert.False(consumer.Children.ContainsKey(new YamlScalarNode("if")));
+        Assert.False(consumer.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        Assert.True(IndexOf(steps, sdk) < IndexOf(steps, consumer));
+        Assert.True(IndexOf(steps, consumer) < IndexOf(steps, restore));
+        Assert.True(IndexOf(steps, consumer) < IndexOf(steps, lifecycleProof));
+        Assert.True(IndexOf(steps, consumer) < IndexOf(steps, themeProof));
+    }
+
+    [Fact]
+    public void KeycloakThemeEvidenceRequiresThePackedSingleFileSmoke()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        Assert.True(File.Exists(TestPathUtils.PathUnder(repository, "tests", "keycloak-identity-feasibility", "verify-packed-worker-single-file.py")));
+
+        var steps = _buildWorkflow["jobs"].AsMapping()["keycloak-theme-evidence"].AsMapping()["steps"].AsSequence();
+        var lifecycleProof = FindStep(steps, "Verify theme lifecycle contracts");
+        var packedWorkerProof = FindStep(steps, "Verify packed single-file worker resolution");
+        var themeProof = FindStep(steps, "Prove the pinned sample theme image and disposable realm");
+
+        Assert.Equal("bash", packedWorkerProof["shell"].AsScalar());
+        Assert.Equal("python3 -B tests/keycloak-identity-feasibility/verify-packed-worker-single-file.py --dotnet \"$(command -v dotnet)\"",
+            packedWorkerProof["run"].AsScalar());
+        Assert.False(packedWorkerProof.Children.ContainsKey(new YamlScalarNode("if")));
+        Assert.False(packedWorkerProof.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        Assert.True(IndexOf(steps, lifecycleProof) < IndexOf(steps, packedWorkerProof));
+        Assert.True(IndexOf(steps, packedWorkerProof) < IndexOf(steps, themeProof));
     }
 
     [Fact]

@@ -166,6 +166,13 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Test coverage candidate workflow contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./tests/coverage-candidate/install-coverage-candidate.tests.ps1
+          & ./tests/coverage-native-failure/contracts.ps1
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         env:
@@ -304,42 +311,7 @@ jobs:
 
       - name: Verify and install candidate CLI
         shell: pwsh
-        run: |
-          $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
-          $manifest = Get-Content -Raw -Path (Join-Path $feed "candidate.json") | ConvertFrom-Json
-          $commit = (git rev-parse HEAD).Trim()
-          $tree = (git rev-parse "HEAD^{tree}").Trim()
-          $sdk = (dotnet --version).Trim()
-          $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
-          if ($manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
-              $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
-              $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
-            throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
-          }
-          if ((Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Candidate CLI package hash does not match its same-run manifest."
-          }
-          $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
-          $toolConfig = Join-Path $feed "candidate.nuget.config"
-          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
-          @"
-          <configuration>
-            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
-            <fallbackPackageFolders><clear /></fallbackPackageFolders>
-          </configuration>
-          "@ | Set-Content -LiteralPath $toolConfig
-          dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
-            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
-          if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
-          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
-            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
-          if ($installedArchives.Count -ne 1 -or
-              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Installed CLI archive does not match the same-run candidate."
-          }
-          $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
-          if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
-          Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
+        run: ./.github/scripts/install-coverage-candidate.ps1
 
       - name: Prepare generated docs stylesheet for coverage security tests
         if: ${{ !matrix.keycloak }}
@@ -395,6 +367,7 @@ jobs:
             $producer = $env:COVERAGE_KEYCLOAK_PRODUCER
             $collection = Join-Path $env:RUNNER_TEMP "coverage-native-collection-$producer-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
             if (Test-Path -LiteralPath $collection) { throw "Keycloak native collection path is not fresh." }
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "collection-path=$collection"
             $adapter += @('--native-producer', $producer, '--collection', $collection)
           } else {
             $reports = @(Get-ChildItem -Path "${{ runner.temp }}/coverage-native-results" -Recurse -Filter coverage.cobertura.xml)
@@ -433,6 +406,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Summarize failed Keycloak native collection
+        id: summarize-native-collection-failure
+        if: ${{ !cancelled() && matrix.keycloak && steps.capture-native-coverage.outcome == 'failure' && steps.capture-native-coverage.outputs.collection-path != '' }}
+        shell: pwsh
+        env:
+          COVERAGE_NATIVE_COLLECTION: ${{ steps.capture-native-coverage.outputs.collection-path }}
+          COVERAGE_TEST_PROJECT: ${{ matrix.testProject }}
+        run: |
+          $summary = Join-Path $env:RUNNER_TEMP 'coverage-keycloak-failure-summary.json'
+          & ./.github/scripts/write-keycloak-native-failure-summary.ps1 -CollectionDirectory $env:COVERAGE_NATIVE_COLLECTION `
+            -ProducerId $env:COVERAGE_KEYCLOAK_PRODUCER -TestProject $env:COVERAGE_TEST_PROJECT -OutputPath $summary
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "summary-path=$summary"
+
       - name: Upload failed native capture result
         if: ${{ !cancelled() && steps.capture-native-coverage.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -441,11 +427,12 @@ jobs:
           path: |
             ${{ runner.temp }}/coverage-native-${{ matrix.producerId }}-${{ github.run_id }}-${{ github.run_attempt }}/native-result.json
             ${{ runner.temp }}/coverage-native-${{ matrix.producerId }}-${{ github.run_id }}-${{ github.run_attempt }}.time.log
+            ${{ steps.summarize-native-collection-failure.outputs.summary-path }}
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload coverage security diagnostics
-        if: ${{ always() }}
+        if: ${{ always() && !matrix.keycloak }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-security-diagnostics-${{ matrix.producerId }}
@@ -478,11 +465,19 @@ jobs:
             Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/packages.lock.json
             Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/packages.lock.json
 
+      - name: Verify offline worker consumer upgrade and clean
+        shell: bash
+        run: python3 -B tests/keycloak-identity-feasibility/verify-worker-consumer.py --dotnet "$(command -v dotnet)"
+
       - name: Restore focused Keycloak proof (locked)
         run: dotnet restore Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj --locked-mode
 
       - name: Verify theme lifecycle contracts
         run: dotnet test Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj --configuration Release --no-restore
+
+      - name: Verify packed single-file worker resolution
+        shell: bash
+        run: python3 -B tests/keycloak-identity-feasibility/verify-packed-worker-single-file.py --dotnet "$(command -v dotnet)"
 
       - name: Prove the pinned sample theme image and disposable realm
         run: |
@@ -839,42 +834,7 @@ jobs:
       - name: Verify and install candidate CLI
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         shell: pwsh
-        run: |
-          $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
-          $manifest = Get-Content -Raw -Path (Join-Path $feed "candidate.json") | ConvertFrom-Json
-          $commit = (git rev-parse HEAD).Trim()
-          $tree = (git rev-parse "HEAD^{tree}").Trim()
-          $sdk = (dotnet --version).Trim()
-          $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
-          if ($manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
-              $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
-              $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
-            throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
-          }
-          if ((Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Candidate CLI package hash does not match its same-run manifest."
-          }
-          $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
-          $toolConfig = Join-Path $feed "candidate.nuget.config"
-          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
-          @"
-          <configuration>
-            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
-            <fallbackPackageFolders><clear /></fallbackPackageFolders>
-          </configuration>
-          "@ | Set-Content -LiteralPath $toolConfig
-          dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
-            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
-          if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
-          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
-            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
-          if ($installedArchives.Count -ne 1 -or
-              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Installed CLI archive does not match the same-run candidate."
-          }
-          $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
-          if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
-          Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
+        run: ./.github/scripts/install-coverage-candidate.ps1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -1097,42 +1057,7 @@ jobs:
       - name: Verify and install candidate CLI
         if: ${{ needs.coverage-evidence-plan.outputs.requires_coverage == 'true' }}
         shell: pwsh
-        run: |
-          $feed = Join-Path $env:RUNNER_TEMP "coverage-candidate-feed"
-          $manifest = Get-Content -Raw -Path (Join-Path $feed "candidate.json") | ConvertFrom-Json
-          $commit = (git rev-parse HEAD).Trim()
-          $tree = (git rev-parse "HEAD^{tree}").Trim()
-          $sdk = (dotnet --version).Trim()
-          $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}.nupkg"
-          if ($manifest.commit -ne $env:COVERAGE_SOURCE_COMMIT -or $manifest.commit -ne $commit -or $manifest.tree -ne $tree -or
-              $manifest.sdk -ne $sdk -or $manifest.sdk -ne "${{ env.COVERAGE_SDK_VERSION }}" -or
-              $manifest.version -ne "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" -or !(Test-Path $package)) {
-            throw "Candidate CLI package source, SDK, or pinned version does not match this lane."
-          }
-          if ((Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Candidate CLI package hash does not match its same-run manifest."
-          }
-          $toolRoot = Join-Path $env:RUNNER_TEMP "coverage-cli"
-          $toolConfig = Join-Path $feed "candidate.nuget.config"
-          $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
-          @"
-          <configuration>
-            <packageSources><clear /><add key="candidate" value="$escapedFeed" /></packageSources>
-            <fallbackPackageFolders><clear /></fallbackPackageFolders>
-          </configuration>
-          "@ | Set-Content -LiteralPath $toolConfig
-          dotnet tool install ForgeTrust.AppSurface.Cli --tool-path $toolRoot `
-            --version "${{ env.COVERAGE_CLI_CANDIDATE_VERSION }}" --configfile $toolConfig
-          if ($LASTEXITCODE -ne 0) { throw "Candidate CLI installation failed." }
-          $installedArchives = @(Get-ChildItem -LiteralPath (Join-Path $toolRoot ".store") -Recurse -File |
-            Where-Object { $_.Name -ieq (Split-Path -Leaf $package) })
-          if ($installedArchives.Count -ne 1 -or
-              (Get-FileHash -LiteralPath $installedArchives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.packageSha256) {
-            throw "Installed CLI archive does not match the same-run candidate."
-          }
-          $command = Join-Path $toolRoot $(if ($IsWindows) { "appsurface.exe" } else { "appsurface" })
-          if (!(Test-Path $command)) { throw "Installed appsurface command was not found." }
-          Add-Content -Path $env:GITHUB_ENV -Value "COVERAGE_CLI_PATH=$command"
+        run: ./.github/scripts/install-coverage-candidate.ps1
 
       - name: Verify generated package chooser
         run: |

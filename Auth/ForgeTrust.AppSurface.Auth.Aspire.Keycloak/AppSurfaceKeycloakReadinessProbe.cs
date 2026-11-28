@@ -15,7 +15,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
 
     private readonly HttpClient _httpClient;
     private readonly string? _expectedLoginThemeName;
-    private readonly IReadOnlyList<string> _expectedSeededUserNames;
+    private readonly ImmutableArray<string> _expectedSeededUserNames;
     private readonly AppSurfaceKeycloakOptions _options;
     private readonly AppSurfaceKeycloakConfigurationProjection? _registrationProjection;
     private readonly Func<string, string> _readAllText;
@@ -30,7 +30,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
     /// challenge checks can inspect Keycloak's raw response. Injected clients should preserve those behaviors.
     /// </remarks>
     public AppSurfaceKeycloakReadinessProbe(AppSurfaceKeycloakOptions options, HttpClient? httpClient = null)
-        : this(options, httpClient ?? DefaultHttpClient, File.ReadAllText, loginThemeName: null, seededUserNames: null)
+        : this(options, httpClient ?? DefaultHttpClient, File.ReadAllText)
     {
     }
 
@@ -46,15 +46,11 @@ public sealed class AppSurfaceKeycloakReadinessProbe
     /// <param name="options">The proof options to verify.</param>
     /// <param name="httpClient">HTTP client used for metadata and authorization requests.</param>
     /// <param name="readAllText">Realm import file reader.</param>
-    /// <param name="loginThemeName">Optional safe theme name expected in generated realm evidence.</param>
-    /// <param name="seededUserNames">Optional safe user names expected in generated realm evidence.</param>
     /// <param name="registrationProjection">Projection from the same already validated registration options.</param>
     internal AppSurfaceKeycloakReadinessProbe(
         AppSurfaceKeycloakOptions options,
         HttpClient httpClient,
         Func<string, string> readAllText,
-        string? loginThemeName = null,
-        IReadOnlyList<string>? seededUserNames = null,
         AppSurfaceKeycloakConfigurationProjection? registrationProjection = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -65,8 +61,8 @@ public sealed class AppSurfaceKeycloakReadinessProbe
         _registrationProjection = registrationProjection;
         _httpClient = httpClient;
         _readAllText = readAllText;
-        _expectedLoginThemeName = loginThemeName ?? options.LoginTheme?.Name;
-        _expectedSeededUserNames = seededUserNames ?? options.SeededUsers.Select(user => user.Username).ToArray();
+        _expectedLoginThemeName = options.LoginTheme?.Name;
+        _expectedSeededUserNames = options.SeededUsers.Select(user => user.Username).ToImmutableArray();
     }
 
     /// <summary>
@@ -83,7 +79,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             _options.Realm,
             _options.RedirectUris.Select(uri => uri.ToString()).ToImmutableArray(),
             _options.PostLogoutRedirectUris.Select(uri => uri.ToString()).ToImmutableArray(),
-            _expectedSeededUserNames.ToImmutableArray(),
+            _expectedSeededUserNames,
             _options.RealmImportDirectory,
             _expectedLoginThemeName);
 

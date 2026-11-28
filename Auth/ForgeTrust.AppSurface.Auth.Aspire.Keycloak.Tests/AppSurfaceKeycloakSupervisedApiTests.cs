@@ -107,6 +107,10 @@ public sealed class AppSurfaceKeycloakSupervisedApiTests
         Assert.Empty(Directory.EnumerateFileSystemEntries(folder.Path));
         Assert.StartsWith(TestPathUtils.PathUnder(folder.Path, "runs"), expectedDirectory, StringComparison.Ordinal);
         Assert.Same(wrapper.RealmReady(), run.RealmReady);
+        var readinessError = Assert.Throws<InvalidOperationException>(() => wrapper.Readiness);
+        var importError = Assert.Throws<InvalidOperationException>(() => wrapper.RealmImportFile);
+        Assert.Contains("RealmReady()", readinessError.Message, StringComparison.Ordinal);
+        Assert.Contains("RealmReady()", importError.Message, StringComparison.Ordinal);
         Assert.Same(run.RealmReady.Resource.Resource, Assert.Single(seed.Resource.Annotations.OfType<WaitAnnotation>()).Resource);
         Assert.Same(seed.Resource, Assert.Single(web.Resource.Annotations.OfType<WaitAnnotation>()).Resource);
         Assert.Empty(wrapper.Resource.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());

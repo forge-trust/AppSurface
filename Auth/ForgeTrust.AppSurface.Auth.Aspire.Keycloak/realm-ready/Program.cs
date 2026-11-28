@@ -10,6 +10,8 @@ namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 internal static class AppSurfaceKeycloakRealmReadyEntryPoint
 {
+    private static readonly TimeSpan LegacyReadinessTimeout = TimeSpan.FromSeconds(120);
+
     private static Task<int> Main(string[] args)
         => RunAsync(args, Environment.GetEnvironmentVariable, Console.Out, Console.Error, CancellationToken.None);
 
@@ -44,24 +46,24 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
         if (args is [KeycloakWorkerProtocol.InitializeVolume, var uidText])
             return RunInitializeVolumeCommand(volumeRoot, uidText, standardError, InitializeNativeVolume);
         var boundaryStage = "configuration";
-        (Func<CancellationToken, Task<int>> Execute, bool Finite, string? ResultPath)? command = args switch
+        (Func<CancellationToken, Task<int>> Execute, TimeSpan? Timeout, string? ResultPath)? command = args switch
         {
             [KeycloakWorkerProtocol.Reconcile, var desired, var bindings, var result]
-                => (token => RunRealmAsync(token, (desired, bindings, result)), true, result),
+                => (token => RunRealmAsync(token, (desired, bindings, result)), KeycloakWorkerProtocol.ReconciliationTimeout, result),
             [KeycloakWorkerProtocol.FencedMemoryAnchor, var input, var ready, var port, var owner]
-                => (token => HoldAnchorAsync(input, ready, token, ParsePort(port), owner), false, null),
+                => (token => HoldAnchorAsync(input, ready, token, ParsePort(port), owner, standardError), null, null),
             [KeycloakWorkerProtocol.OwnerFence, var ready, var port, var owner]
-                => (token => HoldAnchorAsync(null, ready, token, ParsePort(port), owner), false, null),
+                => (token => HoldAnchorAsync(null, ready, token, ParsePort(port), owner, standardError), null, null),
             ["--appsurface-keycloak-memory-anchor", var input, var ready]
-                => (token => HoldAnchorAsync(input, ready, token, null, null), false, null),
-            [KeycloakWorkerProtocol.RealmReady] => (token => RunRealmAsync(token), true, null),
+                => (token => HoldAnchorAsync(input, ready, token, null, null, standardError), null, null),
+            [KeycloakWorkerProtocol.RealmReady] => (token => RunRealmAsync(token), LegacyReadinessTimeout, null),
             _ => null
         };
         if (command is not { } selected) return 1;
 
         var execution = Stopwatch.StartNew();
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (selected.Finite) stop.CancelAfter(TimeSpan.FromSeconds(120));
+        if (selected.Timeout is { } timeout) stop.CancelAfter(timeout);
         using var term = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => { context.Cancel = true; stop.Cancel(); });
         ConsoleCancelEventHandler interrupt = (_, e) => { e.Cancel = true; stop.Cancel(); };
         Console.CancelKeyPress += interrupt;
@@ -127,7 +129,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
                 return 0;
             }
             var (desiredPath, bindingsPath, resultPath) = inputs;
-            WriteStarted(resultPath);
+            VerifyReceiptDirectoryWritable(resultPath);
             if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
             var privateFile = new FileInfo(bindingsPath);
             if (!privateFile.Exists || privateFile.LinkTarget is not null || privateFile.Length > 16 * 1024
@@ -287,12 +289,13 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
 
     /// <summary>Holds the owner fence and, for a confidential client, the same-run sealed capture.</summary>
     /// <remarks>A null input path selects a credential-free fence. In that mode only the listening marker is written.</remarks>
-    private static Task<int> HoldAnchorAsync(string? inputPath, string readyPath, CancellationToken token, int? ownerPort, string? expectedOwner)
+    private static Task<int> HoldAnchorAsync(string? inputPath, string readyPath, CancellationToken token, int? ownerPort,
+        string? expectedOwner, TextWriter standardError)
     {
         if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
             throw new PlatformNotSupportedException();
 
-        return HoldAnchorCoreAsync(inputPath, readyPath, token, ownerPort, expectedOwner, CreateNativeAnchorCapture, Console.Error);
+        return HoldAnchorCoreAsync(inputPath, readyPath, token, ownerPort, expectedOwner, CreateNativeAnchorCapture, standardError);
     }
 
     /// <summary>Coordinates anchor capture custody and metadata publication without invoking native capture operations.</summary>
@@ -302,7 +305,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
     /// <param name="ownerPort">The local heartbeat port, or null for an unfenced worker.</param>
     /// <param name="expectedOwner">The required owner identifier for a fenced worker.</param>
     /// <param name="createCapture">Creates disposable custody and returns its metadata-only reference.</param>
-    /// <param name="standardError">The safe publication diagnostic writer.</param>
+    /// <param name="standardError">The safe publication and owner-loss diagnostic writer.</param>
     /// <param name="createInitialFenceDeadline">Optional deadline factory forwarded to the owner fence.</param>
     /// <param name="exitProcess">Optional process exit callback forwarded to the owner fence.</param>
     /// <returns>The worker's owner-fence or cancellation exit code.</returns>
@@ -312,7 +315,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
         CancellationToken token,
         int? ownerPort,
         string? expectedOwner,
-        Func<MemoryAnchorInput, (IDisposable Custody, KeycloakClientCredentialReference Reference)> createCapture,
+        Func<KeycloakMemoryAnchorInput, (IDisposable Custody, KeycloakClientCredentialReference Reference)> createCapture,
         TextWriter standardError,
         Func<Action, IDisposable>? createInitialFenceDeadline = null,
         Action<int>? exitProcess = null)
@@ -329,7 +332,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
                 return 0;
             }
 
-            return await RunOwnerFenceAsync(readyPath, ownerPort.Value, expectedOwner!, token, PrepareCaptureAsync,
+            return await RunOwnerFenceAsync(readyPath, ownerPort.Value, expectedOwner!, token, standardError, PrepareCaptureAsync,
                 createInitialFenceDeadline, exitProcess);
         }
         finally { custody?.Custody.Dispose(); }
@@ -353,6 +356,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
     /// <param name="ownerPort">The local TCP port reserved for the owner heartbeat.</param>
     /// <param name="expectedOwner">The GUID-N owner identifier required by every heartbeat frame.</param>
     /// <param name="cancellationToken">Cancels acceptance, preparation, acknowledgement, or monitoring.</param>
+    /// <param name="standardError">The safe owner-loss diagnostic writer.</param>
     /// <param name="prepareBeforeAcknowledgement">Optional same-run capture and reference publication performed after owner acceptance.</param>
     /// <param name="createInitialFenceDeadline">Optional deadline factory for deterministic tests. Production uses the fixed twelve-second timer.</param>
     /// <param name="exitProcess">Optional process exit action. Production exits with status 71 if the initial fence expires.</param>
@@ -362,6 +366,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
         int ownerPort,
         string expectedOwner,
         CancellationToken cancellationToken,
+        TextWriter standardError,
         Func<CancellationToken, Task>? prepareBeforeAcknowledgement = null,
         Func<Action, IDisposable>? createInitialFenceDeadline = null,
         Action<int>? exitProcess = null)
@@ -391,7 +396,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
             if (Interlocked.CompareExchange(ref initialFenceState, 2, 0) != 0) throw new TimeoutException();
             await heartbeat.AcknowledgeAsync(ownerCancellation.Token);
             await heartbeat.WaitForLossAsync(ownerCancellation.Token);
-            Console.Error.WriteLine("AppSurface Keycloak owner connection lost; namespace fencing.");
+            standardError.WriteLine("AppSurface Keycloak owner connection lost; namespace fencing.");
             return 71;
         }
         catch (OperationCanceledException) when (Volatile.Read(ref initialFenceState) == 1)
@@ -414,7 +419,7 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
     /// <exception cref="InvalidDataException">The file is linked, has unsafe permissions or bounds, or names another owner.</exception>
     /// <exception cref="JsonException">The declaration JSON is malformed.</exception>
     /// <exception cref="PlatformNotSupportedException">The current platform does not provide Unix file permissions.</exception>
-    internal static MemoryAnchorInput ReadAnchorDeclaration(string inputPath, string? expectedOwner)
+    internal static KeycloakMemoryAnchorInput ReadAnchorDeclaration(string inputPath, string? expectedOwner)
     {
         if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
 
@@ -422,13 +427,13 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
         if (!input.Exists || input.LinkTarget is not null || input.Length is < 1 or > 16 * 1024
             || (File.GetUnixFileMode(inputPath) & ~(UnixFileMode.UserRead | UnixFileMode.UserWrite)) != 0)
             throw new InvalidDataException();
-        var declaration = JsonSerializer.Deserialize<MemoryAnchorInput>(File.ReadAllBytes(inputPath)) ?? throw new InvalidDataException();
+        var declaration = JsonSerializer.Deserialize<KeycloakMemoryAnchorInput>(File.ReadAllBytes(inputPath)) ?? throw new InvalidDataException();
         if (expectedOwner is not null && declaration.RunId != expectedOwner) throw new InvalidDataException();
         return declaration;
     }
 
     [SupportedOSPlatform("linux")]
-    private static (IDisposable, KeycloakClientCredentialReference) CreateNativeAnchorCapture(MemoryAnchorInput declaration)
+    private static (IDisposable, KeycloakClientCredentialReference) CreateNativeAnchorCapture(KeycloakMemoryAnchorInput declaration)
     {
         var capture = KeycloakClientCredentialMemoryCapture.CreateForOwnerLifetime(
             declaration.RunId, new Uri(declaration.Authority), declaration.ClientId, declaration.ClientSecret);
@@ -466,10 +471,12 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
         standardError.WriteLine("AppSurface Keycloak sealed-memory anchor ready.");
     }
 
-    private static void WriteStarted(string output)
+    /// <summary>Checks the receipt directory before reconciliation can update Keycloak.</summary>
+    private static void VerifyReceiptDirectoryWritable(string resultPath)
     {
-        using var process = Process.GetCurrentProcess();
-        File.WriteAllText(output + ".started", JsonSerializer.Serialize(new { pid = Environment.ProcessId, startTicks = process.StartTime.ToUniversalTime().Ticks }));
+        var directory = Path.GetDirectoryName(Path.GetFullPath(resultPath)) ?? throw new InvalidDataException();
+        var probePath = Path.Combine(directory, ".receipt-probe-" + Guid.NewGuid().ToString("N"));
+        using var probe = File.OpenHandle(probePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, FileOptions.DeleteOnClose);
     }
 
     /// <summary>Reads the legacy nonsecret environment contract before contacting Keycloak.</summary>
@@ -505,7 +512,5 @@ internal static class AppSurfaceKeycloakRealmReadyEntryPoint
             string.IsNullOrWhiteSpace(theme) ? null : theme);
     }
 
-    /// <summary>Contains the private, bounded declaration consumed by Linux sealed-memory capture.</summary>
-    internal sealed record MemoryAnchorInput(string RunId, string Authority, string ClientId, string ClientSecret);
     [DllImport("libc", SetLastError = true)] private static extern int chown(string path, uint owner, uint group);
 }

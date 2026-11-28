@@ -20,8 +20,6 @@ internal static class RealmClientCapture
     private const uint Immutable = 2;
     private const ushort Regular = 0x8000;
     private const ushort DirectoryType = 0x4000;
-    private const int MaximumCredentialBytes = 4096;
-    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     /// <summary>Captures one opaque UTF-8 client credential under an already held run owner.</summary>
     internal static void Capture(string root, string runId, string value) => Capture(root, runId, value, null, null);
@@ -106,7 +104,7 @@ internal static class RealmClientCapture
         var expected = JsonSerializer.Deserialize<Identity>(metadata) ?? throw new InvalidDataException();
         if (expected.RunId != runId || DateTimeOffset.UtcNow.ToUnixTimeSeconds() >= expected.ExpiresUnixSeconds)
             throw new InvalidDataException("Capture expired or wrong run.");
-        if (expected.SecretByteLength is < 1 or > MaximumCredentialBytes)
+        if (expected.SecretByteLength is < 1 or > KeycloakClientCredentialText.MaximumBytes)
             throw new InvalidDataException("Capture descriptor rejected.");
         if (verifyIdentity && (!string.Equals(expected.Authority, expectedAuthority, StringComparison.Ordinal)
             || !string.Equals(expected.ClientId, expectedClientId, StringComparison.Ordinal)))
@@ -125,13 +123,13 @@ internal static class RealmClientCapture
         string value;
         try
         {
-            value = StrictUtf8.GetString(bytes);
+            value = KeycloakClientCredentialText.Decode(bytes);
         }
         catch (DecoderFallbackException)
         {
             throw new InvalidDataException("Capture credential is not valid UTF-8.");
         }
-        if (!IsValidCredentialText(value)) throw new InvalidDataException("Capture credential is invalid.");
+        if (!KeycloakClientCredentialText.IsValid(value)) throw new InvalidDataException("Capture credential is invalid.");
         // Never export the bytes, their hash, or a credential-derived acknowledgment.
         return value;
     }
@@ -149,10 +147,10 @@ internal static class RealmClientCapture
         if (fchflags(file, stat.Flags & ~Immutable) != 0) throw new IOException("Owned unseal failed.");
     }
 
-    private static void ValidateFile(Stat stat)
+    private static void ValidateFile(DarwinArm64FileMetadata stat)
     {
         if ((stat.Mode & 0xf000) != Regular || (stat.Mode & 0xfff) != 0x100 || stat.Owner != getuid()
-            || stat.Links != 1 || stat.Size is < 1 or > MaximumCredentialBytes || (stat.Flags & Immutable) == 0)
+            || stat.Links != 1 || stat.Size is < 1 or > KeycloakClientCredentialText.MaximumBytes || (stat.Flags & Immutable) == 0)
             throw new InvalidDataException("Capture file rejected.");
     }
 
@@ -162,21 +160,18 @@ internal static class RealmClientCapture
         byte[] bytes;
         try
         {
-            bytes = StrictUtf8.GetBytes(value);
+            bytes = KeycloakClientCredentialText.Encode(value);
         }
         catch (EncoderFallbackException)
         {
             throw new InvalidDataException("Capture credential is not valid UTF-8.");
         }
-        if (bytes.Length is < 1 or > MaximumCredentialBytes || !IsValidCredentialText(value))
+        if (bytes.Length is < 1 or > KeycloakClientCredentialText.MaximumBytes || !KeycloakClientCredentialText.IsValid(value))
             throw new InvalidDataException("Capture credential is invalid.");
         return bytes;
     }
 
-    private static bool IsValidCredentialText(string value) =>
-        !string.IsNullOrWhiteSpace(value) && !value.Any(char.IsControl);
-
-    private static void ValidateDirectory(Stat stat)
+    private static void ValidateDirectory(DarwinArm64FileMetadata stat)
     {
         if ((stat.Mode & 0xf000) != DirectoryType || (stat.Mode & 0xfff) != 0x1c0 || stat.Owner != getuid())
             throw new InvalidDataException("Private directory rejected.");
@@ -196,9 +191,9 @@ internal static class RealmClientCapture
         return new SafeFileHandle((IntPtr)fd, true);
     }
 
-    private static Stat Inspect(SafeFileHandle file)
+    private static DarwinArm64FileMetadata Inspect(SafeFileHandle file)
     {
-        if (fstat(file, out var stat) != 0) throw new IOException("Capture inventory unavailable.");
+        if (DarwinArm64FileMetadata.ReadNative(file, out var stat) != 0) throw new IOException("Capture inventory unavailable.");
         return stat;
     }
 
@@ -220,24 +215,8 @@ internal static class RealmClientCapture
         string? Authority,
         string? ClientId);
 
-    // Native Darwin ARM64 layout verified against the installed SDK with sizeof/offsetof.
-    [StructLayout(LayoutKind.Explicit, Size = 144)]
-    private struct Stat
-    {
-        [FieldOffset(0)] internal int Device;
-        [FieldOffset(4)] internal ushort Mode;
-        [FieldOffset(6)] internal ushort Links;
-        [FieldOffset(8)] internal ulong Inode;
-        [FieldOffset(16)] internal uint Owner;
-        [FieldOffset(80)] internal long BirthSeconds;
-        [FieldOffset(88)] internal long BirthNanoseconds;
-        [FieldOffset(96)] internal long Size;
-        [FieldOffset(116)] internal uint Flags;
-    }
-
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int open(string path, int flags);
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int openat(SafeFileHandle parent, string path, int flags);
-    [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int fstat(SafeFileHandle fd, out Stat stat);
     [DllImport("libSystem.B.dylib", SetLastError = true)] private static extern int fchflags(SafeFileHandle fd, uint flags);
     [DllImport("libSystem.B.dylib")] private static extern uint getuid();
 }

@@ -127,6 +127,36 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
         Assert.Contains(TestPathUtils.PathUnder(workerDirectory, $"{workerAssemblyName}.dll"), worker.Arguments, StringComparer.Ordinal);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("dll")]
+    [InlineData("deps.json")]
+    [InlineData("runtimeconfig.json")]
+    public void WorkerResolver_BundledAppRequiresTheExternalWorkerFiles(string? missingExtension)
+    {
+        using var directory = new TempDirectory();
+        var workerDirectory = TestPathUtils.PathUnder(directory.Path, "appsurface-keycloak-realm-ready");
+        Directory.CreateDirectory(workerDirectory);
+        var assemblyName = AppSurfaceKeycloakRealmReadyWorker.WorkerAssemblyName;
+        foreach (var extension in new[] { "dll", "deps.json", "runtimeconfig.json" })
+        {
+            if (extension != missingExtension)
+                File.WriteAllText(TestPathUtils.PathUnder(workerDirectory, $"{assemblyName}.{extension}"), string.Empty);
+        }
+
+        if (missingExtension is not null)
+        {
+            var error = Assert.Throws<AppSurfaceKeycloakException>(
+                () => AppSurfaceKeycloakRealmReadyWorker.ResolveBundled(directory.Path));
+            Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmReadyWorkerUnavailable, error.Code);
+            return;
+        }
+
+        var worker = AppSurfaceKeycloakRealmReadyWorker.ResolveBundled(directory.Path);
+        Assert.Equal(workerDirectory, worker.WorkingDirectory);
+        Assert.Contains(TestPathUtils.PathUnder(workerDirectory, $"{assemblyName}.dll"), worker.Arguments, StringComparer.Ordinal);
+    }
+
     [Fact]
     public async Task RealmReady_WhenCalledConcurrently_CachesOneWorkerResource()
     {

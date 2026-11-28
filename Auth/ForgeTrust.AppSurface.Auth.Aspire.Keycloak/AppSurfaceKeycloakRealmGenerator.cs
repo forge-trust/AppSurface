@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ForgeTrust.AppSurface.Auth.Keycloak;
 using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
@@ -119,7 +120,8 @@ public static class AppSurfaceKeycloakRealmGenerator
             ["webOrigins"] = new JsonArray(JsonValue.Create("+")),
             ["attributes"] = new JsonObject
             {
-                ["post.logout.redirect.uris"] = string.Join("##", options.PostLogoutRedirectUris.Select(uri => uri.ToString())),
+                [KeycloakPostLogoutRedirectUris.AttributeName] =
+                    KeycloakPostLogoutRedirectUris.Format(options.PostLogoutRedirectUris.Select(uri => uri.ToString())),
             },
             ["protocolMappers"] = new JsonArray(CreateRoleMapper()),
         };

@@ -22,20 +22,13 @@ internal sealed class KeycloakClientCredentialMemoryCapture : IDisposable
     private const int AddSeals = 1033;
     private const int GetSeals = 1034;
     private const int RequiredSeals = 15;
-    private const uint RequiredStatx = 1 | 2 | 4 | 8 | 0x100 | 0x200;
+    private const uint RequiredStatx = LinuxArm64Statx.TypeField | LinuxArm64Statx.ModeField | LinuxArm64Statx.LinkCountField
+        | LinuxArm64Statx.UserIdField | LinuxArm64Statx.InodeField | LinuxArm64Statx.SizeField;
     private const int MaximumHeaderBytes = 4096;
-    private const int MaximumSecretBytes = 4096;
-    private const int MaximumFrameBytes = 12 + MaximumHeaderBytes + MaximumSecretBytes;
+    private const int MaximumFrameBytes = 12 + MaximumHeaderBytes + KeycloakClientCredentialText.MaximumBytes;
     private const int Interrupted = 4;
     private const int MaximumInterruptedCalls = 16;
-    private const int StatxBufferSize = 256;
-    private const int StatxLinkCountOffset = 16;
-    private const int StatxUserIdOffset = 20;
-    private const int StatxModeOffset = 28;
-    private const int StatxInodeOffset = 32;
-    private const int StatxSizeOffset = 40;
     private static readonly byte[] Magic = "SMB1"u8.ToArray();
-    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string ExpiringLifetime = "expiring";
     private const string OwnerLifetime = "owner";
@@ -217,7 +210,7 @@ internal sealed class KeycloakClientCredentialMemoryCapture : IDisposable
                 throw new InvalidDataException("Sealed credential frame was rejected.");
             var headerLength = BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(4, 4));
             var secretLength = BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(8, 4));
-            if (headerLength is 0 or > MaximumHeaderBytes || secretLength is 0 or > MaximumSecretBytes
+            if (headerLength is 0 or > MaximumHeaderBytes || secretLength is 0 or > KeycloakClientCredentialText.MaximumBytes
                 || 12UL + headerLength + secretLength != (ulong)frame.Length)
                 throw new InvalidDataException("Sealed credential frame length was rejected.");
 
@@ -229,9 +222,9 @@ internal sealed class KeycloakClientCredentialMemoryCapture : IDisposable
                 throw new InvalidDataException("Sealed credential binding or expiry was rejected.");
 
             string value;
-            try { value = StrictUtf8.GetString(secret); }
+            try { value = KeycloakClientCredentialText.Decode(secret); }
             catch (DecoderFallbackException) { throw new InvalidDataException("Sealed credential text was rejected."); }
-            if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl))
+            if (!KeycloakClientCredentialText.IsValid(value))
                 throw new InvalidDataException("Sealed credential text was rejected.");
             return value;
         }
@@ -312,9 +305,9 @@ internal sealed class KeycloakClientCredentialMemoryCapture : IDisposable
     private static byte[] EncodeCredential(string value)
     {
         byte[] bytes;
-        try { bytes = StrictUtf8.GetBytes(value); }
+        try { bytes = KeycloakClientCredentialText.Encode(value); }
         catch (EncoderFallbackException) { throw new InvalidDataException("Credential text must be strict UTF-8."); }
-        if (bytes.Length is < 1 or > MaximumSecretBytes || string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl))
+        if (bytes.Length is < 1 or > KeycloakClientCredentialText.MaximumBytes || !KeycloakClientCredentialText.IsValid(value))
         {
             CryptographicOperations.ZeroMemory(bytes);
             throw new InvalidDataException("Credential text is outside the supported bounds.");
@@ -452,16 +445,11 @@ internal sealed class KeycloakClientCredentialMemoryCapture : IDisposable
     /// <exception cref="InvalidDataException">The buffer does not have the expected statx size.</exception>
     internal static MemoryFileStatus ParseStatxMemoryStatus(ReadOnlySpan<byte> statx)
     {
-        if (statx.Length != StatxBufferSize)
+        if (statx.Length != LinuxArm64Statx.BufferSize)
             throw new InvalidDataException("Sealed credential file metadata was rejected.");
 
-        return new MemoryFileStatus(
-            BinaryPrimitives.ReadUInt32LittleEndian(statx),
-            BinaryPrimitives.ReadUInt16LittleEndian(statx[StatxModeOffset..]),
-            BinaryPrimitives.ReadUInt32LittleEndian(statx[StatxUserIdOffset..]),
-            BinaryPrimitives.ReadUInt32LittleEndian(statx[StatxLinkCountOffset..]),
-            BinaryPrimitives.ReadUInt64LittleEndian(statx[StatxInodeOffset..]),
-            BinaryPrimitives.ReadUInt64LittleEndian(statx[StatxSizeOffset..]));
+        var status = new LinuxArm64Statx(statx);
+        return new MemoryFileStatus(status.Mask, status.Mode, status.UserId, status.LinkCount, status.Inode, status.Size);
     }
 
     internal interface IMemoryNative
@@ -485,7 +473,6 @@ internal sealed class KeycloakClientCredentialMemoryCapture : IDisposable
         private const int CloseOnExec = 0x80000;
         private const int NonBlocking = 0x800;
         private const int AtEmptyPath = 0x1000;
-        private const uint StatxMask = RequiredStatx;
 
         public int LastError => Marshal.GetLastPInvokeError();
         public uint EffectiveUserId => Native.geteuid();
@@ -501,8 +488,8 @@ internal sealed class KeycloakClientCredentialMemoryCapture : IDisposable
 
         public MemoryFileStatus GetFileStatus(int descriptor)
         {
-            var stat = new byte[StatxBufferSize];
-            if (Native.statx(descriptor, "", AtEmptyPath, StatxMask, stat) != 0)
+            var stat = new byte[LinuxArm64Statx.BufferSize];
+            if (LinuxArm64Statx.ReadNative(descriptor, "", AtEmptyPath, RequiredStatx, stat) != 0)
                 throw new IOException("Sealed credential file metadata could not be read.");
             return ParseStatxMemoryStatus(stat);
         }
@@ -531,9 +518,6 @@ internal sealed class KeycloakClientCredentialMemoryCapture : IDisposable
             [DllImport("libc", SetLastError = true)] internal static extern int fchmod(int descriptor, uint mode);
             [DllImport("libc", SetLastError = true, EntryPoint = "open")]
             internal static extern int open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-            [DllImport("libc", SetLastError = true, EntryPoint = "statx")]
-            internal static extern int statx(int descriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
-                int flags, uint mask, [Out] byte[] buffer);
             [DllImport("libc", SetLastError = true)] internal static extern nint write(int descriptor, IntPtr buffer, nuint count);
             [DllImport("libc", SetLastError = true)] internal static extern nint read(int descriptor, IntPtr buffer, nuint count);
             [DllImport("libc", SetLastError = true)] internal static extern int close(int descriptor);

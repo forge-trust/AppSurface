@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -195,7 +196,7 @@ internal sealed class SupervisedDocker
     {
         try
         {
-            if (!IsDockerName(name))
+            if (!IsSupportedVolumeName(name))
                 throw Failure();
 
             var snapshot = await RunAsync(ct, "volume", "ls", "--format", "{{.Name}}").ConfigureAwait(false);
@@ -239,7 +240,7 @@ internal sealed class SupervisedDocker
     {
         try
         {
-            if (!IsDockerName(volumeName))
+            if (!IsSupportedVolumeName(volumeName))
                 throw Failure();
 
             var output = await RunAsync(ct, "ps", "-aq", "--no-trunc", "--filter", "volume=" + volumeName).ConfigureAwait(false);
@@ -376,6 +377,16 @@ internal sealed class SupervisedDocker
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
+    /// <summary>Builds the per-user Unix endpoint used by the default option and the exact command allowlist.</summary>
+    /// <returns>The normalized endpoint, or an empty value if the user profile is unavailable.</returns>
+    internal static string GetUserSocketEndpoint()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return string.IsNullOrWhiteSpace(profile)
+            ? string.Empty
+            : "unix://" + PathUtils.PathUnder(profile, ".docker", "run", "docker.sock").Replace('\\', '/');
+    }
+
     private static bool IsSupportedEndpoint(string value)
     {
         try
@@ -383,12 +394,8 @@ internal sealed class SupervisedDocker
             if (string.IsNullOrEmpty(value))
                 return false;
 
-            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var userSocket = string.IsNullOrEmpty(profile)
-                ? string.Empty
-                : "unix://" + Path.GetFullPath(Path.Combine(profile, ".docker", "run", "docker.sock")).Replace('\\', '/');
             return string.Equals(value, "unix:///var/run/docker.sock", StringComparison.Ordinal)
-                || string.Equals(value, userSocket, StringComparison.Ordinal);
+                || string.Equals(value, GetUserSocketEndpoint(), StringComparison.Ordinal);
         }
         catch { return false; }
     }
@@ -399,7 +406,10 @@ internal sealed class SupervisedDocker
         catch { return long.MaxValue; }
     }
 
-    private static bool IsDockerName(string value) => !string.IsNullOrEmpty(value)
+    /// <summary>Checks the bounded volume name accepted by registration, leases, and volume inventory.</summary>
+    internal static bool IsSupportedVolumeName(string? value) => value is { Length: <= 128 } && IsDockerName(value);
+
+    private static bool IsDockerName(string? value) => !string.IsNullOrEmpty(value)
         && char.IsAsciiLetterOrDigit(value[0])
         && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '.' or '-');
 

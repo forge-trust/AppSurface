@@ -58,7 +58,10 @@ public sealed class AppSurfaceKeycloakOptions
     public bool UsePersistentDataVolume { get; set; }
 
     /// <summary>Gets or sets an explicit persistent volume name, preserving the named volume across runs.</summary>
-    /// <remarks>A nonblank name selects persistent execution. The legacy boolean never authorizes replacing missing data.</remarks>
+    /// <remarks>
+    /// An explicit name selects persistent execution. It must be 1–128 characters, start with an ASCII letter or digit,
+    /// and contain only ASCII letters, digits, periods, underscores, or hyphens. The legacy boolean never authorizes replacing missing data.
+    /// </remarks>
     public string? PersistentVolumeName { get; set; }
 
     /// <summary>Gets or sets the explicit supervised execution profile; null retains the existing local proof path.</summary>
@@ -168,9 +171,9 @@ public sealed class AppSurfaceKeycloakOptions
         ValidateUris(PostLogoutRedirectUris, SignedOutCallbackPath, nameof(PostLogoutRedirectUris));
 
         if (!Enum.IsDefined(ClientMode)) throw Invalid(nameof(ClientMode), "client mode is unsupported.");
-        if (PersistentVolumeName is not null && (string.IsNullOrWhiteSpace(PersistentVolumeName)
-            || PersistentVolumeName.Length > 128 || PersistentVolumeName.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_' or '.'))))
-            throw Invalid(nameof(PersistentVolumeName), "an explicit volume name must be nonblank and contain only supported name characters.");
+        if (PersistentVolumeName is not null && !SupervisedDocker.IsSupportedVolumeName(PersistentVolumeName))
+            throw Invalid(nameof(PersistentVolumeName),
+                "an explicit volume name must be 1–128 characters, start with an ASCII letter or digit, and use only ASCII letters, digits, periods, underscores, or hyphens.");
         if (AdditionalLocalEnvironmentNames.Any(string.IsNullOrWhiteSpace))
             throw Invalid(nameof(AdditionalLocalEnvironmentNames), "local environment names cannot be blank.");
 

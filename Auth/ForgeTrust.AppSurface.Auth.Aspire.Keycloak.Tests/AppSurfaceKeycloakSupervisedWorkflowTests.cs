@@ -92,6 +92,14 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
         => RunScenarioAsync(new WorkflowScenario(
             Failure: WorkloadFailure.SeedCancelled, Confidential: false, UnverifiedStop: false, Storage: null));
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task CreatedWorkerOrSeedWithZeroExitCodeWithholdsTheNextWorkload(bool worker)
+        => RunScenarioAsync(new WorkflowScenario(
+            Failure: worker ? WorkloadFailure.WorkerStillCreated : WorkloadFailure.SeedStillCreated,
+            Confidential: false, UnverifiedStop: false, Storage: null));
+
     [Fact]
     public Task RunPublishesReadinessAndShutsDownWithoutLifecycleObservationHooks()
         => RunScenarioAsync(new WorkflowScenario(
@@ -155,6 +163,14 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
         => RunScenarioAsync(new WorkflowScenario(
             Failure: WorkloadFailure.UnownedProject, Confidential: false, UnverifiedStop: false, Storage: null));
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ReportsAnActiveMarkerOnHostStopFailureOnlyAfterReservation(bool reservesOwnership)
+        => RunScenarioAsync(new WorkflowScenario(
+            Failure: reservesOwnership ? WorkloadFailure.None : WorkloadFailure.UnownedProject,
+            Confidential: false, UnverifiedStop: false, Storage: null, HostStopFailure: true));
+
     [Fact]
     public Task CancellationBeforeDockerCreateAllowsVerifiedCleanup()
         => RunScenarioAsync(new WorkflowScenario(
@@ -169,7 +185,7 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
     {
         None, SeedNonzero, SeedTimeout, SeedCancelled, SeedSecretInArguments, SeedSecretInEnvironment,
         WebExit, ServerExit, WorkerNonzero, MissingReference, AnchorStartAcknowledgement, TransportUnavailable, OwnerLossDuringWorkflow,
-        UnownedProject, CancelBeforeCreate
+        UnownedProject, CancelBeforeCreate, WorkerStillCreated, SeedStillCreated
     }
 
     private sealed record WorkflowScenario(
@@ -181,11 +197,12 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
         bool UsePinnedTransport = false,
         bool PublicThemeAndSeeds = false,
         bool DelayedWebStop = false,
-        bool AttachLifecycleObservation = true)
+        bool AttachLifecycleObservation = true,
+        bool HostStopFailure = false)
     {
         internal bool RetainActive => UnverifiedStop || InventoryDrift is not null
-            || Failure == WorkloadFailure.AnchorStartAcknowledgement;
-        internal string ExpectedCode => RetainActive || Failure == WorkloadFailure.OwnerLossDuringWorkflow ? "ASKEYC034"
+            || Failure == WorkloadFailure.AnchorStartAcknowledgement || HostStopFailure && Failure != WorkloadFailure.UnownedProject;
+        internal string ExpectedCode => RetainActive || HostStopFailure || Failure == WorkloadFailure.OwnerLossDuringWorkflow ? "ASKEYC034"
             : Failure switch
             {
                 WorkloadFailure.None => "Completed",
@@ -200,7 +217,8 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
         internal bool StartsWorker => StartsServer && Failure != WorkloadFailure.TransportUnavailable;
         internal bool ReachesReady => Failure is WorkloadFailure.None or WorkloadFailure.WebExit or WorkloadFailure.ServerExit;
         internal bool ExpectsSeed => StartsWorker && Failure is not
-            (WorkloadFailure.WorkerNonzero or WorkloadFailure.SeedSecretInArguments or WorkloadFailure.SeedSecretInEnvironment);
+            (WorkloadFailure.WorkerNonzero or WorkloadFailure.WorkerStillCreated
+            or WorkloadFailure.SeedSecretInArguments or WorkloadFailure.SeedSecretInEnvironment);
         internal bool ExpectsObservation => Storage is not null;
         internal bool ExpectsInitializer => Storage == "new";
         internal bool ExpectsWeb => ReachesReady;
@@ -277,7 +295,7 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
             builder.Configuration["DcpPublisher:DashboardPath"] = TestPathUtils.PathUnder(physicalRoot, "unused-dashboard");
             builder.Services.RemoveAll<IHostedService>();
             builder.Services.AddSingleton<IHostedService, PublishAfterResourcesCreatedHostedService>();
-            builder.Services.AddSingleton<IHostLifetime, RuntimeLifetime>();
+            builder.Services.AddSingleton<IHostLifetime>(new RuntimeLifetime(scenario.HostStopFailure));
 
             var username = builder.AddParameter("test-user", () => "test-user");
             var password = builder.AddParameter("test-password", () => "test-password", secret: true);
@@ -299,16 +317,18 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
                 SupervisedExecution = execution
             };
             options.SeededUsers.Clear();
+            var expectedKeycloakImage = AppSurfaceKeycloakSupervisedOptions.TaggedQualifiedKeycloakImage;
             if (publicThemeAndSeeds)
             {
-                var image = "quay.io/keycloak/keycloak:26.6@" + ImageId;
-                execution.KeycloakImage = image;
+                expectedKeycloakImage = "quay.io/keycloak/keycloak:26.6@" + ImageId;
+                execution.KeycloakImage = "quay.io/keycloak/keycloak@" + ImageId;
                 options.Authority = new Uri(publicIssuer + "/realms/" + options.Realm);
                 options.ApprovedHttpsOrigins.Add(new Uri(publicIssuer));
                 options.ApprovedHttpsOrigins.Add(new Uri(publicWeb));
                 options.RedirectUris.Add(new Uri(publicWeb + options.CallbackPath));
                 options.PostLogoutRedirectUris.Add(new Uri(publicWeb + options.SignedOutCallbackPath));
-                options.LoginTheme = AppSurfaceKeycloakThemeOptions.Login(themeName, themeRoot, AppSurfaceKeycloakImageReference.Parse(image));
+                options.LoginTheme = AppSurfaceKeycloakThemeOptions.Login(themeName, themeRoot,
+                    AppSurfaceKeycloakImageReference.Parse(expectedKeycloakImage));
                 options.LoginTheme.Platform = "linux/arm64";
             }
             var declaredBindings = new AppSurfaceKeycloakCredentialBindings();
@@ -467,6 +487,7 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
                 }
             }
             var result = await running.WaitAsync(TimeSpan.FromSeconds(30));
+            if (scenario.HostStopFailure) await app.DisposeAsync();
             if (dockerFixture.HeartbeatFixture is not null) await dockerFixture.HeartbeatFixture.WaitAsync(TimeSpan.FromSeconds(2));
             if (usePinnedTransport)
                 await Assert.IsAssignableFrom<Task>(dockerFixture.TlsFixture).WaitAsync(TimeSpan.FromSeconds(2));
@@ -502,6 +523,7 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
                 if (scenario.StartsServer)
                 {
                     var server = Assert.Single(dockerFixture.Containers.Values, item => item.Role == "keycloak");
+                    Assert.Equal(expectedKeycloakImage, server.Image);
                     Assert.Equal(storage is not null, server.Mounts.Any(mount => mount.Type == "volume" && mount.Source == VolumeName));
                     if (storage is "uid1000" or "uid1000-empty")
                     {
@@ -684,12 +706,14 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
                 lock (ContainersLock)
                 {
                     var container = Containers[args[1]];
+                    var staysCreated = (_scenario.Failure, container.Role) is
+                        (WorkloadFailure.WorkerStillCreated, "worker") or (WorkloadFailure.SeedStillCreated, "seed-workload");
                     if (container.Role is "anchor" or "keycloak" or "web-workload" || _keepSeedRunning && container.Role == "seed-workload")
                     {
                         container.Running = true;
                         container.Status = "running";
                     }
-                    else
+                    else if (!staysCreated)
                     {
                         container.ExitCode = (_failSeed && container.Role == "seed-workload")
                             || (_workerFails && container.Role == "worker") ? 17 : 0;
@@ -1004,10 +1028,11 @@ public sealed class AppSurfaceKeycloakSupervisedWorkflowTests
         }
     }
 
-    private sealed class RuntimeLifetime : IHostLifetime
+    private sealed class RuntimeLifetime(bool failStop) : IHostLifetime
     {
         public Task WaitForStartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken) => failStop
+            ? Task.FromException(new IOException("Fixture host stop failed.")) : Task.CompletedTask;
     }
 
     private sealed class PublishAfterResourcesCreatedHostedService(IServiceProvider services) : IHostedService

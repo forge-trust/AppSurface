@@ -600,6 +600,7 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         var custody = new TestCustody();
         var port = GetAvailableOwnerPort();
         var processExitCode = 0;
+        using var diagnostic = new StringWriter();
 
         var running = AppSurfaceKeycloakRealmReadyEntryPoint.HoldAnchorCoreAsync(
             inputPath, readyPath, CancellationToken.None, port, owner,
@@ -610,7 +611,7 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
                 Assert.Equal(reference.ClientId, declaration.ClientId);
                 Assert.Equal("fixture-only-anchor-custody", declaration.ClientSecret);
                 return (custody, reference);
-            }, TextWriter.Null,
+            }, diagnostic,
             exitProcess: code => { Interlocked.Exchange(ref processExitCode, code); });
 
         Assert.Equal(owner, File.ReadAllText(listeningPath));
@@ -633,6 +634,9 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         Assert.Equal(71, await running.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal(0, Volatile.Read(ref processExitCode));
         Assert.Equal(1, custody.DisposeCount);
+        Assert.Equal(
+            new[] { "AppSurface Keycloak sealed-memory anchor ready.", "AppSurface Keycloak owner connection lost; namespace fencing." },
+            diagnostic.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
     }
 
     [Fact]
@@ -766,7 +770,7 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         using var cancellation = new CancellationTokenSource();
 
         var running = AppSurfaceKeycloakRealmReadyEntryPoint.RunOwnerFenceAsync(
-            files.FilePath("cancelled-owner-fence.json"), port, owner, cancellation.Token,
+            files.FilePath("cancelled-owner-fence.json"), port, owner, cancellation.Token, TextWriter.Null,
             exitProcess: code => { Interlocked.Exchange(ref processExitCode, code); });
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, port);
@@ -790,7 +794,7 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         var processExitCode = 0;
 
         var running = AppSurfaceKeycloakRealmReadyEntryPoint.RunOwnerFenceAsync(
-            files.FilePath("wrong-steady-owner-fence.json"), port, owner, CancellationToken.None,
+            files.FilePath("wrong-steady-owner-fence.json"), port, owner, CancellationToken.None, TextWriter.Null,
             exitProcess: code => { Interlocked.Exchange(ref processExitCode, code); });
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, port);
@@ -818,7 +822,7 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         var processExitCode = 0;
 
         var running = AppSurfaceKeycloakRealmReadyEntryPoint.RunOwnerFenceAsync(
-            files.FilePath("expired-owner-fence.json"), port, owner, CancellationToken.None,
+            files.FilePath("expired-owner-fence.json"), port, owner, CancellationToken.None, TextWriter.Null,
             async token =>
             {
                 preparationStarted.TrySetResult();
@@ -897,13 +901,16 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         if (OperatingSystem.IsWindows()) return;
 
         using var files = new TestFiles();
+        var desired = files.Write("desired.json", DesiredJson);
+        var bindings = files.Write("bindings.json", BindingsJson);
+        File.SetUnixFileMode(bindings, UnixFileMode.UserRead);
         var missingParent = TestPathUtils.PathUnder(files.Root, "missing-parent");
         var result = TestPathUtils.PathUnder(missingParent, "result.json");
         using var error = new StringWriter();
         var reconciled = false;
 
         var exitCode = await AppSurfaceKeycloakRealmReadyEntryPoint.RunAsync(
-            ["--appsurface-keycloak-reconcile", files.FilePath("desired.json"), files.FilePath("bindings.json"), result],
+            ["--appsurface-keycloak-reconcile", desired, bindings, result],
             _ => null, TextWriter.Null, error, CancellationToken.None,
             reconcile: (_, _, _, _) =>
             {
@@ -1045,7 +1052,7 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
         using var envelope = JsonDocument.Parse(File.ReadAllText(output));
         Assert.Equal("Ready", envelope.RootElement.GetProperty("result").GetProperty("Code").GetString());
         Assert.True(envelope.RootElement.GetProperty("result").GetProperty("Ready").GetBoolean());
-        Assert.True(File.Exists(output + ".started"));
+        Assert.Equal(new[] { bindings, desired, output }, Directory.GetFiles(files.Root).Order(StringComparer.Ordinal));
         Assert.DoesNotContain("sensitive-admin-password", File.ReadAllText(output));
         Assert.DoesNotContain("sensitive-admin-password", error.ToString());
     }
@@ -1395,7 +1402,7 @@ public sealed class AppSurfaceKeycloakRealmReadyEntryPointTests
     private static string WriteTestAnchorDeclaration(TestFiles files, KeycloakClientCredentialReference reference)
     {
         if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-        var declaration = new AppSurfaceKeycloakRealmReadyEntryPoint.MemoryAnchorInput(
+        var declaration = new KeycloakMemoryAnchorInput(
             reference.RunId, reference.Authority.AbsoluteUri, reference.ClientId, "fixture-only-anchor-custody");
         var inputPath = files.Write("anchor-declaration.json", JsonSerializer.Serialize(declaration));
         File.SetUnixFileMode(inputPath, UnixFileMode.UserRead);

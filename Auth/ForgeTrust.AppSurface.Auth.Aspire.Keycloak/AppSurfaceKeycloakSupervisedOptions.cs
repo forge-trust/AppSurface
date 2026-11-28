@@ -21,8 +21,8 @@ public sealed class AppSurfaceKeycloakSupervisedOptions
     public string LeaseRoot { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AppSurface", "Keycloak", "leases");
     /// <summary>Gets or sets an existing private parent for collision-resistant run directories.</summary>
     public string RunRoot { get; set; } = Path.Combine(Path.GetTempPath(), "appsurface-keycloak-runs");
-    /// <summary>Gets or sets the explicitly selected local Docker Unix endpoint.</summary>
-    public string DockerEndpoint { get; set; } = "unix://" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".docker", "run", "docker.sock");
+    /// <summary>Gets or sets the exact per-user Docker Unix endpoint or <c>unix:///var/run/docker.sock</c>.</summary>
+    public string DockerEndpoint { get; set; } = SupervisedDocker.GetUserSocketEndpoint();
     /// <summary>Gets or sets the pinned Linux ARM64 .NET image containing the worker's framework.</summary>
     public string RuntimeImage { get; set; } = "mcr.microsoft.com/dotnet/sdk@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b";
     /// <summary>Gets or sets the pinned Keycloak image qualified by this profile.</summary>
@@ -78,7 +78,7 @@ public sealed record AppSurfaceKeycloakSupervisedWorkload(string Name, string Pa
 /// <param name="ExitCode">Zero for clean cancellation/success, nonzero for required-gate or shutdown failure.</param>
 /// <param name="Code">Safe stable diagnostic code.</param>
 /// <param name="OwnerId">Opaque run owner identifier.</param>
-/// <param name="ActiveRetained">Whether the lease record remains active for guarded recovery.</param>
+/// <param name="ActiveRetained">Whether this run's active marker remains or its absence could not be verified under the lease.</param>
 /// <param name="StopSeconds">Observed shared stop/verify/cleanup duration.</param>
 public sealed record AppSurfaceKeycloakSupervisedResult(int ExitCode, string Code, string OwnerId, bool ActiveRetained, double StopSeconds);
 

@@ -139,13 +139,29 @@ to `$(OutDir)appsurface-keycloak-realm-ready/`, preserving relative paths. It ru
 and fails with `ASKEYC022` before copying if the payload is empty or the worker DLL, dependency manifest or runtime
 configuration is missing. Packing also rejects those missing inputs. Preserve the entire directory when moving an
 AppHost output; copying only the worker DLL or the previous four-file payload can omit a dependency needed later.
+The build replaces the package-owned worker subdirectory after validating the new payload. This removes obsolete
+files when a consumer upgrades in place. `dotnet clean` removes the copied worker files recorded by the build.
 The resolver's three-file existence check is not a complete dependency integrity check. Runtime-host failures such
 as malformed configuration or an unavailable framework occur before worker entry and have .NET host diagnostics.
 Framework-dependent `dotnet publish` output carries the same recursive worker directory beside the AppHost.
-Keep it as an external directory when packaging an AppHost as a single file.
+Publish refreshes its package-owned worker directory even when two package versions have identical file timestamps.
+For a single-file AppHost, keep that external directory beside the executable, including when
+`IncludeAllContentForSelfExtract=true`. The self-extracting AppHost can resolve the external worker beside its
+native executable even when the adapter assembly is loaded from the extraction cache. Executable-relative
+lookup supports renamed AppHosts and skips [shared .NET installations](https://learn.microsoft.com/en-us/dotnet/core/distribution-packaging)
+that contain the muxer's `host/fxr` directory.
 
-`BuildRealmReadyWorker` restores the worker and publishes into a fresh configuration/TFM-specific intermediate
-directory. The parent pack build supplies the pure-library output first; the nested worker publish disables
+The Keycloak evidence job runs the [two-version consumer check](../../tests/keycloak-identity-feasibility/verify-worker-consumer.py).
+It exercises upgrade, publish, and clean with local fixture packages that share file timestamps. Run it from the repository root with
+`python3 tests/keycloak-identity-feasibility/verify-worker-consumer.py --dotnet <absolute-dotnet-host>`.
+The same job runs the [packed single-file smoke](../../tests/keycloak-identity-feasibility/verify-packed-worker-single-file.py)
+against the real adapter archive and its shipped publish target. It checks both layouts in offline consumers,
+including lookup from another directory and `ASKEYC022` when the external runtime configuration is missing.
+It also checks a self-extracting AppHost named `dotnet` and rejection of a complete worker placed beside a private
+copy of the shared muxer.
+
+`BuildRealmReadyWorker` restores the worker and publishes into a fresh subdirectory of the SDK's intermediate
+output path for that pack. The parent pack build supplies the pure-library output first; the nested worker publish disables
 project-reference builds to reuse that matching output. The worker no longer has a reference back to its adapter. Use a normal build-enabled pack after source
 changes. A `--no-build` pack requires matching, previously built project-reference outputs.
 

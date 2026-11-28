@@ -10,10 +10,21 @@ import tempfile
 import zipfile
 
 from replay_environment import (SDK_VERSION, dotnet_host, prepared_file_manifest, run_offline_build,
-                                verify_offline_restore, verify_sdk_version)
+                                verify_prepared_closure, verify_sdk_version)
 from worker_payload import PURE_LIBRARY, read_worker_payload, worker_payload_target
 
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+
+def stage_verified_composition(composition: dict, root: Path) -> None:
+    """Copy the composition inputs and check their staged bytes before applying candidate overrides."""
+    prepared = Path(composition['root'])
+    payload = root / 'payload'
+    browser = root / 'browser'
+    shutil.copytree(prepared / 'code', payload)
+    verify_prepared_closure(payload, composition['codeManifest'])
+    shutil.copytree(prepared / 'browser', browser)
+    if sha(browser / 'supervised-browser.mjs') != composition['browserScriptSha256']:
+        raise ValueError('prepared browser driver changed')
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -48,10 +59,8 @@ def main():
         target = worker_payload_target(worker_root, name)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-    prepared=Path(composition['root'])
-    shutil.copytree(prepared/'code',root/'payload')
-    shutil.copyfile(root/'host/ForgeTrust.AppSurface.Auth.Keycloak.dll',root/'payload/ForgeTrust.AppSurface.Auth.Keycloak.dll')
-    shutil.copytree(prepared/'browser',root/'browser')
+    stage_verified_composition(composition, root)
+    shutil.copyfile(root / 'host' / PURE_LIBRARY, root / 'payload' / PURE_LIBRARY)
     shutil.copytree(aspire_packages/'aspire.hosting.orchestration.osx-arm64/13.6.5/tools',root/'dcp')
     shutil.copytree(aspire_packages/'aspire.dashboard.sdk.osx-arm64/13.6.5/tools',root/'dashboard')
     shutil.copyfile(Path(__file__).with_name('normal-supervised-apphost')/'Program.cs',root/'source/Program.cs')
@@ -63,24 +72,22 @@ def main():
     project=root/'source/Normal.csproj'
     project.write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><AssemblyName>ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests</AssemblyName><AssemblyVersion>0.2.0.0</AssemblyVersion><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><GenerateDependencyFile>false</GenerateDependencyFile><GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles><UseAppHost>false</UseAppHost></PropertyGroup><ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App"/>'+references+'</ItemGroup></Project>')
     apphost_cache = root/'apphost-build'
-    steps = run_offline_build(dotnet, project, cache_root=apphost_cache,
-                              logs=(a.evidence/'restore.log', a.evidence/'build.log'))
-    if steps[-1].exit_code:
-        raise RuntimeError(steps[-1].stage + ' failed')
-    verify_offline_restore(root/'source/obj/project.assets.json', apphost_cache/'nuget')
-    commands = [{'stage': step.stage, 'exit': step.exit_code} for step in steps]
+    result = run_offline_build(dotnet, project, cache_root=apphost_cache,
+                               logs=(a.evidence/'restore.log', a.evidence/'build.log'))
+    if result.failed_stage is not None:
+        raise RuntimeError(result.failed_stage + ' failed')
+    commands = [{'stage': step.stage, 'exit': step.exit_code} for step in result.commands]
     shutil.copyfile(root/'source/bin/Release/net10.0/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.dll',root/'host/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.dll')
     probe_source=root/'probe-source/Program.cs'
     shutil.copyfile(Path(__file__).with_name('lifecycle-probe')/'Program.cs',probe_source)
     probe_project=root/'probe-source/LifecycleProbe.csproj'
     probe_project.write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><AssemblyName>LifecycleProbe</AssemblyName><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><UseAppHost>false</UseAppHost><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup></Project>')
     probe_cache = root/'probe-build'
-    probe_steps = run_offline_build(dotnet, probe_project, cache_root=probe_cache,
-                                    logs=(a.evidence/'lifecycle-probe-restore.log', a.evidence/'lifecycle-probe-build.log'))
-    if probe_steps[-1].exit_code:
-        raise RuntimeError('lifecycle probe ' + probe_steps[-1].stage + ' failed')
-    verify_offline_restore(root/'probe-source/obj/project.assets.json', probe_cache/'nuget')
-    probe_commands = [{'stage': step.stage, 'exit': step.exit_code} for step in probe_steps]
+    probe_result = run_offline_build(dotnet, probe_project, cache_root=probe_cache,
+                                     logs=(a.evidence/'lifecycle-probe-restore.log', a.evidence/'lifecycle-probe-build.log'))
+    if probe_result.failed_stage is not None:
+        raise RuntimeError('lifecycle probe ' + probe_result.failed_stage + ' failed')
+    probe_commands = [{'stage': step.stage, 'exit': step.exit_code} for step in probe_result.commands]
     probe_config = probe_project.with_name('NuGet.Config')
     probe_dll=root/'probe-source/bin/Release/net10.0/LifecycleProbe.dll'
     payload_probe=root/'payload/LifecycleProbe.dll'
