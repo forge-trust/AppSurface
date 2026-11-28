@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -77,6 +78,36 @@ public sealed class CoverageArtifactOperationLeaseTests
             Assert.False(Directory.Exists(Path.Join(external, "output")));
         }
         finally { Directory.Delete(parent); }
+    }
+
+    [Fact]
+    public void ExistingArtifactChildUnderReplacementParentIsRefused()
+    {
+        // Windows retains the parent without rename sharing, so the replacement cannot occur.
+        if (OperatingSystem.IsWindows()) return;
+
+        using var tree = LeaseTree.Create();
+        const string childName = "reports";
+        Directory.CreateDirectory(TestPathUtils.PathUnder(tree.Output, childName));
+        using var originalParent = CoverageRunOutputLease.AcquireArtifactDirectory(
+            tree.Output, createMissing: false, requirePrivate: false)!;
+        var originalPath = TestPathUtils.PathUnder(tree.Root, "original-output");
+        Directory.Move(tree.Output, originalPath);
+
+        var replacementChild = TestPathUtils.PathUnder(tree.Output, childName);
+        Directory.CreateDirectory(replacementChild);
+        var sentinel = TestPathUtils.PathUnder(replacementChild, "sentinel");
+        File.WriteAllText(sentinel, "replacement contents");
+
+        var error = Assert.Throws<IOException>(() =>
+        {
+            using var child = originalParent.OpenOrCreateArtifactChildDirectory(childName, requirePrivate: false);
+        });
+
+        Assert.Contains("retained parent", error.Message, StringComparison.Ordinal);
+        Assert.Equal(sentinel, Assert.Single(Directory.GetFileSystemEntries(replacementChild)));
+        Assert.Equal("replacement contents", File.ReadAllText(sentinel));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(TestPathUtils.PathUnder(originalPath, childName)));
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.Testing;
 
@@ -195,6 +196,48 @@ public sealed class EvidenceArtifactFileValidationTests
         var verified = await evidence.Workflow.VerifyAsync(evidence.PlanPath, evidence.ManifestPath, CancellationToken.None);
 
         Assert.Equal(EvidenceClaimKind.TargetedComplete, verified.Manifest.ClaimKind);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Verify_ShouldCheckRetainedCoverageUsingTheReuseRunLayout(bool multipleProducers)
+    {
+        using var directory = TestDirectory.Create();
+        const string coverageId = "coverage/opaque-id";
+        const string assertion = "coverage-complete";
+        var coverage = new EvidenceProducerDeclaration(coverageId, "coverage", "1.0.0", [],
+            [assertion], [CoverageEvidenceInventory.CreateSlot()], 30, new EvidenceCoverageGateRequirements(95, 85));
+        EvidenceProducerDeclaration[] producers = multipleProducers ? [coverage, coverage with { Id = "other-coverage" }] : [coverage];
+        var profile = new EvidenceProfile("coverage", EvidenceProfileScope.Targeted, [], producers,
+            [new EvidenceObligation("cover", "tooling", "Coverage passed.", producers.Select(producer => producer.Id).ToArray(), assertion)]);
+        var planner = new EvidencePlanner();
+        var plan = planner.Resolve(new EvidencePolicy("sample", "1", profile.Id, [profile], []),
+            [new NormalizedDiffPath("src/Changed.cs")]);
+        var output = TestPathUtils.PathUnder(directory.Path, "evidence");
+        const string report = "coverage/report.xml";
+        var (_, custodyRoot) = EvidenceReuseExecutionResolver.GetProducerRoots(output, coverageId, !multipleProducers);
+        var reportPath = TestPathUtils.PathUnder(custodyRoot, report);
+        Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
+        await File.WriteAllBytesAsync(reportPath, Content);
+        var artifact = new EvidenceArtifactResult(CoverageEvidenceInventory.LogicalName, report,
+            "application/octet-stream", Content.Length, Convert.ToHexStringLower(SHA256.HashData(Content)));
+        var results = producers.Select(producer => new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed,
+            [assertion], Artifacts: producer.Id == coverageId ? [artifact] : [])).ToArray();
+        var workflow = new EvidenceCliWorkflow(planner);
+        await workflow.WritePlanAsync(plan, output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, results), output, CancellationToken.None);
+        var planPath = TestPathUtils.PathUnder(output, "evidence-plan.json");
+        var manifestPath = TestPathUtils.PathUnder(output, "evidence-manifest.json");
+
+        var verified = await workflow.VerifyAsync(planPath, manifestPath, CancellationToken.None, requireGateAdmission: true);
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, verified.Manifest.ClaimKind);
+
+        File.Delete(reportPath);
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(
+            () => workflow.VerifyAsync(planPath, manifestPath, CancellationToken.None));
+        Assert.Equal("ASEVD213", exception.Code);
+        Assert.Contains(coverageId, exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -42,6 +42,7 @@ public sealed class HostContractTests
 {
     private const string ValidToken = "local-token-for-host-contract-tests";
     private const string SensitiveMarker = "must-never-appear-in-a-host-response";
+
     private const string ActivationPath = "/private/durable/activate";
 
     [Theory]

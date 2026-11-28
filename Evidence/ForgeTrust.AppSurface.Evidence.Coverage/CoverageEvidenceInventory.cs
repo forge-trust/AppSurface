@@ -1,0 +1,215 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using ForgeTrust.AppSurface.Evidence.Contracts;
+
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+
+/// <summary>A versioned, complete set of writer-owned coverage outputs, relative to the Evidence run root.</summary>
+/// <remarks>
+/// Capture consumes the managed session's declared publications and invocation-owned trees, never an arbitrary
+/// output-directory walk. Original report bytes, including provenance, are retained under <c>coverage/</c>.
+/// The complete set is bounded to 128 files, 256 MiB of original bytes, and 2 MiB of serialized metadata.
+/// Portable paths are limited to 4096 characters and 32 components. Explicit slots may impose smaller aggregate limits.
+/// Missing, unsafe, changed or oversized sets are optimization failures; they never change a fresh gate outcome.
+/// </remarks>
+internal sealed record CoverageEvidenceInventory(int Version, IReadOnlyList<CoverageReportFile> Files)
+{
+    private const string SlotRoot = "coverage";
+
+    /// <summary>The supported closed-inventory format.</summary>
+    internal const int CurrentVersion = 1;
+    /// <summary>The existing producer-wide uncompressed artifact limit, shared with the bounded writer.</summary>
+    internal const long MaximumBytes = EvidenceArtifactWriter.MaximumTotalArtifactBytes;
+    /// <summary>The maximum count supported by an explicit multi-file slot.</summary>
+    internal const int MaximumFiles = 128;
+    /// <summary>The maximum serialized inventory metadata, independent of report byte size.</summary>
+    internal const int MaximumMetadataBytes = 2 * 1024 * 1024;
+    /// <summary>The adapter-owned slot name; callers explicitly declare it to opt into report custody.</summary>
+    internal const string LogicalName = "coverage-reports";
+
+    /// <summary>Creates the optional fresh-manifest slot used for complete reusable report custody.</summary>
+    /// <remarks>
+    /// Required is false so an oversized or unavailable optional cache inventory cannot invalidate an otherwise
+    /// successful fresh coverage manifest. Collection, gate thresholds and required assertions remain independently
+    /// mandatory. Receipt admission still requires the complete closed inventory and a null adapter ineligibility
+    /// reason; an empty optional slot is never proof of a reusable coverage result. Consumers explicitly declaring
+    /// Required=true retain that stronger artifact contract, including invalidation when required custody is missing.
+    /// Legacy declarations are never modified implicitly. See the
+    /// <see href="../../guides/evidence-reuse.md#coverage-report-custody">coverage report custody contract</see>.
+    /// </remarks>
+    internal static EvidenceArtifactSlot CreateSlot() => new(LogicalName, SlotRoot, "application/octet-stream", false, MaximumBytes)
+    { MaximumFiles = MaximumFiles };
+
+    /// <summary>Captures required run/gate reports and every retained publication in the managed session.</summary>
+    /// <param name="outputRoot">Current execution root containing the original coverage directory.</param>
+    /// <param name="result">A successful collection and passing gate; other results are ineligible.</param>
+    /// <param name="publications">Complete writer-owned publications; the 128-file total also includes any current-run sidecar.</param>
+    /// <param name="token">Producer cancellation/deadline, propagated rather than treated as optional ineligibility.</param>
+    /// <param name="afterSidecarParsed">Optional per-call scheduling seam used to verify that parsing and hashing
+    /// consume one immutable, bounded byte snapshot. Production omits it.</param>
+    /// <returns>A complete validated receipt inventory, including an eligible current-run sidecar when present.</returns>
+    /// <remarks>Includes the current-run history sidecar when the managed session published one. That sidecar is
+    /// optional in the existing retention workflow; receipt eligibility does not enable or require history storage.
+    /// Rejects oversized publication counts before enumerating publications or reading optional metadata. Ordinary
+    /// report delivery remains independent of this receipt-only limit. Project schema numbers must be integral,
+    /// representable 32-bit values equal to the supported version; malformed numbers refuse receipt capture
+    /// without replacing the actual fresh collection and gate outcome.</remarks>
+    internal static async Task<CoverageEvidenceInventory> CaptureAsync(string outputRoot, CoverageEvidenceExecutionResult result,
+        IReadOnlyList<CoverageArtifactInventoryEntry> publications, CancellationToken token, Action? afterSidecarParsed = null)
+    {
+        if (!result.Run.Success || result.Gate is null || !result.Gate.Passed)
+            throw new CoverageEvidenceInventoryException("inventory-result-not-passed");
+        token.ThrowIfCancellationRequested();
+        if (publications.Count is 0 or > MaximumFiles)
+            throw new CoverageEvidenceInventoryException("inventory-file-limit");
+        var root = Path.GetFullPath(outputRoot);
+        var manifestPath = "coverage/" + CoverageArtifactSession.SidecarName;
+        var hasManifest = File.Exists(Path.Join(root, manifestPath));
+        if (hasManifest && publications.Count == MaximumFiles)
+            throw new CoverageEvidenceInventoryException("inventory-file-limit");
+        var paths = publications.Select(static entry => CoverageReportFile.FromPublication(entry)).ToList();
+        if (hasManifest)
+            using (var manifest = Open(root, manifestPath))
+            {
+                var bytes = CoverageReportSet.ReadReceiptMetadata(manifest, token);
+                using var snapshot = new MemoryStream(bytes, writable: false);
+                var run = CoverageArtifactSession.ReadCurrent(snapshot);
+                if (run.ManifestBase.Outcome != "success" || !run.Inventory.SequenceEqual(publications))
+                    throw new CoverageEvidenceInventoryException("inventory-run-manifest-mismatch");
+                afterSidecarParsed?.Invoke();
+                token.ThrowIfCancellationRequested();
+                paths.Add(new(manifestPath, bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes))));
+            }
+        var inventory = new CoverageEvidenceInventory(CurrentVersion, paths.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray());
+        await inventory.ValidateAsync(root, token).ConfigureAwait(false);
+        var names = inventory.Files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal);
+        CoverageReportSet.ValidateReceiptCapture(root, names, result, token);
+        return inventory;
+    }
+
+    /// <summary>Validates the entire closed set and its original bytes before any destination is written.</summary>
+    /// <param name="outputRoot">Run root containing the recorded report paths.</param>
+    /// <param name="token">Cancels inventory validation and the bounded reads of each report.</param>
+    /// <remarks>Reads exactly the declared length of each report and probes for one extra byte.
+    /// Never trim or normalize receipt paths. Case collisions are rejected on every platform.</remarks>
+    internal async Task ValidateAsync(string outputRoot, CancellationToken token = default)
+    {
+        if (Version != CurrentVersion) throw new CoverageEvidenceInventoryException("inventory-version-unsupported");
+        if (Files.Count is 0 or > MaximumFiles) throw new CoverageEvidenceInventoryException("inventory-file-limit");
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var prefixes = new EvidencePathPrefixes();
+        long total = 0;
+        string? previous = null;
+        foreach (var file in Files)
+        {
+            token.ThrowIfCancellationRequested();
+            CoverageReportFile.ValidatePath(file.RelativePath);
+            if (!seen.Add(file.RelativePath) || !prefixes.TryAdd(file.RelativePath))
+                throw new CoverageEvidenceInventoryException("inventory-path-collision");
+            if (previous is not null && StringComparer.Ordinal.Compare(previous, file.RelativePath) >= 0)
+                throw new CoverageEvidenceInventoryException("inventory-order-invalid");
+            previous = file.RelativePath;
+            if (file.LengthBytes < 0 || file.LengthBytes > MaximumBytes - total)
+                throw new CoverageEvidenceInventoryException("inventory-byte-limit");
+            total += file.LengthBytes;
+            if (!file.HasCanonicalDigest)
+                throw new CoverageEvidenceInventoryException("inventory-digest-invalid");
+        }
+        if (JsonSerializer.SerializeToUtf8Bytes(this).Length > MaximumMetadataBytes)
+            throw new CoverageEvidenceInventoryException("inventory-metadata-limit");
+        foreach (var file in Files)
+        {
+            token.ThrowIfCancellationRequested();
+            using var input = Open(outputRoot, file.RelativePath);
+            var (status, digest) = await EvidenceArtifactStream.HashAsync(input, file.LengthBytes, token).ConfigureAwait(false);
+            if (status != EvidenceArtifactLengthStatus.Exact || digest != file.Sha256)
+                throw new CoverageEvidenceInventoryException("inventory-file-changed");
+        }
+    }
+
+    /// <summary>Preflights the complete declared slot, then streams original bytes into an exclusive custody root.</summary>
+    /// <param name="writer">A fresh writer rooted in separate coordinator-owned staging, preserving run-relative paths.</param>
+    /// <param name="slot">The explicitly declared coverage-reports multi-file slot.</param>
+    /// <param name="outputRoot">Original Evidence run root containing coverage reports; never overwritten.</param>
+    /// <param name="cancellationToken">Invocation cancellation; propagated rather than converted into eligibility.</param>
+    /// <returns>The complete custody metadata. The coordinator must discard staging on any failure.</returns>
+    internal async Task<IReadOnlyList<EvidenceArtifactResult>> WriteAsync(EvidenceArtifactWriter writer,
+        EvidenceArtifactSlot slot, string outputRoot, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        await ValidateAsync(outputRoot, cancellationToken).ConfigureAwait(false);
+        ValidateSlot(writer, slot);
+        var results = new List<EvidenceArtifactResult>(Files.Count);
+        foreach (var file in Files)
+        {
+            using var input = Open(outputRoot, file.RelativePath);
+            var artifact = await writer.WriteAsync(slot.LogicalName, file.RelativePath, input, cancellationToken).ConfigureAwait(false);
+            if (artifact.LengthBytes != file.LengthBytes || artifact.Sha256 != file.Sha256)
+                throw new CoverageEvidenceInventoryException("inventory-file-changed");
+            results.Add(artifact);
+        }
+        return results;
+    }
+
+    /// <summary>Requires the declared multi-file slot for coverage receipt custody.</summary>
+    /// <param name="slot">The slot selected by the caller, if declared.</param>
+    /// <returns>The verified declaration.</returns>
+    /// <exception cref="CoverageEvidenceInventoryException">The slot is absent or does not support coverage receipt custody.</exception>
+    internal static EvidenceArtifactSlot RequireSlotDeclaration(EvidenceArtifactSlot? slot)
+    {
+        if (slot is null || slot.LogicalName != LogicalName || slot.RelativeRoot != SlotRoot
+            || slot.MaximumFiles is null || slot.MaximumFiles > MaximumFiles)
+            throw new CoverageEvidenceInventoryException("inventory-slot-ineligible");
+        return slot;
+    }
+
+    /// <summary>Checks complete custody bounds before any optional file is copied or registered.</summary>
+    /// <param name="writer">Fresh bounded custody writer.</param>
+    /// <param name="slot">Explicit report slot with sufficient count and aggregate byte capacity.</param>
+    /// <exception cref="CoverageEvidenceInventoryException">The complete set cannot fit the declared custody slot.</exception>
+    internal void ValidateSlot(EvidenceArtifactWriter writer, EvidenceArtifactSlot slot)
+    {
+        RequireSlotDeclaration(slot);
+        if (slot.MaximumFiles < Files.Count || slot.MaximumBytes < Files.Sum(file => file.LengthBytes)
+            || writer.WrittenArtifacts.Count != 0)
+            throw new CoverageEvidenceInventoryException("inventory-slot-ineligible");
+    }
+
+    /// <summary>Adopts a complete set of already delivered reports without rewriting their canonical paths.</summary>
+    /// <param name="writer">Fresh bounded writer for the exact controlled report root.</param>
+    /// <param name="slot">Explicit complete report-custody slot.</param>
+    /// <param name="outputRoot">Root already populated by atomic ordinary delivery.</param>
+    /// <param name="token">Cancels complete-set validation; partial registration never authorizes a receipt.</param>
+    /// <returns>Complete bounded metadata after native no-follow validation of every report.</returns>
+    /// <remarks>All slot and aggregate bounds are checked before registration. The coordinator must still verify
+    /// the writer and final source bytes during receipt admission. This operation writes no report bytes.</remarks>
+    internal async Task<IReadOnlyList<EvidenceArtifactResult>> AdoptDeliveredAsync(EvidenceArtifactWriter writer,
+        EvidenceArtifactSlot slot, string outputRoot, CancellationToken token)
+    {
+        if (Path.GetFullPath(outputRoot) != writer.RootPath)
+            throw new CoverageEvidenceInventoryException("inventory-custody-root-mismatch");
+        await ValidateAsync(outputRoot, token).ConfigureAwait(false);
+        ValidateSlot(writer, slot);
+        var results = Files.Select(file => new EvidenceArtifactResult(slot.LogicalName, file.RelativePath,
+            slot.MediaType, file.LengthBytes, file.Sha256)).ToArray();
+        foreach (var artifact in results)
+        {
+            token.ThrowIfCancellationRequested();
+            writer.RecordVerifiedExistingArtifact(artifact);
+        }
+        return results;
+    }
+
+    private static FileStream Open(string root, string relative)
+    {
+        CoverageReportFile.ValidatePath(relative);
+        return CoverageReportFile.OpenRead(Path.GetFullPath(root), relative);
+    }
+}
+
+/// <summary>A bounded reason code for optional custody failure; contains no source paths or exception details.</summary>
+internal sealed class CoverageEvidenceInventoryException(string reason) : Exception(reason)
+{
+    /// <summary>Gets the stable reason suitable for coordinator diagnostics.</summary>
+    internal string Reason { get; } = reason;
+}

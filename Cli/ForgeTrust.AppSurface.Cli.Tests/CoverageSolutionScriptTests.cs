@@ -71,7 +71,6 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("COVERAGE_RUN_SCOPE: ${{ github.repository }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ID: ${{ github.run_id }}", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_RUN_ATTEMPT: ${{ github.run_attempt }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_DOGFOOD_OUTPUT", workflow, StringComparison.Ordinal);
         Assert.Contains("/composed/coverage.cobertura.xml", workflow, StringComparison.Ordinal);
         Assert.Contains("steps.solution-coverage.outcome == 'success'", workflow, StringComparison.Ordinal);
@@ -284,25 +283,36 @@ public sealed class CoverageSolutionScriptTests
         var runCoverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Run coverage security contracts");
         var runCommand = ((YamlScalarNode)runCoverage.Children[new YamlScalarNode("run")]).Value!;
-        Assert.Equal(1, CountOccurrences(runCommand, "dotnet test "));
-        Assert.DoesNotContain("\n", runCommand, StringComparison.Ordinal);
-        Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--configuration Release", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--no-restore", runCommand, StringComparison.Ordinal);
-        Assert.Contains("/p:TailwindEnabled=false", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand|FullyQualifiedName~CoverageRunProcessContractTests|FullyQualifiedName~CoverageRunCollectorVersionPreflightTests|FullyQualifiedName~CoverageFanIn|FullyQualifiedName~EvidenceTestProducerPlannerTests|FullyQualifiedName~EvidenceArtifactFileValidationTests|FullyQualifiedName~EvidenceRunTestProducerTests|FullyQualifiedName~TestRunReconcilerTests|FullyQualifiedName~DotnetCliTestRunSourceTests|FullyQualifiedName~TestEvidenceProducerTests|FullyQualifiedName~TestEvidenceProducerProcessTests|FullyQualifiedName~VsTestRunnerProbeTests\"", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--logger \"console;verbosity=detailed\"", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--results-directory \"${{ runner.temp }}/coverage-native-results\"", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--collect:\"XPlat Code Coverage\"", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--blame-hang", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--blame-hang-timeout 2m", runCommand, StringComparison.Ordinal);
-        Assert.Contains("--blame-hang-dump-type mini", runCommand, StringComparison.Ordinal);
-        Assert.Contains("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura", runCommand, StringComparison.Ordinal);
-        Assert.Contains("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude=\"[*.Tests]*,[*.IntegrationTests]*\"", runCommand, StringComparison.Ordinal);
-        Assert.Contains(
-            "-- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude=\"[*.Tests]*,[*.IntegrationTests]*\"",
-            runCommand,
-            StringComparison.Ordinal);
+        Assert.Equal("pwsh", ((YamlScalarNode)runCoverage.Children[new YamlScalarNode("shell")]).Value);
+        Assert.Equal(1, CountOccurrences(runCommand, "& $env:COVERAGE_CLI_PATH @arguments"));
+        Assert.Contains("$arguments = @('coverage', 'run')", runCommand, StringComparison.Ordinal);
+        Assert.Contains("$projects = @(Get-Content -LiteralPath '.github/workflows/native-coverage-test-projects.txt')", runCommand, StringComparison.Ordinal);
+        Assert.Contains("foreach ($project in $projects)", runCommand, StringComparison.Ordinal);
+        Assert.Contains("$arguments += @('--test-project', $project)", runCommand, StringComparison.Ordinal);
+        Assert.Contains("'--configuration', 'Release', '--no-restore'", runCommand, StringComparison.Ordinal);
+        Assert.Contains("'--test-argument', '/p:TailwindEnabled=false'", runCommand, StringComparison.Ordinal);
+        Assert.Contains("$filter = & dotnet $dogfood --print-test-filter native", runCommand, StringComparison.Ordinal);
+        Assert.Contains("'--test-argument', '--filter', '--test-argument', $filter", runCommand, StringComparison.Ordinal);
+        Assert.Contains("'--logger', 'console;verbosity=detailed'", runCommand, StringComparison.Ordinal);
+        Assert.Contains("'--test-results', 'junit', '--artifact-retention', 'full'", runCommand, StringComparison.Ordinal);
+        Assert.Contains("'--test-argument', '--blame-hang', '--test-argument', '--blame-hang-timeout', '--test-argument', '2m'", runCommand, StringComparison.Ordinal);
+        Assert.Contains("'--test-argument', '--blame-hang-dump-type', '--test-argument', 'mini'", runCommand, StringComparison.Ordinal);
+        Assert.Contains("if ($LASTEXITCODE -ne 0) { throw \"Native coverage collection failed\" }", runCommand, StringComparison.Ordinal);
+
+        // The installed collector supplies these settings after the forwarded test arguments.
+        var coverageCommand = ReadRepositoryFile("Cli", "ForgeTrust.AppSurface.Cli", "CoverageRun.cs");
+        var coverageDriver = ReadRepositoryFile("Cli", "ForgeTrust.AppSurface.Cli", "CoverageRunDrivers.cs");
+        Assert.Contains("public string CoverageDriverName { get; set; } = \"collector\"", coverageCommand, StringComparison.Ordinal);
+        Assert.Contains("ExcludeFilter ?? \"[*.Tests]*,[*.IntegrationTests]*\"", coverageCommand, StringComparison.Ordinal);
+        Assert.Contains("\"--collect:XPlat Code Coverage\"", coverageDriver, StringComparison.Ordinal);
+        Assert.Contains("arguments.Add(\"DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura\")", coverageDriver, StringComparison.Ordinal);
+        Assert.Contains("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude={request.ExcludeFilter}", coverageDriver, StringComparison.Ordinal);
+
+        var collectorEnvironment = (YamlMappingNode)runCoverage.Children[new YamlScalarNode("env")];
+        Assert.Equal("${{ runner.temp }}/packed-reuse-diagnostics",
+            ((YamlScalarNode)collectorEnvironment.Children[new YamlScalarNode("APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS")]).Value);
+        Assert.Contains("New-Item -ItemType Directory -Force -Path $env:APPSURFACE_PACKED_JOURNEY_DIAGNOSTICS",
+            runCommand, StringComparison.Ordinal);
 
         var uploadDiagnostics = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
             ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload coverage security diagnostics");
@@ -310,7 +320,18 @@ public sealed class CoverageSolutionScriptTests
         Assert.Equal("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("uses")]).Value);
         var uploadWith = (YamlMappingNode)uploadDiagnostics.Children[new YamlScalarNode("with")];
         Assert.Equal("coverage-security-diagnostics-${{ matrix.os }}", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("name")]).Value);
-        Assert.Equal("${{ runner.temp }}/coverage-native-results", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("path")]).Value);
+        Assert.Equal(new[]
+        {
+            "${{ runner.temp }}/coverage-native-results",
+            "${{ runner.temp }}/packed-reuse-journey-feed/pack-logs/pack-*.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/pack-*.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/source.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/proof.json",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/*.log",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/proof/packed-progress.jsonl",
+            "${{ runner.temp }}/packed-reuse-diagnostics/**/fixture-progress.jsonl"
+        }, ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("path")]).Value!
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries));
         Assert.Equal("warn", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("if-no-files-found")]).Value);
         Assert.Equal("7", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("retention-days")]).Value);
         Assert.Contains(
@@ -325,7 +346,7 @@ public sealed class CoverageSolutionScriptTests
             workflow,
             StringComparison.Ordinal);
         Assert.Matches(
-            "(?s)--no-restore\\s+/p:TailwindEnabled=false\\s+--filter",
+            "(?s)'--configuration', 'Release', '--no-restore'.*'--test-argument', '/p:TailwindEnabled=false'.*'--test-argument', '--filter'",
             workflow);
         Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled", workflow, StringComparison.Ordinal);
     }
@@ -333,7 +354,7 @@ public sealed class CoverageSolutionScriptTests
     [Fact]
     public void CoverageEfficiencyWorkflow_ShouldCaptureCompleteReadOnlyEvidenceWithoutChangingPrValidation()
     {
-        var workflow = ReadRepositoryFile(".github", "workflows", "coverage-efficiency.yml");
+        var workflow = ReadRepositoryFile(".github", "workflows", "coverage-efficiency.yml").ReplaceLineEndings("\n");
         var yaml = new YamlStream();
         using var reader = new StringReader(workflow);
         yaml.Load(reader);

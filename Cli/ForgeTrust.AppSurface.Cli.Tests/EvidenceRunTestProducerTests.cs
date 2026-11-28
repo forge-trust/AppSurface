@@ -218,6 +218,8 @@ public sealed class EvidenceRunTestProducerTests
         Assert.Contains("  tests/A/A.csproj | filter: FullyQualifiedName~A | minimumTests: 7", output, StringComparison.Ordinal);
         Assert.Contains(TestEvidenceRunSupport.PreviewLine, output, StringComparison.Ordinal);
         using var summary = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Output, "evidence-summary.json")));
+        Assert.Equal(new[] { "kind", "profile", "scope", "matchedRules", "obligations", "testProducers", "next" },
+            summary.RootElement.EnumerateObject().Select(static property => property.Name));
         var producer = summary.RootElement.GetProperty("testProducers")[0];
         Assert.Equal(ProducerId, producer.GetProperty("id").GetString());
         Assert.True(producer.GetProperty("preview").GetBoolean());
@@ -261,6 +263,18 @@ public sealed class EvidenceRunTestProducerTests
         var distinct = plan with { Profile = profile with { Producers = [profile.Producers[0], profile.Producers[2]] } };
         TestEvidenceRunSupport.ValidateSelection(distinct);
         Assert.Throws<ArgumentNullException>(() => TestEvidenceRunSupport.ValidateSelection(null!));
+    }
+
+    [Fact]
+    public void ValidateReuseContext_ShouldRequireFreshExecutionForThePreviewProducer()
+    {
+        var plan = Fixture.Plan(Fixture.Policy());
+
+        var exception = Assert.Throws<CommandException>(() =>
+            EvidenceReuseCommandOptions.ValidateContext(true, plan, _ => null));
+
+        Assert.Contains("reuse.test_preview_requires_fresh", exception.Message, StringComparison.Ordinal);
+        EvidenceReuseCommandOptions.ValidateContext(false, plan, _ => null);
     }
 
     [Fact]

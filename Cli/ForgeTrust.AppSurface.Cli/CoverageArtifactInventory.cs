@@ -6,19 +6,52 @@ using System.Text.Json;
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
 /// <summary>Collects explicitly writer-owned paths without adopting pre-existing output contents.</summary>
+/// <param name="outputDirectory">The invocation-owned output root.</param>
+/// <param name="clock">Clock used for bounded optional history capture.</param>
+/// <param name="enumerationCalls">Optional invocation-local native enumeration seam; null uses the host APIs.</param>
 /// <remarks>
 /// Writers register each attempted file publication and only invocation-unique subtrees. Hashing occurs after
 /// producers drain, under the caller's output lease. An incomplete inventory cannot publish complete history.
 /// </remarks>
-internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProvider clock)
+internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProvider clock,
+    CoverageRunOutputLease.CoverageArtifactEnumerationCalls? enumerationCalls = null)
 {
     private readonly object _sync = new();
     private readonly HashSet<string> _files = new(StringComparer.Ordinal);
     private readonly HashSet<string> _freshTrees = new(StringComparer.Ordinal);
     private bool _limited;
+    private HashSet<string>? _ordinaryFiles;
+    private HashSet<string>? _ordinaryTrees;
+    private bool _ordinaryIncomplete;
 
     /// <summary>Gets the absolute output root whose writers own this inventory.</summary>
     internal string OutputDirectory { get; } = CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(outputDirectory));
+
+    /// <summary>Opts into ordinary-report tracking before this execution publishes its first file.</summary>
+    /// <remarks>
+    /// Normal observation-only sessions retain their existing bounded registries. Ordinary tracking retains the
+    /// same explicitly owned paths independently of optional storage limits and uses the producer's cancellation
+    /// deadline. Enabling after an incomplete observation cannot recover dropped paths and remains incomplete.
+    /// </remarks>
+    internal void EnableOrdinaryCapture()
+    {
+        lock (_sync)
+        {
+            if (_ordinaryFiles is not null) return;
+            _ordinaryFiles = new(_files, StringComparer.Ordinal);
+            _ordinaryTrees = new(_freshTrees, StringComparer.Ordinal);
+            _ordinaryIncomplete |= _limited;
+        }
+    }
+
+    private void MarkIncomplete()
+    {
+        lock (_sync)
+        {
+            _limited = true;
+            _ordinaryIncomplete = true;
+        }
+    }
 
     /// <summary>Registers a path that this invocation creates or overwrites; absent failed writes are not invented.</summary>
     /// <param name="path">A known writer destination within this output.</param>
@@ -28,11 +61,12 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
         try { relative = Relative(path); }
         catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
         {
-            lock (_sync) _limited = true;
+            MarkIncomplete();
             return;
         }
         lock (_sync)
         {
+            _ordinaryFiles?.Add(relative);
             if (_files.Count >= CoverageArtifactLimits.MaximumFiles && !_files.Contains(relative)) _limited = true;
             else _files.Add(relative);
         }
@@ -46,11 +80,12 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
         try { relative = Relative(path); }
         catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
         {
-            lock (_sync) _limited = true;
+            MarkIncomplete();
             return;
         }
         lock (_sync)
         {
+            _ordinaryTrees?.Add(relative);
             if (_freshTrees.Count >= CoverageArtifactLimits.MaximumFiles) _limited = true;
             else _freshTrees.Add(relative);
         }
@@ -70,7 +105,7 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
         }
         catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception))
         {
-            lock (_sync) _limited = true;
+            MarkIncomplete();
             return null;
         }
     }
@@ -91,42 +126,71 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
             {
                 // The external producer has no publication callback for a retained fixed-name file.
                 // A timestamp/length change cannot establish writer authority, so preserve uncertainty.
-                lock (_sync) _limited = true;
+                MarkIncomplete();
             }
         }
         catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception))
         {
-            lock (_sync) _limited = true;
+            MarkIncomplete();
         }
     }
 
     /// <summary>Hashes the writer-owned regular files after producers stop, preserving exact original bytes.</summary>
     /// <param name="token">Caller cancellation; terminal failure inventory may use its independent bounded budget.</param>
     /// <returns>A bounded complete inventory, or an exception that prevents optional complete publication.</returns>
-    internal IReadOnlyList<CoverageArtifactInventoryEntry> Capture(CancellationToken token)
+    internal IReadOnlyList<CoverageArtifactInventoryEntry> Capture(CancellationToken token) => CaptureCore(token, ordinary: false);
+
+    /// <summary>Captures explicitly owned ordinary reports without optional history/custody limits.</summary>
+    /// <param name="token">The executing producer's cancellation/deadline token, checked during traversal and streaming hashing.</param>
+    /// <returns>The complete safe publication set; unsafe or incompletely registered output is refused.</returns>
+    /// <remarks>
+    /// Call <see cref="EnableOrdinaryCapture"/> before publication. This path preserves regular-file, binding and
+    /// containment checks while removing optional storage file-count, metadata and one-second limits from primary
+    /// report delivery. Receipt admission applies its separate 128-file and 256-MiB limits afterwards.
+    /// </remarks>
+    internal IReadOnlyList<CoverageArtifactInventoryEntry> CaptureOrdinary(CancellationToken token) => CaptureCore(token, ordinary: true);
+
+    private IReadOnlyList<CoverageArtifactInventoryEntry> CaptureCore(CancellationToken token, bool ordinary)
     {
+        token.ThrowIfCancellationRequested();
         string[] trees;
         HashSet<string> files;
         lock (_sync)
         {
-            if (_limited) throw new InvalidDataException("Writer inventory exceeded its file limit.");
-            trees = _freshTrees.ToArray();
-            files = new(_files, StringComparer.Ordinal);
+            if (ordinary)
+            {
+                if (_ordinaryFiles is null || _ordinaryTrees is null || _ordinaryIncomplete)
+                    throw new InvalidDataException("Ordinary publications were not completely registered.");
+                trees = _ordinaryTrees.ToArray();
+                files = new(_ordinaryFiles, StringComparer.Ordinal);
+            }
+            else
+            {
+                if (_limited) throw new InvalidDataException("Writer inventory exceeded its file limit.");
+                trees = _freshTrees.ToArray();
+                files = new(_files, StringComparer.Ordinal);
+            }
         }
-        var deadline = new CoverageArtifactWorkBudget(clock, TimeSpan.FromSeconds(1));
+        var deadline = ordinary ? null : new CoverageArtifactWorkBudget(clock, TimeSpan.FromSeconds(1));
+        void Check()
+        {
+            token.ThrowIfCancellationRequested();
+            deadline?.Check(token);
+        }
         foreach (var tree in trees)
         {
             var pending = new Stack<string>();
             pending.Push(Path.Join(OutputDirectory, tree));
             while (pending.Count > 0)
             {
-                deadline.Check(token);
+                Check();
                 using var directory = CoverageRunOutputLease.AcquireArtifactDirectory(pending.Pop(), false, false);
                 if (directory is null) continue;
-                foreach (var entry in directory.EnumerateArtifactEntries(CoverageArtifactLimits.MaximumFiles))
+                foreach (var entry in directory.EnumerateArtifactEntries(
+                    ordinary ? int.MaxValue : CoverageArtifactLimits.MaximumFiles, token, enumerationCalls))
                 {
-                    deadline.Check(token);
-                    if (files.Count >= CoverageArtifactLimits.MaximumFiles) throw new InvalidDataException("Writer inventory exceeded its file limit.");
+                    Check();
+                    if (!ordinary && files.Count >= CoverageArtifactLimits.MaximumFiles) throw new InvalidDataException("Writer inventory exceeded its file limit.");
                     var path = Path.Join(directory.ArtifactDirectoryPath, entry.Name);
                     if (entry.IsDirectory) pending.Push(path);
                     else files.Add(Relative(path));
@@ -137,7 +201,7 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
         var buffer = new byte[CoverageArtifactLimits.OperationBufferMaxBytes];
         foreach (var relative in files.Order(StringComparer.Ordinal))
         {
-            deadline.Check(token);
+            Check();
             var path = Path.Join(OutputDirectory, relative);
             using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(path)!, false, false);
             if (parent is null) continue;
@@ -152,7 +216,7 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
                 int read;
                 while ((read = stream.Read(buffer)) > 0)
                 {
-                    deadline.Check(token);
+                    Check();
                     observed = checked(observed + read);
                     hash.AppendData(buffer, 0, read);
                 }
@@ -160,7 +224,7 @@ internal sealed class CoverageArtifactInventory(string outputDirectory, TimeProv
                 result.Add(new(relative.Replace('\\', '/'), length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant()));
             }
         }
-        if (JsonSerializer.SerializeToUtf8Bytes(result).LongLength > CoverageArtifactLimits.RunInventoryMaxBytes)
+        if (!ordinary && JsonSerializer.SerializeToUtf8Bytes(result).LongLength > CoverageArtifactLimits.RunInventoryMaxBytes)
             throw new InvalidDataException("Writer inventory exceeds its encoded metadata limit.");
         return result;
     }

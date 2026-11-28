@@ -86,9 +86,21 @@ internal sealed class StrictReportGeneratorRuntimeLocator : IReportGeneratorPack
         }
     }
 
+    /// <summary>Gets the SHA-256 identity of the exact embedded manifest used to verify this assembly's runtime.</summary>
+    /// <returns>The lowercase digest prefixed with <c>sha256:</c>, or null if the pinned resource is missing.</returns>
+    /// <remarks>This describes the embedded manifest. Use <see cref="ResolveRuntime()"/> to verify a deployed runtime.</remarks>
+    internal static string? GetPinnedManifestDigest()
+    {
+        using var stream = OpenEmbeddedManifest();
+        return stream is null ? null : "sha256:" + Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+    }
+
+    private static Stream? OpenEmbeddedManifest()
+        => typeof(StrictReportGeneratorRuntimeLocator).Assembly.GetManifestResourceStream(ManifestResourceName);
+
     private static byte[] ReadEmbeddedManifest()
     {
-        using var stream = typeof(StrictReportGeneratorRuntimeLocator).Assembly.GetManifestResourceStream(ManifestResourceName)
+        using var stream = OpenEmbeddedManifest()
             ?? throw new InvalidDataException("The pinned runtime manifest resource is missing from the coverage assembly.");
         using var buffer = new MemoryStream();
         stream.CopyTo(buffer);

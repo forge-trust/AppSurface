@@ -6,7 +6,7 @@ Use ordinary [`coverage merge`](../../../Cli/ForgeTrust.AppSurface.Cli/README.md
 
 ## Run the installed headless package proof
 
-Build the coordinated candidate packages first. For the complete walkthrough, the same local feed must contain `ForgeTrust.AppSurface.Coverage`, `ForgeTrust.AppSurface.Evidence.Coverage`, and `ForgeTrust.AppSurface.Cli` at the exact `CANDIDATE_VERSION`. The `--package-proof` path validates the two library packages in an isolated headless consumer and exercises the checked-in fixture's real collection path, public capture/composition/acceptance/verification flow, and altered-output rejection. The native-import journey also installs the candidate CLI from that same feed and passes its installed `appsurface` path to the repository adapter. It creates only the fresh proof output directory and retains stage logs there.
+Build the coordinated candidate packages first. For the complete walkthrough, the same local feed must contain `ForgeTrust.AppSurface.Coverage`, [`ForgeTrust.AppSurface.Evidence.Contracts`](../../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), `ForgeTrust.AppSurface.Evidence.Coverage`, and `ForgeTrust.AppSurface.Cli` at the exact `CANDIDATE_VERSION`. The `--package-proof` path validates the three library packages in an isolated headless consumer and exercises the checked-in fixture's real collection path, public capture/composition/acceptance/verification flow, and altered-output rejection. The native-import journey also installs the candidate CLI from that same feed and passes its installed `appsurface` path to the repository adapter. It creates only the fresh proof output directory and retains stage logs there.
 
 The fixture's native producer declares two projects and retains their original collector reports, exact ordered index and successful timings. [`CaptureNativeSetAsync`](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Coverage.Dogfood/examples/CoverageFanInApiExample.cs) shows how an existing trusted producer supplies `RawCoveragePaths` and `TimingsPath`; `CaptureNativeAsync` covers the single-project normalized/raw form. The [request reference](../../../Coverage/ForgeTrust.AppSurface.Coverage/README.md#request-and-result-reference) defines their mutually exclusive selectors. Both forms preserve original bytes and require independent checks before acceptance.
 
@@ -40,9 +40,9 @@ The following recipe uses this repository's policy adapter to generate exact CLI
 
 ## Generate exact CLI requests and results
 
-The adapter requires a clean source checkout and explicit run identity. Supply real artifacts produced by the collector jobs: `NORMALIZED_REPORT` is the collector's normalized Cobertura report, `RAW_REPORT` is the original collector output, and the receiving fan-in input directory must contain one matching `manifest.json` for each required producer. Use the same run scope, run ID, attempt, source, SDK, and configuration across the native jobs and receiving job. Each `--output` value must name a fresh path.
+The adapter requires a clean source checkout and explicit run identity. Supply real artifacts produced by the collector jobs: `RAW_REPORT_INDEX` maps the exact declared Aspire and CLI test project paths to their original collector reports, `NATIVE_TIMINGS` is their complete successful `coverage run` timings file, and the receiving fan-in input directory must contain one matching `manifest.json` for each required producer. Use the same run scope, run ID, attempt, source, SDK, and configuration across the native jobs and receiving job. Each `--output` value must name a fresh path.
 
-On an actual native runner, capture that runner's supplied report pair:
+On an actual native runner, capture that runner's supplied indexed original reports and timings:
 
 ```sh
 : "${REPOSITORY_ROOT:?Set this to the clean source checkout}"
@@ -51,8 +51,8 @@ On an actual native runner, capture that runner's supplied report pair:
 : "${RUN_ID:?Set the trusted provider run ID}"
 : "${ATTEMPT:?Set the positive provider attempt number}"
 : "${NATIVE_PLATFORM:?Set Linux, Windows, or Darwin from the actual runner}"
-: "${NORMALIZED_REPORT:?Set the actual normalized Cobertura report path}"
-: "${RAW_REPORT:?Set the retained original collector report path}"
+: "${RAW_REPORT_INDEX:?Set the exact project-to-original-report JSON index path}"
+: "${NATIVE_TIMINGS:?Set the complete successful two-project timings path}"
 native_output="${TMPDIR:-/tmp}/appsurface-native-capture-$$"
 test ! -e "$native_output"
 dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood \
@@ -63,8 +63,8 @@ dotnet run --project tools/ForgeTrust.AppSurface.Coverage.Dogfood \
   --output "$native_output" \
   --configuration Release \
   --native-platform "$NATIVE_PLATFORM" \
-  --report "$NORMALIZED_REPORT" \
-  --raw "$RAW_REPORT" \
+  --raw-index "$RAW_REPORT_INDEX" \
+  --timings "$NATIVE_TIMINGS" \
   --run-scope "$RUN_SCOPE" \
   --run-id "$RUN_ID" \
   --attempt "$ATTEMPT"

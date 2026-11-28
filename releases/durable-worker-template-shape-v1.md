@@ -52,6 +52,7 @@ tests/FirstDurableWorker.Tests/FirstDurableWorker.Tests.csproj
 tests/FirstDurableWorker.Tests/ActivityExporter.cs
 tests/FirstDurableWorker.Tests/BoundedProcessRunner.cs
 tests/FirstDurableWorker.Tests/FirstDurableWorkTests.cs
+tests/FirstDurableWorker.Tests/FirstWorkFailureMarker.cs
 tests/FirstDurableWorker.Tests/HostContractTests.cs
 tests/FirstDurableWorker.Tests/PostgreSqlTestContainerImage.cs
 tests/FirstDurableWorker.Tests/PostgreSqlFixture.cs
@@ -84,6 +85,19 @@ The package content allowlist includes the manifest and intended dotfiles explic
 This source inventory is not itself a generated-artifact or runtime result. Exact-package archive inspection and clean-hive generation must verify that the packed template emits the listed shape. In particular, the package-consumer proof must find and execute the named `FirstDurableWork` test; an empty filter result is not evidence for any checkpoint.
 
 ## Manual upgrade checklist
+
+### Diagnostic formatter addition for #917
+
+The coordinated package compatibility table above is unchanged. The reviewed inventory adds
+`tests/FirstDurableWorker.Tests/FirstWorkFailureMarker.cs`; `FirstDurableWorkTests.cs` now calls that
+internal helper to format the same failure marker. No file is removed or renamed. This separates
+formatting from execution so the repository can test the actual marker with its bounded receipt reader.
+It changes no Docker prerequisite, timeout, cleanup or proof assertion. The update also adds `PostgreSqlFixture.DockerPrerequisiteException` and the corresponding
+`RequireDockerAsync` wrapping in `PostgreSqlFixture.cs`. Existing projects that adopt this diagnostic
+update must coordinate all three files: `FirstWorkFailureMarker.cs`, `FirstDurableWorkTests.cs`, and
+`PostgreSqlFixture.cs`. Copying the updated test without the helper or fixture changes will not compile. Preserve application-owned edits and follow the comparison
+and execution steps below. The [PackageIndex diagnostic reference](../tools/ForgeTrust.AppSurface.PackageIndex/README.md)
+describes the independently validated fields; diagnostic text never establishes proof success.
 
 For every later template shape, the release must provide a versioned before/after guide, exact template/generated-package compatibility table, and a manual file-by-file checklist. The adopter should:
 

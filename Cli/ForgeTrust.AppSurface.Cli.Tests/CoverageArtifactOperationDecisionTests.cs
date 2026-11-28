@@ -9,6 +9,14 @@ public sealed class CoverageArtifactOperationDecisionTests
 {
     private const string LockFileName = ".appsurface-coverage-operation.lock";
 
+    [Fact]
+    public void ContentionClassificationRequiresTheCoverageExceptionAndItsExactCode()
+    {
+        Assert.True(CoverageArtifactOperationLease.IsContention(new CoverageExecutionException("ASCOV202 Busy.")));
+        Assert.False(CoverageArtifactOperationLease.IsContention(new IOException("ASCOV202")));
+        Assert.False(CoverageArtifactOperationLease.IsContention(new CoverageExecutionException("ASCOV203 See ASCOV202.")));
+    }
+
     [Theory]
     [InlineData(false, 5)]
     [InlineData(true, 6)]

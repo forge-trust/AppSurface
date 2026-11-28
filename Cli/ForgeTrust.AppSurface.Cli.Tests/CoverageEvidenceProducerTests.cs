@@ -276,8 +276,10 @@ public sealed class CoverageEvidenceProducerTests
         Assert.Contains("Patch line mode: codecov", await File.ReadAllTextAsync(Path.Join(outputDirectory, "coverage", "coverage-gate.md")), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task RunAsync_ShouldForwardConfiguredExecutionWithoutChangingCoverageScope()
+    [Theory]
+    [InlineData("coverage")]
+    [InlineData("Coverage")]
+    public async Task RunAsync_ShouldForwardConfiguredExecutionWithoutChangingCoverageScope(string kind)
     {
         using var directory = TestDirectory.Create();
         var solutionPath = Path.Join(directory.Path, "sample.slnx");
@@ -290,7 +292,7 @@ public sealed class CoverageEvidenceProducerTests
         }
         var processRunner = new PassingCoverageRunProcessRunner(projectCount: 2);
         var producer = CreateProducer(processRunner);
-        var declaration = CreateDeclaration() with
+        var declaration = CreateDeclaration(kind: kind) with
         {
             CoverageExecution = new EvidenceCoverageExecutionOptions(
                 Configuration: "Release",

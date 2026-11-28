@@ -4,6 +4,8 @@
 
 Start with the [EvidenceHost guide](../../start-here/evidencehost.md). The workflow reads only explicit policy and diff inputs; it does not scan consumer assemblies, discover test projects, provision third-party services, or report outbound usage telemetry. The preview [`test` producer](#test-producer-preview) lists the tests of the projects a policy declares; it never searches for projects.
 
+See the canonical [producer reuse guide](../../guides/evidence-reuse.md) for complete input declarations, optional multi-file report custody, cooperative child lifetime, reuse/audit CLI behavior, and candidate 1.1 constraints.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
@@ -47,7 +49,11 @@ Use the report to prepare a run. Release-envelope validation takes place in the 
 
 An intentionally selected `no-evidence` profile may close a gate. A skipped test project, unavailable browser, missing Docker runtime, or unsupported producer cannot. A filtered test suite cannot close a coverage assertion; it can close the [`test` assertion](#test-producer-preview) of a producer that names its filter in the plan. `run` returns a failing command and a manifest with `ClaimKind.None` for those cases, preserving the diagnostic and next action in `evidence-summary.json`.
 
+For an `ObservationOnly` claim, the `next` field in `evidence-summary.json` identifies the result as informational and directs gate consumers to run fresh evidence without `--observation-only`.
+
 The built-in coverage producer is an in-process adapter over the private [`ForgeTrust.AppSurface.Evidence.Coverage`](../ForgeTrust.AppSurface.Evidence.Coverage/README.md) engine shared with `appsurface coverage run` and `appsurface coverage gate`. Its policy declaration carries the exact overall and optional patch thresholds, tolerance, and patch-line mode; the resolved plan binds those values before collection begins. When a patch gate is selected, `evidence run` captures the bounded `--diff-file` bytes during planning and reuses that immutable snapshot for gate evaluation, so replacing the file mid-run cannot change the measured input. It does not silently convert a partial test selection into a full-profile claim.
+
+The CLI reuse resolver has an internal per-instance `sdkExecutableForTests` seam for deterministic SDK-version-query tests. A supplied path must be fully qualified; it affects only SDK version queries. Production omits it and resolves `dotnet` normally. It does not replace the coverage engine process runner or add a user-facing executable override. The existing 30-second query deadline also covers stdout/stderr draining, including after root exit. Deadline expiry returns `unavailable`; caller cancellation propagates. Actual root termination is joined on cancellation. Releasing the readers does not prove that an unregistered descendant has stopped; the query never admits a receipt from incomplete SDK identity.
 
 Coverage declarations may also set `coverageExecution` with a simple `configuration` identifier, `parallelism` from 1 through 32, and `testResults` of `none` or `junit`. The defaults preserve the legacy Debug, serial, no-managed-results run. These options select the build and test envelope only; the built-in producer keeps its collector, AppSurface test exclusions, coverage gates, and source scope unchanged. See the [`EvidenceCoverageExecutionOptions` contract](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceCoverageExecutionOptions.cs) for the public shape and validation limits.
 
@@ -308,18 +314,21 @@ Tested on 2026-11-22 with released CLI 0.2.0-preview.14 against a CLI that knows
 - `run` refuses to start with `ASEVD216` when the `artifacts` directory or a `test` producer's directory under it is a symbolic link, because retiring earlier outputs would delete through the link. It checks every such directory before it deletes anything. It does not check the `--output` directory itself or its parents. Only `test` producers' artifact directories are retired.
 - The receipt slot must use `relativeRoot` `test`, and its `maximumBytes` must be at least 4096 plus, per project, 512 plus six bytes per character of the project path. The planner checks both (`ASEVD146`, `ASEVD147`) so a run never finishes its tests and then fails to write the receipt.
 
+Profiles that select the preview test producer require a fresh CLI run. Omit `--reuse` for these profiles.
+
 ## Verifying evidence
 
 ```bash
-appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <evidence-plan.json>] [--artifact-root <directory>]
+appsurface evidence verify TestResults/evidence/evidence-manifest.json [--plan <evidence-plan.json>] [--artifact-root <directory>] [--for-gate]
 ```
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--plan` | `evidence-plan.json` beside the manifest | The resolved plan the manifest must bind to. |
-| `--artifact-root` | the `artifacts` directory beside the manifest | Directory holding one subdirectory per producer id, as `run` writes it. Pass it only when the artifacts were moved. |
+| `--artifact-root` | the `artifacts` directory beside the manifest for the preview test producer | Explicit directory holding one subdirectory per producer id. |
+| `--for-gate` | off | Require a gate-eligible claim in addition to checking integrity. |
 
-`verify` re-resolves the policy snapshot inside the plan, compares digests, and then runs the shared [artifact file check](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#retained-artifact-check) for every artifact a producer result lists. A manifest that lists no artifacts never touches the artifact root.
+`verify` re-resolves the policy snapshot inside the plan, compares digests, and then runs the shared [artifact file check](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#retained-artifact-check) for every artifact a producer result lists. For a CLI coverage run with receipt custody, the default uses the [coverage custody layout](../../guides/evidence-reuse.md#coverage-report-custody) beside the manifest. Keep the whole run directory together when moving it. A manifest that lists no artifacts never touches the artifact root.
 
 | Code | Meaning | Next action |
 | --- | --- | --- |

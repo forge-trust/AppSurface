@@ -4,6 +4,21 @@
 
 Read the [EvidenceHost guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/evidencehost.md) first. `EvidenceAspireApplication.StartAsync(...)` can build and start an explicitly consumer-composed `DistributedApplication` and bind a named Aspire health condition to a declared evidence resource. The package never discovers an application, provisions cloud resources, creates a Docker sandbox, attests an artifact, or operates a dashboard.
 
+For opt-in local receipt reuse, use the canonical [reuse guide](../../guides/evidence-reuse.md), including the exact prepared-run factory contract and the cooperative child-lifetime requirement. A prepared host must build only its `RequiredResourceIds`, use the returned `ArtifactDirectories` map for producer roots, and retain its resource scope until settlement.
+
+An admitted child that loses its completion channel leaves settlement unknown. Joining its disconnected handler
+does not authorize disposal of prepared producers or the transferred application scope, even when a producer
+raises a fatal failure. The failure still propagates; the consumer must follow the [stopped-environment recovery
+procedure](../../guides/evidence-reuse.md#admission-failure-and-safe-retry) before releasing retained owners.
+
+Disposing an active prepared run requests its resource factory's cancellation before joining the run. A factory
+must observe that token and clean its partial construction; disposal joins actual work rather than treating
+cancellation as settlement. See the [prepared-host lifecycle](../../guides/evidence-reuse.md#migrating-an-existing-prepared-host).
+
+The [lifecycle inventory](../../guides/evidence-prepared-lifecycle.md) records the host-admission handoff: a scope
+returned after cancellation or disposal won is cleaned without starting readiness or producers; disposal after
+admission joins the already-owned execution.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 

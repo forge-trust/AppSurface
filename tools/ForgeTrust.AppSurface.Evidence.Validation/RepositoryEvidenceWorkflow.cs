@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -20,12 +21,17 @@ internal static class RepositoryEvidenceWorkflow
 {
     private const int MaximumJsonBytes = 16 * 1024 * 1024;
 
+    /// <summary>Carries in-process services for a local repository evidence execution.</summary>
+    /// <param name="VerifySourceAsync">Rechecks the pinned source and policy before coverage can use a local patch.</param>
+    /// <param name="ManagedRun">Cache and cleanup tracking for managed output. Explicit output passes null.</param>
+    internal sealed record LocalExecutionContext(Func<CancellationToken, Task> VerifySourceAsync, LocalEvidenceOutput.ManagedRun? ManagedRun);
+
     /// <summary>Runs one explicit repository planning, execution, or gate operation; incomplete evidence returns nonzero.</summary>
     /// <param name="options">Validated command options and trusted plan inputs.</param>
     /// <param name="cancellationToken">Cancels execution and artifact verification.</param>
-    /// <param name="verifyLocalSourceAsync">Optional in-process local source and policy digest check; required for patch overrides.</param>
+    /// <param name="localExecution">Local execution services, required for patch overrides. Direct CLI callers omit these services.</param>
     internal static async Task<int> RunAsync(IReadOnlyDictionary<string, string> options, CancellationToken cancellationToken,
-        Func<CancellationToken, Task>? verifyLocalSourceAsync = null)
+        LocalExecutionContext? localExecution = null)
     {
         var operation = Required(options, "--operation");
         if (operation is not ("plan" or "run" or "verify")) throw new ArgumentException("Operation must be plan, run or verify.");
@@ -73,6 +79,7 @@ internal static class RepositoryEvidenceWorkflow
         }
         ValidationSettings? settings = null;
         RepositoryCheckSettings? checks = null;
+        var managedRun = localExecution?.ManagedRun;
         if (operation == "run" && plan.Profile.Producers.Count > 0)
         {
             var dotnet = Path.GetFullPath(Required(options, "--dotnet"));
@@ -95,15 +102,17 @@ internal static class RepositoryEvidenceWorkflow
                 options.GetValueOrDefault("--diff-base"), nativeCoverageDirectory, options.GetValueOrDefault("--diff-file"), coverageCli)
             {
                 NativeCoverageContractVersion = nativeCoverageContractVersion,
-                VerifyLocalSourceAsync = verifyLocalSourceAsync,
+                VerifyLocalSourceAsync = localExecution?.VerifySourceAsync,
+                PackageRestoreCache = managedRun?.PackageRestoreCache,
                 CoverageCollectionDirectory = options.GetValueOrDefault("--coverage-collection"),
                 CoverageScheduleTimingsPath = options.TryGetValue("--coverage-schedule-timings", out var timings) ? Path.GetFullPath(timings) : null,
             };
         }
 
         Directory.CreateDirectory(output);
-        await File.WriteAllBytesAsync(Path.Join(output, "evidence-plan.json"), EvidenceCanonicalJson.Serialize(plan), cancellationToken);
-        await File.WriteAllTextAsync(Path.Join(output, "selection.json"), JsonSerializer.Serialize(new
+        await File.WriteAllBytesAsync(PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.PlanFileName),
+            EvidenceCanonicalJson.Serialize(plan), cancellationToken);
+        await File.WriteAllTextAsync(PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.SelectionFileName), JsonSerializer.Serialize(new
         {
             profileId = plan.Profile.Id,
             requiresPackage = RequiresPackage(plan.Profile),
@@ -115,29 +124,34 @@ internal static class RepositoryEvidenceWorkflow
             requiresPackageChecks = plan.Profile.Producers.Any(producer => producer.Id == "package-checks"),
             producerIds = plan.Profile.Producers.Select(producer => producer.Id).ToArray(),
         }, Program.JsonOptions), cancellationToken);
-        await File.WriteAllTextAsync(Path.Join(output, "evidence-summary.md"), Summary(plan), cancellationToken);
+        var summaryPath = PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.SummaryFileName);
+        await File.WriteAllTextAsync(summaryPath, Summary(plan), cancellationToken);
         if (operation == "plan") return 0;
 
+        var runner = new EvidenceCommandRunner();
+        var command = managedRun?.Settlement.Track(runner.RunAsync) ?? runner.RunAsync;
+        var artifactRoot = PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ArtifactsDirectoryName);
         await using var host = EvidenceHostBootstrap.Create(plan, registration =>
         {
             foreach (var declaration in plan.Profile.Producers)
             {
                 IEvidenceProducer producer = declaration.Id switch
                 {
-                    "packed-storage" => new PackedStorageProducer(settings!),
-                    "installed-consumer" => new InstalledConsumerProducer(settings!),
-                    "solution-coverage" => new SolutionCoverageProducer(checks!),
-                    "package-checks" => new PackageChecksProducer(checks!),
+                    "packed-storage" => new PackedStorageProducer(settings!, command),
+                    "installed-consumer" => new InstalledConsumerProducer(settings!, command),
+                    "solution-coverage" => new SolutionCoverageProducer(checks!, command),
+                    "package-checks" => new PackageChecksProducer(checks!, command),
                     _ => throw new InvalidOperationException("Unsupported repository evidence producer."),
                 };
                 registration.AddProducer(producer);
             }
-        }, new EvidenceHostOptions(ArtifactDirectory: Path.Join(output, "artifacts")));
+        }, new EvidenceHostOptions(ArtifactDirectory: artifactRoot));
         var result = await host.RunAsync(cancellationToken: cancellationToken);
-        await File.WriteAllBytesAsync(Path.Join(output, "evidence-manifest.json"), EvidenceCanonicalJson.Serialize(result), CancellationToken.None);
-        await File.AppendAllTextAsync(Path.Join(output, "evidence-summary.md"), $"\nClaim: `{result.ClaimKind}`; cleanup: `{result.Metrics.CleanupCompleted}`.\n", CancellationToken.None);
+        await File.WriteAllBytesAsync(PathUtils.PathUnder(output, RepositoryEvidenceOutputLayout.ManifestFileName),
+            EvidenceCanonicalJson.Serialize(result), CancellationToken.None);
+        await File.AppendAllTextAsync(summaryPath, $"\nClaim: `{result.ClaimKind}`; cleanup: `{result.Metrics.CleanupCompleted}`.\n", CancellationToken.None);
         foreach (var producer in result.ProducerResults) Console.WriteLine($"{producer.ProducerId}: {producer.Outcome} {producer.Diagnostic}");
-        await VerifyAsync(plan, result, Path.Join(output, "artifacts"), cancellationToken);
+        await VerifyAsync(plan, result, artifactRoot, cancellationToken);
         return 0;
     }
 
@@ -154,7 +168,7 @@ internal static class RepositoryEvidenceWorkflow
                 new("transcript", "proof", "application/json", true, 16 * 1024 * 1024),
                 new("aggregate-gate", "proof", "application/json", true, 2 * 1024 * 1024),
                 new("patch-gate", "proof", "application/json", false, 2 * 1024 * 1024)], 5400,
-            new EvidenceCoverageGateRequirements(95, 85, 95, 85, "codecov", 0.5m)),
+            SolutionCoverageProducer.GateRequirements),
         "package-checks" => new(id, "repository-validation", "1.0.0", [],
             ["package/manifest@1", "package/generated-docs@1", "package/archives-and-consumers@1"],
             [new("result", "proof", "application/json", true, 1024 * 1024),

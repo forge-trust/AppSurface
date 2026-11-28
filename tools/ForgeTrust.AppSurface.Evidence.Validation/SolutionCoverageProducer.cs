@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Coverage;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -12,7 +13,7 @@ namespace ForgeTrust.AppSurface.Evidence.Validation;
 internal sealed class SolutionCoverageProducer : IEvidenceProducer
 {
     private const string ProducerId = "solution-coverage";
-    private const long MaxJson = 2 * 1024 * 1024;
+    private const int MaxJson = 2 * 1024 * 1024;
     private static readonly string[] Assertions = ["coverage/solution-complete@1", "coverage/thresholds@1"];
     private static readonly string[] ExclusiveProjects =
     [
@@ -24,6 +25,9 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     ];
     private readonly RepositoryCheckSettings _settings;
     private readonly Func<EvidenceCommandRequest, CancellationToken, Task<EvidenceCommandResult>> _command;
+
+    /// <summary>The fixed repository gate policy used for declaration, CLI arguments and report validation.</summary>
+    internal static EvidenceCoverageGateRequirements GateRequirements { get; } = new(95, 85, 95, 85, "codecov", 0.5m);
 
     /// <summary>Creates a solution coverage producer with an optional bounded command seam.</summary>
     public SolutionCoverageProducer(RepositoryCheckSettings settings,
@@ -70,11 +74,10 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             if (nativeFanIn && (string.IsNullOrWhiteSpace(_settings.DiffBase) || !string.IsNullOrWhiteSpace(_settings.DiffFile)))
                 throw new InvalidDataException("Native fan-in requires a pinned Git diff base and no local patch override.");
             stage = "identity";
-            var commit = (await ExecuteTextAsync("git", ["rev-parse", "--verify", "HEAD^{commit}"], root, proof, cancellationToken)).Trim();
-            var tree = (await ExecuteTextAsync("git", ["rev-parse", "--verify", "HEAD^{tree}"], root, proof, cancellationToken)).Trim();
-            var sdk = (await ExecuteTextAsync(_settings.DotnetPath, ["--version"], root, proof, cancellationToken)).Trim();
-            if (commit.Length != 40 || tree.Length != 40 || sdk.Length is 0 or > 64) throw new InvalidDataException("Repository or SDK identity is invalid.");
-            await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
+            var identity = await ReadIdentityAsync(root, proof, cancellationToken).ConfigureAwait(false);
+            if (identity.Commit.Length != 40 || identity.Tree.Length != 40 || identity.Sdk.Length is 0 or > 64)
+                throw new InvalidDataException("Repository or SDK identity is invalid.");
+            await RequireUnchangedSourceAsync(root, identity.Commit, proof, cancellationToken).ConfigureAwait(false);
             Directory.CreateDirectory(coverage);
 
             stage = "collection";
@@ -82,16 +85,16 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             {
                 if (!string.IsNullOrWhiteSpace(_settings.DiffFile))
                     throw new InvalidDataException("Collected CI coverage cannot be used for a local patch.");
-                await SolutionCoverageHandoff.ImportAsync(collection, coverage, new(commit, tree, sdk), WorkflowRun(), cancellationToken).ConfigureAwait(false);
+                await SolutionCoverageHandoff.ImportAsync(collection, coverage, identity, WorkflowRun(), cancellationToken).ConfigureAwait(false);
             }
             else
                 await CollectCoverageAsync(root, coverage, proof, cancellationToken).ConfigureAwait(false);
             var report = Path.Join(coverage, "coverage.cobertura.xml");
             var timings = Path.Join(coverage, "timings.json");
-            ValidateTimings(timings, expected);
+            ValidateTimings(timings, expected, cancellationToken);
             if (!File.Exists(report) || new FileInfo(report).Length == 0) throw new InvalidDataException("The merged solution coverage report is missing.");
 
-            await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
+            await RequireUnchangedSourceAsync(root, identity.Commit, proof, cancellationToken).ConfigureAwait(false);
 
             stage = "aggregate-gate";
             var aggregateGate = Path.Join(coverage, "aggregate-gate");
@@ -101,10 +104,10 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 installed: _settings.CoverageCliPath is not null);
             await ExecuteAsync("aggregate-gate", aggregateArgs, root, proof, cancellationToken,
                 _settings.CoverageCliPath ?? _settings.DotnetPath).ConfigureAwait(false);
-            ValidateGate(aggregateJson, patch: false);
+            _ = ReadValidatedGate(aggregateJson, cancellationToken, patch: false);
 
             string? patchJson = null;
-            string? nativeProofHash = null;
+            NativeGateProof? nativeProof = null;
             if (nativeFanIn)
             {
                 stage = "native-fan-in";
@@ -127,17 +130,17 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 if (nativeContract == 3)
                     dogfoodArgs.AddRange(["--diff-policy-id", CoverageFanInPolicy.VisualBaselinePngDiffPolicyId]);
                 await ExecuteAsync("coverage-fanin", dogfoodArgs, root, proof, cancellationToken, _settings.DotnetPath).ConfigureAwait(false);
-                nativeProofHash = await ValidateNativeFanInAsync(fanInOutput, nativeContract, _settings.DiffBase!,
-                    commit, tree, sdk, run, cancellationToken).ConfigureAwait(false);
-                var primaryGateDir = Path.Join(coverage, "primary-gate");
+                nativeProof = await ValidateNativeFanInAsync(fanInOutput, nativeContract, _settings.DiffBase!,
+                    identity, run, cancellationToken).ConfigureAwait(false);
+                var primaryGateDir = PathUtils.PathUnder(coverage, "primary-gate");
                 Directory.CreateDirectory(primaryGateDir);
-                var primaryGate = Path.Join(primaryGateDir, "coverage-gate.json");
-                File.Copy(Path.Join(fanInOutput, "accepted", "primary-gate.json"), primaryGate, overwrite: false);
-                var patchGateDir = Path.Join(coverage, "patch-gate");
+                var primaryGate = PathUtils.PathUnder(primaryGateDir, "coverage-gate.json");
+                await WriteNewFileAsync(primaryGate, nativeProof.Primary, cancellationToken).ConfigureAwait(false);
+                var patchGateDir = PathUtils.PathUnder(coverage, "patch-gate");
                 Directory.CreateDirectory(patchGateDir);
-                patchJson = Path.Join(patchGateDir, "coverage-gate.json");
-                File.Copy(Path.Join(fanInOutput, "accepted", "composed-gate.json"), patchJson, overwrite: false);
-                ValidateGate(primaryGate, patch: false);
+                patchJson = PathUtils.PathUnder(patchGateDir, "coverage-gate.json");
+                await WriteNewFileAsync(patchJson, nativeProof.Composed, cancellationToken).ConfigureAwait(false);
+                ValidateGate(nativeProof.Primary, patch: false);
             }
             else if (!string.IsNullOrWhiteSpace(_settings.DiffBase) || !string.IsNullOrWhiteSpace(_settings.DiffFile))
             {
@@ -148,30 +151,40 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 await ExecuteAsync("patch-gate", GateArgs(report, root, patchGate, _settings.DiffBase, _settings.DiffFile,
                     patch: true, installed: _settings.CoverageCliPath is not null), root, proof, cancellationToken,
                     _settings.CoverageCliPath ?? _settings.DotnetPath).ConfigureAwait(false);
-                ValidateGate(patchJson, patch: true);
+                _ = ReadValidatedGate(patchJson, cancellationToken, patch: true);
             }
 
-            ValidateGate(aggregateJson, patch: false);
-            if (patchJson is not null) ValidateGate(patchJson, patch: true, typedPatch: nativeFanIn && nativeContract == 3);
-            await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
-            await WriteJsonAsync(context.Artifacts, "aggregate-gate", "proof/aggregate-gate.json", aggregateJson, cancellationToken);
-            if (patchJson is not null) await WriteJsonAsync(context.Artifacts, "patch-gate", "proof/patch-gate.json", patchJson, cancellationToken);
+            await RequireUnchangedSourceAsync(root, identity.Commit, proof, cancellationToken).ConfigureAwait(false);
+            // Check and publish the same bounded bytes after the final source check.
+            var aggregateBytes = ReadValidatedGate(aggregateJson, cancellationToken, patch: false);
+            ReadOnlyMemory<byte>? patchBytes = null;
+            if (patchJson is not null)
+            {
+                var captured = ReadValidatedGate(patchJson, cancellationToken, patch: true, typedPatch: nativeFanIn && nativeContract == 3);
+                if (nativeProof is not null && !captured.Span.SequenceEqual(nativeProof.Composed.Span))
+                    throw new InvalidDataException("The staged patch gate differs from native acceptance.");
+                patchBytes = captured;
+            }
+            await context.Artifacts.WriteAsync("aggregate-gate", "proof/aggregate-gate.json", aggregateBytes, cancellationToken).ConfigureAwait(false);
+            var patchArtifact = patchBytes is { } capturedPatch
+                ? await context.Artifacts.WriteAsync("patch-gate", "proof/patch-gate.json", capturedPatch, cancellationToken).ConfigureAwait(false)
+                : null;
             await context.Artifacts.WriteAsync("transcript", "proof/transcript.json", JsonSerializer.SerializeToUtf8Bytes(proof), cancellationToken);
             await context.Artifacts.WriteAsync("result", "proof/result.json", JsonSerializer.SerializeToUtf8Bytes(new
             {
                 completed = true,
-                commit,
-                tree,
-                sdk,
+                commit = identity.Commit,
+                tree = identity.Tree,
+                sdk = identity.Sdk,
                 configuration = "Release",
                 fullSolution = true,
                 nativeFanInContractVersion = nativeFanIn ? (int?)nativeContract : null,
-                nativeFanInProofSha256 = nativeProofHash,
+                nativeFanInProofSha256 = nativeProof?.ReceiptSha256,
                 testProjects = expected.Order(StringComparer.Ordinal).ToArray(),
                 reportSha256 = await HashFileAsync(report, cancellationToken),
                 aggregateGatePassed = true,
-                patchGatePassed = patchJson is not null,
-                patchGateSha256 = patchJson is null ? null : await HashFileAsync(patchJson, cancellationToken),
+                patchGatePassed = patchArtifact is not null,
+                patchGateSha256 = patchArtifact?.Sha256,
                 assertions = Assertions,
             }), cancellationToken);
             return new(Id, EvidenceProducerOutcome.Passed, Assertions);
@@ -182,7 +195,8 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             var artifactDiagnostic = await FailureArtifactDiagnostics.WriteAsync(context.Artifacts,
                 [("transcript", JsonSerializer.SerializeToUtf8Bytes(proof)),
                     ("result", JsonSerializer.SerializeToUtf8Bytes(new { completed = false, stage, failure = exception.GetType().Name, commands = proof }))]).ConfigureAwait(false);
-            return Failed($"Solution coverage failed during {stage}." + artifactDiagnostic);
+            var commandDiagnostic = RepositoryCommandSettlement.IsUnconfirmedCleanup(exception) ? " cleanup_failed." : string.Empty;
+            return Failed($"Solution coverage failed during {stage}." + commandDiagnostic + artifactDiagnostic);
         }
     }
 
@@ -208,16 +222,21 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         var run = WorkflowRun();
         SolutionCoverageHandoff.RequireRun(run);
         var proof = new List<CommandProof>();
+        var identity = await ReadIdentityAsync(root, proof, cancellationToken).ConfigureAwait(false);
+        identity.Validate();
+        await RequireUnchangedSourceAsync(root, identity.Commit, proof, cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(coverage);
+        await CollectCoverageAsync(root, coverage, proof, cancellationToken).ConfigureAwait(false);
+        await RequireUnchangedSourceAsync(root, identity.Commit, proof, cancellationToken).ConfigureAwait(false);
+        await SolutionCoverageHandoff.WriteAsync(coverage, identity, run, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<SolutionCoverageIdentity> ReadIdentityAsync(string root, List<CommandProof> proof, CancellationToken cancellationToken)
+    {
         var commit = (await ExecuteTextAsync("git", ["rev-parse", "--verify", "HEAD^{commit}"], root, proof, cancellationToken)).Trim();
         var tree = (await ExecuteTextAsync("git", ["rev-parse", "--verify", "HEAD^{tree}"], root, proof, cancellationToken)).Trim();
         var sdk = (await ExecuteTextAsync(_settings.DotnetPath, ["--version"], root, proof, cancellationToken)).Trim();
-        var identity = new SolutionCoverageIdentity(commit, tree, sdk);
-        identity.Validate();
-        await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
-        Directory.CreateDirectory(coverage);
-        await CollectCoverageAsync(root, coverage, proof, cancellationToken).ConfigureAwait(false);
-        await RequireUnchangedSourceAsync(root, commit, proof, cancellationToken).ConfigureAwait(false);
-        await SolutionCoverageHandoff.WriteAsync(coverage, identity, run, cancellationToken).ConfigureAwait(false);
+        return new SolutionCoverageIdentity(commit, tree, sdk);
     }
 
     private async Task CollectCoverageAsync(string root, string coverage, List<CommandProof> proof,
@@ -239,7 +258,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         runArgs.AddRange(["--logger", "console;verbosity=normal", "--test-results", "junit", "--slow-test-diagnostics", "--require-non-sandbox"]);
         await ExecuteAsync("coverage-run", runArgs, root, proof, cancellationToken,
             installedCli ?? _settings.DotnetPath).ConfigureAwait(false);
-        ValidateTimings(Path.Join(coverage, "timings.json"), ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx")));
+        ValidateTimings(Path.Join(coverage, "timings.json"), ReadInventory(Path.Join(root, "ForgeTrust.AppSurface.slnx")), cancellationToken);
         var report = Path.Join(coverage, "coverage.cobertura.xml");
         if (!File.Exists(report) || new FileInfo(report).Length == 0)
             throw new InvalidDataException("The merged solution coverage report is missing.");
@@ -282,9 +301,9 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             && (x.EndsWith(".Tests.csproj", StringComparison.Ordinal) || x.EndsWith(".IntegrationTests.csproj", StringComparison.Ordinal)))
         .Select(x => x!.Replace('\\', '/')).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 
-    private static void ValidateTimings(string path, IReadOnlyList<string> expected)
+    private static void ValidateTimings(string path, IReadOnlyList<string> expected, CancellationToken cancellationToken)
     {
-        using var document = ReadJson(path, 16 * 1024 * 1024);
+        using var document = ReadJson(path, 16 * 1024 * 1024, cancellationToken);
         var root = document.RootElement;
         if (root.GetProperty("configuration").GetString() != "Release"
             || root.GetProperty("coverageDriver").GetString() != "collector"
@@ -303,31 +322,36 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
 
     private static List<string> GateArgs(string report, string root, string output, string? diffBase, string? diffFile, bool patch, bool installed)
     {
+        static string Number(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+
         var args = installed ? new List<string> { "coverage", "gate" } : new List<string> { "run", "--project", Path.Join(root, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"), "--configuration", "Release", "--no-build", "--no-restore", "--", "coverage", "gate" };
         args.AddRange([
-            "--coverage", report, "--repository-root", root, "--output", output, "--min-line", patch ? "0" : "95", "--min-branch", patch ? "0" : "85", "--tolerance", "0.5", "--no-github-summary"]);
+            "--coverage", report, "--repository-root", root, "--output", output,
+            "--min-line", Number(patch ? 0 : GateRequirements.MinLinePercent),
+            "--min-branch", Number(patch ? 0 : GateRequirements.MinBranchPercent),
+            "--tolerance", Number(GateRequirements.TolerancePercent), "--no-github-summary"]);
         if (!string.IsNullOrWhiteSpace(diffBase) && string.IsNullOrWhiteSpace(diffFile))
             args.AddRange(["--diff-base", diffBase, "--diff-label", diffBase]);
         if (!string.IsNullOrWhiteSpace(diffBase) || !string.IsNullOrWhiteSpace(diffFile))
-            args.AddRange(["--patch-line-mode", "codecov"]);
+            args.AddRange(["--patch-line-mode", GateRequirements.PatchLineMode]);
         if (patch)
         {
             if (!string.IsNullOrWhiteSpace(diffFile)) args.AddRange(["--diff-file", diffFile, "--diff-label", "pinned local source snapshot"]);
-            else if (!string.IsNullOrWhiteSpace(diffBase)) { /* diff source already added above */ }
-            args.AddRange(["--min-patch-line", "95", "--min-patch-branch", "85"]);
+            args.AddRange(["--min-patch-line", Number(GateRequirements.MinPatchLinePercent!.Value),
+                "--min-patch-branch", Number(GateRequirements.MinPatchBranchPercent!.Value)]);
         }
         return args;
     }
 
     /// <summary>Requires the installed adapter's delivered acceptance and separate verification, retaining their artifact binding.</summary>
-    private static async Task<string> ValidateNativeFanInAsync(string output, int contractVersion, string diffBase, string commit, string tree, string sdk,
+    private static async Task<NativeGateProof> ValidateNativeFanInAsync(string output, int contractVersion, string diffBase, SolutionCoverageIdentity identity,
         IReadOnlyDictionary<string, string?> run, CancellationToken cancellationToken)
     {
         string? policyDigest = null;
         JsonElement? applicability = null;
         foreach (var operation in new[] { "accept", "verify" })
         {
-            using var document = ReadJson(Path.Join(output, operation + "-result.json"), MaxJson);
+            using var document = ReadJson(Path.Join(output, operation + "-result.json"), MaxJson, cancellationToken);
             var terminal = document.RootElement;
             var result = terminal.GetProperty("result");
             var delivery = terminal.GetProperty("delivery");
@@ -356,53 +380,53 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 applicability = claim.Clone();
             }
         }
-        var accepted = Path.Join(output, "accepted");
-        using var acceptance = ReadJson(Path.Join(accepted, "acceptance.json"), MaxJson);
+        var accepted = PathUtils.PathUnder(output, "accepted");
+        var receiptBytes = ReadJsonBytes(PathUtils.PathUnder(accepted, "acceptance.json"), MaxJson, cancellationToken);
+        using var acceptance = JsonDocument.Parse(receiptBytes);
         var receipt = acceptance.RootElement;
         var source = receipt.GetProperty("source");
         var workflow = receipt.GetProperty("run");
         if (receipt.GetProperty("schemaVersion").GetInt32() != contractVersion)
             throw new InvalidDataException("Native acceptance receipt does not match the verified contract version.");
         if (receipt.GetProperty("policyDigest").GetString() != policyDigest
-            || source.GetProperty("commit").GetString() != commit || source.GetProperty("tree").GetString() != tree
-            || source.GetProperty("sdk").GetString() != sdk || source.GetProperty("configuration").GetString() != "Release"
+            || source.GetProperty("commit").GetString() != identity.Commit || source.GetProperty("tree").GetString() != identity.Tree
+            || source.GetProperty("sdk").GetString() != identity.Sdk || source.GetProperty("configuration").GetString() != "Release"
             || workflow.GetProperty("runScope").GetString() != run["GITHUB_REPOSITORY"]
             || workflow.GetProperty("runId").GetString() != run["GITHUB_RUN_ID"]
             || workflow.GetProperty("attempt").GetInt32() != int.Parse(run["GITHUB_RUN_ATTEMPT"]!, CultureInfo.InvariantCulture))
             throw new InvalidDataException("Native acceptance does not bind the current source and workflow attempt.");
         // The installed verifier owns semantic composition, custody and denominator checks.
-        // Bind its retained receipts and the two reports copied into EvidenceHost's artifact slots.
-        foreach (var (property, file) in new[]
-        {
-            ("primaryGateSha256", Path.Join(accepted, "primary-gate.json")),
-            ("composedGateSha256", Path.Join(accepted, "composed-gate.json")),
-            ("compositionReceiptSha256", Path.Join(output, "composed", "verification.json")),
-        })
-            if (receipt.GetProperty(property).GetString() != await HashFileAsync(file, cancellationToken).ConfigureAwait(false))
-                throw new InvalidDataException("Native acceptance differs from its retained gate or composition receipt.");
+        // Retain the exact gate bytes named by the acceptance receipt for staging and v3 verification.
+        var proof = new NativeGateProof(EvidenceDigest.Sha256(receiptBytes.Span),
+            ReadJsonBytes(PathUtils.PathUnder(accepted, "primary-gate.json"), MaxJson, cancellationToken),
+            ReadJsonBytes(PathUtils.PathUnder(accepted, "composed-gate.json"), MaxJson, cancellationToken));
+        if (receipt.GetProperty("primaryGateSha256").GetString() != EvidenceDigest.Sha256(proof.Primary.Span)
+            || receipt.GetProperty("composedGateSha256").GetString() != EvidenceDigest.Sha256(proof.Composed.Span)
+            || receipt.GetProperty("compositionReceiptSha256").GetString() != await HashFileAsync(
+                PathUtils.PathUnder(output, "composed", "verification.json"), cancellationToken).ConfigureAwait(false))
+            throw new InvalidDataException("Native acceptance differs from its retained gate or composition receipt.");
         if (applicability is { } verified)
-            await ValidateV3ApplicabilityAsync(accepted, receipt, verified, diffBase, commit, cancellationToken).ConfigureAwait(false);
-        return await HashFileAsync(Path.Join(accepted, "acceptance.json"), cancellationToken).ConfigureAwait(false);
+            await ValidateV3ApplicabilityAsync(accepted, receipt, verified, proof, diffBase, identity.Commit, cancellationToken).ConfigureAwait(false);
+        return proof;
     }
 
     /// <summary>Binds the independent v3 result to the applicability, diff and gate reports retained by the producer.</summary>
     private static async Task ValidateV3ApplicabilityAsync(string accepted, JsonElement receipt, JsonElement verified,
-        string diffBase, string commit, CancellationToken cancellationToken)
+        NativeGateProof proof, string diffBase, string commit, CancellationToken cancellationToken)
     {
         if (receipt.GetProperty("evaluationIntent").GetString() != "currentTrustedRun"
             || receipt.GetProperty("patchOutcome").GetString() != "PatchAccepted")
             throw new InvalidDataException("Native v3 did not retain a current patch acceptance receipt.");
 
-        foreach (var (property, file) in new[]
-        {
-            ("applicabilitySha256", "patch-applicability.json"),
-            ("diffSha256", "diff.patch"),
-            ("diffMetadataSha256", "diff-metadata.json"),
-        })
-            if (receipt.GetProperty(property).GetString() != await HashFileAsync(Path.Join(accepted, file), cancellationToken).ConfigureAwait(false))
-                throw new InvalidDataException("Native v3 acceptance differs from its retained patch proof.");
+        var applicabilityBytes = ReadJsonBytes(PathUtils.PathUnder(accepted, "patch-applicability.json"), MaxJson, cancellationToken);
+        var metadataBytes = ReadJsonBytes(PathUtils.PathUnder(accepted, "diff-metadata.json"), MaxJson, cancellationToken);
+        if (receipt.GetProperty("applicabilitySha256").GetString() != EvidenceDigest.Sha256(applicabilityBytes.Span)
+            || receipt.GetProperty("diffSha256").GetString() != await HashFileAsync(
+                PathUtils.PathUnder(accepted, "diff.patch"), cancellationToken).ConfigureAwait(false)
+            || receipt.GetProperty("diffMetadataSha256").GetString() != EvidenceDigest.Sha256(metadataBytes.Span))
+            throw new InvalidDataException("Native v3 acceptance differs from its retained patch proof.");
 
-        using var metadata = ReadJson(Path.Join(accepted, "diff-metadata.json"), MaxJson);
+        using var metadata = JsonDocument.Parse(metadataBytes);
         var diff = metadata.RootElement;
         if (diff.GetProperty("schemaVersion").GetInt32() != 3
             || diff.GetProperty("requestedBaseCommit").GetString() != diffBase
@@ -413,7 +437,7 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
             || diff.GetProperty("diffSha256").GetString() != receipt.GetProperty("diffSha256").GetString())
             throw new InvalidDataException("Native v3 diff metadata does not bind the required diff policy and accepted patch.");
 
-        using var applicability = ReadJson(Path.Join(accepted, "patch-applicability.json"), MaxJson);
+        using var applicability = JsonDocument.Parse(applicabilityBytes);
         var claim = applicability.RootElement;
         if (claim.GetProperty("schemaVersion").GetInt32() != 3
             || claim.GetProperty("reportProfileId").GetString() != "coverlet-collector-cobertura-v1"
@@ -421,10 +445,10 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
                 .Any(property => !JsonElement.DeepEquals(claim.GetProperty(property), receipt.GetProperty(property))))
             throw new InvalidDataException("Native v3 applicability does not bind the accepted policy, source, run and diff.");
 
-        foreach (var (dimension, gateFile) in new[] { ("primary", "primary-gate.json"), ("composed", "composed-gate.json") })
+        foreach (var (dimension, gateBytes) in new[] { ("primary", proof.Primary), ("composed", proof.Composed) })
         {
             var metrics = claim.GetProperty(dimension);
-            using var gate = ReadJson(Path.Join(accepted, gateFile), MaxJson);
+            using var gate = JsonDocument.Parse(gateBytes);
             if (!JsonElement.DeepEquals(metrics, verified.GetProperty(dimension))
                 || !JsonElement.DeepEquals(metrics.GetProperty("line"), gate.RootElement.GetProperty("patchLine"))
                 || !JsonElement.DeepEquals(metrics.GetProperty("branch"), gate.RootElement.GetProperty("patchBranch"))
@@ -434,22 +458,37 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
         }
     }
 
-    private static void ValidateGate(string path, bool patch, bool typedPatch = false)
+    private static ReadOnlyMemory<byte> ReadValidatedGate(string path, CancellationToken cancellationToken, bool patch, bool typedPatch = false)
     {
-        using var document = ReadJson(path, MaxJson);
+        var bytes = ReadJsonBytes(path, MaxJson, cancellationToken);
+        ValidateGate(bytes, patch, typedPatch);
+        return bytes;
+    }
+
+    private static void ValidateGate(ReadOnlyMemory<byte> bytes, bool patch, bool typedPatch = false)
+    {
+        using var document = JsonDocument.Parse(bytes);
         var root = document.RootElement;
-        if (!root.GetProperty("passed").GetBoolean() || root.GetProperty("tolerancePercent").GetDecimal() != .5m)
+        var tolerance = GateRequirements.TolerancePercent;
+        if (!root.GetProperty("passed").GetBoolean() || root.GetProperty("tolerancePercent").GetDecimal() != tolerance)
             throw new InvalidDataException("The coverage gate did not satisfy the declared policy.");
-        if (!patch && (root.GetProperty("thresholds").GetProperty("line").GetDecimal() != 95m
-            || root.GetProperty("thresholds").GetProperty("branch").GetDecimal() != 85m
-            || root.GetProperty("line").GetProperty("percent").GetDecimal() < 94.5m
-            || root.GetProperty("branch").GetProperty("percent").GetDecimal() < 84.5m))
-            throw new InvalidDataException("The aggregate coverage gate did not satisfy its thresholds.");
-        if (patch && (root.GetProperty("thresholds").GetProperty("patchLine").GetDecimal() != 95m
-            || root.GetProperty("thresholds").GetProperty("patchBranch").GetDecimal() != 85m
-            || root.GetProperty("patchLineMode").GetString() != "codecov"
-            || !PatchMetricPasses(root.GetProperty("patchLine"), 94.5m, typedPatch)
-            || !PatchMetricPasses(root.GetProperty("patchBranch"), 84.5m, typedPatch)))
+        if (!patch)
+        {
+            if (root.GetProperty("thresholds").GetProperty("line").GetDecimal() != GateRequirements.MinLinePercent
+                || root.GetProperty("thresholds").GetProperty("branch").GetDecimal() != GateRequirements.MinBranchPercent
+                || root.GetProperty("line").GetProperty("percent").GetDecimal() < GateRequirements.MinLinePercent - tolerance
+                || root.GetProperty("branch").GetProperty("percent").GetDecimal() < GateRequirements.MinBranchPercent - tolerance)
+                throw new InvalidDataException("The aggregate coverage gate did not satisfy its thresholds.");
+            return;
+        }
+
+        var minimumLine = GateRequirements.MinPatchLinePercent!.Value;
+        var minimumBranch = GateRequirements.MinPatchBranchPercent!.Value;
+        if (root.GetProperty("thresholds").GetProperty("patchLine").GetDecimal() != minimumLine
+            || root.GetProperty("thresholds").GetProperty("patchBranch").GetDecimal() != minimumBranch
+            || root.GetProperty("patchLineMode").GetString() != GateRequirements.PatchLineMode
+            || !PatchMetricPasses(root.GetProperty("patchLine"), minimumLine - tolerance, typedPatch)
+            || !PatchMetricPasses(root.GetProperty("patchBranch"), minimumBranch - tolerance, typedPatch))
             throw new InvalidDataException("The patch coverage gate did not satisfy the declared policy.");
     }
 
@@ -477,9 +516,23 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     private static bool IsRepositoryCommit(string? value) => value is { Length: 40 }
         && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
-    private static async Task WriteJsonAsync(EvidenceArtifactWriter writer, string name, string path, string source, CancellationToken ct)
-    { var bytes = await File.ReadAllBytesAsync(source, ct); if (bytes.Length > MaxJson) throw new InvalidDataException("Coverage gate artifact exceeded its bound."); await writer.WriteAsync(name, path, bytes, ct); }
-    private static JsonDocument ReadJson(string path, long max) { var info = new FileInfo(path); if (!info.Exists || info.Length is <= 0 || info.Length > max) throw new InvalidDataException("A required coverage JSON artifact is missing or oversized."); return JsonDocument.Parse(File.ReadAllBytes(path)); }
+    private static async Task WriteNewFileAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous);
+        await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static JsonDocument ReadJson(string path, int maximumBytes, CancellationToken cancellationToken) =>
+        JsonDocument.Parse(ReadJsonBytes(path, maximumBytes, cancellationToken));
+
+    private static ReadOnlyMemory<byte> ReadJsonBytes(string path, int maximumBytes, CancellationToken cancellationToken)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Length <= 0)
+            throw new InvalidDataException("A required coverage JSON artifact is missing or oversized.");
+        return ValidationProof.ReadBoundedFile(path, maximumBytes, cancellationToken);
+    }
+
     private static async Task<string> HashFileAsync(string path, CancellationToken ct)
     { await using var stream = File.OpenRead(path); return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, ct)); }
     private static string Hash(string value) => Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value)));
@@ -488,5 +541,6 @@ internal sealed class SolutionCoverageProducer : IEvidenceProducer
     { ["GITHUB_REPOSITORY"] = Environment.GetEnvironmentVariable("GITHUB_REPOSITORY"), ["GITHUB_RUN_ID"] = Environment.GetEnvironmentVariable("GITHUB_RUN_ID"), ["GITHUB_RUN_ATTEMPT"] = Environment.GetEnvironmentVariable("GITHUB_RUN_ATTEMPT") };
     private static EvidenceProducerResult Failed(string message) => new(ProducerId, EvidenceProducerOutcome.Failed, [], message);
     private static EvidenceProducerResult Invalid(string message) => new(ProducerId, EvidenceProducerOutcome.Invalid, [], message);
+    private sealed record NativeGateProof(string ReceiptSha256, ReadOnlyMemory<byte> Primary, ReadOnlyMemory<byte> Composed);
     private sealed record CommandProof(string Name, int ExitCode, long ElapsedMilliseconds, bool Truncated, string StandardOutputSha256, string StandardErrorSha256);
 }

@@ -17,9 +17,16 @@ internal static class CoverageArtifactMetadataPublication
     /// <param name="bytes">Complete, validated encoded state.</param>
     /// <param name="maximumBytes">Category-specific encoded-byte bound, also applied to abandoned staging.</param>
     /// <param name="beforePublish">Optional per-call fault/scheduling seam after durable staging and before rename.</param>
-    /// <remarks>The hook verifies cleanup decisions; production omits it. It must not be used as ownership authority.</remarks>
+    /// <param name="durableDirectoryEntry">Whether to make the renamed directory entry durable before returning; defaults off for observation state.</param>
+    /// <param name="unixDirectoryFsync">Optional Unix directory-sync seam for failure and ordering tests; production omits it.</param>
+    /// <remarks>
+    /// The hook verifies cleanup decisions; production omits it. It must not be used as ownership authority.
+    /// Durable publication fails closed when the host cannot provide the documented native operation. A sync failure
+    /// is propagated even though the atomic rename may already be visible, so dependent work must not start.
+    /// </remarks>
     internal static void Write(CoverageRunOutputLease directory, string destinationName, byte[] bytes,
-        long maximumBytes, Action? beforePublish = null)
+        long maximumBytes, Action? beforePublish = null, bool durableDirectoryEntry = false,
+        Func<int, int>? unixDirectoryFsync = null)
     {
         ArgumentNullException.ThrowIfNull(directory);
         ArgumentNullException.ThrowIfNull(bytes);
@@ -51,7 +58,8 @@ internal static class CoverageArtifactMetadataPublication
             }
             beforePublish?.Invoke();
             directory.MoveArtifactEntry(StagingName, directory, destinationName,
-                replaceFile: true, expectedSourceIdentity: stagedIdentity);
+                replaceFile: true, expectedSourceIdentity: stagedIdentity,
+                durableDirectoryEntry: durableDirectoryEntry, unixDirectoryFsync: unixDirectoryFsync);
             stagedIdentity = null;
         }
         finally

@@ -21,7 +21,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Update="README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
+  <!-- Main-tool command workflows call the private support ABI from the same coordinated release. -->
+  <Target Name="PinEvidenceCliSupportVersion" BeforeTargets="GenerateNuspec">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
+          Condition="'%(_ProjectReferencesWithVersions.Filename)' == 'ForgeTrust.AppSurface.Evidence.Coverage'">
+        <ProjectVersion>[$(PackageVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+  </Target>
 </Project>

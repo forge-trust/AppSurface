@@ -1,5 +1,7 @@
 # EvidenceHost Cookbook
 
+The [local producer reuse recipe](./evidence-reuse.md) covers explicit input promises, cooperative child lifetime, fresh/reuse CLI commands, prepared-host composition, store recovery, and versioned contracts. Treat its version matrix as a candidate until the released-reader matrix is recorded.
+
 The repository validation tool has two distinct uses. Its [direct package recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#run-the-direct-package-journeys) validates a supplied package outside EvidenceHost and writes `native-validation-receipt.json`, with no EvidenceHost claim or gate authority. AppSurface's [policy-backed local and CI workflow](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development) selects changed-path coverage, package checks and native acceptance through the checked-in policy and emits the manifest used by the repository evidence gate.
 
 Its [shared local and CI policy recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md#local-development)
